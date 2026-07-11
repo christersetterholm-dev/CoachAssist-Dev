@@ -147,8 +147,11 @@ async function startServer() {
       return res.status(401).json({ error: 'Unauthorized' });
     }
 
-    const token = authHeader.split(' ')[1];
     try {
+      const authStr = Array.isArray(authHeader) ? authHeader[0] : authHeader;
+      const partsAuth = authStr.split(' ');
+      const token = partsAuth.length > 1 ? partsAuth[1] : partsAuth[0];
+
       const decoded: any = jwt.verify(token, JWT_SECRET);
       const userRow: any = db.prepare('SELECT id, email FROM users WHERE id = ?').get(decoded.id);
       if (!userRow) {
@@ -188,9 +191,12 @@ async function startServer() {
     } else if (pathStr.startsWith('users/')) {
       const authHeader = req.headers.authorization;
       if (!authHeader) return res.status(401).json({ error: 'Unauthorized' });
-      const token = authHeader.split(' ')[1];
 
       try {
+        const authStr = Array.isArray(authHeader) ? authHeader[0] : authHeader;
+        const partsAuth = authStr.split(' ');
+        const token = partsAuth.length > 1 ? partsAuth[1] : partsAuth[0];
+
         const decoded: any = jwt.verify(token, JWT_SECRET);
         const parts = pathStr.split('/');
         const userId = parts[1];
@@ -240,9 +246,12 @@ async function startServer() {
     } else if (pathStr.startsWith('users/')) {
       const authHeader = req.headers.authorization;
       if (!authHeader) return res.status(401).json({ error: 'Unauthorized' });
-      const token = authHeader.split(' ')[1];
 
       try {
+        const authStr = Array.isArray(authHeader) ? authHeader[0] : authHeader;
+        const partsAuth = authStr.split(' ');
+        const token = partsAuth.length > 1 ? partsAuth[1] : partsAuth[0];
+
         const decoded: any = jwt.verify(token, JWT_SECRET);
         const parts = pathStr.split('/');
         const userId = parts[1];
