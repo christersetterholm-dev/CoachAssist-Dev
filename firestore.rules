@@ -1,0 +1,80 @@
+// ===============================================================
+// Assumed Data Model
+// ===============================================================
+//
+// Collection: shared_leaderboards
+// Document ID: {id}
+// Fields:
+//   - id: string (required) - Unique ID for the shared leaderboard
+//   - name: string (required) - Name of the period
+//   - startDate: number (optional) - Start timestamp
+//   - endDate: number (optional) - End timestamp
+//   - standings: array (required) - List of player standings
+//   - createdAt: number (required) - Creation timestamp
+//
+// ===============================================================
+
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isValidSharedLeaderboard(data) {
+      return data.keys().hasAll(['id', 'name', 'standings', 'createdAt', 'coachUid']) &&
+             data.id is string &&
+             data.name is string && data.name.size() > 0 && data.name.size() < 100 &&
+             data.standings is list && data.standings.size() <= 200 &&
+             data.createdAt is number &&
+             data.coachUid is string;
+    }
+
+    // ===============================================================
+    // Rules
+    // ===============================================================
+
+    match /shared_leaderboards/{id} {
+      // Anyone can read a shared leaderboard if they have the ID
+      allow read: if true;
+      
+      // Only authenticated users (the admin) can create shared leaderboards
+      allow create: if isAuthenticated() && 
+                    request.resource.data.coachUid == request.auth.uid &&
+                    isValidSharedLeaderboard(request.resource.data);
+      
+      // Allow updates by the owner to keep the leaderboard in sync
+      allow update: if isAuthenticated() && 
+                    resource.data.coachUid == request.auth.uid &&
+                    request.resource.data.coachUid == request.auth.uid &&
+                    isValidSharedLeaderboard(request.resource.data);
+      
+      allow delete: if isAuthenticated() && resource.data.coachUid == request.auth.uid;
+    }
+
+    match /users/{userId}/config/state {
+      // Users can only read and write their own state
+      allow read, write: if isAuthenticated() && request.auth.uid == userId;
+    }
+
+    match /users/{userId}/data/{docId} {
+      // Users can only read and write their own data segments
+      allow read, write: if isAuthenticated() && request.auth.uid == userId;
+    }
+
+    match /users/{userId}/lineup_history/{lineupId} {
+      // Users can only read and write their own history
+      allow read, write: if isAuthenticated() && request.auth.uid == userId;
+    }
+    
+    // Default deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

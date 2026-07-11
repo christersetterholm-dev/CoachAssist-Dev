@@ -1,0 +1,138 @@
+{
+  "entities": {
+    "SharedLeaderboard": {
+      "title": "Shared Leaderboard",
+      "description": "A snapshot of a leaderboard period shared with others.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "startDate": { "type": "number" },
+        "endDate": { "type": "number" },
+        "standings": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "playerId": { "type": "string" },
+              "playerName": { "type": "string" },
+              "points": { "type": "number" }
+            }
+          }
+        },
+        "createdAt": { "type": "number" }
+      },
+      "required": ["id", "name", "standings", "createdAt"]
+    },
+    "TrainingSession": {
+      "title": "Training Session",
+      "description": "Represents a planned training session with multiple moments",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "date": { "type": "number" },
+        "startTime": { "type": "string" },
+        "endTime": { "type": "string" },
+        "moments": { "type": "array" },
+        "createdAt": { "type": "number" },
+        "updatedAt": { "type": "number" }
+      },
+      "required": ["id", "title", "date", "startTime", "moments"]
+    },
+    "UserData": {
+      "title": "User Data",
+      "description": "The full state of the user's training league.",
+      "type": "object",
+      "properties": {
+        "squad": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": { "type": "string" },
+              "name": { "type": "string" },
+              "position": { "type": "string" },
+              "number": { "type": "string" },
+              "photoUrl": { "type": "string" },
+              "role": { "type": "string", "enum": ["player", "leader"] }
+            },
+            "required": ["id", "name"]
+          }
+        },
+        "exercises": { "type": "array" },
+        "sessions": { "type": "array" },
+        "deletedSessions": { "type": "array" },
+        "lineups": { "type": "array" },
+        "activeLineupId": { "type": "string" },
+        "periods": { "type": "array" },
+        "currentPeriodId": { "type": "string" },
+        "customFormations": { "type": "array" },
+        "pinnedFormationIds": { "type": "array" },
+        "teamUrl": { "type": "string" },
+        "adminUrl": { "type": "string" },
+        "seriesUrl": { "type": "string" },
+        "trainingSettings": {
+          "type": "object",
+          "properties": {
+            "defaultStartTime": { "type": "string" },
+            "defaultEndTime": { "type": "string" },
+            "defaultDuration": { "type": "number" },
+            "icsUrl": { "type": "string" }
+          }
+        },
+        "exerciseBank": { "type": "array" },
+        "exerciseBankCategories": { "type": "array" },
+        "updatedAt": { "type": "number" }
+      }
+    },
+    "LineupHistory": {
+      "title": "Lineup History",
+      "description": "Persistence for undo/redo stacks per lineup.",
+      "type": "object",
+      "properties": {
+        "history": { "type": "array" },
+        "future": { "type": "array" },
+        "updatedAt": { "type": "number" }
+      }
+    }
+  },
+  "firestore": {
+    "/shared_leaderboards/{id}": {
+      "schema": "SharedLeaderboard",
+      "description": "Publicly viewable leaderboard snapshots."
+    },
+    "/users/{userId}/config/state": {
+      "schema": "UserData",
+      "description": "The synchronized state for a coach (deprecated, kept for migration)."
+    },
+    "/users/{userId}/data/squad": {
+      "schema": "object",
+      "description": "Granular squad data segment."
+    },
+    "/users/{userId}/data/sessions": {
+      "schema": "object",
+      "description": "Granular sessions and deleted sessions data segment."
+    },
+    "/users/{userId}/data/exercises": {
+      "schema": "object",
+      "description": "Granular exercises, exercise bank, and category data segment."
+    },
+    "/users/{userId}/data/lineups": {
+      "schema": "object",
+      "description": "Granular lineups and active lineup ID data segment (real-time synced)."
+    },
+    "/users/{userId}/data/periods": {
+      "schema": "object",
+      "description": "Granular period and current period data segment."
+    },
+    "/users/{userId}/data/settings": {
+      "schema": "object",
+      "description": "Granular setting fields, custom formations, and training options segment."
+    },
+    "/users/{userId}/lineup_history/{lineupId}": {
+      "schema": "LineupHistory",
+      "description": "Undo/Redo history for a specific lineup."
+    }
+  }
+}

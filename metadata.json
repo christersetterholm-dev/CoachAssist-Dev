@@ -1,0 +1,8 @@
+{
+  "name": "Remix: CoachAssist",
+  "description": "Ett komplett verktyg för fotbollscoachen. Planera träningspass med tävlingsmoment och poängräkning. Hantera spelartrupp med bilder, bygg laguppställningar och håll koll på poängjakt och statistik.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

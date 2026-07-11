@@ -1,0 +1,12 @@
+{
+  "firestore": [
+    {
+      "database": "(default)",
+      "rules": "firestore.rules"
+    },
+    {
+      "database": "ai-studio-remixcoachassist-3ac8f9c7-729f-4797-87b6-4c498370756c",
+      "rules": "firestore.rules"
+    }
+  ]
+}

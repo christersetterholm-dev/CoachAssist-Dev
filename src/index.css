@@ -1,0 +1,54 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+
+  /* coachassist design system colors */
+  --color-brand-primary: #003869;
+  --color-brand-secondary: #163CC7;
+  --color-brand-light-blue: #EAF2FF;
+  
+  --color-brand-success: #16A34A;
+  --color-brand-warning: #D97706;
+  --color-brand-danger: #DC2626;
+
+  /* Redefining indigo scale to map perfectly to CoachAssist active & brand states */
+  --color-indigo-50: #EAF2FF;   /* Brand light blue background for selected chips/active filters */
+  --color-indigo-100: #EAF2FF;  /* Also mapped to light blue */
+  --color-indigo-200: #C2D7FF;  /* Light blue selection border */
+  --color-indigo-300: #8FB5FF;
+  --color-indigo-400: #4A7DFF;  /* Sekundär accent for dark theme */
+  --color-indigo-500: #163CC7;  /* Sekundärfärg (Klar blå) - used for icons, links, focus, secondary action text */
+  --color-indigo-600: #003869;  /* Primärfärg (Mörkt marinblå) - used for primary buttons, active navigation, headers */
+  --color-indigo-700: #002D54;  /* Slightly darker navy for hover states */
+  --color-indigo-805: #002D54;  /* Backward compatible */
+  --color-indigo-800: #002241;
+  --color-indigo-900: #00172E;
+  --color-indigo-950: #000C19;
+
+  /* Redefining zinc scale to map perfectly to CoachAssist light and dark themes */
+  --color-zinc-50: #F5F6F8;     /* Ljust tema bakgrund */
+  --color-zinc-100: #E4E7EC;    /* Ljust tema dividers/borders */
+  --color-zinc-200: #CBD5E1;
+  --color-zinc-350: #9CA3AF;
+  --color-zinc-400: #9CA3AF;    /* Inaktiv navigation */
+  --color-zinc-500: #6B7280;    /* Ljust tema sekundär text */
+  --color-zinc-650: #475569;
+  --color-zinc-700: #334155;
+  --color-zinc-800: #1F2937;    /* Dark mode dividers / borders / highlights */
+  --color-zinc-900: #181C23;    /* Mörkt tema kort background */
+  --color-zinc-950: #0F1115;    /* Mörkt tema bakgrund */
+}
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+@layer utilities {
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+  .no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+}
