@@ -1,0 +1,19 @@
+# Apache configuration for CoachAssist hosted in the /coachassist/ subdirectory
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+  RewriteBase /coachassist/
+
+  # 1. If the request is for assets (JS/CSS), rewrite and serve them directly from dist/assets/
+  RewriteCond %{REQUEST_FILENAME} !-f
+  RewriteRule ^assets/(.*)$ dist/assets/$1 [L]
+
+  # 2. Rewrite other static assets (favicons, icons, manifest) to the dist folder
+  RewriteCond %{REQUEST_FILENAME} !-f
+  RewriteRule ^(favicon.*|icon.*|manifest\.webmanifest)$ dist/$1 [L]
+
+  # 3. SPA Routing Fallback: If Passenger is not active or for client-side fallback,
+  # rewrite any other non-file requests to dist/index.html so the React app handles routing.
+  RewriteCond %{REQUEST_FILENAME} !-f
+  RewriteCond %{REQUEST_FILENAME} !-d
+  RewriteRule ^(.*)$ dist/index.html [L]
+</IfModule>
