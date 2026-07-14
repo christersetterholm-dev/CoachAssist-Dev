@@ -13,6 +13,7 @@ const serverPath = path.join(__dirname, 'dist', 'server.cjs');
 
 if (fs.existsSync(serverPath)) {
   console.log('Production server found. Starting Coach Assist...');
+  process.env.NODE_ENV = 'production'; // Force production mode
   require('./dist/server.cjs');
 } else {
   console.log('Production server bundle not found yet. Starting automatic background build and fallback server...');

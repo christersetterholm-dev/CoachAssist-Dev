@@ -7,9 +7,19 @@ import Database from 'better-sqlite3';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import multer from 'multer';
+import { fileURLToPath } from 'url';
+
+// Environment-safe way to define __dirname and __filename in both ESM (dev) and CJS (prod esbuild bundle)
+const _filename = typeof import.meta !== 'undefined' && import.meta.url
+  ? fileURLToPath(import.meta.url)
+  : __filename;
+const _dirname = typeof import.meta !== 'undefined' && import.meta.url
+  ? path.dirname(_filename)
+  : __dirname;
 
 // Environment variables for persistence on cloud platforms
-const DATA_DIR = process.env.DATA_DIR || (process.env.NODE_ENV === 'production' ? path.join(__dirname, '..') : process.cwd());
+const isProduction = process.env.NODE_ENV === 'production' || _dirname.includes('dist') || _dirname.includes('\\dist');
+const DATA_DIR = process.env.DATA_DIR || (isProduction ? path.join(_dirname, '..') : process.cwd());
 const UPLOADS_DIR = process.env.UPLOADS_DIR || path.join(DATA_DIR, 'uploads');
 const DB_PATH = process.env.DATABASE_PATH || path.join(DATA_DIR, 'coachassist.db');
 
@@ -423,7 +433,7 @@ async function startServer() {
 
   // --- VITE AND SPA SERVING ---
 
-  if (process.env.NODE_ENV !== 'production') {
+  if (!isProduction) {
     const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
       server: { middlewareMode: true },
@@ -431,8 +441,9 @@ async function startServer() {
     });
     app.use(vite.middlewares);
   } else {
-    const distPath = __dirname;
+    const distPath = _dirname;
     app.use(express.static(distPath));
+    app.use('/coachassist', express.static(distPath));
     app.get('*', (_req, res) => {
       res.sendFile(path.join(distPath, 'index.html'));
     });
