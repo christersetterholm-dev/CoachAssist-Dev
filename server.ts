@@ -9,7 +9,7 @@ import jwt from 'jsonwebtoken';
 import multer from 'multer';
 
 // Environment variables for persistence on cloud platforms
-const DATA_DIR = process.env.DATA_DIR || process.cwd();
+const DATA_DIR = process.env.DATA_DIR || (process.env.NODE_ENV === 'production' ? path.join(__dirname, '..') : process.cwd());
 const UPLOADS_DIR = process.env.UPLOADS_DIR || path.join(DATA_DIR, 'uploads');
 const DB_PATH = process.env.DATABASE_PATH || path.join(DATA_DIR, 'coachassist.db');
 
@@ -431,7 +431,7 @@ async function startServer() {
     });
     app.use(vite.middlewares);
   } else {
-    const distPath = path.join(process.cwd(), 'dist');
+    const distPath = __dirname;
     app.use(express.static(distPath));
     app.get('*', (_req, res) => {
       res.sendFile(path.join(distPath, 'index.html'));
