@@ -9,6 +9,17 @@ export interface User {
   providerData: any[];
 }
 
+export const getApiUrl = (path: string): string => {
+  if (!path || path.startsWith('http://') || path.startsWith('https://') || path.startsWith('data:') || path.startsWith('blob:')) {
+    return path;
+  }
+  const base = window.location.pathname.endsWith('/') 
+    ? window.location.pathname 
+    : window.location.pathname.substring(0, window.location.pathname.lastIndexOf('/') + 1);
+  const cleanPath = path.startsWith('/') ? path.slice(1) : path;
+  return base + cleanPath;
+};
+
 export const auth: any = {
   currentUser: null as User | null
 };
@@ -171,7 +182,7 @@ export const signInWithGoogle = async (_forceSelect = false): Promise<User> => {
       submitBtn.disabled = true;
       submitBtn.classList.add('opacity-70');
 
-      const url = isRegisterMode ? '/api/auth/register' : '/api/auth/login';
+      const url = getApiUrl(isRegisterMode ? '/api/auth/register' : '/api/auth/login');
 
       try {
         const response = await fetch(url, {
@@ -209,7 +220,7 @@ const initializeSession = async () => {
   const token = localStorage.getItem('token');
   if (token) {
     try {
-      const res = await fetch('/api/auth/me', {
+      const res = await fetch(getApiUrl('/api/auth/me'), {
         headers: {
           'Authorization': `Bearer ${token}`
         }
@@ -245,7 +256,7 @@ export const getDoc = async (docRef: { path: string }) => {
     headers['Authorization'] = `Bearer ${token}`;
   }
 
-  const res = await fetch(`/api/docs?path=${encodeURIComponent(docRef.path)}`, {
+  const res = await fetch(getApiUrl(`/api/docs?path=${encodeURIComponent(docRef.path)}`), {
     headers
   });
 
@@ -272,7 +283,7 @@ export const setDoc = async (docRef: { path: string }, data: any, _options?: { m
     headers['Authorization'] = `Bearer ${token}`;
   }
 
-  const res = await fetch(`/api/docs?path=${encodeURIComponent(docRef.path)}`, {
+  const res = await fetch(getApiUrl(`/api/docs?path=${encodeURIComponent(docRef.path)}`), {
     method: 'POST',
     headers,
     body: JSON.stringify({ data })
@@ -331,7 +342,7 @@ export const uploadBytes = async (storageRef: { path: string }, blob: Blob) => {
     headers['Authorization'] = `Bearer ${token}`;
   }
 
-  const res = await fetch('/api/upload', {
+  const res = await fetch(getApiUrl('/api/upload'), {
     method: 'POST',
     headers,
     body: formData
@@ -376,8 +387,10 @@ export const uploadBytesResumable = (storageRef: { path: string }, blob: Blob) =
 };
 
 export const getDownloadURL = async (refObj: any) => {
-  if (refObj && refObj.url) return refObj.url;
-  return `/uploads/${refObj.path}`;
+  if (refObj && refObj.url) {
+    return refObj.url.startsWith('http') ? refObj.url : getApiUrl(refObj.url);
+  }
+  return getApiUrl(`/uploads/${refObj.path}`);
 };
 
 export const deleteObject = async (refObj: any) => {
@@ -388,7 +401,7 @@ export const deleteObject = async (refObj: any) => {
   }
 
   try {
-    await fetch(`/api/delete-file?path=${encodeURIComponent(refObj.path)}`, {
+    await fetch(getApiUrl(`/api/delete-file?path=${encodeURIComponent(refObj.path)}`), {
       method: 'DELETE',
       headers
     });

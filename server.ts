@@ -52,6 +52,38 @@ async function startServer() {
   const app = express();
   const PORT = 3000;
 
+  // Subpath and routing prefix middleware for hosting under custom folders like /coachassist/
+  app.use((req, res, next) => {
+    const url = req.url;
+    const pathPart = url.split('?')[0];
+    const segments = pathPart.split('/').filter(Boolean);
+
+    // 1. Handle missing trailing slash for the subfolder base (e.g. /coachassist -> /coachassist/)
+    // This is crucial so that relative paths (base: "./") resolve relative to /coachassist/ rather than the domain root.
+    if (segments.length === 1 && !['api', 'assets', 'uploads', 'rebuild', 'favicon.ico'].includes(segments[0])) {
+      const hasTrailingSlash = pathPart.endsWith('/');
+      if (!hasTrailingSlash) {
+        const query = url.includes('?') ? '?' + url.split('?')[1] : '';
+        console.log(`[Subfolder Redirect] Redirecting ${url} to /${segments[0]}/${query}`);
+        return res.redirect(301, `/${segments[0]}/${query}`);
+      }
+    }
+
+    // 2. Rewrite req.url to strip the subfolder prefix (e.g. /coachassist/api/health -> /api/health)
+    const match = url.match(/^\/([^\/]+)\/(api|assets|uploads|favicon\.ico|rebuild)(.*)$/);
+    if (match) {
+      req.url = '/' + match[2] + match[3];
+      console.log(`[Subfolder Rewriter] Rewrote URL: ${url} -> ${req.url}`);
+    } else {
+      // Also rewrite root of subpath (e.g. /coachassist/ -> /)
+      if (segments.length === 1 && !['api', 'assets', 'uploads', 'rebuild', 'favicon.ico'].includes(segments[0])) {
+        req.url = '/' + (url.includes('?') ? '?' + url.split('?')[1] : '');
+        console.log(`[Subfolder Rewriter] Rewrote root: ${url} -> ${req.url}`);
+      }
+    }
+    next();
+  });
+
   app.use(express.json());
 
   // Static serving of uploaded images

@@ -1,6 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { User } from 'lucide-react';
+import { getApiUrl } from '../lib/firebase';
 import { getCachedImage, cacheImage } from '../lib/imageCache';
 
 // Global memory cache to share across instances (crucial for export view)
@@ -63,7 +64,7 @@ export const CachedImage: React.FC<CachedImageProps> = ({ src, className, alt, c
         let response: Response | null = null;
         
         try {
-          response = await fetch(src, { 
+          response = await fetch(getApiUrl(src), { 
             cache: 'default',
             mode: 'cors',
             credentials: 'omit',
@@ -75,7 +76,7 @@ export const CachedImage: React.FC<CachedImageProps> = ({ src, className, alt, c
         
         if (!response || !response.ok) {
           try {
-            response = await fetch(`/api/proxy?url=${encodeURIComponent(src)}`, { 
+            response = await fetch(getApiUrl(`/api/proxy?url=${encodeURIComponent(src)}`), { 
               cache: 'default'
             });
           } catch (proxyErr) {

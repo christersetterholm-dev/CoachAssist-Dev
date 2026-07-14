@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { getApiUrl } from '../lib/firebase';
 import { Calendar, Trophy, Clock, Trash2, Copy, History, ListTodo, FileText, X, ArrowUpDown, ChevronLeft, ChevronRight, RefreshCw, EyeOff, Eye, CalendarDays, MapPin, CheckCircle, HelpCircle, ChevronDown, ChevronUp, ArrowRight, Edit, Library } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Exercise, TrainingSession, TrainingSettings, BankExercise } from '../types';
@@ -720,7 +721,7 @@ export default function TrainingManager({
     }
 
     try {
-      const response = await fetch(`/api/fetch-calendar?url=${encodeURIComponent(urlToUse)}`);
+      const response = await fetch(getApiUrl(`/api/fetch-calendar?url=${encodeURIComponent(urlToUse)}`));
       if (!response.ok) {
         throw new Error(`Kunde inte hämta kalendern (Status ${response.status})`);
       }
