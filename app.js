@@ -26,8 +26,16 @@ if (fs.existsSync(serverPath)) {
     buildStatus = 'building';
     buildLog = 'Starting build process: npm run build...\n';
 
-    // Execute the build command in the background
-    const buildProcess = exec('npm run build', { cwd: __dirname });
+    // Execute the build command in the background with limited threads to prevent cPanel NPROC panics
+    const buildProcess = exec('npm run build', { 
+      cwd: __dirname,
+      env: {
+        ...process.env,
+        RAYON_NUM_THREADS: '1',
+        UV_THREADPOOL_SIZE: '1',
+        ESBUILD_WORKERS: '1'
+      }
+    });
 
     buildProcess.stdout.on('data', (data) => {
       buildLog += data.toString();
