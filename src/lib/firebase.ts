@@ -13,11 +13,14 @@ export const getApiUrl = (path: string): string => {
   if (!path || path.startsWith('http://') || path.startsWith('https://') || path.startsWith('data:') || path.startsWith('blob:')) {
     return path;
   }
-  const base = window.location.pathname.endsWith('/') 
-    ? window.location.pathname 
-    : window.location.pathname.substring(0, window.location.pathname.lastIndexOf('/') + 1);
-  const cleanPath = path.startsWith('/') ? path.slice(1) : path;
-  return base + cleanPath;
+  const pathname = window.location.pathname;
+  const cleanPath = path.startsWith('/') ? path : '/' + path;
+  
+  if (pathname.startsWith('/coachassist')) {
+    return '/coachassist' + cleanPath;
+  }
+  
+  return cleanPath;
 };
 
 export const auth: any = {
