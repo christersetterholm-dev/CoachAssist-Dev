@@ -442,6 +442,9 @@ async function startServer() {
     app.use(vite.middlewares);
   } else {
     const distPath = _dirname;
+    // Serve assets with absolute precision to prevent any rewrite or subfolder routing issues
+    app.use('/assets', express.static(path.join(distPath, 'assets')));
+    app.use('/coachassist/assets', express.static(path.join(distPath, 'assets')));
     app.use(express.static(distPath));
     app.use('/coachassist', express.static(distPath));
     app.get('*', (_req, res) => {

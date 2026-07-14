@@ -1,16 +1,18 @@
-# Apache configuration for CoachAssist hosted in the /coachassist/ subdirectory
+# Apache configuration for CoachAssist hosted at root of domain or subdomain
 <IfModule mod_rewrite.c>
   RewriteEngine On
-  RewriteBase /coachassist/
+  RewriteBase /
 
-  # 1. Direct static file serving from the public/ directory
-  # If the requested URL maps to a file inside the public/ folder, serve it directly
-  RewriteCond %{DOCUMENT_ROOT}/coachassist/public/$1 -f
-  RewriteRule ^(.*)$ public/$1 [L]
+  # 1. Prevent Apache from serving the raw source index.html in the root folder.
+  # Instead, rewrite requests for the root '/' or '/index.html' to the compiled '/dist/index.html'.
+  RewriteRule ^(index\.html)?$ dist/index.html [L]
 
-  # 2. If Passenger is not active or as a secondary client-side fallback,
-  # serve public/index.html for any other non-file routes
-  RewriteCond %{REQUEST_FILENAME} !-f
-  RewriteCond %{REQUEST_FILENAME} !-d
-  RewriteRule ^(.*)$ public/index.html [L]
+  # 2. Direct static file serving:
+  # If the requested URL is a real file on disk (like compiled assets, images, etc.), let Apache serve it directly.
+  # This serves JS, CSS, images, and other compiled assets instantly without Node.js overhead.
+  RewriteCond %{REQUEST_FILENAME} -f
+  RewriteRule ^ - [L]
+
+  # 3. All other requests (API routes, pages, etc.) are NOT real files on disk,
+  # so they are automatically passed to and handled by Phusion Passenger / Node.js.
 </IfModule>
