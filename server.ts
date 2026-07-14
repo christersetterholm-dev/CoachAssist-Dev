@@ -60,7 +60,7 @@ const JWT_SECRET = process.env.JWT_SECRET || 'coachassist-local-secret-key-12345
 
 async function startServer() {
   const app = express();
-  const PORT = 3000;
+  const PORT = process.env.PORT || 3000;
 
   // Subpath and routing prefix middleware for hosting under custom folders like /coachassist/
   app.use((req, res, next) => {
@@ -449,9 +449,15 @@ async function startServer() {
     });
   }
 
-  app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Server running on http://localhost:${PORT}`);
-  });
+  if (typeof PORT === 'string' && isNaN(Number(PORT))) {
+    app.listen(PORT, () => {
+      console.log(`Server running on Unix socket/pipe: ${PORT}`);
+    });
+  } else {
+    app.listen(Number(PORT), '0.0.0.0', () => {
+      console.log(`Server running on http://localhost:${PORT}`);
+    });
+  }
 }
 
 startServer().catch(err => {

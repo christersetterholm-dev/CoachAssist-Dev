@@ -3,17 +3,14 @@
   RewriteEngine On
   RewriteBase /coachassist/
 
-  # 1. If the request is for assets (JS/CSS), rewrite and serve them directly from dist/assets/
-  RewriteCond %{REQUEST_FILENAME} !-f
-  RewriteRule ^assets/(.*)$ dist/assets/$1 [L]
+  # 1. Direct static file serving from the public/ directory
+  # If the requested URL maps to a file inside the public/ folder, serve it directly
+  RewriteCond %{DOCUMENT_ROOT}/coachassist/public/$1 -f
+  RewriteRule ^(.*)$ public/$1 [L]
 
-  # 2. Rewrite other static assets (favicons, icons, manifest) to the dist folder
-  RewriteCond %{REQUEST_FILENAME} !-f
-  RewriteRule ^(favicon.*|icon.*|manifest\.webmanifest)$ dist/$1 [L]
-
-  # 3. SPA Routing Fallback: If Passenger is not active or for client-side fallback,
-  # rewrite any other non-file requests to dist/index.html so the React app handles routing.
+  # 2. If Passenger is not active or as a secondary client-side fallback,
+  # serve public/index.html for any other non-file routes
   RewriteCond %{REQUEST_FILENAME} !-f
   RewriteCond %{REQUEST_FILENAME} !-d
-  RewriteRule ^(.*)$ dist/index.html [L]
+  RewriteRule ^(.*)$ public/index.html [L]
 </IfModule>
