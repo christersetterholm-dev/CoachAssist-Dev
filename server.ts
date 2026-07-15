@@ -54,6 +54,21 @@ db.exec(`
     coachUid TEXT,
     FOREIGN KEY (coachUid) REFERENCES users(id) ON DELETE SET NULL
   );
+
+  CREATE TABLE IF NOT EXISTS clubs_data (
+    clubId TEXT NOT NULL,
+    teamId TEXT NOT NULL,
+    segment TEXT NOT NULL,
+    data TEXT NOT NULL,
+    updatedAt INTEGER NOT NULL,
+    PRIMARY KEY (clubId, teamId, segment)
+  );
+
+  CREATE TABLE IF NOT EXISTS system_docs (
+    path TEXT PRIMARY KEY,
+    data TEXT NOT NULL,
+    updatedAt INTEGER NOT NULL
+  );
 `);
 
 const JWT_SECRET = process.env.JWT_SECRET || 'coachassist-local-secret-key-12345';
@@ -67,6 +82,12 @@ async function startServer() {
     const url = req.url;
     const pathPart = url.split('?')[0];
     const segments = pathPart.split('/').filter(Boolean);
+
+    // If we are served at the root of a subdomain or domain (first segment is not 'coachassist'),
+    // bypass the custom subfolder rewriter completely to avoid routing conflicts.
+    if (segments[0] !== 'coachassist') {
+      return next();
+    }
 
     // 1. Handle missing trailing slash for the subfolder base (e.g. /coachassist -> /coachassist/)
     // This is crucial so that relative paths (base: "./") resolve relative to /coachassist/ rather than the domain root.
@@ -257,6 +278,41 @@ async function startServer() {
         console.error('Error fetching user data:', e);
         res.status(401).json({ error: 'Invalid session or token' });
       }
+    } else if (pathStr.startsWith('clubs/')) {
+      const authHeader = req.headers.authorization;
+      if (!authHeader) return res.status(401).json({ error: 'Unauthorized' });
+
+      try {
+        const authStr = Array.isArray(authHeader) ? authHeader[0] : authHeader;
+        const partsAuth = authStr.split(' ');
+        const token = partsAuth.length > 1 ? partsAuth[1] : partsAuth[0];
+
+        jwt.verify(token, JWT_SECRET);
+        const parts = pathStr.split('/');
+        const clubId = parts[1];
+        const teamId = parts[3] || 'club_global';
+        const segment = parts[5] || parts[3] || 'data';
+
+        const row: any = db.prepare('SELECT data FROM clubs_data WHERE clubId = ? AND teamId = ? AND segment = ?').get(clubId, teamId, segment);
+        if (!row) {
+          return res.status(404).json({ error: 'Not found' });
+        }
+        res.json(JSON.parse(row.data));
+      } catch (e: any) {
+        console.error('Error fetching club data:', e);
+        res.status(500).json({ error: 'Failed to fetch club data' });
+      }
+    } else if (pathStr.startsWith('admins/')) {
+      try {
+        const row: any = db.prepare('SELECT data FROM system_docs WHERE path = ?').get(pathStr);
+        if (!row) {
+          return res.status(404).json({ error: 'Not found' });
+        }
+        res.json(JSON.parse(row.data));
+      } catch (e: any) {
+        console.error('Error fetching admin doc:', e);
+        res.status(500).json({ error: 'Failed to fetch admin doc' });
+      }
     } else {
       res.status(400).json({ error: 'Invalid path' });
     }
@@ -314,6 +370,46 @@ async function startServer() {
       } catch (e: any) {
         console.error('Error saving user data:', e);
         res.status(500).json({ error: 'Failed to save user data' });
+      }
+    } else if (pathStr.startsWith('clubs/')) {
+      const authHeader = req.headers.authorization;
+      if (!authHeader) return res.status(401).json({ error: 'Unauthorized' });
+
+      try {
+        const authStr = Array.isArray(authHeader) ? authHeader[0] : authHeader;
+        const partsAuth = authStr.split(' ');
+        const token = partsAuth.length > 1 ? partsAuth[1] : partsAuth[0];
+
+        jwt.verify(token, JWT_SECRET);
+        const parts = pathStr.split('/');
+        const clubId = parts[1];
+        const teamId = parts[3] || 'club_global';
+        const segment = parts[5] || parts[3] || 'data';
+
+        const serializedData = JSON.stringify(data);
+        db.prepare(`
+          INSERT INTO clubs_data (clubId, teamId, segment, data, updatedAt)
+          VALUES (?, ?, ?, ?, ?)
+          ON CONFLICT(clubId, teamId, segment) DO UPDATE SET data = excluded.data, updatedAt = excluded.updatedAt
+        `).run(clubId, teamId, segment, serializedData, Date.now());
+
+        res.json({ success: true });
+      } catch (e: any) {
+        console.error('Error saving club data:', e);
+        res.status(500).json({ error: 'Failed to save club data' });
+      }
+    } else if (pathStr.startsWith('admins/')) {
+      try {
+        const serializedData = JSON.stringify(data);
+        db.prepare(`
+          INSERT INTO system_docs (path, data, updatedAt)
+          VALUES (?, ?, ?)
+          ON CONFLICT(path) DO UPDATE SET data = excluded.data, updatedAt = excluded.updatedAt
+        `).run(pathStr, serializedData, Date.now());
+        res.json({ success: true });
+      } catch (e: any) {
+        console.error('Error saving admin doc:', e);
+        res.status(500).json({ error: 'Failed to save admin doc' });
       }
     } else {
       res.status(400).json({ error: 'Invalid path' });

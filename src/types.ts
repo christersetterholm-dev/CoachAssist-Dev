@@ -302,3 +302,37 @@ export interface BankExercise {
   tacticalBoards?: TacticalSavedBoard[];
 }
 
+export interface Club {
+  id: string;
+  name: string;
+}
+
+export interface ClubTeam {
+  id: string;
+  name: string;
+}
+
+export interface ClubMetadata {
+  id: string;
+  name: string;
+  teams: ClubTeam[];
+}
+
+export interface ClubMember {
+  userId: string;
+  email: string;
+  fullName: string;
+  phone?: string;
+  personnummer?: string;
+  roles: ('admin' | 'coach' | 'player' | 'parent')[];
+  teams: string[]; // List of team IDs within the club
+}
+
+export interface UserProfile {
+  fullName: string;
+  phone?: string;
+  personnummer?: string;
+  activeClubId?: string | null;
+  activeTeamId?: string | null;
+}
+

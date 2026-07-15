@@ -25,53 +25,103 @@ if (fs.existsSync(serverPath)) {
   const runBuild = () => {
     if (buildStatus === 'building') return;
     buildStatus = 'building';
-    buildLog = 'Starting build process: npm run build...\n';
+    
+    // Check if we need to run npm install first
+    const hasVite = fs.existsSync(path.join(__dirname, 'node_modules', 'vite'));
+    const needsInstall = !hasVite;
+    
+    buildLog = '';
+    
+    // Dynamically resolve the Node.js binary directory of the virtual environment
+    // and prepend it to process.env.PATH so that child processes find the same node/npm/npx
+    const nodeBinDir = path.dirname(process.execPath);
+    const customEnv = {
+      ...process.env,
+      PATH: nodeBinDir + (process.platform === 'win32' ? ';' : ':') + (process.env.PATH || ''),
+      RAYON_NUM_THREADS: '1',
+      UV_THREADPOOL_SIZE: '1',
+      ESBUILD_WORKERS: '1'
+    };
 
-    // Execute the build command in the background with limited threads to prevent cPanel NPROC panics
-    const buildProcess = exec('npm run build', { 
-      cwd: __dirname,
-      env: {
-        ...process.env,
-        RAYON_NUM_THREADS: '1',
-        UV_THREADPOOL_SIZE: '1',
-        ESBUILD_WORKERS: '1'
-      }
-    });
+    const startBuildStep = () => {
+      buildLog += 'Starting build process: npm run build...\n';
+      console.log('Running build command...');
+      
+      const buildProcess = exec('npm run build', { 
+        cwd: __dirname,
+        env: customEnv
+      });
 
-    buildProcess.stdout.on('data', (data) => {
-      buildLog += data.toString();
-      console.log(data.toString());
-    });
+      buildProcess.stdout.on('data', (data) => {
+        buildLog += data.toString();
+        console.log(data.toString());
+      });
 
-    buildProcess.stderr.on('data', (data) => {
-      buildLog += data.toString();
-      console.error(data.toString());
-    });
+      buildProcess.stderr.on('data', (data) => {
+        buildLog += data.toString();
+        console.error(data.toString());
+      });
 
-    buildProcess.on('close', (code) => {
-      if (code === 0) {
-        buildStatus = 'success';
-        buildLog += '\nBuild completed successfully!\n';
-        console.log('Build succeeded! Touching tmp/restart.txt to restart Phusion Passenger...');
-        
-        try {
-          const tmpDir = path.join(__dirname, 'tmp');
-          if (!fs.existsSync(tmpDir)) {
-            fs.mkdirSync(tmpDir);
+      buildProcess.on('close', (code) => {
+        if (code === 0) {
+          buildStatus = 'success';
+          buildLog += '\nBuild completed successfully!\n';
+          console.log('Build succeeded! Touching tmp/restart.txt to restart Phusion Passenger...');
+          
+          try {
+            const tmpDir = path.join(__dirname, 'tmp');
+            if (!fs.existsSync(tmpDir)) {
+              fs.mkdirSync(tmpDir);
+            }
+            fs.writeFileSync(path.join(tmpDir, 'restart.txt'), String(Date.now()));
+            buildLog += 'Restart triggered successfully.\n';
+          } catch (err) {
+            console.error('Failed to touch tmp/restart.txt:', err);
+            buildLog += `Failed to trigger automatic restart: ${err.message}\n`;
           }
-          fs.writeFileSync(path.join(tmpDir, 'restart.txt'), String(Date.now()));
-          buildLog += 'Restart triggered successfully.\n';
-        } catch (err) {
-          console.error('Failed to touch tmp/restart.txt:', err);
-          buildLog += `Failed to trigger automatic restart: ${err.message}\n`;
+        } else {
+          buildStatus = 'failed';
+          buildError = `Build process exited with code ${code}`;
+          buildLog += `\nBuild failed with code ${code}.\n`;
+          console.error(`Build failed with code ${code}`);
         }
-      } else {
-        buildStatus = 'failed';
-        buildError = `Build process exited with code ${code}`;
-        buildLog += `\nBuild failed with code ${code}.\n`;
-        console.error(`Build failed with code ${code}`);
-      }
-    });
+      });
+    };
+
+    if (needsInstall) {
+      buildLog += 'node_modules or vite not found. Installing dependencies first with npm install...\n';
+      console.log('Running npm install inside server container...');
+      
+      const installProcess = exec('npm install --no-audit --no-fund', {
+        cwd: __dirname,
+        env: customEnv
+      });
+
+      installProcess.stdout.on('data', (data) => {
+        buildLog += data.toString();
+        console.log(data.toString());
+      });
+
+      installProcess.stderr.on('data', (data) => {
+        buildLog += data.toString();
+        console.error(data.toString());
+      });
+
+      installProcess.on('close', (code) => {
+        if (code === 0) {
+          buildLog += '\nnpm install completed successfully! Now starting the build...\n';
+          console.log('npm install succeeded, starting build...');
+          startBuildStep();
+        } else {
+          buildStatus = 'failed';
+          buildError = `npm install exited with code ${code}`;
+          buildLog += `\nnpm install failed with code ${code}.\n`;
+          console.error(`npm install failed with code ${code}`);
+        }
+      });
+    } else {
+      startBuildStep();
+    }
   };
 
   // Trigger the build immediately
@@ -81,6 +131,29 @@ if (fs.existsSync(serverPath)) {
     // Handle rebuilding from the button
     if (req.method === 'POST' && req.url === '/rebuild') {
       if (buildStatus !== 'building') {
+        runBuild();
+      }
+      res.writeHead(302, { 'Location': '/' });
+      return res.end();
+    }
+
+    // Handle clean rebuilding (deletes node_modules first)
+    if (req.method === 'POST' && req.url === '/clean-rebuild') {
+      if (buildStatus !== 'building') {
+        buildStatus = 'building';
+        buildLog = 'Deletes node_modules to perform a clean installation...\n';
+        try {
+          const nmPath = path.join(__dirname, 'node_modules');
+          if (fs.existsSync(nmPath)) {
+            fs.rmSync(nmPath, { recursive: true, force: true });
+            buildLog += 'Successfully deleted node_modules!\n';
+          } else {
+            buildLog += 'node_modules does not exist. Skipping deletion.\n';
+          }
+        } catch (err) {
+          buildLog += `Warning: Failed to delete node_modules directory: ${err.message}\nTrying to run npm install anyway...\n`;
+        }
+        buildStatus = 'idle'; // Reset so runBuild doesn't bypass
         runBuild();
       }
       res.writeHead(302, { 'Location': '/' });
@@ -253,7 +326,17 @@ if (fs.existsSync(serverPath)) {
             ${
               buildStatus === 'building'
                 ? '<p>Sidan laddas om automatiskt var 5:e sekund för att visa förloppet.</p>'
-                : '<p>Något gick fel under byggprocessen. Se felmeddelandet i loggen nedan. Du kan försöka bygga igen genom att klicka på knappen.</p><form method="POST" action="/rebuild"><button class="button" type="submit">Försök bygga igen</button></form>'
+                : `
+                <p>Något gick fel under byggprocessen. Om det står att "vite" eller andra kommandon inte finns beror det oftast på att en trasig eller felaktigt uppladdad <code>node_modules</code>-mapp blockerar processen. Klicka på "Gör en helt ren installation" nedan för att rensa gamla filer och installera allt på nytt.</p>
+                <div style="display: flex; gap: 10px; margin-top: 1rem; flex-wrap: wrap;">
+                  <form method="POST" action="/rebuild">
+                    <button class="button" type="submit">Försök bygga igen</button>
+                  </form>
+                  <form method="POST" action="/clean-rebuild">
+                    <button class="button" style="background-color: #dc2626;" type="submit">Gör en helt ren installation (rekommenderas)</button>
+                  </form>
+                </div>
+                `
             }
           </div>
 

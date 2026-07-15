@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { RotateCcw, Trophy, ArrowLeft, Check, Sun, Moon, Timer as TimerIcon, Edit2, Zap, Rocket, Users, LayoutDashboard, Unlock, LogIn, LogOut, User as UserIcon, Mail, ShieldCheck, Cloud, Layout, Upload, Globe, AlertTriangle, Calendar, Settings, RefreshCw } from 'lucide-react';
+import { RotateCcw, Trophy, ArrowLeft, Check, Sun, Moon, Timer as TimerIcon, Edit2, Zap, Rocket, Users, LayoutDashboard, Unlock, LogIn, LogOut, User as UserIcon, ShieldCheck, Cloud, Layout, Globe, AlertTriangle, Calendar, Settings, RefreshCw } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { SquadPlayer, Exercise, Team, PointsConfig, Period, PeriodStandings, Lineup, TrainingSession, TrainingSettings, CoachData, BankExercise, SessionMoment } from './types';
+import { SquadPlayer, Exercise, Team, PointsConfig, Period, PeriodStandings, Lineup, TrainingSession, TrainingSettings, CoachData, BankExercise, SessionMoment, UserProfile, ClubMember } from './types';
 import { auth, signInWithGoogle, db, handleFirestoreError, OperationType } from './lib/firebase';
 import { onAuthStateChanged, signOut, User } from 'firebase/auth';
 import { doc, onSnapshot, setDoc, getDoc } from 'firebase/firestore';
@@ -18,9 +18,11 @@ import TeamPage from './components/TeamPage';
 import TrainingManager from './components/TrainingManager';
 import SessionEditor from './components/SessionEditor';
 import TeamOverviewModal from './components/TeamOverviewModal';
-import { CachedImage } from './components/CachedImage';
 
-type View = 'training' | 'setup' | 'exercise' | 'squad' | 'leaderboard' | 'profile' | 'lineup' | 'teampage';
+import ProfileAndSettings from './components/ProfileAndSettings';
+import ClubAdminDashboard from './components/ClubAdminDashboard';
+
+type View = 'training' | 'setup' | 'exercise' | 'squad' | 'leaderboard' | 'profile' | 'lineup' | 'teampage' | 'clubadmin';
 
 const INITIAL_DATA: CoachData = {
   squad: [],
@@ -99,6 +101,137 @@ const deduplicateById = <T extends { id: string }>(arr: T[] | undefined | null):
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const [isAuthReady, setIsAuthReady] = useState(false);
+  
+  const [userProfile, setUserProfile] = useState<UserProfile>({
+    fullName: '',
+    phone: '',
+    personnummer: '',
+    activeClubId: null,
+    activeTeamId: null,
+  });
+  const [userRoles, setUserRoles] = useState<string[]>(['admin', 'coach']);
+  const [isRootAdmin, setIsRootAdmin] = useState(false);
+
+  const checkRootAdminStatus = async (uid: string, email: string) => {
+    try {
+      const lowerEmail = email.trim().toLowerCase();
+      const hardcodedRoots = ['christer.setterholm@gmail.com', 'christer@setterholm.se'];
+      let isRoot = hardcodedRoots.includes(lowerEmail);
+
+      // Check specific admin UID document
+      const adminDoc = await getDoc(doc(db, 'admins', uid));
+      if (adminDoc.exists()) {
+        isRoot = true;
+      }
+
+      // Check global root admins list document
+      try {
+        const rootAdminsListDoc = await getDoc(doc(db, 'admins', 'root_admins_list'));
+        if (rootAdminsListDoc.exists()) {
+          const data = rootAdminsListDoc.data();
+          if (data && Array.isArray(data.admins)) {
+            const hasEmail = data.admins.some((adm: any) => adm.email.trim().toLowerCase() === lowerEmail);
+            if (hasEmail) {
+              isRoot = true;
+            }
+          }
+        }
+      } catch (listErr) {
+        console.warn('Could not read global root admins list:', listErr);
+      }
+
+      setIsRootAdmin(isRoot);
+
+      if (isRoot) {
+        // Ensure a document exists in the admins collection to satisfy the Security Rules 'exists' check
+        await setDoc(doc(db, 'admins', uid), {
+          uid,
+          email: lowerEmail,
+          role: 'root_admin',
+          assignedAt: Date.now()
+        }, { merge: true });
+
+        // Ensure user's email is also in the global root_admins_list
+        try {
+          const listRef = doc(db, 'admins', 'root_admins_list');
+          const listSnap = await getDoc(listRef);
+          let currentAdmins: any[] = [];
+          
+          if (listSnap.exists()) {
+            const listData = listSnap.data();
+            if (listData && Array.isArray(listData.admins)) {
+              currentAdmins = listData.admins;
+            }
+          }
+
+          // Add hardcoded admins if missing from list
+          for (const hardcoded of hardcodedRoots) {
+            if (!currentAdmins.some((adm: any) => adm.email.trim().toLowerCase() === hardcoded)) {
+              currentAdmins.push({
+                email: hardcoded,
+                uid: '',
+                role: 'root_admin',
+                assignedAt: Date.now()
+              });
+            }
+          }
+
+          // Add current user if missing from list
+          if (!currentAdmins.some((adm: any) => adm.email.trim().toLowerCase() === lowerEmail)) {
+            currentAdmins.push({
+              email: lowerEmail,
+              uid: uid,
+              role: 'root_admin',
+              assignedAt: Date.now()
+            });
+          }
+
+          await setDoc(listRef, { admins: currentAdmins });
+        } catch (listSaveErr) {
+          console.error('Failed to update root admins list:', listSaveErr);
+        }
+      }
+    } catch (err) {
+      console.error('Failed to check root admin status:', err);
+      // Fallback to runtime email check if rules block write or firestore error
+      const lowerEmail = email.trim().toLowerCase();
+      const hardcodedRoots = ['christer.setterholm@gmail.com', 'christer@setterholm.se'];
+      const isRoot = hardcodedRoots.includes(lowerEmail);
+      setIsRootAdmin(isRoot);
+    }
+  };
+
+  const getDocRefs = (currUser: User | null, profile: UserProfile) => {
+    if (!currUser) {
+      return {
+        docSquadRef: doc(db, 'users', 'guest', 'data', 'squad'),
+        docSessionsRef: doc(db, 'users', 'guest', 'data', 'sessions'),
+        docExercisesRef: doc(db, 'users', 'guest', 'data', 'exercises'),
+        docLineupsRef: doc(db, 'users', 'guest', 'data', 'lineups'),
+        docPeriodsRef: doc(db, 'users', 'guest', 'data', 'periods'),
+        docSettingsRef: doc(db, 'users', 'guest', 'data', 'settings'),
+      };
+    }
+    if (profile.activeClubId && profile.activeTeamId) {
+      return {
+        docSquadRef: doc(db, 'clubs', profile.activeClubId, 'teams', profile.activeTeamId, 'data', 'squad'),
+        docSessionsRef: doc(db, 'clubs', profile.activeClubId, 'teams', profile.activeTeamId, 'data', 'sessions'),
+        docExercisesRef: doc(db, 'clubs', profile.activeClubId, 'teams', profile.activeTeamId, 'data', 'exercises'),
+        docLineupsRef: doc(db, 'clubs', profile.activeClubId, 'teams', profile.activeTeamId, 'data', 'lineups'),
+        docPeriodsRef: doc(db, 'clubs', profile.activeClubId, 'teams', profile.activeTeamId, 'data', 'periods'),
+        docSettingsRef: doc(db, 'clubs', profile.activeClubId, 'teams', profile.activeTeamId, 'data', 'settings'),
+      };
+    } else {
+      return {
+        docSquadRef: doc(db, 'users', currUser.uid, 'data', 'squad'),
+        docSessionsRef: doc(db, 'users', currUser.uid, 'data', 'sessions'),
+        docExercisesRef: doc(db, 'users', currUser.uid, 'data', 'exercises'),
+        docLineupsRef: doc(db, 'users', currUser.uid, 'data', 'lineups'),
+        docPeriodsRef: doc(db, 'users', currUser.uid, 'data', 'periods'),
+        docSettingsRef: doc(db, 'users', currUser.uid, 'data', 'settings'),
+      };
+    }
+  };
   const [sharedLeaderboardId, setSharedLeaderboardId] = useState<string | null>(() => {
     const params = new URLSearchParams(window.location.search);
     return params.get('share');
@@ -545,6 +678,69 @@ export default function App() {
     }
   }, [squad, exercises, sessions, deletedSessions, lineups, activeLineupId, periods, currentPeriodId, activeExerciseId, teamUrl, customFormations, trainingSettings, pinnedFormationIds, exerciseBank, exerciseBankCategories, isAuthReady, isInitialSyncDone]);
 
+  const loadUserProfile = async (uid: string, email: string) => {
+    try {
+      const profileSnap = await getDoc(doc(db, 'users', uid, 'data', 'profile'));
+      if (profileSnap.exists()) {
+        const p = profileSnap.data() as UserProfile;
+        setUserProfile(p);
+        
+        // Load roles for active club
+        if (p.activeClubId) {
+          const membersSnap = await getDoc(doc(db, 'clubs', p.activeClubId, 'teams', 'club_global', 'data', 'members'));
+          if (membersSnap.exists()) {
+            const members: ClubMember[] = membersSnap.data().members || [];
+            const myRecord = members.find(m => m.userId === uid || m.email.trim().toLowerCase() === email.trim().toLowerCase());
+            if (myRecord) {
+              setUserRoles(myRecord.roles || []);
+            } else {
+              setUserRoles([]);
+            }
+          } else {
+            setUserRoles([]);
+          }
+        } else {
+          setUserRoles(['admin', 'coach']);
+        }
+      } else {
+        const defaultProfile: UserProfile = {
+          fullName: email.split('@')[0],
+          activeClubId: null,
+          activeTeamId: null
+        };
+        setUserProfile(defaultProfile);
+        setUserRoles(['admin', 'coach']);
+      }
+    } catch (e) {
+      console.error('Failed to load user profile:', e);
+    }
+  };
+
+  const handleProfileUpdated = (updatedProfile: UserProfile) => {
+    setUserProfile(updatedProfile);
+    
+    // Reload user roles for the new active club
+    if (user) {
+      if (updatedProfile.activeClubId) {
+        getDoc(doc(db, 'clubs', updatedProfile.activeClubId, 'teams', 'club_global', 'data', 'members')).then(membersSnap => {
+          if (membersSnap.exists()) {
+            const members: ClubMember[] = membersSnap.data().members || [];
+            const myRecord = members.find(m => m.userId === user.uid || m.email.trim().toLowerCase() === (user.email || '').trim().toLowerCase());
+            if (myRecord) {
+              setUserRoles(myRecord.roles || []);
+            } else {
+              setUserRoles([]);
+            }
+          } else {
+            setUserRoles([]);
+          }
+        }).catch(err => console.error('Failed to load roles on profile update:', err));
+      } else {
+        setUserRoles(['admin', 'coach']);
+      }
+    }
+  };
+
   // Clear data on user change
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (newUser) => {
@@ -562,6 +758,18 @@ export default function App() {
       setIsAuthReady(true);
       if (!newUser) {
         setHasPulledFromCloud(true);
+        setUserProfile({
+          fullName: '',
+          phone: '',
+          personnummer: '',
+          activeClubId: null,
+          activeTeamId: null,
+        });
+        setUserRoles(['admin', 'coach']);
+        setIsRootAdmin(false);
+      } else {
+        loadUserProfile(newUser.uid, newUser.email || '');
+        checkRootAdminStatus(newUser.uid, newUser.email || '');
       }
     });
     return () => unsubscribe();
@@ -585,12 +793,7 @@ export default function App() {
     try {
       console.log("App: Manually pulling segmented data from cloud...");
       setIsSyncing(true);
-      const docSquadRef = doc(db, 'users', user.uid, 'data', 'squad');
-      const docSessionsRef = doc(db, 'users', user.uid, 'data', 'sessions');
-      const docExercisesRef = doc(db, 'users', user.uid, 'data', 'exercises');
-      const docLineupsRef = doc(db, 'users', user.uid, 'data', 'lineups');
-      const docPeriodsRef = doc(db, 'users', user.uid, 'data', 'periods');
-      const docSettingsRef = doc(db, 'users', user.uid, 'data', 'settings');
+      const { docSquadRef, docSessionsRef, docExercisesRef, docLineupsRef, docPeriodsRef, docSettingsRef } = getDocRefs(user, userProfile);
 
       const [squadSnap, sessionsSnap, exercisesSnap, lineupsSnap, periodsSnap, settingsSnap] = await Promise.all([
         getDoc(docSquadRef),
@@ -664,12 +867,7 @@ export default function App() {
 
     const initializeAndLoad = async () => {
       try {
-        const docSquadRef = doc(db, 'users', user.uid, 'data', 'squad');
-        const docSessionsRef = doc(db, 'users', user.uid, 'data', 'sessions');
-        const docExercisesRef = doc(db, 'users', user.uid, 'data', 'exercises');
-        const docLineupsRef = doc(db, 'users', user.uid, 'data', 'lineups');
-        const docPeriodsRef = doc(db, 'users', user.uid, 'data', 'periods');
-        const docSettingsRef = doc(db, 'users', user.uid, 'data', 'settings');
+        const { docSquadRef, docSessionsRef, docExercisesRef, docLineupsRef, docPeriodsRef, docSettingsRef } = getDocRefs(user, userProfile);
         const docOldStateRef = doc(db, 'users', user.uid, 'config', 'state');
 
         // Step 1: Check if any segmented documents exist
@@ -956,7 +1154,7 @@ export default function App() {
         unsubscribeLineups();
       }
     };
-  }, [user?.uid, isAuthReady]);
+  }, [user?.uid, isAuthReady, userProfile.activeClubId, userProfile.activeTeamId]);
 
   // Push Local Actions to Cloud with dynamic debounce and granular dirty tracking
   useEffect(() => {
@@ -1019,24 +1217,25 @@ export default function App() {
         const writePromises = [];
         const now = Date.now();
         const lastUpdatedBy = sessionIdRef.current;
+        const { docSquadRef, docSessionsRef, docExercisesRef, docLineupsRef, docPeriodsRef, docSettingsRef } = getDocRefs(user, userProfile);
 
         if (nowSquadDirty) {
-          writePromises.push(setDoc(doc(db, 'users', user.uid, 'data', 'squad'), { squad, updatedAt: now, lastUpdatedBy }));
+          writePromises.push(setDoc(docSquadRef, { squad, updatedAt: now, lastUpdatedBy }));
         }
         if (nowSessionsDirty) {
-          writePromises.push(setDoc(doc(db, 'users', user.uid, 'data', 'sessions'), { sessions, deletedSessions, updatedAt: now, lastUpdatedBy }));
+          writePromises.push(setDoc(docSessionsRef, { sessions, deletedSessions, updatedAt: now, lastUpdatedBy }));
         }
         if (nowExercisesDirty) {
-          writePromises.push(setDoc(doc(db, 'users', user.uid, 'data', 'exercises'), { exercises, exerciseBank, exerciseBankCategories, updatedAt: now, lastUpdatedBy }));
+          writePromises.push(setDoc(docExercisesRef, { exercises, exerciseBank, exerciseBankCategories, updatedAt: now, lastUpdatedBy }));
         }
         if (nowLineupsDirty) {
-          writePromises.push(setDoc(doc(db, 'users', user.uid, 'data', 'lineups'), { lineups, activeLineupId, updatedAt: now, lastUpdatedBy }));
+          writePromises.push(setDoc(docLineupsRef, { lineups, activeLineupId, updatedAt: now, lastUpdatedBy }));
         }
         if (nowPeriodsDirty) {
-          writePromises.push(setDoc(doc(db, 'users', user.uid, 'data', 'periods'), { periods, currentPeriodId, updatedAt: now, lastUpdatedBy }));
+          writePromises.push(setDoc(docPeriodsRef, { periods, currentPeriodId, updatedAt: now, lastUpdatedBy }));
         }
         if (nowSettingsDirty) {
-          writePromises.push(setDoc(doc(db, 'users', user.uid, 'data', 'settings'), { teamUrl, adminUrl, seriesUrl, customFormations, pinnedFormationIds, trainingSettings, activeExerciseId, updatedAt: now, lastUpdatedBy }));
+          writePromises.push(setDoc(docSettingsRef, { teamUrl, adminUrl, seriesUrl, customFormations, pinnedFormationIds, trainingSettings, activeExerciseId, updatedAt: now, lastUpdatedBy }));
         }
 
         if (writePromises.length === 0) {
@@ -2033,23 +2232,25 @@ export default function App() {
     const nowSettingsDirty = currentSynced.teamUrl !== teamUrl || currentSynced.adminUrl !== adminUrl || currentSynced.seriesUrl !== seriesUrl || JSON.stringify(currentSynced.customFormations) !== JSON.stringify(customFormations) || JSON.stringify(currentSynced.pinnedFormationIds) !== JSON.stringify(pinnedFormationIds) || JSON.stringify(currentSynced.trainingSettings) !== JSON.stringify(trainingSettings) || currentSynced.activeExerciseId !== activeExerciseId;
 
     const writePromises = [];
+    const { docSquadRef, docSessionsRef, docExercisesRef, docLineupsRef, docPeriodsRef, docSettingsRef } = getDocRefs(user, userProfile);
+
     if (nowSquadDirty) {
-      writePromises.push(setDoc(doc(db, 'users', user.uid, 'data', 'squad'), { squad, updatedAt: now, lastUpdatedBy }));
+      writePromises.push(setDoc(docSquadRef, { squad, updatedAt: now, lastUpdatedBy }));
     }
     if (nowSessionsDirty) {
-      writePromises.push(setDoc(doc(db, 'users', user.uid, 'data', 'sessions'), { sessions, deletedSessions, updatedAt: now, lastUpdatedBy }));
+      writePromises.push(setDoc(docSessionsRef, { sessions, deletedSessions, updatedAt: now, lastUpdatedBy }));
     }
     if (nowExercisesDirty) {
-      writePromises.push(setDoc(doc(db, 'users', user.uid, 'data', 'exercises'), { exercises, exerciseBank, exerciseBankCategories, updatedAt: now, lastUpdatedBy }));
+      writePromises.push(setDoc(docExercisesRef, { exercises, exerciseBank, exerciseBankCategories, updatedAt: now, lastUpdatedBy }));
     }
     if (nowLineupsDirty) {
-      writePromises.push(setDoc(doc(db, 'users', user.uid, 'data', 'lineups'), { lineups, activeLineupId, updatedAt: now, lastUpdatedBy }));
+      writePromises.push(setDoc(docLineupsRef, { lineups, activeLineupId, updatedAt: now, lastUpdatedBy }));
     }
     if (nowPeriodsDirty) {
-      writePromises.push(setDoc(doc(db, 'users', user.uid, 'data', 'periods'), { periods, currentPeriodId, updatedAt: now, lastUpdatedBy }));
+      writePromises.push(setDoc(docPeriodsRef, { periods, currentPeriodId, updatedAt: now, lastUpdatedBy }));
     }
     if (nowSettingsDirty) {
-      writePromises.push(setDoc(doc(db, 'users', user.uid, 'data', 'settings'), { teamUrl, adminUrl, seriesUrl, customFormations, pinnedFormationIds, trainingSettings, activeExerciseId, updatedAt: now, lastUpdatedBy }));
+      writePromises.push(setDoc(docSettingsRef, { teamUrl, adminUrl, seriesUrl, customFormations, pinnedFormationIds, trainingSettings, activeExerciseId, updatedAt: now, lastUpdatedBy }));
     }
 
     if (writePromises.length === 0) {
@@ -2102,10 +2303,6 @@ export default function App() {
     } finally {
       setIsSyncing(false);
     }
-  };
-
-  const handleManualPull = async () => {
-    await pullLatestData();
   };
 
   const handleSwitchAccount = async () => {
@@ -2648,168 +2845,136 @@ export default function App() {
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -20 }}
-              className="max-w-2xl mx-auto p-4 sm:p-8"
+              className="max-w-4xl mx-auto p-4 sm:p-8"
             >
-              <div className="bg-white dark:bg-zinc-900 rounded-3xl border border-zinc-100 dark:border-zinc-800 shadow-xl overflow-hidden">
-                <div className="h-32 bg-indigo-600 relative">
-                  <div className="absolute -bottom-12 left-8">
-                    <div className="w-24 h-24 rounded-3xl border-4 border-white dark:border-zinc-900 bg-white dark:bg-zinc-800 overflow-hidden shadow-lg">
-                      {user?.photoURL ? (
-                        <CachedImage src={user.photoURL} alt={user.displayName || ''} className="w-full h-full object-cover" />
-                      ) : (
-                        <div className="w-full h-full flex items-center justify-center text-indigo-600 dark:text-indigo-400">
-                          <UserIcon size={40} />
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                </div>
-                
-                <div className="pt-16 pb-8 px-8">
-                  <div className="flex flex-col gap-5 mb-8 border-b border-zinc-100 dark:border-zinc-800 pb-6">
+              {user ? (
+                <div className="space-y-6">
+                  {/* Top quick links for admin/clubs */}
+                  <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-white dark:bg-zinc-900 border border-zinc-150 dark:border-zinc-800 p-6 rounded-3xl shadow-md">
                     <div>
-                      <h2 className="text-2xl font-black text-zinc-900 dark:text-white tracking-tight">
-                        {user?.displayName || 'Gäst'}
-                      </h2>
-                      <div className="flex items-center gap-2 text-zinc-500 dark:text-zinc-400 mt-1 font-bold text-sm">
-                        <Mail size={14} />
-                        <span>{user?.email}</span>
-                      </div>
+                      <h2 className="text-xl font-extrabold text-zinc-900 dark:text-white tracking-tight">Konto & inställningar</h2>
+                      <p className="text-sm text-zinc-500 mt-1 font-medium">Hantera ditt konto, anslutna föreningar och lag.</p>
                     </div>
-                    
                     <div className="flex flex-wrap gap-2.5">
+                      {(isRootAdmin || userRoles.includes('admin')) && (
+                        <button
+                          onClick={() => setView('clubadmin')}
+                          className="inline-flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold px-4 py-2.5 rounded-xl shadow-lg shadow-indigo-100 dark:shadow-none transition-all active:scale-95 cursor-pointer text-xs"
+                        >
+                          <ShieldCheck size={14} />
+                          <span>Föreningar & lag</span>
+                        </button>
+                      )}
                       <button
                         onClick={handleSwitchAccount}
-                        className="flex items-center justify-center gap-1.5 bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-zinc-850 dark:text-zinc-200 px-4 py-2 sm:px-5 sm:py-2.5 rounded-xl text-xs sm:text-sm font-extrabold border border-zinc-200 dark:border-zinc-700/60 active:scale-95 transition-all cursor-pointer"
+                        className="inline-flex items-center gap-2 bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-zinc-700 dark:text-zinc-200 font-extrabold px-4 py-2.5 rounded-xl transition-all active:scale-95 cursor-pointer text-xs border border-zinc-200 dark:border-zinc-700"
                       >
-                        <RotateCcw size={15} />
+                        <RotateCcw size={14} />
                         <span>Byt konto</span>
                       </button>
                       <button
                         onClick={handleLogout}
-                        className="flex items-center justify-center gap-1.5 bg-red-50 hover:bg-red-105/95 dark:bg-red-900/20 dark:hover:bg-red-900/40 text-red-600 dark:text-red-400 px-4 py-2 sm:px-5 sm:py-2.5 rounded-xl text-xs sm:text-sm font-extrabold border border-red-100 dark:border-red-900/30 active:scale-95 transition-all cursor-pointer"
+                        className="inline-flex items-center gap-2 bg-red-50 hover:bg-red-100 dark:bg-red-950/20 dark:hover:bg-red-900/40 text-red-600 dark:text-red-400 font-extrabold px-4 py-2.5 rounded-xl transition-all active:scale-95 cursor-pointer text-xs"
                       >
-                        <LogOut size={15} />
+                        <LogOut size={14} />
                         <span>Logga ut</span>
-                      </button>
-                      <button
-                        onClick={handleManualPull}
-                        className="flex items-center justify-center gap-1.5 bg-indigo-50 hover:bg-indigo-100/90 dark:bg-indigo-950/20 dark:hover:bg-indigo-950/40 text-indigo-600 dark:text-indigo-400 px-4 py-2 sm:px-5 sm:py-2.5 rounded-xl text-xs sm:text-sm font-extrabold border border-indigo-100 dark:border-indigo-950/30 active:scale-95 transition-all cursor-pointer"
-                      >
-                        <Cloud size={15} />
-                        <span>Hämta från molnet</span>
-                      </button>
-                      <button
-                        onClick={handleManualPush}
-                        className="flex items-center justify-center gap-1.5 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 sm:px-5 sm:py-2.5 rounded-xl text-xs sm:text-sm font-extrabold shadow-md hover:shadow-lg active:scale-95 transition-all cursor-pointer"
-                      >
-                        <Upload size={15} />
-                        <span>Spara till molnet</span>
                       </button>
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div className="bg-zinc-50 dark:bg-zinc-950 p-6 rounded-2xl border border-zinc-100 dark:border-zinc-800">
-                      <div className="flex items-center gap-3 mb-4 text-indigo-600 dark:text-indigo-400">
-                        <Cloud size={20} />
-                        <h3 className="font-black uppercase tracking-wider text-xs">Molnsynkronisering</h3>
-                      </div>
-                      <p className="text-sm text-zinc-600 dark:text-zinc-400 leading-relaxed">
-                        Dina data sparas automatiskt i molnet och synkas mellan alla dina enheter där du är inloggad.
-                      </p>
-                      <div className="mt-4 space-y-3">
-                        {isQuotaExceeded ? (
-                          <div className="flex flex-col gap-1.5 p-3 rounded-xl bg-amber-50 dark:bg-amber-900/10 border border-amber-200 dark:border-amber-900/30 text-amber-700 dark:text-amber-400">
-                            <div className="flex items-center gap-2 text-xs font-bold">
-                              <AlertTriangle size={14} className="shrink-0" />
-                              <span>Gratis dygnsgräns nådd i molnet</span>
-                            </div>
-                            <p className="text-[10px] font-medium leading-normal animate-pulse">
-                              Datan sparas fortfarande helt säkert lokalt i webbläsaren. Synkronisering återupptas automatiskt när molnet återställs.
-                            </p>
-                          </div>
-                        ) : (
-                          <div className="flex items-center gap-2 text-green-600 dark:text-green-400 text-xs font-bold">
-                            <ShieldCheck size={14} />
-                            <span>Aktiv och säker</span>
-                          </div>
-                        )}
-                        {isSyncing && (
-                          <div className="flex items-center gap-2 text-indigo-600 dark:text-indigo-400 text-xs font-bold animate-pulse">
-                            <RotateCcw size={14} className="animate-spin" />
-                            <span>Synkroniserar...</span>
-                          </div>
-                        )}
-                        <div className="pt-2 flex flex-col gap-2">
-                          <button
-                            onClick={handleManualPull}
-                            disabled={isSyncing}
-                            className="w-full text-left px-4 py-3 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl text-xs font-bold text-zinc-600 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors flex items-center justify-between group"
-                          >
-                            <span>Hämta från molnet</span>
-                            <Cloud size={14} className="group-hover:translate-y-[-1px] transition-transform" />
-                          </button>
-                          <button
-                            onClick={handleManualPush}
-                            disabled={isSyncing}
-                            className="w-full text-left px-4 py-3 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl text-xs font-bold text-zinc-600 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors flex items-center justify-between group"
-                          >
-                            <span>Skicka till molnet</span>
-                            <Cloud size={14} className="group-hover:translate-y-[-1px] transition-transform" />
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="bg-zinc-50 dark:bg-zinc-950 p-6 rounded-2xl border border-zinc-100 dark:border-zinc-800">
-                      <div className="flex items-center gap-3 mb-4 text-indigo-600 dark:text-indigo-400">
+                  <ProfileAndSettings
+                    userId={user.uid}
+                    userEmail={user.email || ''}
+                    onProfileUpdated={handleProfileUpdated}
+                    currentProfile={userProfile}
+                  />
+                  
+                  {/* Stats Grid */}
+                  <div className="bg-white dark:bg-zinc-900 border border-zinc-150 dark:border-zinc-800 p-6 rounded-3xl shadow-xl">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-5 pb-4 border-b border-zinc-100 dark:border-zinc-800/60">
+                      <div className="flex items-center gap-3 text-indigo-600 dark:text-indigo-400">
                         <LayoutDashboard size={20} />
-                        <h3 className="font-black uppercase tracking-wider text-xs">Statistik</h3>
+                        <h3 className="font-black uppercase tracking-wider text-xs">Aktivitetsstatistik ({userProfile.activeClubId ? 'Aktivt lag' : 'Privat trupp'})</h3>
                       </div>
-                      <div className="space-y-2.5">
-                        <div className="flex justify-between items-center border-b border-zinc-100/60 dark:border-zinc-800/50 pb-1.5">
-                          <span className="text-sm text-zinc-500">Spelare i truppen</span>
-                          <span className="text-sm font-bold text-zinc-800 dark:text-zinc-200">{squad.filter(p => p.role !== 'leader').length} st</span>
+                      {(userRoles.length > 0 || isRootAdmin) && (
+                        <div className="flex flex-wrap gap-1.5 items-center">
+                          <span className="text-[10px] text-zinc-400 dark:text-zinc-500 font-extrabold uppercase tracking-wider">Mina roller:</span>
+                          {isRootAdmin && (
+                            <span className="text-[9px] font-black uppercase tracking-wider bg-red-50 dark:bg-red-950/40 text-red-600 dark:text-red-400 px-2 py-0.5 rounded-md border border-red-100/40 dark:border-red-900/40 animate-pulse">
+                              Root Admin
+                            </span>
+                          )}
+                          {userRoles.map(role => (
+                            <span key={role} className="text-[9px] font-black uppercase tracking-wider bg-indigo-50 dark:bg-indigo-950/40 text-indigo-600 dark:text-indigo-400 px-2 py-0.5 rounded-md border border-indigo-100/40 dark:border-indigo-900/40">
+                              {role === 'admin' ? 'Admin' : role === 'coach' ? 'Tränare' : role === 'player' ? 'Spelare' : 'Förälder'}
+                            </span>
+                          ))}
                         </div>
-                        <div className="flex justify-between items-center border-b border-zinc-100/60 dark:border-zinc-800/50 pb-1.5">
-                          <span className="text-sm text-zinc-500">Ledare</span>
-                          <span className="text-sm font-bold text-zinc-800 dark:text-zinc-200">{squad.filter(p => p.role === 'leader').length} st</span>
+                      )}
+                    </div>
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                      <div className="bg-zinc-50 dark:bg-zinc-950 p-4 rounded-2xl border border-zinc-100 dark:border-zinc-800">
+                        <span className="text-xs text-zinc-500 uppercase font-bold tracking-wider">Spelare</span>
+                        <div className="text-2xl font-black text-zinc-900 dark:text-white mt-1">
+                          {squad.filter(p => p.role !== 'leader').length}
                         </div>
-                        <div className="flex justify-between items-center border-b border-zinc-100/60 dark:border-zinc-800/50 pb-1.5">
-                          <span className="text-sm text-zinc-500">Antal träningar</span>
-                          <span className="text-sm font-bold text-zinc-800 dark:text-zinc-200">{sessions.filter(s => getSessionCategory(s) === 'training').length} st</span>
+                      </div>
+                      <div className="bg-zinc-50 dark:bg-zinc-950 p-4 rounded-2xl border border-zinc-100 dark:border-zinc-800">
+                        <span className="text-xs text-zinc-500 uppercase font-bold tracking-wider">Tränare/Ledare</span>
+                        <div className="text-2xl font-black text-zinc-900 dark:text-white mt-1">
+                          {squad.filter(p => p.role === 'leader').length}
                         </div>
-                        <div className="flex justify-between items-center border-b border-zinc-100/60 dark:border-zinc-800/50 pb-1.5">
-                          <span className="text-sm text-zinc-500">Antal matcher</span>
-                          <span className="text-sm font-bold text-zinc-800 dark:text-zinc-200">{sessions.filter(s => getSessionCategory(s) === 'match').length} st</span>
+                      </div>
+                      <div className="bg-zinc-50 dark:bg-zinc-950 p-4 rounded-2xl border border-zinc-100 dark:border-zinc-800">
+                        <span className="text-xs text-zinc-500 uppercase font-bold tracking-wider">Träningar</span>
+                        <div className="text-2xl font-black text-zinc-900 dark:text-white mt-1">
+                          {sessions.filter(s => getSessionCategory(s) === 'training').length}
                         </div>
-                        <div className="flex justify-between items-center border-b border-zinc-100/60 dark:border-zinc-800/50 pb-1.5">
-                          <span className="text-sm text-zinc-500">Tävlingsmoment</span>
-                          <span className="text-sm font-bold text-zinc-800 dark:text-zinc-200">{exercises.length} st</span>
-                        </div>
-                        <div className="flex justify-between items-center pb-0.5">
-                          <span className="text-sm text-zinc-500">Perioder</span>
-                          <span className="text-sm font-bold text-zinc-800 dark:text-zinc-200">{periods.length} st</span>
+                      </div>
+                      <div className="bg-zinc-50 dark:bg-zinc-950 p-4 rounded-2xl border border-zinc-100 dark:border-zinc-800">
+                        <span className="text-xs text-zinc-500 uppercase font-bold tracking-wider">Matcher</span>
+                        <div className="text-2xl font-black text-zinc-900 dark:text-white mt-1">
+                          {sessions.filter(s => getSessionCategory(s) === 'match').length}
                         </div>
                       </div>
                     </div>
                   </div>
                 </div>
-              </div>
-
-              {!user && (
-                <div className="mt-8 text-center">
-                  <h3 className="text-xl font-bold text-zinc-900 dark:text-white mb-4">Logga in för att spara din data</h3>
+              ) : (
+                <div className="bg-white dark:bg-zinc-900 rounded-3xl border border-zinc-100 dark:border-zinc-800 shadow-xl p-8 text-center max-w-md mx-auto">
+                  <div className="w-16 h-16 bg-indigo-50 dark:bg-indigo-950/30 rounded-2xl flex items-center justify-center text-indigo-600 dark:text-indigo-400 mx-auto mb-6">
+                    <UserIcon size={32} />
+                  </div>
+                  <h3 className="text-xl font-bold text-zinc-900 dark:text-white mb-2">Logga in för att spara din data</h3>
+                  <p className="text-sm text-zinc-500 dark:text-zinc-400 mb-6 font-medium leading-relaxed">
+                    Spara dina spelare, kalendrar och poängligor säkert i molnet samt anslut till idrottsklubbar.
+                  </p>
                   <button
                     onClick={handleLogin}
-                    className="inline-flex items-center gap-3 bg-indigo-600 text-white px-8 py-4 rounded-2xl font-bold hover:bg-indigo-700 transition-all shadow-xl shadow-indigo-100 dark:shadow-none"
+                    className="w-full inline-flex items-center justify-center gap-3 bg-indigo-600 text-white px-6 py-3.5 rounded-2xl font-bold hover:bg-indigo-700 transition-all shadow-xl shadow-indigo-100 dark:shadow-none"
                   >
                     <LogIn size={20} />
                     <span>Logga in med Google</span>
                   </button>
                 </div>
               )}
+            </motion.div>
+          )}
+
+          {view === 'clubadmin' && user && (
+            <motion.div
+              key="clubadmin"
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -20 }}
+              className="max-w-6xl mx-auto p-4 sm:p-8"
+            >
+              <ClubAdminDashboard
+                userId={user.uid}
+                userEmail={user.email || ''}
+                isRootAdmin={isRootAdmin}
+                onBack={() => setView('profile')}
+              />
             </motion.div>
           )}
 

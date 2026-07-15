@@ -133,6 +133,22 @@
     "/users/{userId}/lineup_history/{lineupId}": {
       "schema": "LineupHistory",
       "description": "Undo/Redo history for a specific lineup."
+    },
+    "/admins/{adminId}": {
+      "schema": "object",
+      "description": "Root administrator configuration."
+    },
+    "/clubs/{clubId}/teams/club_global/data/metadata": {
+      "schema": "object",
+      "description": "Club metadata list of teams."
+    },
+    "/clubs/{clubId}/teams/club_global/data/members": {
+      "schema": "object",
+      "description": "Club member records and roles list."
+    },
+    "/clubs/{clubId}/teams/{teamId}/data/{docId}": {
+      "schema": "object",
+      "description": "Club team granular data segment (squad, sessions, exercises, lineups, periods, settings)."
     }
   }
 }
