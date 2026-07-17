@@ -77,37 +77,35 @@ async function startServer() {
   const app = express();
   const PORT = process.env.PORT || 3000;
 
-  // Subpath and routing prefix middleware for hosting under custom folders like /coachassist/
+  // Subpath and routing prefix middleware for hosting under custom folders (e.g., /coachassist/ or any other custom folder name)
   app.use((req, res, next) => {
     const url = req.url;
     const pathPart = url.split('?')[0];
     const segments = pathPart.split('/').filter(Boolean);
 
-    // If we are served at the root of a subdomain or domain (first segment is not 'coachassist'),
-    // bypass the custom subfolder rewriter completely to avoid routing conflicts.
-    if (segments[0] !== 'coachassist') {
+    // If there are no segments or the first segment is a known root-level route, bypass
+    if (segments.length === 0 || ['api', 'assets', 'uploads', 'rebuild', 'favicon.ico'].includes(segments[0])) {
       return next();
     }
 
-    // 1. Handle missing trailing slash for the subfolder base (e.g. /coachassist -> /coachassist/)
-    // This is crucial so that relative paths (base: "./") resolve relative to /coachassist/ rather than the domain root.
-    if (segments.length === 1 && !['api', 'assets', 'uploads', 'rebuild', 'favicon.ico'].includes(segments[0])) {
-      const hasTrailingSlash = pathPart.endsWith('/');
-      if (!hasTrailingSlash) {
-        const query = url.includes('?') ? '?' + url.split('?')[1] : '';
-        console.log(`[Subfolder Redirect] Redirecting ${url} to /${segments[0]}/${query}`);
-        return res.redirect(301, `/${segments[0]}/${query}`);
-      }
+    const subfolder = segments[0];
+
+    // 1. Handle missing trailing slash for the subfolder base (e.g. /my-subfolder -> /my-subfolder/)
+    // This is crucial so that relative paths (base: "./") resolve relative to the subfolder rather than the domain root.
+    if (segments.length === 1 && !pathPart.endsWith('/')) {
+      const query = url.includes('?') ? '?' + url.split('?')[1] : '';
+      console.log(`[Subfolder Redirect] Redirecting ${url} to /${subfolder}/${query}`);
+      return res.redirect(301, `/${subfolder}/${query}`);
     }
 
-    // 2. Rewrite req.url to strip the subfolder prefix (e.g. /coachassist/api/health -> /api/health)
+    // 2. Rewrite req.url to strip the subfolder prefix (e.g. /my-subfolder/api/health -> /api/health)
     const match = url.match(/^\/([^\/]+)\/(api|assets|uploads|favicon\.ico|rebuild)(.*)$/);
     if (match) {
       req.url = '/' + match[2] + match[3];
       console.log(`[Subfolder Rewriter] Rewrote URL: ${url} -> ${req.url}`);
     } else {
-      // Also rewrite root of subpath (e.g. /coachassist/ -> /)
-      if (segments.length === 1 && !['api', 'assets', 'uploads', 'rebuild', 'favicon.ico'].includes(segments[0])) {
+      // Also rewrite root of subpath (e.g. /my-subfolder/ -> /)
+      if (segments.length === 1) {
         req.url = '/' + (url.includes('?') ? '?' + url.split('?')[1] : '');
         console.log(`[Subfolder Rewriter] Rewrote root: ${url} -> ${req.url}`);
       }
@@ -540,9 +538,7 @@ async function startServer() {
     const distPath = _dirname;
     // Serve assets with absolute precision to prevent any rewrite or subfolder routing issues
     app.use('/assets', express.static(path.join(distPath, 'assets')));
-    app.use('/coachassist/assets', express.static(path.join(distPath, 'assets')));
     app.use(express.static(distPath));
-    app.use('/coachassist', express.static(distPath));
     app.get('*', (_req, res) => {
       res.sendFile(path.join(distPath, 'index.html'));
     });

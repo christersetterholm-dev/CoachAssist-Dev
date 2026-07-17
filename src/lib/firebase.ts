@@ -13,11 +13,23 @@ export const getApiUrl = (path: string): string => {
   if (!path || path.startsWith('http://') || path.startsWith('https://') || path.startsWith('data:') || path.startsWith('blob:')) {
     return path;
   }
+
+  // Allow overriding via environment variable
+  const apiBase = (import.meta as any).env?.VITE_API_URL || '';
+  if (apiBase) {
+    const cleanBase = apiBase.endsWith('/') ? apiBase.slice(0, -1) : apiBase;
+    const cleanPath = path.startsWith('/') ? path : '/' + path;
+    return cleanBase + cleanPath;
+  }
+
   const pathname = window.location.pathname;
   const cleanPath = path.startsWith('/') ? path : '/' + path;
   
-  if (pathname.startsWith('/coachassist')) {
-    return '/coachassist' + cleanPath;
+  // Dynamically detect if we are hosted under a subfolder
+  // If pathname is not "/" and has segments, the first segment can be our subfolder
+  const segments = pathname.split('/').filter(Boolean);
+  if (segments.length > 0 && segments[0] !== 'api' && segments[0] !== 'uploads') {
+    return '/' + segments[0] + cleanPath;
   }
   
   return cleanPath;
