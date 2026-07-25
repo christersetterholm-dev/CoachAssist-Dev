@@ -386,7 +386,8 @@ export default function App() {
         const target = e.target;
         if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA')) {
           const type = target.type || 'text';
-          const isTextInput = ['text', 'search', 'url', 'tel', 'email', 'password'].includes(type) || target.tagName === 'TEXTAREA';
+          // Exclude email and password inputs and any inputs in the custom auth modal to allow secure autofill, native input handling, and prevent Safari selection exceptions
+          const isTextInput = (['text', 'search', 'url', 'tel'].includes(type) || target.tagName === 'TEXTAREA') && !target.closest('#custom-auth-modal');
           if (!isTextInput) return;
 
           // List of input types we handle manually to bypass native WebKit UndoManager insertion
@@ -398,69 +399,75 @@ export default function App() {
           ];
 
           if (handledInputTypes.includes(e.inputType)) {
-            e.preventDefault();
-            e.stopPropagation();
+            try {
+              // Read selection properties first before preventing default, in case they throw an exception
+              const start = target.selectionStart ?? 0;
+              const end = target.selectionEnd ?? 0;
 
-            const start = target.selectionStart ?? 0;
-            const end = target.selectionEnd ?? 0;
-            const value = target.value;
-            let newValue = value;
-            let newSelectionStart = start;
-            let newSelectionEnd = start;
+              e.preventDefault();
+              e.stopPropagation();
 
-            if (e.inputType === 'insertText') {
-              const textToInsert = e.data || '';
-              newValue = value.slice(0, start) + textToInsert + value.slice(end);
-              newSelectionStart = start + textToInsert.length;
-              newSelectionEnd = newSelectionStart;
-            } else if (e.inputType === 'insertFromPaste') {
-              const textToInsert = e.dataTransfer?.getData('text') || '';
-              newValue = value.slice(0, start) + textToInsert + value.slice(end);
-              newSelectionStart = start + textToInsert.length;
-              newSelectionEnd = newSelectionStart;
-            } else if (e.inputType === 'deleteContentBackward') {
-              if (start === end) {
-                if (start > 0) {
-                  newValue = value.slice(0, start - 1) + value.slice(end);
-                  newSelectionStart = start - 1;
-                  newSelectionEnd = start - 1;
-                }
-              } else {
-                newValue = value.slice(0, start) + value.slice(end);
-                newSelectionStart = start;
-                newSelectionEnd = start;
-              }
-            } else if (e.inputType === 'deleteContentForward') {
-              if (start === end) {
-                if (start < value.length) {
-                  newValue = value.slice(0, start) + value.slice(start + 1);
+              const value = target.value;
+              let newValue = value;
+              let newSelectionStart = start;
+              let newSelectionEnd = start;
+
+              if (e.inputType === 'insertText') {
+                const textToInsert = e.data || '';
+                newValue = value.slice(0, start) + textToInsert + value.slice(end);
+                newSelectionStart = start + textToInsert.length;
+                newSelectionEnd = newSelectionStart;
+              } else if (e.inputType === 'insertFromPaste') {
+                const textToInsert = e.dataTransfer?.getData('text') || '';
+                newValue = value.slice(0, start) + textToInsert + value.slice(end);
+                newSelectionStart = start + textToInsert.length;
+                newSelectionEnd = newSelectionStart;
+              } else if (e.inputType === 'deleteContentBackward') {
+                if (start === end) {
+                  if (start > 0) {
+                    newValue = value.slice(0, start - 1) + value.slice(end);
+                    newSelectionStart = start - 1;
+                    newSelectionEnd = start - 1;
+                  }
+                } else {
+                  newValue = value.slice(0, start) + value.slice(end);
                   newSelectionStart = start;
                   newSelectionEnd = start;
                 }
-              } else {
-                newValue = value.slice(0, start) + value.slice(end);
-                newSelectionStart = start;
-                newSelectionEnd = start;
+              } else if (e.inputType === 'deleteContentForward') {
+                if (start === end) {
+                  if (start < value.length) {
+                    newValue = value.slice(0, start) + value.slice(start + 1);
+                    newSelectionStart = start;
+                    newSelectionEnd = start;
+                  }
+                } else {
+                  newValue = value.slice(0, start) + value.slice(end);
+                  newSelectionStart = start;
+                  newSelectionEnd = start;
+                }
               }
-            }
 
-            // Programmatically update native property value to trigger React's synthetic input/change flow
-            const prototype = target.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
-            const descriptor = Object.getOwnPropertyDescriptor(prototype, 'value');
-            const nativeValueSetter = descriptor?.set;
-            
-            if (nativeValueSetter) {
-              nativeValueSetter.call(target, newValue);
-              const event = new Event('input', { bubbles: true, cancelable: true });
-              target.dispatchEvent(event);
-            } else {
-              target.value = newValue;
-            }
+              // Programmatically update native property value to trigger React's synthetic input/change flow
+              const prototype = target.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+              const descriptor = Object.getOwnPropertyDescriptor(prototype, 'value');
+              const nativeValueSetter = descriptor?.set;
+              
+              if (nativeValueSetter) {
+                nativeValueSetter.call(target, newValue);
+                const event = new Event('input', { bubbles: true, cancelable: true });
+                target.dispatchEvent(event);
+              } else {
+                target.value = newValue;
+              }
 
-            // Restore selection range/cursor position
-            try {
-              target.setSelectionRange(newSelectionStart, newSelectionEnd);
-            } catch (err) {}
+              // Restore selection range/cursor position
+              try {
+                target.setSelectionRange(newSelectionStart, newSelectionEnd);
+              } catch (err) {}
+            } catch (err) {
+              console.warn('Bypassed iOS manual input handling due to error:', err);
+            }
           }
         }
       }
