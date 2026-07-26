@@ -103,15 +103,25 @@ export const signInWithGoogle = async (_forceSelect = false): Promise<User> => {
         </div>
 
         <form id="auth-form" class="space-y-4">
-          <div>
+          <div id="auth-email-container">
             <label class="block text-xs font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider mb-1.5" for="auth-email">E-postadress</label>
             <input type="email" id="auth-email" required class="w-full px-4 py-3 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl text-sm text-zinc-800 dark:text-zinc-100 placeholder-zinc-400 focus:outline-none focus:border-indigo-500 dark:focus:border-indigo-500 transition-colors" placeholder="coach@lag.se" />
           </div>
-          <div>
-            <label class="block text-xs font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider mb-1.5" for="auth-password">Lösenord</label>
+
+          <div id="auth-code-container" class="hidden">
+            <label class="block text-xs font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider mb-1.5" for="auth-code">6-siffrig verifieringskod</label>
+            <input type="text" id="auth-code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" class="w-full px-4 py-3 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl text-center text-xl font-mono font-bold tracking-widest text-indigo-600 dark:text-indigo-400 placeholder-zinc-400 focus:outline-none focus:border-indigo-500 dark:focus:border-indigo-500 transition-colors" placeholder="123456" autocomplete="one-time-code" />
+          </div>
+
+          <div id="auth-password-container">
+            <div class="flex items-center justify-between mb-1.5">
+              <label id="auth-password-label" class="block text-xs font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider" for="auth-password">Lösenord</label>
+              <button type="button" id="auth-forgot-btn" class="text-xs text-indigo-500 hover:text-indigo-600 dark:text-indigo-400 underline font-medium transition-colors">Glömt lösenord?</button>
+            </div>
             <input type="password" id="auth-password" required class="w-full px-4 py-3 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl text-sm text-zinc-800 dark:text-zinc-100 placeholder-zinc-400 focus:outline-none focus:border-indigo-500 dark:focus:border-indigo-500 transition-colors" placeholder="••••••••" minlength="6" />
           </div>
 
+          <div id="auth-info" class="hidden text-xs font-medium text-emerald-800 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800/40 px-3.5 py-2.5 rounded-xl"></div>
           <div id="auth-error" class="hidden text-xs font-medium text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-900/30 px-3.5 py-2.5 rounded-xl"></div>
 
           <button type="submit" id="auth-submit-btn" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3.5 px-4 rounded-xl text-sm transition-colors shadow-lg shadow-indigo-100 dark:shadow-none flex items-center justify-center gap-2">
@@ -140,16 +150,26 @@ export const signInWithGoogle = async (_forceSelect = false): Promise<User> => {
       }
     }, 10);
 
-    let isRegisterMode = false;
+    let authMode: 'login' | 'register' | 'request-reset' | 'verify-reset' = 'login';
 
     const closeBtn = modal.querySelector('#auth-close-btn') as HTMLButtonElement;
     const switchBtn = modal.querySelector('#auth-switch-btn') as HTMLButtonElement;
+    const forgotBtn = modal.querySelector('#auth-forgot-btn') as HTMLButtonElement;
     const form = modal.querySelector('#auth-form') as HTMLFormElement;
     const errorDiv = modal.querySelector('#auth-error') as HTMLDivElement;
+    const infoDiv = modal.querySelector('#auth-info') as HTMLDivElement;
     const submitBtn = modal.querySelector('#auth-submit-btn') as HTMLButtonElement;
     const title = modal.querySelector('#auth-title') as HTMLElement;
     const subtitle = modal.querySelector('#auth-subtitle') as HTMLElement;
     const switchText = modal.querySelector('#auth-switch-text') as HTMLElement;
+    const passwordLabel = modal.querySelector('#auth-password-label') as HTMLElement;
+    const emailInput = modal.querySelector('#auth-email') as HTMLInputElement;
+    const codeInput = modal.querySelector('#auth-code') as HTMLInputElement;
+    const passwordInput = modal.querySelector('#auth-password') as HTMLInputElement;
+
+    const emailContainer = modal.querySelector('#auth-email-container') as HTMLElement;
+    const codeContainer = modal.querySelector('#auth-code-container') as HTMLElement;
+    const passwordContainer = modal.querySelector('#auth-password-container') as HTMLElement;
 
     const cleanUpModal = () => {
       const card = modal.querySelector('div') as HTMLElement;
@@ -168,50 +188,135 @@ export const signInWithGoogle = async (_forceSelect = false): Promise<User> => {
       reject(new Error('Inloggningen avbröts av användaren'));
     };
 
-    switchBtn.onclick = (e) => {
-      e.preventDefault();
-      isRegisterMode = !isRegisterMode;
+    const updateAuthUI = () => {
       errorDiv.classList.add('hidden');
+      infoDiv.classList.add('hidden');
 
-      if (isRegisterMode) {
+      if (authMode === 'register') {
         title.innerText = 'Skapa nytt konto';
         subtitle.innerText = 'Skapa ett konto för att säkert spara din spelartrupp och träningspass.';
+        passwordLabel.innerText = 'Lösenord';
+        emailContainer.classList.remove('hidden');
+        codeContainer.classList.add('hidden');
+        passwordContainer.classList.remove('hidden');
+        forgotBtn.classList.add('hidden');
+        passwordInput.required = true;
+        codeInput.required = false;
         submitBtn.querySelector('span')!.innerText = 'Skapa konto';
         switchText.innerText = 'Har du redan ett konto?';
         switchBtn.innerText = 'Logga in';
+      } else if (authMode === 'request-reset') {
+        title.innerText = 'Återställ lösenord';
+        subtitle.innerText = 'Ange din e-postadress för att få en 6-siffrig verifieringskod.';
+        emailContainer.classList.remove('hidden');
+        codeContainer.classList.add('hidden');
+        passwordContainer.classList.add('hidden');
+        forgotBtn.classList.add('hidden');
+        passwordInput.required = false;
+        codeInput.required = false;
+        submitBtn.querySelector('span')!.innerText = 'Skicka verifieringskod';
+        switchText.innerText = 'Kom du ihåg ditt lösenord?';
+        switchBtn.innerText = 'Logga in';
+      } else if (authMode === 'verify-reset') {
+        title.innerText = 'Mata in verifieringskod';
+        subtitle.innerText = 'Ange den 6-siffriga koden vi skickat samt ditt nya lösenord.';
+        passwordLabel.innerText = 'Nytt lösenord';
+        emailContainer.classList.remove('hidden');
+        codeContainer.classList.remove('hidden');
+        passwordContainer.classList.remove('hidden');
+        forgotBtn.classList.add('hidden');
+        passwordInput.required = true;
+        codeInput.required = true;
+        submitBtn.querySelector('span')!.innerText = 'Återställ & logga in';
+        switchText.innerText = 'Vill du börja om?';
+        switchBtn.innerText = 'Tillbaka till inloggning';
       } else {
         title.innerText = 'Logga in till ditt konto';
         subtitle.innerText = 'Ange din e-postadress och lösenord för att hantera din trupp.';
+        passwordLabel.innerText = 'Lösenord';
+        emailContainer.classList.remove('hidden');
+        codeContainer.classList.add('hidden');
+        passwordContainer.classList.remove('hidden');
+        forgotBtn.classList.remove('hidden');
+        passwordInput.required = true;
+        codeInput.required = false;
         submitBtn.querySelector('span')!.innerText = 'Logga in';
         switchText.innerText = 'Har du inget konto?';
         switchBtn.innerText = 'Skapa konto';
       }
     };
 
+    forgotBtn.onclick = (e) => {
+      e.preventDefault();
+      authMode = 'request-reset';
+      updateAuthUI();
+    };
+
+    switchBtn.onclick = (e) => {
+      e.preventDefault();
+      if (authMode === 'login') {
+        authMode = 'register';
+      } else {
+        authMode = 'login';
+      }
+      updateAuthUI();
+    };
+
     form.onsubmit = async (e) => {
       e.preventDefault();
-      const email = (modal.querySelector('#auth-email') as HTMLInputElement).value;
-      const password = (modal.querySelector('#auth-password') as HTMLInputElement).value;
+      const email = emailInput.value.trim();
+      const password = passwordInput.value;
+      const code = codeInput.value.trim();
 
       errorDiv.classList.add('hidden');
+      infoDiv.classList.add('hidden');
       submitBtn.disabled = true;
       submitBtn.classList.add('opacity-70');
 
-      const url = getApiUrl(isRegisterMode ? '/api/auth/register' : '/api/auth/login');
-
       try {
+        if (authMode === 'request-reset') {
+          const url = getApiUrl('/api/auth/request-reset');
+          const response = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email })
+          });
+          const resData = await response.json();
+          if (!response.ok) {
+            throw new Error(resData.error || 'Begäran om återställning misslyckades.');
+          }
+
+          infoDiv.innerText = resData.message || 'Verifieringskod har skickats till din e-postadress.';
+          infoDiv.classList.remove('hidden');
+          authMode = 'verify-reset';
+          updateAuthUI();
+          // Keep info message visible after updateAuthUI
+          infoDiv.classList.remove('hidden');
+          return;
+        }
+
+        let endpoint = '/api/auth/login';
+        let bodyPayload: any = { email, password };
+
+        if (authMode === 'register') {
+          endpoint = '/api/auth/register';
+          bodyPayload = { email, password };
+        } else if (authMode === 'verify-reset') {
+          endpoint = '/api/auth/reset-password';
+          bodyPayload = { email, code, newPassword: password };
+        }
+
+        const url = getApiUrl(endpoint);
         const response = await fetch(url, {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({ email, password })
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(bodyPayload)
         });
 
         const resData = await response.json();
 
         if (!response.ok) {
-          throw new Error(resData.error || 'Autentisering misslyckades');
+          throw new Error(resData.error || 'Åtgärden misslyckades');
         }
 
         localStorage.setItem('token', resData.token);
@@ -221,8 +326,9 @@ export const signInWithGoogle = async (_forceSelect = false): Promise<User> => {
         cleanUpModal();
         resolve(resData.user);
       } catch (err: any) {
-        errorDiv.innerText = err.message || 'Kunde inte ansluta till servern';
+        errorDiv.innerText = err.message || 'Ett fel uppstod';
         errorDiv.classList.remove('hidden');
+      } finally {
         submitBtn.disabled = false;
         submitBtn.classList.remove('opacity-70');
       }

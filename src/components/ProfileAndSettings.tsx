@@ -3,6 +3,7 @@ import { User, Phone, Fingerprint, Check, Save, Landmark, Info } from 'lucide-re
 import { UserProfile, Club, ClubMetadata, ClubMember } from '../types';
 import { db } from '../lib/firebase';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
+import PwaIconGenerator from './PwaIconGenerator';
 
 interface ProfileAndSettingsProps {
   userId: string;
@@ -402,6 +403,14 @@ export default function ProfileAndSettings({
             </div>
           )}
         </div>
+      </div>
+
+      {/* PWA Icon Set Generator */}
+      <div className="lg:col-span-12">
+        <PwaIconGenerator
+          initialLogoUrl="/icon.svg"
+          clubName={memberships.find(m => m.club.id === profile.activeClubId)?.club.name || 'CoachAssist'}
+        />
       </div>
     </div>
   );

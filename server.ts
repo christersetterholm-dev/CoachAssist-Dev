@@ -7,6 +7,7 @@ import Database from 'better-sqlite3';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import multer from 'multer';
+import nodemailer from 'nodemailer';
 import { fileURLToPath } from 'url';
 
 // Environment-safe way to define __dirname and __filename in both ESM (dev) and CJS (prod esbuild bundle)
@@ -68,6 +69,16 @@ db.exec(`
     path TEXT PRIMARY KEY,
     data TEXT NOT NULL,
     updatedAt INTEGER NOT NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS password_resets (
+    id TEXT PRIMARY KEY,
+    email TEXT NOT NULL,
+    code_hash TEXT NOT NULL,
+    expires_at INTEGER NOT NULL,
+    attempts INTEGER NOT NULL DEFAULT 0,
+    used INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL
   );
 `);
 
@@ -198,6 +209,183 @@ async function startServer() {
     } catch (error: any) {
       console.error('Login error:', error);
       res.status(500).json({ error: 'Kunde inte logga in' });
+    }
+  });
+
+  // Helper function to send email for password reset
+  const sendVerificationEmail = async (email: string, code: string) => {
+    const smtpHost = process.env.SMTP_HOST;
+    const smtpUser = process.env.SMTP_USER;
+    const smtpPass = process.env.SMTP_PASS;
+    const smtpPort = parseInt(process.env.SMTP_PORT || '587', 10);
+    const smtpFrom = process.env.SMTP_FROM || 'CoachAssist <no-reply@coachassist.app>';
+
+    console.log(`[PASSWORD RESET CODE] Email: ${email} | Verification Code: ${code}`);
+
+    if (smtpHost && smtpUser && smtpPass) {
+      try {
+        const transporter = nodemailer.createTransport({
+          host: smtpHost,
+          port: smtpPort,
+          secure: smtpPort === 465,
+          auth: {
+            user: smtpUser,
+            pass: smtpPass
+          }
+        });
+
+        await transporter.sendMail({
+          from: smtpFrom,
+          to: email,
+          subject: 'Återställ ditt lösenord - CoachAssist',
+          html: `
+            <div style="font-family: sans-serif; max-width: 500px; margin: 0 auto; padding: 20px; border: 1px solid #e4e4e7; rounded: 12px;">
+              <h2 style="color: #18181b; margin-bottom: 8px;">Återställning av lösenord</h2>
+              <p style="color: #71717a; font-size: 14px;">Du har begärt att återställa lösenordet för ditt CoachAssist-konto.</p>
+              <div style="background-color: #f4f4f5; padding: 16px; text-align: center; border-radius: 8px; margin: 24px 0;">
+                <span style="font-size: 32px; font-weight: bold; letter-spacing: 6px; color: #4f46e5;">${code}</span>
+              </div>
+              <p style="color: #71717a; font-size: 13px;">Koden är giltig i <strong>15 minuter</strong>. Om du inte begärt återställningen kan du ignorera detta meddelande.</p>
+            </div>
+          `
+        });
+        return true;
+      } catch (err) {
+        console.error('Failed to send verification email via SMTP:', err);
+      }
+    }
+    return false;
+  };
+
+  // Phase 1: Request password reset email code
+  app.post('/api/auth/request-reset', async (req, res) => {
+    const { email } = req.body;
+    if (!email || typeof email !== 'string' || !email.includes('@')) {
+      return res.status(400).json({ error: 'Ange en giltig e-postadress.' });
+    }
+
+    const trimmedEmail = email.trim().toLowerCase();
+
+    try {
+      // Rate limiting check: max 3 requests per 10 minutes per email
+      const tenMinutesAgo = Date.now() - 10 * 60 * 1000;
+      const recentRequestsCount: any = db.prepare(
+        'SELECT COUNT(*) as count FROM password_resets WHERE email = ? AND created_at > ?'
+      ).get(trimmedEmail, tenMinutesAgo);
+
+      if (recentRequestsCount && recentRequestsCount.count >= 5) {
+        return res.status(429).json({
+          error: 'För många återställningsförsök. Vänligen vänta 10 minuter innan du försöker igen.'
+        });
+      }
+
+      // Defense against email enumeration: respond identically regardless of user existence
+      const userRow: any = db.prepare('SELECT id FROM users WHERE email = ?').get(trimmedEmail);
+
+      if (userRow) {
+        // Generate cryptographically secure 6-digit code
+        const codeNum = crypto.randomInt(100000, 999999);
+        const code = codeNum.toString();
+        const codeHash = await bcrypt.hash(code, 10);
+        const expiresAt = Date.now() + 15 * 60 * 1000; // 15 mins expiry
+        const id = crypto.randomUUID();
+
+        // Invalidate any old unused codes for this email
+        db.prepare('UPDATE password_resets SET used = 1 WHERE email = ? AND used = 0').run(trimmedEmail);
+
+        // Store reset code
+        db.prepare(
+          'INSERT INTO password_resets (id, email, code_hash, expires_at, attempts, used, created_at) VALUES (?, ?, ?, ?, 0, 0, ?)'
+        ).run(id, trimmedEmail, codeHash, expiresAt, Date.now());
+
+        // Send email
+        await sendVerificationEmail(trimmedEmail, code);
+      }
+
+      // Return unified success message
+      res.json({
+        success: true,
+        message: 'Om e-postadressen finns registrerad har vi skickat en 6-siffrig verifieringskod.'
+      });
+    } catch (error: any) {
+      console.error('Request reset error:', error);
+      res.status(500).json({ error: 'Kunde inte behandla begäran om återställning.' });
+    }
+  });
+
+  // Phase 2: Verify code and update password
+  app.post('/api/auth/reset-password', async (req, res) => {
+    const { email, code, newPassword } = req.body;
+    if (!email || !code || !newPassword) {
+      return res.status(400).json({ error: 'E-postadress, verifieringskod och nytt lösenord krävs.' });
+    }
+
+    if (typeof newPassword !== 'string' || newPassword.length < 6) {
+      return res.status(400).json({ error: 'Det nya lösenordet måste vara minst 6 tecken långt.' });
+    }
+
+    const trimmedEmail = email.trim().toLowerCase();
+    const cleanCode = code.toString().trim();
+
+    try {
+      // Find latest active reset request for this email
+      const resetRow: any = db.prepare(
+        'SELECT * FROM password_resets WHERE email = ? AND used = 0 AND expires_at > ? ORDER BY created_at DESC LIMIT 1'
+      ).get(trimmedEmail, Date.now());
+
+      if (!resetRow) {
+        return res.status(400).json({
+          error: 'Ingen giltig verifieringskod hittades eller koden har gått ut. Begär en ny kod.'
+        });
+      }
+
+      if (resetRow.attempts >= 5) {
+        return res.status(400).json({
+          error: 'För många felaktiga försök för denna kod. Vänligen begär en ny verifieringskod.'
+        });
+      }
+
+      // Verify code match
+      const isCodeValid = await bcrypt.compare(cleanCode, resetRow.code_hash);
+
+      if (!isCodeValid) {
+        // Increment attempt counter
+        db.prepare('UPDATE password_resets SET attempts = attempts + 1 WHERE id = ?').run(resetRow.id);
+        const remaining = 4 - resetRow.attempts;
+        return res.status(400).json({
+          error: `Felaktig verifieringskod. Du har ${Math.max(0, remaining)} försök kvar.`
+        });
+      }
+
+      // Verify user exists
+      const userRow: any = db.prepare('SELECT id, email FROM users WHERE email = ?').get(trimmedEmail);
+      if (!userRow) {
+        return res.status(404).json({ error: 'Användarkontot kunde inte hittas.' });
+      }
+
+      // Mark code as used
+      db.prepare('UPDATE password_resets SET used = 1 WHERE id = ?').run(resetRow.id);
+
+      // Update password hash
+      const newPasswordHash = await bcrypt.hash(newPassword, 10);
+      db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(newPasswordHash, userRow.id);
+
+      // Issue fresh authentication JWT token
+      const token = jwt.sign({ id: userRow.id, email: userRow.email }, JWT_SECRET, { expiresIn: '30d' });
+
+      res.json({
+        message: 'Lösenordet har återställts!',
+        token,
+        user: {
+          uid: userRow.id,
+          email: userRow.email,
+          displayName: userRow.email.split('@')[0],
+          photoURL: null
+        }
+      });
+    } catch (error: any) {
+      console.error('Reset password error:', error);
+      res.status(500).json({ error: 'Kunde inte återställa lösenordet.' });
     }
   });
 

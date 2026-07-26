@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { Landmark, Trash2, Edit3, Users, Shield, Check, PlusCircle, Search, Mail, Phone, Fingerprint, Settings, ArrowRight, UserPlus, Save } from 'lucide-react';
+import { Landmark, Trash2, Edit3, Users, Shield, Check, PlusCircle, Search, Mail, Phone, Fingerprint, Settings, ArrowRight, UserPlus, Save, Smartphone } from 'lucide-react';
 import { Club, ClubMetadata, ClubTeam, ClubMember } from '../types';
 import { db } from '../lib/firebase';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
+import PwaIconGenerator from './PwaIconGenerator';
 
 interface ClubAdminDashboardProps {
   userId: string;
@@ -13,7 +14,7 @@ interface ClubAdminDashboardProps {
 
 export default function ClubAdminDashboard({ userId, userEmail, isRootAdmin = false, onBack }: ClubAdminDashboardProps) {
   // Navigation tabs within admin
-  const [activeTab, setActiveTab] = useState<'clubs' | 'teams' | 'members' | 'root_admins'>('clubs');
+  const [activeTab, setActiveTab] = useState<'clubs' | 'teams' | 'members' | 'root_admins' | 'pwa_icons'>('clubs');
 
   // Master lists
   const [clubs, setClubs] = useState<Club[]>([]);
@@ -533,6 +534,18 @@ export default function ClubAdminDashboard({ userId, userEmail, isRootAdmin = fa
           >
             <Users size={16} />
             <span>Medlemmar & Roller ({members.length})</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('pwa_icons')}
+            className={`flex items-center gap-2 px-5 py-3 rounded-xl font-extrabold text-sm transition-all cursor-pointer ${
+              activeTab === 'pwa_icons'
+                ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-100 dark:shadow-none'
+                : 'bg-zinc-50 hover:bg-zinc-100 dark:bg-zinc-950 dark:hover:bg-zinc-800 text-zinc-600 dark:text-zinc-400'
+            }`}
+          >
+            <Smartphone size={16} />
+            <span>PWA-Ikonpaket</span>
           </button>
 
           {isRootAdmin && (
@@ -1088,6 +1101,13 @@ export default function ClubAdminDashboard({ userId, userEmail, isRootAdmin = fa
             </div>
           </div>
         </div>
+      )}
+
+      {activeTab === 'pwa_icons' && (
+        <PwaIconGenerator
+          initialLogoUrl="/icon.svg"
+          clubName={selectedClub?.name || 'CoachAssist'}
+        />
       )}
     </div>
   );
