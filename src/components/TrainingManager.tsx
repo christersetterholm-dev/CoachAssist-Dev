@@ -910,7 +910,7 @@ export default function TrainingManager({
   const currentExerciseForTeams = exercises.find(e => e.id === selectedExerciseForTeams);
 
   return (
-    <div className="w-full max-w-4xl lg:max-w-5xl xl:max-w-6xl 2xl:max-w-7xl mx-auto mb-32 pt-0 sm:pt-4">
+    <div className="w-full max-w-4xl lg:max-w-5xl xl:max-w-6xl 2xl:max-w-7xl mx-auto mb-4 pt-0 sm:pt-4">
       {/* Team Overview Modal */}
       <AnimatePresence>
         {selectedExerciseForTeams && currentExerciseForTeams && (

@@ -21,6 +21,7 @@ import TeamOverviewModal from './components/TeamOverviewModal';
 
 import ProfileAndSettings from './components/ProfileAndSettings';
 import ClubAdminDashboard from './components/ClubAdminDashboard';
+import VersionFooter from './components/VersionFooter';
 
 type View = 'training' | 'setup' | 'exercise' | 'squad' | 'leaderboard' | 'profile' | 'lineup' | 'teampage' | 'clubadmin';
 
@@ -3224,6 +3225,10 @@ export default function App() {
             )
           )}
         </AnimatePresence>
+
+        {view !== 'exercise' && (
+          <VersionFooter className="mt-4 mb-2" />
+        )}
       </main>
 
       {/* Bottom Navigation */}
