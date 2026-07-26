@@ -757,29 +757,32 @@ export default function TrainingManager({
       let updatedCount = 0;
 
       for (const ev of events) {
-        const matchByExternalId = existingSessions.find(s => s.externalId === ev.externalId);
-        const matchByDateTime = !matchByExternalId && existingSessions.find(s => {
-          return formatToYYYYMMDD(s.date) === formatToYYYYMMDD(ev.date) && s.startTime === ev.startTime;
-        });
+        const matchByExternalId = ev.externalId ? existingSessions.find(s => s.externalId === ev.externalId) : undefined;
+        
+        let matchByProximity = undefined;
+        if (!matchByExternalId) {
+          // Exact date and start time match for sessions without externalId
+          matchByProximity = existingSessions.find(s => {
+            return !s.externalId && formatToYYYYMMDD(s.date) === formatToYYYYMMDD(ev.date) && s.startTime === ev.startTime;
+          });
 
-        const matchedSession = matchByExternalId || matchByDateTime;
+          // Fallback: title & close proximity match (within 4 days)
+          if (!matchByProximity && ev.title) {
+            const cleanEvTitle = ev.title.replace(/^\[INSTÄLLT\]\s*/i, '').trim().toLowerCase();
+            matchByProximity = existingSessions.find(s => {
+              if (s.externalId) return false;
+              const cleanSTitle = s.title.replace(/^\[INSTÄLLT\]\s*/i, '').trim().toLowerCase();
+              const isSameTitle = cleanSTitle === cleanEvTitle || (cleanSTitle.includes('träning') && cleanEvTitle.includes('träning'));
+              const dayDiff = Math.abs(s.date - ev.date) / (1000 * 60 * 60 * 24);
+              return isSameTitle && dayDiff <= 4;
+            });
+          }
+        }
+
+        const matchedSession = matchByExternalId || matchByProximity;
 
         if (matchedSession) {
           if (matchedSession.isCompleted || matchedSession.isIgnored) {
-            skippedCount++;
-            continue;
-          }
-
-          // Strict protection check: Identify if this matched session represents an active planned activity.
-          // If a session has planned moments, coach notes, is started, or is flagged as isPlanned or isLocallyEdited,
-          // it must never be overwritten/amended by external automated calendar imports.
-          const isPlannedActive = 
-            (matchedSession.moments && matchedSession.moments.length > 0) ||
-            (matchedSession.notes && matchedSession.notes.trim() !== '') ||
-            matchedSession.isStarted ||
-            (!forceOverwrite && (matchedSession.isPlanned || matchedSession.isLocallyEdited));
-
-          if (isPlannedActive) {
             skippedCount++;
             continue;
           }

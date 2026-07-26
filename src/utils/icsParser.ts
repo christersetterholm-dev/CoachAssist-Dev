@@ -6,6 +6,8 @@ export interface ParsedIcsEvent {
   endTime?: string; // "HH:MM"
   description?: string;
   location?: string;
+  status?: string;
+  isCancelled?: boolean;
 }
 
 export function parseIcsCalendar(icsData: string): ParsedIcsEvent[] {
@@ -24,6 +26,7 @@ export function parseIcsCalendar(icsData: string): ParsedIcsEvent[] {
     dtEndRaw?: string;
     description?: string;
     location?: string;
+    status?: string;
   } | null = null;
   
   // Helper to parse ICS date-times
@@ -81,20 +84,28 @@ export function parseIcsCalendar(icsData: string): ParsedIcsEvent[] {
       currentEvent = {};
     } else if (trimmed === 'END:VEVENT') {
       if (currentEvent) {
-        const { externalId, title, dtStartRaw, dtEndRaw, description, location } = currentEvent;
+        const { externalId, title, dtStartRaw, dtEndRaw, description, location, status } = currentEvent;
         if (dtStartRaw) {
           const startInfo = parseDateTime(dtStartRaw);
           const endInfo = dtEndRaw ? parseDateTime(dtEndRaw) : null;
           
           if (startInfo) {
+            const isCancelled = status?.toUpperCase() === 'CANCELLED';
+            let finalTitle = title?.trim() || 'Träningspass';
+            if (isCancelled && !finalTitle.toUpperCase().startsWith('[INSTÄLLT]')) {
+              finalTitle = `[INSTÄLLT] ${finalTitle}`;
+            }
+
             events.push({
               externalId: externalId || `ics-${startInfo.timestamp}-${Math.random().toString(36).slice(2, 6)}`,
-              title: title?.trim() || 'Träningspass',
+              title: finalTitle,
               date: startInfo.timestamp,
               startTime: startInfo.timeStr || '18:00',
               endTime: endInfo?.timeStr || undefined,
               location: location || '',
-              description: description || ''
+              description: description || '',
+              status,
+              isCancelled
             });
           }
         }
@@ -111,6 +122,8 @@ export function parseIcsCalendar(icsData: string): ParsedIcsEvent[] {
       
       if (key === 'UID') {
         currentEvent.externalId = valuePart.trim();
+      } else if (key === 'STATUS') {
+        currentEvent.status = valuePart.trim().toUpperCase();
       } else if (key === 'SUMMARY') {
         currentEvent.title = valuePart
           .replace(/\\,/g, ',')
