@@ -284,59 +284,8 @@ export default function App() {
     return 'training';
   });
 
-  const clearBrowserUndoHistory = () => {
-    // 1. Aggressively blur any active elements (especially inputs / textareas) 
-    // BEFORE they get unmounted to completely prevent iOS "Undo/Shake to Undo" ghost states.
-    try {
-      const activeEl = document.activeElement as HTMLElement;
-      if (activeEl && typeof activeEl.blur === 'function') {
-        activeEl.blur();
-      }
-    } catch (e) {
-      console.error("Error blurring:", e);
-    }
-
-    try {
-      // 2. Disable, make read-only, and set type to 'hidden' to force Safari WebKit's input responder chain to drop them.
-      const inputs = document.querySelectorAll('input, textarea');
-      inputs.forEach((el: any) => {
-        try {
-          el.blur();
-          el.disabled = true;
-          el.readOnly = true;
-          if (el.tagName === 'INPUT') {
-            el.setAttribute('type', 'hidden');
-          }
-        } catch (err) {}
-      });
-    } catch (e) {
-      console.error("Error cleaning up inputs:", e);
-    }
-
-    // 3. Clear any active selection ranges to prevent iOS selection shake-to-undo
-    try {
-      window.getSelection()?.removeAllRanges();
-    } catch (e) {}
-
-    // 4. Synchronously toggle document.designMode 'on' and then immediately 'off'.
-    // This is a highly effective, silent WebKit/Blink workaround that programmatically
-    // forces Safari to discard its native document-level UndoManager stack completely.
-    try {
-      document.designMode = 'on';
-      document.designMode = 'off';
-    } catch (e) {
-      console.error("Error toggling designMode:", e);
-    }
-  };
-
   const setView = (newView: View | ((prev: View) => View)) => {
-    clearBrowserUndoHistory();
-    // Delay the actual state update slightly (120ms) to allow Safari's input responder chain,
-    // active event loop, and UndoManager to process the blurs, disabling, and designMode
-    // toggle BEFORE the inputs are fully unmounted from the DOM.
-    setTimeout(() => {
-      _setView(newView);
-    }, 120);
+    _setView(newView);
   };
   const [trainingTab, setTrainingTab] = useState<'completed' | 'exercises' | 'calendar_view'>('calendar_view');
   const [openTrainingSettings, setOpenTrainingSettings] = useState(false);
@@ -370,107 +319,24 @@ export default function App() {
 
   // Notification Scheduler for Training Moments & iOS Shake to Undo Protection
   useEffect(() => {
-    // Prevent iOS "Shake to Undo" dialog
+    // ONLY apply iOS Shake-to-Undo protections when actively in an exercise (competition view)
+    if (view !== 'exercise') {
+      return;
+    }
+
+    // Blur any open keyboard or focused text input upon starting an exercise
+    try {
+      const activeEl = document.activeElement as HTMLElement;
+      if (activeEl && typeof activeEl.blur === 'function') {
+        activeEl.blur();
+      }
+    } catch (e) {}
+
     const handleUndo = (e: any) => {
       // iOS triggers 'beforeinput' with inputType 'historyUndo' or 'historyRedo' when shaking
       if (e.inputType === 'historyUndo' || e.inputType === 'historyRedo') {
         e.preventDefault();
         e.stopPropagation();
-        return;
-      }
-
-      // Check if we are on iOS to bypass the native text editing UndoManager
-      const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || 
-                    (navigator.userAgent.includes('Macintosh') && navigator.maxTouchPoints > 1);
-
-      if (isIOS) {
-        const target = e.target;
-        if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA')) {
-          const type = target.type || 'text';
-          // Exclude email and password inputs and any inputs in the custom auth modal to allow secure autofill, native input handling, and prevent Safari selection exceptions
-          const isTextInput = (['text', 'search', 'url', 'tel'].includes(type) || target.tagName === 'TEXTAREA') && !target.closest('#custom-auth-modal');
-          if (!isTextInput) return;
-
-          // List of input types we handle manually to bypass native WebKit UndoManager insertion
-          const handledInputTypes = [
-            'insertText',
-            'insertFromPaste',
-            'deleteContentBackward',
-            'deleteContentForward'
-          ];
-
-          if (handledInputTypes.includes(e.inputType)) {
-            try {
-              // Read selection properties first before preventing default, in case they throw an exception
-              const start = target.selectionStart ?? 0;
-              const end = target.selectionEnd ?? 0;
-
-              e.preventDefault();
-              e.stopPropagation();
-
-              const value = target.value;
-              let newValue = value;
-              let newSelectionStart = start;
-              let newSelectionEnd = start;
-
-              if (e.inputType === 'insertText') {
-                const textToInsert = e.data || '';
-                newValue = value.slice(0, start) + textToInsert + value.slice(end);
-                newSelectionStart = start + textToInsert.length;
-                newSelectionEnd = newSelectionStart;
-              } else if (e.inputType === 'insertFromPaste') {
-                const textToInsert = e.dataTransfer?.getData('text') || '';
-                newValue = value.slice(0, start) + textToInsert + value.slice(end);
-                newSelectionStart = start + textToInsert.length;
-                newSelectionEnd = newSelectionStart;
-              } else if (e.inputType === 'deleteContentBackward') {
-                if (start === end) {
-                  if (start > 0) {
-                    newValue = value.slice(0, start - 1) + value.slice(end);
-                    newSelectionStart = start - 1;
-                    newSelectionEnd = start - 1;
-                  }
-                } else {
-                  newValue = value.slice(0, start) + value.slice(end);
-                  newSelectionStart = start;
-                  newSelectionEnd = start;
-                }
-              } else if (e.inputType === 'deleteContentForward') {
-                if (start === end) {
-                  if (start < value.length) {
-                    newValue = value.slice(0, start) + value.slice(start + 1);
-                    newSelectionStart = start;
-                    newSelectionEnd = start;
-                  }
-                } else {
-                  newValue = value.slice(0, start) + value.slice(end);
-                  newSelectionStart = start;
-                  newSelectionEnd = start;
-                }
-              }
-
-              // Programmatically update native property value to trigger React's synthetic input/change flow
-              const prototype = target.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
-              const descriptor = Object.getOwnPropertyDescriptor(prototype, 'value');
-              const nativeValueSetter = descriptor?.set;
-              
-              if (nativeValueSetter) {
-                nativeValueSetter.call(target, newValue);
-                const event = new Event('input', { bubbles: true, cancelable: true });
-                target.dispatchEvent(event);
-              } else {
-                target.value = newValue;
-              }
-
-              // Restore selection range/cursor position
-              try {
-                target.setSelectionRange(newSelectionStart, newSelectionEnd);
-              } catch (err) {}
-            } catch (err) {
-              console.warn('Bypassed iOS manual input handling due to error:', err);
-            }
-          }
-        }
       }
     };
 
@@ -479,71 +345,32 @@ export default function App() {
       e.stopPropagation();
     };
 
-    // Clean up inputs on state changes to prevent unmounting inputs from leaving trailing undo histories
-    clearBrowserUndoHistory();
-
-    // Focus cleanup on first interaction
-    let cleanedUpInteraction = false;
-    const handleFirstInteraction = () => {
-      if (!cleanedUpInteraction) {
-        cleanedUpInteraction = true;
-        try {
-          const activeEl = document.activeElement as HTMLElement;
-          if (activeEl && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA')) {
-            activeEl.blur();
-          }
-        } catch (e) {}
-        window.removeEventListener('touchstart', handleFirstInteraction, { capture: true });
-        window.removeEventListener('mousedown', handleFirstInteraction, { capture: true });
-      }
-    };
-
-    // Extra selection-suppressing event listeners during live exercise views
     const clearSelection = () => {
       try {
         window.getSelection()?.removeAllRanges();
       } catch (e) {}
     };
 
-    if (view === 'exercise') {
-      try {
-        const activeEl = document.activeElement as HTMLElement;
-        if (activeEl && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA')) {
-          activeEl.blur();
-        }
-      } catch (e) {}
-
-      window.addEventListener('touchstart', handleFirstInteraction, { capture: true, passive: true });
-      window.addEventListener('mousedown', handleFirstInteraction, { capture: true, passive: true });
-
-      // Aggressively clear selection range on any touches/taps to prevent iOS from keeping selection undo actions
-      window.addEventListener('touchend', clearSelection, { passive: true });
-      window.addEventListener('touchcancel', clearSelection, { passive: true });
-      window.addEventListener('mouseup', clearSelection, { passive: true });
-      document.addEventListener('selectionchange', clearSelection, { passive: true });
-    }
-
-    // Capture phase listeners for undo/redo
     window.addEventListener('beforeinput', handleUndo, true);
     document.addEventListener('undo', preventDefault, true);
     document.addEventListener('redo', preventDefault, true);
 
-    return () => {
-      // Clear inputs and flush native UndoManager stack again upon unmounting or state transition
-      clearBrowserUndoHistory();
+    window.addEventListener('touchend', clearSelection, { passive: true });
+    window.addEventListener('touchcancel', clearSelection, { passive: true });
+    window.addEventListener('mouseup', clearSelection, { passive: true });
+    document.addEventListener('selectionchange', clearSelection, { passive: true });
 
+    return () => {
       window.removeEventListener('beforeinput', handleUndo, true);
       document.removeEventListener('undo', preventDefault, true);
       document.removeEventListener('redo', preventDefault, true);
-      window.removeEventListener('touchstart', handleFirstInteraction, { capture: true });
-      window.removeEventListener('mousedown', handleFirstInteraction, { capture: true });
-      
+
       window.removeEventListener('touchend', clearSelection);
       window.removeEventListener('touchcancel', clearSelection);
       window.removeEventListener('mouseup', clearSelection);
       document.removeEventListener('selectionchange', clearSelection);
     };
-  }, [view, showTeamOverview, openTrainingSettings, activeSessionId]);
+  }, [view]);
 
   useEffect(() => {
     const checkNotifications = () => {
@@ -1166,7 +993,7 @@ export default function App() {
 
   // Push Local Actions to Cloud with dynamic debounce and granular dirty tracking
   useEffect(() => {
-    if (activeExerciseId !== null) {
+    if (activeExerciseId !== null || view === 'exercise') {
       // Skip auto-sync while in competition
       return;
     }
@@ -1174,39 +1001,7 @@ export default function App() {
     if (user && isAuthReady && isInitialSyncDone && hasPulledFromCloud && sessionActionCount > 0 && !isSyncing && !isQuotaExceeded) {
       if (syncUserIdRef.current !== user.uid) return;
 
-      const lastSynced = lastCloudDataRef.current || INITIAL_DATA;
-
-      // Track granular dirty state
-      const isSquadDirty = JSON.stringify(lastSynced.squad) !== JSON.stringify(squad);
-      const isSessionsDirty = 
-        JSON.stringify(lastSynced.sessions) !== JSON.stringify(sessions) ||
-        JSON.stringify(lastSynced.deletedSessions) !== JSON.stringify(deletedSessions);
-      const isExercisesDirty = 
-        JSON.stringify(lastSynced.exercises) !== JSON.stringify(exercises) ||
-        JSON.stringify(lastSynced.exerciseBank) !== JSON.stringify(exerciseBank) ||
-        JSON.stringify(lastSynced.exerciseBankCategories) !== JSON.stringify(exerciseBankCategories);
-      const isLineupsDirty = 
-        JSON.stringify(lastSynced.lineups) !== JSON.stringify(lineups) ||
-        lastSynced.activeLineupId !== activeLineupId;
-      const isPeriodsDirty = 
-        JSON.stringify(lastSynced.periods) !== JSON.stringify(periods) ||
-        lastSynced.currentPeriodId !== currentPeriodId;
-      const isSettingsDirty = 
-        lastSynced.teamUrl !== teamUrl ||
-        lastSynced.adminUrl !== adminUrl ||
-        lastSynced.seriesUrl !== seriesUrl ||
-        JSON.stringify(lastSynced.customFormations) !== JSON.stringify(customFormations) ||
-        JSON.stringify(lastSynced.pinnedFormationIds) !== JSON.stringify(pinnedFormationIds) ||
-        JSON.stringify(lastSynced.trainingSettings) !== JSON.stringify(trainingSettings) ||
-        lastSynced.activeExerciseId !== activeExerciseId;
-
-      let debounceDelay = 5000;
-      if (isSessionsDirty || (isSettingsDirty && JSON.stringify(lastSynced.trainingSettings) !== JSON.stringify(trainingSettings))) {
-        debounceDelay = 30000; // Slower 30s debounce to save writes during planning
-      }
-      if (isLineupsDirty || isSquadDirty || isExercisesDirty || isPeriodsDirty) {
-        debounceDelay = 5000; // Fast 5s sync for higher priority elements
-      }
+      const debounceDelay = 2000; // Fast 2s debounce to reliably save all changes 2 seconds after user finishes editing
 
       const syncData = async () => {
         if (syncUserIdRef.current !== user.uid || isSyncing) return;
@@ -1297,11 +1092,11 @@ export default function App() {
       const timeout = setTimeout(syncData, debounceDelay);
       return () => clearTimeout(timeout);
     }
-  }, [squad, exercises, sessions, deletedSessions, lineups, activeLineupId, periods, currentPeriodId, activeExerciseId, teamUrl, adminUrl, seriesUrl, customFormations, pinnedFormationIds, trainingSettings, exerciseBank, exerciseBankCategories, sessionActionCount, user?.uid, isAuthReady, isInitialSyncDone, hasPulledFromCloud, isSyncing, isQuotaExceeded]);
+  }, [squad, exercises, sessions, deletedSessions, lineups, activeLineupId, periods, currentPeriodId, activeExerciseId, teamUrl, adminUrl, seriesUrl, customFormations, pinnedFormationIds, trainingSettings, exerciseBank, exerciseBankCategories, sessionActionCount, user?.uid, isAuthReady, isInitialSyncDone, hasPulledFromCloud, isSyncing, isQuotaExceeded, view]);
 
   // Sync shared leaderboards globally with optimized, less aggressive debouncing
   useEffect(() => {
-    if (activeExerciseId !== null) {
+    if (activeExerciseId !== null || view === 'exercise') {
       // Skip publishing/sharing leaderboard updates while actively in a competition/exercise view.
       return;
     }
