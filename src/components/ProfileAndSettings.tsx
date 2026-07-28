@@ -1,17 +1,14 @@
 import React, { useState, useEffect } from 'react';
-import { User, Phone, Fingerprint, Check, Save, Landmark, Info, PlusCircle, ShieldCheck } from 'lucide-react';
+import { User, Phone, Fingerprint, Check, Save, Landmark, Info } from 'lucide-react';
 import { UserProfile, Club, ClubMetadata, ClubMember } from '../types';
 import { db } from '../lib/firebase';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
-import PwaIconGenerator from './PwaIconGenerator';
 
 interface ProfileAndSettingsProps {
   userId: string;
   userEmail: string;
   onProfileUpdated: (profile: UserProfile) => void;
   currentProfile: UserProfile;
-  onOpenClubAdmin?: () => void;
-  isRootAdmin?: boolean;
 }
 
 export default function ProfileAndSettings({
@@ -19,8 +16,6 @@ export default function ProfileAndSettings({
   userEmail,
   onProfileUpdated,
   currentProfile,
-  onOpenClubAdmin,
-  isRootAdmin = false,
 }: ProfileAndSettingsProps) {
   const [profile, setProfile] = useState<UserProfile>({
     fullName: currentProfile.fullName || '',
@@ -309,15 +304,6 @@ export default function ProfileAndSettings({
                 <div className="space-y-3">
                   <div className="flex items-center justify-between border-t border-zinc-100 dark:border-zinc-800/80 pt-4 pb-1">
                     <h4 className="text-[11px] font-black uppercase text-zinc-400 tracking-wider">Mina Klubbar</h4>
-                    {onOpenClubAdmin && (
-                      <button
-                        onClick={onOpenClubAdmin}
-                        className="text-xs font-bold text-indigo-600 dark:text-indigo-400 hover:underline flex items-center gap-1 cursor-pointer"
-                      >
-                        <ShieldCheck size={14} />
-                        <span>Hantera</span>
-                      </button>
-                    )}
                   </div>
 
                   {memberships.map(({ club, roles, teams, availableTeams }) => {
@@ -413,31 +399,10 @@ export default function ProfileAndSettings({
                   </div>
                 </div>
               )}
-              {onOpenClubAdmin && (
-                <div className="pt-2 border-t border-zinc-100 dark:border-zinc-800">
-                  <button
-                    onClick={onOpenClubAdmin}
-                    className="w-full bg-indigo-600 hover:bg-indigo-700 text-white py-3 px-4 rounded-2xl font-extrabold text-xs flex items-center justify-center gap-2 transition-all cursor-pointer shadow-md shadow-indigo-100 dark:shadow-none active:scale-95"
-                  >
-                    <PlusCircle size={16} />
-                    <span>Skapa / Hantera Förening & Lag</span>
-                  </button>
-                </div>
-              )}
             </div>
           )}
         </div>
       </div>
-
-      {/* PWA Icon Set Generator - Only visible to admin accounts, placed at the bottom */}
-      {(isRootAdmin || memberships.some(m => m.roles.includes('admin'))) && (
-        <div className="lg:col-span-12 mt-4 pt-6 border-t border-zinc-200/80 dark:border-zinc-800">
-          <PwaIconGenerator
-            initialLogoUrl="/icon.svg"
-            clubName={memberships.find(m => m.club.id === profile.activeClubId)?.club.name || 'CoachAssist'}
-          />
-        </div>
-      )}
     </div>
   );
 }

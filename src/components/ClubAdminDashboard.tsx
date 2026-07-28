@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Landmark, Trash2, Edit3, Users, Shield, Check, PlusCircle, Search, Mail, Phone, Fingerprint, Settings, ArrowRight, UserPlus, Save, Smartphone, X, Database, Server, HardDrive, Cloud, RefreshCw, Download, Upload, Globe, Cpu, CheckCircle2, AlertTriangle } from 'lucide-react';
+import { Landmark, Trash2, Edit3, Users, Shield, Check, PlusCircle, Search, Mail, Phone, Fingerprint, Settings, ArrowRight, UserPlus, Save, Smartphone, X, Database, Server, HardDrive, Cloud, RefreshCw, Download, Upload, Globe, Cpu, CheckCircle2, AlertTriangle, Calendar, Link, Copy, ExternalLink } from 'lucide-react';
 import { Club, ClubMetadata, ClubTeam, ClubMember, SquadPlayer } from '../types';
 import { db } from '../lib/firebase';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
@@ -10,11 +10,28 @@ interface ClubAdminDashboardProps {
   userEmail: string;
   isRootAdmin?: boolean;
   onBack?: () => void;
+  teamUrl?: string;
+  onUpdateTeamUrl?: (url: string) => void;
+  adminUrl?: string;
+  onUpdateAdminUrl?: (url: string) => void;
+  seriesUrl?: string;
+  onUpdateSeriesUrl?: (url: string) => void;
 }
 
-export default function ClubAdminDashboard({ userId, userEmail, isRootAdmin = false, onBack }: ClubAdminDashboardProps) {
+export default function ClubAdminDashboard({
+  userId,
+  userEmail,
+  isRootAdmin = false,
+  onBack,
+  teamUrl = 'https://www.svenskalag.se/',
+  onUpdateTeamUrl,
+  adminUrl = 'https://www.svenskalag.se/admin',
+  onUpdateAdminUrl,
+  seriesUrl = 'https://minfotboll.svenskfotboll.se/',
+  onUpdateSeriesUrl,
+}: ClubAdminDashboardProps) {
   // Navigation tabs within admin
-  const [activeTab, setActiveTab] = useState<'clubs' | 'teams' | 'members' | 'root_admins' | 'pwa_icons' | 'database_env'>('clubs');
+  const [activeTab, setActiveTab] = useState<'clubs' | 'teams' | 'members' | 'calendar_sync' | 'pwa_icons' | 'database_env' | 'root_admins'>('clubs');
 
   // Master lists
   const [clubs, setClubs] = useState<Club[]>([]);
@@ -29,6 +46,18 @@ export default function ClubAdminDashboard({ userId, userEmail, isRootAdmin = fa
   const [rootAdminError, setRootAdminError] = useState('');
 
   // Database & Environment Management State
+  const [tempTeamUrl, setTempTeamUrl] = useState(teamUrl);
+  const [tempAdminUrl, setTempAdminUrl] = useState(adminUrl);
+  const [tempSeriesUrl, setTempSeriesUrl] = useState(seriesUrl);
+  const [calSyncSaved, setCalSyncSaved] = useState(false);
+  const [copiedCalFeed, setCopiedCalFeed] = useState(false);
+
+  useEffect(() => {
+    setTempTeamUrl(teamUrl);
+    setTempAdminUrl(adminUrl);
+    setTempSeriesUrl(seriesUrl);
+  }, [teamUrl, adminUrl, seriesUrl]);
+
   const [dbConfig, setDbConfig] = useState<{
     mode: 'hybrid' | 'local_sqlite' | 'firestore_only';
     dbPath?: string;
@@ -701,6 +730,18 @@ export default function ClubAdminDashboard({ userId, userEmail, isRootAdmin = fa
           </button>
 
           <button
+            onClick={() => setActiveTab('calendar_sync')}
+            className={`flex items-center gap-2 px-4 sm:px-5 py-2.5 sm:py-3 rounded-xl font-extrabold text-xs sm:text-sm transition-all cursor-pointer shrink-0 ${
+              activeTab === 'calendar_sync'
+                ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-100 dark:shadow-none'
+                : 'bg-zinc-50 hover:bg-zinc-100 dark:bg-zinc-950 dark:hover:bg-zinc-800 text-zinc-600 dark:text-zinc-400'
+            }`}
+          >
+            <Calendar size={16} />
+            <span>Kalender & Webb</span>
+          </button>
+
+          <button
             onClick={() => setActiveTab('pwa_icons')}
             className={`flex items-center gap-2 px-4 sm:px-5 py-2.5 sm:py-3 rounded-xl font-extrabold text-xs sm:text-sm transition-all cursor-pointer shrink-0 ${
               activeTab === 'pwa_icons'
@@ -712,32 +753,30 @@ export default function ClubAdminDashboard({ userId, userEmail, isRootAdmin = fa
             <span>PWA-Ikonpaket</span>
           </button>
 
-          {isRootAdmin && (
-            <>
-              <button
-                onClick={() => setActiveTab('database_env')}
-                className={`flex items-center gap-2 px-4 sm:px-5 py-2.5 sm:py-3 rounded-xl font-extrabold text-xs sm:text-sm transition-all cursor-pointer shrink-0 ${
-                  activeTab === 'database_env'
-                    ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-100 dark:shadow-none'
-                    : 'bg-zinc-50 hover:bg-zinc-100 dark:bg-zinc-950 dark:hover:bg-zinc-800 text-zinc-600 dark:text-zinc-400 border border-zinc-100 dark:border-zinc-850'
-                }`}
-              >
-                <Database size={16} />
-                <span>Databas & Miljö</span>
-              </button>
+          <button
+            onClick={() => setActiveTab('database_env')}
+            className={`flex items-center gap-2 px-4 sm:px-5 py-2.5 sm:py-3 rounded-xl font-extrabold text-xs sm:text-sm transition-all cursor-pointer shrink-0 ${
+              activeTab === 'database_env'
+                ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-100 dark:shadow-none'
+                : 'bg-zinc-50 hover:bg-zinc-100 dark:bg-zinc-950 dark:hover:bg-zinc-800 text-zinc-600 dark:text-zinc-400 border border-zinc-100 dark:border-zinc-850'
+            }`}
+          >
+            <Database size={16} />
+            <span>Databas & Molnsynk</span>
+          </button>
 
-              <button
-                onClick={() => setActiveTab('root_admins')}
-                className={`flex items-center gap-2 px-4 sm:px-5 py-2.5 sm:py-3 rounded-xl font-extrabold text-xs sm:text-sm transition-all cursor-pointer shrink-0 ${
-                  activeTab === 'root_admins'
-                    ? 'bg-red-600 text-white shadow-lg shadow-red-100 dark:shadow-none'
-                    : 'bg-zinc-50 hover:bg-zinc-100 dark:bg-zinc-950 dark:hover:bg-zinc-800 text-zinc-600 dark:text-zinc-400 border border-zinc-100 dark:border-zinc-850'
-                }`}
-              >
-                <Shield size={16} />
-                <span>System-Admins ({rootAdminsList.length || 2})</span>
-              </button>
-            </>
+          {isRootAdmin && (
+            <button
+              onClick={() => setActiveTab('root_admins')}
+              className={`flex items-center gap-2 px-4 sm:px-5 py-2.5 sm:py-3 rounded-xl font-extrabold text-xs sm:text-sm transition-all cursor-pointer shrink-0 ${
+                activeTab === 'root_admins'
+                  ? 'bg-red-600 text-white shadow-lg shadow-red-100 dark:shadow-none'
+                  : 'bg-zinc-50 hover:bg-zinc-100 dark:bg-zinc-950 dark:hover:bg-zinc-800 text-zinc-600 dark:text-zinc-400 border border-zinc-100 dark:border-zinc-850'
+              }`}
+            >
+              <Shield size={16} />
+              <span>System-Admins ({rootAdminsList.length || 2})</span>
+            </button>
           )}
         </div>
       </div>
@@ -1543,6 +1582,193 @@ export default function ClubAdminDashboard({ userId, userEmail, isRootAdmin = fa
                 <RefreshCw size={16} className={isSyncingNow ? 'animate-spin' : ''} />
                 <span>{isSyncingNow ? 'Synkroniserar poster...' : 'Synka till Firestore nu'}</span>
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {activeTab === 'calendar_sync' && (
+        <div className="space-y-6">
+          <div className="bg-white dark:bg-zinc-900 rounded-3xl border border-zinc-150 dark:border-zinc-800 shadow-xl p-6 sm:p-8">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6 pb-4 border-b border-zinc-100 dark:border-zinc-800">
+              <div>
+                <h2 className="text-lg font-black text-zinc-900 dark:text-white tracking-tight flex items-center gap-2">
+                  <Globe className="text-indigo-600 dark:text-indigo-400" size={20} />
+                  <span>Externa Webb- & Adminlänkar</span>
+                </h2>
+                <p className="text-xs text-zinc-500 font-medium mt-0.5">
+                  Hantera kopplingar till föreningens externa hemsida (Svenskalag / Laget.se), adminsida och tabeller.
+                </p>
+              </div>
+              {calSyncSaved && (
+                <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-400 font-bold text-xs">
+                  <Check size={14} />
+                  <span>Ändringar sparade!</span>
+                </span>
+              )}
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <label className="block text-xs font-black text-zinc-500 dark:text-zinc-400 uppercase tracking-wider mb-2">
+                  Lagsida (Laget.se / Svenskalag.se)
+                </label>
+                <div className="flex gap-2">
+                  <div className="relative flex-1">
+                    <Globe size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-zinc-400" />
+                    <input
+                      type="url"
+                      value={tempTeamUrl}
+                      onChange={(e) => setTempTeamUrl(e.target.value)}
+                      placeholder="https://www.svenskalag.se/ditt-lag"
+                      className="w-full bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl pl-10 pr-4 py-3 text-sm font-medium text-zinc-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    />
+                  </div>
+                  {tempTeamUrl && (
+                    <a
+                      href={tempTeamUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="px-4 py-3 bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-200 font-bold text-xs rounded-xl flex items-center gap-1.5 hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-colors"
+                    >
+                      <ExternalLink size={14} />
+                      <span className="hidden sm:inline">Öppna</span>
+                    </a>
+                  )}
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-black text-zinc-500 dark:text-zinc-400 uppercase tracking-wider mb-2">
+                  Adminsida (Svenskalag / Laget Admin)
+                </label>
+                <div className="flex gap-2">
+                  <div className="relative flex-1">
+                    <Settings size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-zinc-400" />
+                    <input
+                      type="url"
+                      value={tempAdminUrl}
+                      onChange={(e) => setTempAdminUrl(e.target.value)}
+                      placeholder="https://www.svenskalag.se/admin"
+                      className="w-full bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl pl-10 pr-4 py-3 text-sm font-medium text-zinc-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    />
+                  </div>
+                  {tempAdminUrl && (
+                    <a
+                      href={tempAdminUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="px-4 py-3 bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-200 font-bold text-xs rounded-xl flex items-center gap-1.5 hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-colors"
+                    >
+                      <ExternalLink size={14} />
+                      <span className="hidden sm:inline">Öppna</span>
+                    </a>
+                  )}
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-black text-zinc-500 dark:text-zinc-400 uppercase tracking-wider mb-2">
+                  Serie & Tabell (MinFotboll / Fogis)
+                </label>
+                <div className="flex gap-2">
+                  <div className="relative flex-1">
+                    <Link size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-zinc-400" />
+                    <input
+                      type="url"
+                      value={tempSeriesUrl}
+                      onChange={(e) => setTempSeriesUrl(e.target.value)}
+                      placeholder="https://minfotboll.svenskfotboll.se/lag/..."
+                      className="w-full bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl pl-10 pr-4 py-3 text-sm font-medium text-zinc-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    />
+                  </div>
+                  {tempSeriesUrl && (
+                    <a
+                      href={tempSeriesUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="px-4 py-3 bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-200 font-bold text-xs rounded-xl flex items-center gap-1.5 hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-colors"
+                    >
+                      <ExternalLink size={14} />
+                      <span className="hidden sm:inline">Öppna</span>
+                    </a>
+                  )}
+                </div>
+              </div>
+
+              <div className="pt-4 flex justify-end">
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (onUpdateTeamUrl) onUpdateTeamUrl(tempTeamUrl);
+                    if (onUpdateAdminUrl) onUpdateAdminUrl(tempAdminUrl);
+                    if (onUpdateSeriesUrl) onUpdateSeriesUrl(tempSeriesUrl);
+                    setCalSyncSaved(true);
+                    setTimeout(() => setCalSyncSaved(false), 3000);
+                  }}
+                  className="inline-flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white font-black px-6 py-3 rounded-xl text-xs transition-all cursor-pointer shadow-md shadow-indigo-100 dark:shadow-none active:scale-95 uppercase tracking-wider"
+                >
+                  <Save size={16} />
+                  <span>Spara Externa Länkar</span>
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* Kalendersynk / iCal integration */}
+          <div className="bg-white dark:bg-zinc-900 rounded-3xl border border-zinc-150 dark:border-zinc-800 shadow-xl p-6 sm:p-8">
+            <h2 className="text-lg font-black text-zinc-900 dark:text-white tracking-tight flex items-center gap-2 mb-2">
+              <Calendar className="text-indigo-600 dark:text-indigo-400" size={20} />
+              <span>Kalendersynkronisering (iCal / Webcal)</span>
+            </h2>
+            <p className="text-xs text-zinc-500 font-medium mb-6">
+              Prenumerera på lagets träningar och matcher direkt i din mobil, Google Kalender, Outlook eller Apple Kalender.
+            </p>
+
+            <div className="p-4 bg-indigo-50/50 dark:bg-indigo-950/20 rounded-2xl border border-indigo-100 dark:border-indigo-900/30 mb-6">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div>
+                  <span className="text-[10px] font-black uppercase text-indigo-500 tracking-wider">iCal Prenumerationslänk</span>
+                  <div className="text-xs font-mono font-bold text-zinc-800 dark:text-zinc-200 mt-1 break-all">
+                    {window.location.origin}/api/calendar/events.ics
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    navigator.clipboard.writeText(`${window.location.origin}/api/calendar/events.ics`);
+                    setCopiedCalFeed(true);
+                    setTimeout(() => setCopiedCalFeed(false), 2500);
+                  }}
+                  className="inline-flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold px-4 py-2.5 rounded-xl text-xs transition-all shrink-0 cursor-pointer"
+                >
+                  {copiedCalFeed ? <Check size={14} /> : <Copy size={14} />}
+                  <span>{copiedCalFeed ? 'Kopierad!' : 'Kopiera Länk'}</span>
+                </button>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="p-4 bg-zinc-50 dark:bg-zinc-950 rounded-2xl border border-zinc-100 dark:border-zinc-800">
+                <h4 className="text-xs font-bold text-zinc-900 dark:text-white mb-1">iPhone / iPad / Mac</h4>
+                <p className="text-[11px] text-zinc-500 leading-relaxed font-medium">
+                  Öppna Kalender-appen &gt; Lägg till prenumerationskalender &gt; Klistra in länken ovan.
+                </p>
+              </div>
+
+              <div className="p-4 bg-zinc-50 dark:bg-zinc-950 rounded-2xl border border-zinc-100 dark:border-zinc-800">
+                <h4 className="text-xs font-bold text-zinc-900 dark:text-white mb-1">Google Kalender / Android</h4>
+                <p className="text-[11px] text-zinc-500 leading-relaxed font-medium">
+                  Gå till calendar.google.com i webbläsaren &gt; Klicka "+" vid Andra kalendrar &gt; Från webbadress.
+                </p>
+              </div>
+
+              <div className="p-4 bg-zinc-50 dark:bg-zinc-950 rounded-2xl border border-zinc-100 dark:border-zinc-800">
+                <h4 className="text-xs font-bold text-zinc-900 dark:text-white mb-1">Outlook / Office 365</h4>
+                <p className="text-[11px] text-zinc-500 leading-relaxed font-medium">
+                  Öppna Outlook &gt; Lägg till kalender &gt; Prenumerera från webben &gt; Klistra in iCal-adressen.
+                </p>
+              </div>
             </div>
           </div>
         </div>
