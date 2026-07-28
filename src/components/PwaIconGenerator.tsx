@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Download, Upload, RefreshCw, Smartphone, Layers, Check, Copy, Sparkles } from 'lucide-react';
+import { Download, Upload, RefreshCw, Smartphone, Layers, Check, Copy, Sparkles, CheckCircle2, AlertCircle, UploadCloud } from 'lucide-react';
 import JSZip from 'jszip';
 
 interface PwaIconGeneratorProps {
@@ -52,6 +52,8 @@ export default function PwaIconGenerator({ initialLogoUrl, clubName = 'CoachAssi
   const [showMaskableZone, setShowMaskableZone] = useState<boolean>(true);
   const [appName, setAppName] = useState<string>(clubName);
   const [isGenerating, setIsGenerating] = useState<boolean>(false);
+  const [isApplyingToApp, setIsApplyingToApp] = useState<boolean>(false);
+  const [applyStatus, setApplyStatus] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
   const [copiedCode, setCopiedCode] = useState<'manifest' | 'html' | null>(null);
   const [previewDataUrls, setPreviewDataUrls] = useState<{ [key: string]: string }>({});
 
@@ -227,6 +229,58 @@ export default function PwaIconGenerator({ initialLogoUrl, clubName = 'CoachAssi
     }
   };
 
+  const handleApplyToApp = async () => {
+    if (!logoImage) return;
+    setIsApplyingToApp(true);
+    setApplyStatus(null);
+
+    try {
+      const iconsPayload: { fileName: string; dataUrl: string }[] = [];
+
+      for (const spec of ICON_SPECS) {
+        const dataUrl = renderIconCanvas(spec.size, spec.purpose === 'maskable');
+        if (dataUrl) {
+          iconsPayload.push({
+            fileName: spec.fileName,
+            dataUrl
+          });
+        }
+      }
+
+      const token = localStorage.getItem('coachassist_token');
+      const response = await fetch('/api/pwa-icons', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {})
+        },
+        body: JSON.stringify({
+          appName,
+          themeColor: bgColor,
+          icons: iconsPayload
+        })
+      });
+
+      const data = await response.json();
+      if (response.ok && data.success) {
+        setApplyStatus({
+          type: 'success',
+          message: 'Appens PWA-ikoner har uppdaterats direkt i appen! De nya ikonerna är nu sparade och live.'
+        });
+      } else {
+        throw new Error(data.error || 'Kunde inte uppdatera ikonerna i appen.');
+      }
+    } catch (err: any) {
+      console.error('Failed to apply PWA icons to app:', err);
+      setApplyStatus({
+        type: 'error',
+        message: err.message || 'Ett fel uppstod när ikonerna skulle sparats.'
+      });
+    } finally {
+      setIsApplyingToApp(false);
+    }
+  };
+
   const getManifestSnippet = () => {
     return JSON.stringify({
       name: appName,
@@ -272,34 +326,80 @@ export default function PwaIconGenerator({ initialLogoUrl, clubName = 'CoachAssi
             <h2 className="text-xl font-black text-zinc-900 dark:text-white tracking-tight flex items-center gap-2">
               PWA-Ikonpaket & Generator
               <span className="text-[10px] bg-indigo-100 dark:bg-indigo-950/80 text-indigo-700 dark:text-indigo-300 px-2.5 py-0.5 rounded-full font-bold uppercase tracking-wider">
-                Pro
+                Admin
               </span>
             </h2>
             <p className="text-xs text-zinc-500 dark:text-zinc-400 font-medium">
-              Skapa perfekta hemskärmsikoner (iOS/Android) och favicons direkt från din logotyp.
+              Skapa perfekta hemskärmsikoner (iOS/Android) och tillämpa dem direkt i appen.
             </p>
           </div>
         </div>
 
-        <button
-          type="button"
-          onClick={handleDownloadAllZip}
-          disabled={!logoImage || isGenerating}
-          className="bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white font-extrabold px-5 py-3 rounded-2xl text-xs flex items-center justify-center gap-2 transition-all shadow-lg shadow-indigo-100 dark:shadow-none active:scale-95 cursor-pointer"
-        >
-          {isGenerating ? (
-            <>
-              <RefreshCw size={16} className="animate-spin" />
-              <span>Genererar ZIP...</span>
-            </>
-          ) : (
-            <>
-              <Download size={16} />
-              <span>Ladda ner alla ikoner (.ZIP)</span>
-            </>
-          )}
-        </button>
+        <div className="flex flex-wrap items-center gap-2.5">
+          <button
+            type="button"
+            onClick={handleApplyToApp}
+            disabled={!logoImage || isApplyingToApp}
+            className="bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-extrabold px-5 py-3 rounded-2xl text-xs flex items-center justify-center gap-2 transition-all shadow-lg shadow-emerald-100 dark:shadow-none active:scale-95 cursor-pointer"
+          >
+            {isApplyingToApp ? (
+              <>
+                <RefreshCw size={16} className="animate-spin" />
+                <span>Uppdaterar appen...</span>
+              </>
+            ) : (
+              <>
+                <UploadCloud size={16} />
+                <span>Uppdatera appens PWA-ikoner direkt</span>
+              </>
+            )}
+          </button>
+
+          <button
+            type="button"
+            onClick={handleDownloadAllZip}
+            disabled={!logoImage || isGenerating}
+            className="bg-zinc-800 hover:bg-zinc-900 dark:bg-zinc-800 dark:hover:bg-zinc-700 disabled:opacity-50 text-white font-extrabold px-4 py-3 rounded-2xl text-xs flex items-center justify-center gap-2 transition-all active:scale-95 cursor-pointer"
+          >
+            {isGenerating ? (
+              <>
+                <RefreshCw size={16} className="animate-spin" />
+                <span>Genererar...</span>
+              </>
+            ) : (
+              <>
+                <Download size={15} />
+                <span>Ladda ner ZIP</span>
+              </>
+            )}
+          </button>
+        </div>
       </div>
+
+      {/* Apply Status Banner */}
+      {applyStatus && (
+        <div className={`p-4 rounded-2xl flex items-center justify-between gap-3 text-xs font-bold transition-all ${
+          applyStatus.type === 'success' 
+            ? 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-800 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800/80' 
+            : 'bg-red-50 dark:bg-red-950/40 text-red-800 dark:text-red-300 border border-red-200 dark:border-red-800/80'
+        }`}>
+          <div className="flex items-center gap-2.5">
+            {applyStatus.type === 'success' ? (
+              <CheckCircle2 size={18} className="text-emerald-600 dark:text-emerald-400 shrink-0" />
+            ) : (
+              <AlertCircle size={18} className="text-red-600 dark:text-red-400 shrink-0" />
+            )}
+            <span>{applyStatus.message}</span>
+          </div>
+          <button 
+            type="button"
+            onClick={() => setApplyStatus(null)} 
+            className="text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 text-lg leading-none p-1 cursor-pointer"
+          >
+            &times;
+          </button>
+        </div>
+      )}
 
       {/* Editor Controls & Previews Layout */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">

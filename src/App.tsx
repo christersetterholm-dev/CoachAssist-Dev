@@ -2659,15 +2659,13 @@ export default function App() {
                       <p className="text-sm text-zinc-500 mt-1 font-medium">Hantera ditt konto, anslutna föreningar och lag.</p>
                     </div>
                     <div className="flex flex-wrap gap-2.5">
-                      {(isRootAdmin || userRoles.includes('admin')) && (
-                        <button
-                          onClick={() => setView('clubadmin')}
-                          className="inline-flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold px-4 py-2.5 rounded-xl shadow-lg shadow-indigo-100 dark:shadow-none transition-all active:scale-95 cursor-pointer text-xs"
-                        >
-                          <ShieldCheck size={14} />
-                          <span>Föreningar & lag</span>
-                        </button>
-                      )}
+                      <button
+                        onClick={() => setView('clubadmin')}
+                        className="inline-flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold px-4 py-2.5 rounded-xl shadow-lg shadow-indigo-100 dark:shadow-none transition-all active:scale-95 cursor-pointer text-xs"
+                      >
+                        <ShieldCheck size={14} />
+                        <span>Föreningar & lag</span>
+                      </button>
                       <button
                         onClick={handleSwitchAccount}
                         className="inline-flex items-center gap-2 bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-zinc-700 dark:text-zinc-200 font-extrabold px-4 py-2.5 rounded-xl transition-all active:scale-95 cursor-pointer text-xs border border-zinc-200 dark:border-zinc-700"
@@ -2690,6 +2688,8 @@ export default function App() {
                     userEmail={user.email || ''}
                     onProfileUpdated={handleProfileUpdated}
                     currentProfile={userProfile}
+                    onOpenClubAdmin={() => setView('clubadmin')}
+                    isRootAdmin={isRootAdmin}
                   />
                   
                   {/* Stats Grid */}

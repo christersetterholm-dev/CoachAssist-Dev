@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Landmark, Trash2, Edit3, Users, Shield, Check, PlusCircle, Search, Mail, Phone, Fingerprint, Settings, ArrowRight, UserPlus, Save, Smartphone } from 'lucide-react';
+import { Landmark, Trash2, Edit3, Users, Shield, Check, PlusCircle, Search, Mail, Phone, Fingerprint, Settings, ArrowRight, UserPlus, Save, Smartphone, X } from 'lucide-react';
 import { Club, ClubMetadata, ClubTeam, ClubMember } from '../types';
 import { db } from '../lib/firebase';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
@@ -478,7 +478,7 @@ export default function ClubAdminDashboard({ userId, userEmail, isRootAdmin = fa
           </div>
 
           {/* Club Dropdown */}
-          <div className="flex items-center gap-3">
+          <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3 w-full sm:w-auto">
             <label className="text-xs font-black uppercase text-zinc-400 shrink-0">Välj förening:</label>
             <select
               value={selectedClub?.id || ''}
@@ -486,7 +486,7 @@ export default function ClubAdminDashboard({ userId, userEmail, isRootAdmin = fa
                 const found = clubs.find(c => c.id === e.target.value);
                 if (found) setSelectedClub(found);
               }}
-              className="px-4 py-2.5 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 text-zinc-800 dark:text-zinc-200 rounded-xl font-bold text-sm focus:outline-none focus:border-indigo-500 cursor-pointer"
+              className="w-full sm:w-auto px-4 py-2.5 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 text-zinc-800 dark:text-zinc-200 rounded-xl font-bold text-sm focus:outline-none focus:border-indigo-500 cursor-pointer"
             >
               {clubs.map(c => (
                 <option key={c.id} value={c.id}>{c.name}</option>
@@ -497,12 +497,12 @@ export default function ClubAdminDashboard({ userId, userEmail, isRootAdmin = fa
         </div>
 
         {/* Tab Selection */}
-        <div className="flex items-center gap-2 mt-5">
+        <div className="flex flex-wrap items-center gap-2 mt-4 sm:mt-5 overflow-x-auto pb-1 no-scrollbar">
           <button
             onClick={() => setActiveTab('clubs')}
-            className={`flex items-center gap-2 px-5 py-3 rounded-xl font-extrabold text-sm transition-all cursor-pointer ${
+            className={`flex items-center gap-2 px-4 sm:px-5 py-2.5 sm:py-3 rounded-xl font-extrabold text-xs sm:text-sm transition-all cursor-pointer shrink-0 ${
               activeTab === 'clubs'
-                ? 'bg-indigo-600 text-white'
+                ? 'bg-indigo-600 text-white shadow-md shadow-indigo-100 dark:shadow-none'
                 : 'bg-zinc-50 hover:bg-zinc-100 dark:bg-zinc-950 dark:hover:bg-zinc-800 text-zinc-600 dark:text-zinc-400'
             }`}
           >
@@ -513,9 +513,9 @@ export default function ClubAdminDashboard({ userId, userEmail, isRootAdmin = fa
           <button
             disabled={!selectedClub}
             onClick={() => setActiveTab('teams')}
-            className={`flex items-center gap-2 px-5 py-3 rounded-xl font-extrabold text-sm transition-all disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer ${
+            className={`flex items-center gap-2 px-4 sm:px-5 py-2.5 sm:py-3 rounded-xl font-extrabold text-xs sm:text-sm transition-all disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer shrink-0 ${
               activeTab === 'teams'
-                ? 'bg-indigo-600 text-white'
+                ? 'bg-indigo-600 text-white shadow-md shadow-indigo-100 dark:shadow-none'
                 : 'bg-zinc-50 hover:bg-zinc-100 dark:bg-zinc-950 dark:hover:bg-zinc-800 text-zinc-600 dark:text-zinc-400'
             }`}
           >
@@ -526,9 +526,9 @@ export default function ClubAdminDashboard({ userId, userEmail, isRootAdmin = fa
           <button
             disabled={!selectedClub}
             onClick={() => setActiveTab('members')}
-            className={`flex items-center gap-2 px-5 py-3 rounded-xl font-extrabold text-sm transition-all disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer ${
+            className={`flex items-center gap-2 px-4 sm:px-5 py-2.5 sm:py-3 rounded-xl font-extrabold text-xs sm:text-sm transition-all disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer shrink-0 ${
               activeTab === 'members'
-                ? 'bg-indigo-600 text-white'
+                ? 'bg-indigo-600 text-white shadow-md shadow-indigo-100 dark:shadow-none'
                 : 'bg-zinc-50 hover:bg-zinc-100 dark:bg-zinc-950 dark:hover:bg-zinc-800 text-zinc-600 dark:text-zinc-400'
             }`}
           >
@@ -538,7 +538,7 @@ export default function ClubAdminDashboard({ userId, userEmail, isRootAdmin = fa
 
           <button
             onClick={() => setActiveTab('pwa_icons')}
-            className={`flex items-center gap-2 px-5 py-3 rounded-xl font-extrabold text-sm transition-all cursor-pointer ${
+            className={`flex items-center gap-2 px-4 sm:px-5 py-2.5 sm:py-3 rounded-xl font-extrabold text-xs sm:text-sm transition-all cursor-pointer shrink-0 ${
               activeTab === 'pwa_icons'
                 ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-100 dark:shadow-none'
                 : 'bg-zinc-50 hover:bg-zinc-100 dark:bg-zinc-950 dark:hover:bg-zinc-800 text-zinc-600 dark:text-zinc-400'
@@ -551,7 +551,7 @@ export default function ClubAdminDashboard({ userId, userEmail, isRootAdmin = fa
           {isRootAdmin && (
             <button
               onClick={() => setActiveTab('root_admins')}
-              className={`flex items-center gap-2 px-5 py-3 rounded-xl font-extrabold text-sm transition-all cursor-pointer ${
+              className={`flex items-center gap-2 px-4 sm:px-5 py-2.5 sm:py-3 rounded-xl font-extrabold text-xs sm:text-sm transition-all cursor-pointer shrink-0 ${
                 activeTab === 'root_admins'
                   ? 'bg-red-600 text-white shadow-lg shadow-red-100 dark:shadow-none'
                   : 'bg-zinc-50 hover:bg-zinc-100 dark:bg-zinc-950 dark:hover:bg-zinc-800 text-zinc-600 dark:text-zinc-400 border border-zinc-100 dark:border-zinc-850'
@@ -741,167 +741,176 @@ export default function ClubAdminDashboard({ userId, userEmail, isRootAdmin = fa
             </div>
           </div>
 
-          {/* MEMBER DIALOG FORM (INLINE BOX ON TOP IF OPEN) */}
+          {/* MEMBER DIALOG FORM (FIXED BACKDROP MODAL OVERLAY) */}
           {showMemberForm && (
-            <div className="bg-white dark:bg-zinc-900 rounded-3xl border-2 border-indigo-500 shadow-2xl p-6 sm:p-8 animate-in fade-in zoom-in duration-200">
-              <div className="flex items-center justify-between mb-6 border-b border-zinc-100 dark:border-zinc-800 pb-4">
-                <h3 className="text-lg font-black text-zinc-900 dark:text-white">
-                  {editingMember ? 'Redigera medlemsuppgifter' : 'Lägg till ny medlem i föreningen'}
-                </h3>
-                <button
-                  onClick={() => setShowMemberForm(false)}
-                  className="text-zinc-400 hover:text-zinc-600 text-xs font-bold bg-zinc-100 dark:bg-zinc-800 px-3 py-1.5 rounded-xl cursor-pointer"
-                >
-                  Avbryt
-                </button>
-              </div>
-
-              <form onSubmit={handleSaveMember} className="space-y-5">
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-xs font-black text-zinc-650 dark:text-zinc-400 uppercase tracking-wider mb-2">Medlemmens fullständiga namn</label>
-                    <input
-                      type="text"
-                      required
-                      placeholder="t.ex. Kalle Nilsson"
-                      value={memberName}
-                      onChange={(e) => setMemberName(e.target.value)}
-                      className="w-full px-4 py-2.5 bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-white border border-zinc-200 dark:border-zinc-800 rounded-xl focus:outline-none focus:border-indigo-500 font-semibold text-sm"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-black text-zinc-650 dark:text-zinc-400 uppercase tracking-wider mb-2">Inloggnings-e-post (Måste matcha deras konto)</label>
-                    <div className="relative">
-                      <span className="absolute left-3.5 top-3 text-zinc-400">
-                        <Mail size={16} />
-                      </span>
-                      <input
-                        type="email"
-                        required
-                        disabled={!!editingMember}
-                        placeholder="kalle@exempel.se"
-                        value={memberEmail}
-                        onChange={(e) => setMemberEmail(e.target.value)}
-                        className={`w-full pl-10 pr-4 py-2.5 bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-white border border-zinc-200 dark:border-zinc-800 rounded-xl focus:outline-none focus:border-indigo-500 font-semibold text-sm ${editingMember ? 'opacity-60 cursor-not-allowed' : ''}`}
-                      />
-                    </div>
-                  </div>
+            <div 
+              className="fixed inset-0 z-[100] flex items-center justify-center p-3 sm:p-6 bg-black/60 backdrop-blur-sm overflow-y-auto"
+              onClick={() => setShowMemberForm(false)}
+            >
+              <div 
+                className="bg-white dark:bg-zinc-900 rounded-3xl border border-zinc-200 dark:border-zinc-800 shadow-2xl p-5 sm:p-8 w-full max-w-2xl max-h-[90vh] overflow-y-auto my-auto animate-in fade-in zoom-in-95 duration-200"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div className="flex items-center justify-between mb-5 border-b border-zinc-100 dark:border-zinc-800 pb-4">
+                  <h3 className="text-base sm:text-lg font-black text-zinc-900 dark:text-white">
+                    {editingMember ? 'Redigera medlemsuppgifter' : 'Lägg till ny medlem i föreningen'}
+                  </h3>
+                  <button
+                    onClick={() => setShowMemberForm(false)}
+                    className="text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 p-2 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-xl transition-all cursor-pointer"
+                    title="Stäng"
+                  >
+                    <X size={20} />
+                  </button>
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-xs font-black text-zinc-650 dark:text-zinc-400 uppercase tracking-wider mb-2">Mobilnummer (Valfritt)</label>
-                    <div className="relative">
-                      <span className="absolute left-3.5 top-3 text-zinc-400">
-                        <Phone size={16} />
-                      </span>
-                      <input
-                        type="tel"
-                        placeholder="070-123 45 67"
-                        value={memberPhone}
-                        onChange={(e) => setMemberPhone(e.target.value)}
-                        className="w-full pl-10 pr-4 py-2.5 bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-white border border-zinc-200 dark:border-zinc-800 rounded-xl focus:outline-none focus:border-indigo-500 font-semibold text-sm"
-                      />
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-black text-zinc-650 dark:text-zinc-400 uppercase tracking-wider mb-2">Personnummer (Valfritt)</label>
-                    <div className="relative">
-                      <span className="absolute left-3.5 top-3 text-zinc-400">
-                        <Fingerprint size={16} />
-                      </span>
+                <form onSubmit={handleSaveMember} className="space-y-5">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-xs font-black text-zinc-650 dark:text-zinc-400 uppercase tracking-wider mb-2">Medlemmens fullständiga namn</label>
                       <input
                         type="text"
-                        placeholder="ÅÅÅÅMMDD-XXXX"
-                        value={memberPersonnummer}
-                        onChange={(e) => setMemberPersonnummer(e.target.value)}
-                        className="w-full pl-10 pr-4 py-2.5 bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-white border border-zinc-200 dark:border-zinc-800 rounded-xl focus:outline-none focus:border-indigo-500 font-semibold text-sm"
+                        required
+                        placeholder="t.ex. Kalle Nilsson"
+                        value={memberName}
+                        onChange={(e) => setMemberName(e.target.value)}
+                        className="w-full px-4 py-2.5 bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-white border border-zinc-200 dark:border-zinc-800 rounded-xl focus:outline-none focus:border-indigo-500 font-semibold text-sm"
                       />
                     </div>
-                  </div>
-                </div>
 
-                {/* Role Toggles */}
-                <div className="border-t border-zinc-100 dark:border-zinc-800 pt-4">
-                  <label className="block text-xs font-black text-zinc-650 dark:text-zinc-400 uppercase tracking-wider mb-3">Roll(er) i föreningen (En användare kan ha flera)</label>
-                  <div className="flex flex-wrap gap-2.5">
-                    {[
-                      { id: 'admin', label: 'Föreningsadmin', desc: 'Hantera lag, föreningar och roller.', color: 'purple' },
-                      { id: 'coach', label: 'Tränare', desc: 'Skapa och ändra träningar, trupper, laguppställningar.', color: 'emerald' },
-                      { id: 'player', label: 'Spelare', desc: 'Kan läsa träningar, se laguppställningar och närvaro.', color: 'sky' },
-                      { id: 'parent', label: 'Förälder', desc: 'Se träningar, laguppställningar samt barnets närvaro.', color: 'amber' }
-                    ].map(r => {
-                      const active = memberRoles.includes(r.id as any);
-                      return (
-                        <button
-                          key={r.id}
-                          type="button"
-                          onClick={() => toggleRole(r.id as any)}
-                          className={`flex-1 text-left p-3.5 rounded-2xl border transition-all cursor-pointer ${
-                            active
-                              ? r.color === 'purple' ? 'border-purple-500 bg-purple-50/40 dark:bg-purple-950/10' :
-                                r.color === 'emerald' ? 'border-emerald-500 bg-emerald-50/40 dark:bg-emerald-950/10' :
-                                r.color === 'sky' ? 'border-sky-500 bg-sky-50/40 dark:bg-sky-950/10' :
-                                'border-amber-500 bg-amber-50/40 dark:bg-amber-950/10'
-                              : 'bg-zinc-50 hover:bg-zinc-100/50 border-zinc-200 dark:bg-zinc-950 dark:hover:bg-zinc-900/60 dark:border-zinc-800'
-                          }`}
-                        >
-                          <div className="flex items-center justify-between mb-1">
-                            <span className="font-extrabold text-sm text-zinc-900 dark:text-white">{r.label}</span>
-                            {active && <span className="w-4 h-4 rounded-full bg-indigo-600 flex items-center justify-center text-white text-[10px]"><Check size={10} /></span>}
-                          </div>
-                          <p className="text-[10px] text-zinc-400 font-medium leading-tight">{r.desc}</p>
-                        </button>
-                      );
-                    })}
+                    <div>
+                      <label className="block text-xs font-black text-zinc-650 dark:text-zinc-400 uppercase tracking-wider mb-2">Inloggnings-e-post (Måste matcha deras konto)</label>
+                      <div className="relative">
+                        <span className="absolute left-3.5 top-3 text-zinc-400">
+                          <Mail size={16} />
+                        </span>
+                        <input
+                          type="email"
+                          required
+                          disabled={!!editingMember}
+                          placeholder="kalle@exempel.se"
+                          value={memberEmail}
+                          onChange={(e) => setMemberEmail(e.target.value)}
+                          className={`w-full pl-10 pr-4 py-2.5 bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-white border border-zinc-200 dark:border-zinc-800 rounded-xl focus:outline-none focus:border-indigo-500 font-semibold text-sm ${editingMember ? 'opacity-60 cursor-not-allowed' : ''}`}
+                        />
+                      </div>
+                    </div>
                   </div>
-                </div>
 
-                {/* Team Assignments */}
-                {clubMetadata?.teams && clubMetadata.teams.length > 0 && (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-xs font-black text-zinc-650 dark:text-zinc-400 uppercase tracking-wider mb-2">Mobilnummer (Valfritt)</label>
+                      <div className="relative">
+                        <span className="absolute left-3.5 top-3 text-zinc-400">
+                          <Phone size={16} />
+                        </span>
+                        <input
+                          type="tel"
+                          placeholder="070-123 45 67"
+                          value={memberPhone}
+                          onChange={(e) => setMemberPhone(e.target.value)}
+                          className="w-full pl-10 pr-4 py-2.5 bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-white border border-zinc-200 dark:border-zinc-800 rounded-xl focus:outline-none focus:border-indigo-500 font-semibold text-sm"
+                        />
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-black text-zinc-650 dark:text-zinc-400 uppercase tracking-wider mb-2">Personnummer (Valfritt)</label>
+                      <div className="relative">
+                        <span className="absolute left-3.5 top-3 text-zinc-400">
+                          <Fingerprint size={16} />
+                        </span>
+                        <input
+                          type="text"
+                          placeholder="ÅÅÅÅMMDD-XXXX"
+                          value={memberPersonnummer}
+                          onChange={(e) => setMemberPersonnummer(e.target.value)}
+                          className="w-full pl-10 pr-4 py-2.5 bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-white border border-zinc-200 dark:border-zinc-800 rounded-xl focus:outline-none focus:border-indigo-500 font-semibold text-sm"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Role Toggles */}
                   <div className="border-t border-zinc-100 dark:border-zinc-800 pt-4">
-                    <label className="block text-xs font-black text-zinc-650 dark:text-zinc-400 uppercase tracking-wider mb-2">Koppla medlemmen till lag</label>
-                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
-                      {clubMetadata.teams.map(t => {
-                        const active = memberTeams.includes(t.id);
+                    <label className="block text-xs font-black text-zinc-650 dark:text-zinc-400 uppercase tracking-wider mb-3">Roll(er) i föreningen</label>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                      {[
+                        { id: 'admin', label: 'Föreningsadmin', desc: 'Hantera lag, föreningar och roller.', color: 'purple' },
+                        { id: 'coach', label: 'Tränare', desc: 'Skapa och ändra träningar, trupper, laguppställningar.', color: 'emerald' },
+                        { id: 'player', label: 'Spelare', desc: 'Kan läsa träningar, se laguppställningar och närvaro.', color: 'sky' },
+                        { id: 'parent', label: 'Förälder', desc: 'Se träningar, laguppställningar samt barnets närvaro.', color: 'amber' }
+                      ].map(r => {
+                        const active = memberRoles.includes(r.id as any);
                         return (
                           <button
-                            key={t.id}
+                            key={r.id}
                             type="button"
-                            onClick={() => toggleTeamAssignment(t.id)}
-                            className={`py-2 px-3.5 rounded-xl border text-xs font-bold text-center transition-all cursor-pointer ${
+                            onClick={() => toggleRole(r.id as any)}
+                            className={`text-left p-3.5 rounded-2xl border transition-all cursor-pointer ${
                               active
-                                ? 'bg-indigo-600 text-white border-indigo-600 shadow-md'
-                                : 'bg-zinc-50 hover:bg-zinc-100/50 dark:bg-zinc-950 dark:hover:bg-zinc-900 text-zinc-700 dark:text-zinc-300 border-zinc-200 dark:border-zinc-800'
+                                ? r.color === 'purple' ? 'border-purple-500 bg-purple-50/40 dark:bg-purple-950/20' :
+                                  r.color === 'emerald' ? 'border-emerald-500 bg-emerald-50/40 dark:bg-emerald-950/20' :
+                                  r.color === 'sky' ? 'border-sky-500 bg-sky-50/40 dark:bg-sky-950/20' :
+                                  'border-amber-500 bg-amber-50/40 dark:bg-amber-950/20'
+                                : 'bg-zinc-50 hover:bg-zinc-100/50 border-zinc-200 dark:bg-zinc-950 dark:hover:bg-zinc-900/60 dark:border-zinc-800'
                             }`}
                           >
-                            {t.name}
+                            <div className="flex items-center justify-between mb-1">
+                              <span className="font-extrabold text-xs sm:text-sm text-zinc-900 dark:text-white">{r.label}</span>
+                              {active && <span className="w-4 h-4 rounded-full bg-indigo-600 flex items-center justify-center text-white text-[10px] shrink-0"><Check size={10} /></span>}
+                            </div>
+                            <p className="text-[10px] text-zinc-500 dark:text-zinc-400 font-medium leading-tight">{r.desc}</p>
                           </button>
                         );
                       })}
                     </div>
                   </div>
-                )}
 
-                <div className="pt-4 border-t border-zinc-100 dark:border-zinc-800 flex justify-end gap-3">
-                  <button
-                    type="button"
-                    onClick={() => setShowMemberForm(false)}
-                    className="px-5 py-2.5 rounded-xl border border-zinc-200 hover:bg-zinc-50 dark:border-zinc-800 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300 font-extrabold text-xs cursor-pointer"
-                  >
-                    Avbryt
-                  </button>
-                  <button
-                    type="submit"
-                    className="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-extrabold text-xs flex items-center gap-1.5 transition-all cursor-pointer"
-                  >
-                    <Save size={14} />
-                    <span>Spara medlemsuppgifter</span>
-                  </button>
-                </div>
-              </form>
+                  {/* Team Assignments */}
+                  {clubMetadata?.teams && clubMetadata.teams.length > 0 && (
+                    <div className="border-t border-zinc-100 dark:border-zinc-800 pt-4">
+                      <label className="block text-xs font-black text-zinc-650 dark:text-zinc-400 uppercase tracking-wider mb-2">Koppla medlemmen till lag</label>
+                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                        {clubMetadata.teams.map(t => {
+                          const active = memberTeams.includes(t.id);
+                          return (
+                            <button
+                              key={t.id}
+                              type="button"
+                              onClick={() => toggleTeamAssignment(t.id)}
+                              className={`py-2.5 px-3 rounded-xl border text-xs font-bold text-center transition-all truncate cursor-pointer ${
+                                active
+                                  ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm'
+                                  : 'bg-zinc-50 hover:bg-zinc-100/50 dark:bg-zinc-950 dark:hover:bg-zinc-900 text-zinc-700 dark:text-zinc-300 border-zinc-200 dark:border-zinc-800'
+                              }`}
+                            >
+                              {t.name}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="pt-4 border-t border-zinc-100 dark:border-zinc-800 flex flex-col-reverse sm:flex-row justify-end gap-2.5 sm:gap-3">
+                    <button
+                      type="button"
+                      onClick={() => setShowMemberForm(false)}
+                      className="w-full sm:w-auto px-5 py-3 rounded-xl border border-zinc-200 hover:bg-zinc-50 dark:border-zinc-800 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300 font-extrabold text-xs cursor-pointer text-center"
+                    >
+                      Avbryt
+                    </button>
+                    <button
+                      type="submit"
+                      className="w-full sm:w-auto px-6 py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-extrabold text-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-md shadow-indigo-100 dark:shadow-none"
+                    >
+                      <Save size={14} />
+                      <span>Spara medlemsuppgifter</span>
+                    </button>
+                  </div>
+                </form>
+              </div>
             </div>
           )}
 

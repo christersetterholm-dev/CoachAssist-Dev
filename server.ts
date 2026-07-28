@@ -188,9 +188,133 @@ async function setFirestoreDoc(docPath: string, data: Record<string, any>): Prom
   }
 }
 
+// --- CUSTOM PWA ICONS MANAGEMENT ---
+let customPwaIcons: {
+  appName?: string;
+  themeColor?: string;
+  files: Record<string, string>;
+} | null = null;
+
+function applyCustomPwaIconsToDisk(iconsObj: { appName?: string; themeColor?: string; files: Record<string, string> }) {
+  const publicDir = path.join(process.cwd(), 'public');
+  const distDir = path.join(process.cwd(), 'dist');
+
+  for (const [fileName, dataUrl] of Object.entries(iconsObj.files)) {
+    if (!dataUrl) continue;
+    const base64Data = dataUrl.replace(/^data:image\/\w+;base64,/, '');
+    const buffer = Buffer.from(base64Data, 'base64');
+
+    try {
+      if (fs.existsSync(publicDir)) {
+        fs.writeFileSync(path.join(publicDir, fileName), buffer);
+      }
+    } catch (e) {
+      console.error(`Error saving ${fileName} to public:`, e);
+    }
+
+    try {
+      if (fs.existsSync(distDir)) {
+        fs.writeFileSync(path.join(distDir, fileName), buffer);
+      }
+    } catch (e) {}
+  }
+
+  if (iconsObj.appName || iconsObj.themeColor) {
+    const manifestObj = {
+      name: iconsObj.appName || 'CoachAssist',
+      short_name: iconsObj.appName || 'CoachAssist',
+      description: `${iconsObj.appName || 'CoachAssist'} PWA App`,
+      start_url: '/',
+      display: 'standalone',
+      orientation: 'portrait',
+      background_color: iconsObj.themeColor || '#4f46e5',
+      theme_color: iconsObj.themeColor || '#4f46e5',
+      icons: [
+        { src: '/icon-192.png', sizes: '192x192', type: 'image/png' },
+        { src: '/icon-512.png', sizes: '512x512', type: 'image/png' },
+        { src: '/icon-192x192.png', sizes: '192x192', type: 'image/png' },
+        { src: '/icon-512x512.png', sizes: '512x512', type: 'image/png' },
+        { src: '/icon-maskable-512x512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' }
+      ]
+    };
+    const manifestStr = JSON.stringify(manifestObj, null, 2);
+    try {
+      if (fs.existsSync(publicDir)) {
+        fs.writeFileSync(path.join(publicDir, 'manifest.webmanifest'), manifestStr, 'utf-8');
+      }
+    } catch (e) {}
+    try {
+      if (fs.existsSync(distDir)) {
+        fs.writeFileSync(path.join(distDir, 'manifest.webmanifest'), manifestStr, 'utf-8');
+      }
+    } catch (e) {}
+  }
+}
+
+async function loadAndApplyPwaIconsFromFirestore() {
+  try {
+    const docData = await getFirestoreDoc('app_docs/system_pwa_icons');
+    if (docData && docData.files) {
+      const filesMap = typeof docData.files === 'string' ? JSON.parse(docData.files) : docData.files;
+      customPwaIcons = {
+        appName: docData.appName,
+        themeColor: docData.themeColor,
+        files: filesMap
+      };
+      applyCustomPwaIconsToDisk(customPwaIcons);
+      console.log('[PWA Icons] Restored custom PWA icons from Firestore.');
+    }
+  } catch (err) {
+    console.error('[PWA Icons] Error restoring PWA icons from Firestore:', err);
+  }
+}
+
 async function startServer() {
   const app = express();
   const PORT = process.env.PORT || 3000;
+
+  // Restore custom PWA icons from Firestore on startup
+  loadAndApplyPwaIconsFromFirestore();
+
+  // --- CUSTOM PWA ICONS SERVING MIDDLEWARE ---
+  app.use((req, res, next) => {
+    if (!customPwaIcons) return next();
+
+    const reqPath = req.path.replace(/^\//, '');
+
+    if (customPwaIcons.files && customPwaIcons.files[reqPath]) {
+      const dataUrl = customPwaIcons.files[reqPath];
+      const base64Data = dataUrl.replace(/^data:image\/\w+;base64,/, '');
+      const imgBuffer = Buffer.from(base64Data, 'base64');
+      res.setHeader('Content-Type', 'image/png');
+      res.setHeader('Cache-Control', 'public, max-age=86400');
+      return res.send(imgBuffer);
+    }
+
+    if (reqPath === 'manifest.webmanifest' && customPwaIcons.appName) {
+      const manifestObj = {
+        name: customPwaIcons.appName,
+        short_name: customPwaIcons.appName,
+        description: `${customPwaIcons.appName} PWA App`,
+        start_url: '/',
+        display: 'standalone',
+        orientation: 'portrait',
+        background_color: customPwaIcons.themeColor || '#4f46e5',
+        theme_color: customPwaIcons.themeColor || '#4f46e5',
+        icons: [
+          { src: '/icon-192.png', sizes: '192x192', type: 'image/png' },
+          { src: '/icon-512.png', sizes: '512x512', type: 'image/png' },
+          { src: '/icon-192x192.png', sizes: '192x192', type: 'image/png' },
+          { src: '/icon-512x512.png', sizes: '512x512', type: 'image/png' },
+          { src: '/icon-maskable-512x512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' }
+        ]
+      };
+      res.setHeader('Content-Type', 'application/manifest+json');
+      return res.json(manifestObj);
+    }
+
+    next();
+  });
 
   // Subpath and routing prefix middleware for hosting under custom folders (e.g., /coachassist/ or any other custom folder name)
   app.use((req, res, next) => {
@@ -891,6 +1015,74 @@ async function startServer() {
     } catch (e: any) {
       console.error('Error deleting file:', e);
       res.status(500).json({ error: 'Failed to delete file' });
+    }
+  });
+
+  // --- PWA ICONS DIRECT APPLICATION ENDPOINT ---
+  app.post('/api/pwa-icons', express.json({ limit: '15mb' }), async (req, res) => {
+    try {
+      const { appName, themeColor, icons } = req.body;
+      if (!icons || !Array.isArray(icons)) {
+        return res.status(400).json({ error: 'Inga ikoner skickades med' });
+      }
+
+      const filesMap: Record<string, string> = {};
+      for (const item of icons) {
+        if (item.fileName && item.dataUrl) {
+          filesMap[item.fileName] = item.dataUrl;
+
+          // Map aliases
+          if (item.fileName === 'icon-192x192.png') {
+            filesMap['icon-192.png'] = item.dataUrl;
+          }
+          if (item.fileName === 'icon-512x512.png') {
+            filesMap['icon-512.png'] = item.dataUrl;
+          }
+          if (item.fileName === 'apple-touch-icon.png') {
+            filesMap['apple-touch-icon-precomposed.png'] = item.dataUrl;
+          }
+          if (item.fileName === 'favicon-48x48.png' || item.fileName === 'favicon-32x32.png') {
+            filesMap['favicon.png'] = item.dataUrl;
+          }
+        }
+      }
+
+      customPwaIcons = {
+        appName: appName || 'CoachAssist',
+        themeColor: themeColor || '#4f46e5',
+        files: filesMap
+      };
+
+      // Apply to disk
+      applyCustomPwaIconsToDisk(customPwaIcons);
+
+      // Persist to Firestore so it persists across restarts
+      await setFirestoreDoc('app_docs/system_pwa_icons', {
+        appName: customPwaIcons.appName,
+        themeColor: customPwaIcons.themeColor,
+        files: JSON.stringify(filesMap),
+        updatedAt: Date.now()
+      });
+
+      res.json({
+        success: true,
+        message: 'Appens PWA-ikoner har uppdaterats och verkställts i appen!'
+      });
+    } catch (err: any) {
+      console.error('[PWA Icons] Error saving custom PWA icons:', err);
+      res.status(500).json({ error: 'Kunde inte spara PWA-ikonerna: ' + err.message });
+    }
+  });
+
+  app.get('/api/pwa-icons', (_req, res) => {
+    if (customPwaIcons) {
+      res.json({
+        appName: customPwaIcons.appName,
+        themeColor: customPwaIcons.themeColor,
+        hasCustomIcons: true
+      });
+    } else {
+      res.json({ hasCustomIcons: false });
     }
   });
 
