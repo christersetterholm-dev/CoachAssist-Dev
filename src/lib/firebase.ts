@@ -377,22 +377,27 @@ export const getDoc = async (docRef: { path: string }) => {
     headers['Authorization'] = `Bearer ${token}`;
   }
 
-  const res = await fetch(getApiUrl(`/api/docs?path=${encodeURIComponent(docRef.path)}`), {
-    headers
-  });
+  try {
+    const res = await fetch(getApiUrl(`/api/docs?path=${encodeURIComponent(docRef.path)}`), {
+      headers
+    });
 
-  if (!res.ok) {
-    if (res.status === 404) {
+    if (!res.ok) {
+      if (res.status === 404 || res.status === 401 || res.status === 403) {
+        return { exists: () => false, data: () => null };
+      }
       return { exists: () => false, data: () => null };
     }
-    throw new Error('Failed to load doc');
-  }
 
-  const data = await res.json();
-  return {
-    exists: () => true,
-    data: () => data
-  };
+    const data = await res.json();
+    return {
+      exists: () => true,
+      data: () => data
+    };
+  } catch (err) {
+    console.warn(`[getDoc] Could not load doc ${docRef.path}:`, err);
+    return { exists: () => false, data: () => null };
+  }
 };
 
 export const setDoc = async (docRef: { path: string }, data: any, _options?: { merge?: boolean }) => {
@@ -575,6 +580,5 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
     operationType,
     path
   };
-  console.error('Firestore Error: ', JSON.stringify(errInfo));
-  throw new Error(JSON.stringify(errInfo));
+  console.warn('Firestore Error logged: ', JSON.stringify(errInfo));
 }

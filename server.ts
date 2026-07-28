@@ -98,10 +98,36 @@ try {
   console.error('Could not load firebase-applet-config.json:', e);
 }
 
-const FIRESTORE_BASE_URL = firebaseConfig
-  ? `https://firestore.googleapis.com/v1/projects/${firebaseConfig.projectId}/databases/${firebaseConfig.firestoreDatabaseId || '(default)'}/documents`
-  : null;
 const FIREBASE_API_KEY = firebaseConfig?.apiKey || '';
+
+let dbModeConfig = {
+  mode: process.env.DATABASE_MODE || 'hybrid', // 'hybrid' | 'local_sqlite' | 'firestore_only'
+  customFirestoreProjectId: '',
+  customFirestoreApiKey: '',
+  customRemoteUrl: '',
+  updatedAt: Date.now(),
+  updatedBy: 'system'
+};
+
+// Load saved database configuration from system_docs table in SQLite
+try {
+  const savedRow: any = db.prepare("SELECT data FROM system_docs WHERE path = 'system/db_config'").get();
+  if (savedRow) {
+    const parsed = typeof savedRow.data === 'string' ? JSON.parse(savedRow.data) : savedRow.data;
+    dbModeConfig = { ...dbModeConfig, ...parsed };
+    console.log(`[DB Config] Initialized database mode: ${dbModeConfig.mode}`);
+  }
+} catch (e) {
+  console.warn('[DB Config] Could not read system/db_config from SQLite:', e);
+}
+
+function getActiveFirestoreParams() {
+  const projId = dbModeConfig.customFirestoreProjectId || firebaseConfig?.projectId;
+  const apiKey = dbModeConfig.customFirestoreApiKey || FIREBASE_API_KEY;
+  const dbId = firebaseConfig?.firestoreDatabaseId || '(default)';
+  const baseUrl = projId ? `https://firestore.googleapis.com/v1/projects/${projId}/databases/${dbId}/documents` : null;
+  return { baseUrl, apiKey, projId };
+}
 
 function toFirestoreFields(obj: Record<string, any>): Record<string, any> {
   const fields: Record<string, any> = {};
@@ -156,11 +182,15 @@ function fromFirestoreFields(fields: Record<string, any>): Record<string, any> {
 }
 
 async function getFirestoreDoc(docPath: string): Promise<Record<string, any> | null> {
-  if (!FIRESTORE_BASE_URL || !FIREBASE_API_KEY) return null;
+  if (dbModeConfig.mode === 'local_sqlite') {
+    return null; // Standalone local SQLite mode: skip Firestore calls
+  }
+  const { baseUrl, apiKey } = getActiveFirestoreParams();
+  if (!baseUrl || !apiKey) return null;
   try {
     const encodedPath = docPath.split('/').map(encodeURIComponent).join('/');
-    const url = `${FIRESTORE_BASE_URL}/${encodedPath}?key=${FIREBASE_API_KEY}`;
-    const res = await axios.get(url, { validateStatus: s => s < 500 });
+    const url = `${baseUrl}/${encodedPath}?key=${apiKey}`;
+    const res = await axios.get(url, { validateStatus: s => s < 500, timeout: 5000 });
     if (res.status === 200 && res.data?.fields) {
       return fromFirestoreFields(res.data.fields);
     }
@@ -172,14 +202,19 @@ async function getFirestoreDoc(docPath: string): Promise<Record<string, any> | n
 }
 
 async function setFirestoreDoc(docPath: string, data: Record<string, any>): Promise<boolean> {
-  if (!FIRESTORE_BASE_URL || !FIREBASE_API_KEY) return false;
+  if (dbModeConfig.mode === 'local_sqlite') {
+    return true; // Standalone local SQLite mode: local write succeeded
+  }
+  const { baseUrl, apiKey } = getActiveFirestoreParams();
+  if (!baseUrl || !apiKey) return false;
   try {
     const encodedPath = docPath.split('/').map(encodeURIComponent).join('/');
-    const url = `${FIRESTORE_BASE_URL}/${encodedPath}?key=${FIREBASE_API_KEY}`;
+    const url = `${baseUrl}/${encodedPath}?key=${apiKey}`;
     const fields = toFirestoreFields(data);
     const res = await axios.patch(url, { fields }, {
       headers: { 'Content-Type': 'application/json' },
-      validateStatus: s => s < 500
+      validateStatus: s => s < 500,
+      timeout: 5000
     });
     return res.status === 200;
   } catch (e: any) {
@@ -359,7 +394,212 @@ async function startServer() {
 
   // Health check endpoint
   app.get('/api/health', (_req, res) => {
-    res.json({ status: 'ok', db: 'sqlite' });
+    res.json({ status: 'ok', db: 'sqlite', mode: dbModeConfig.mode });
+  });
+
+  // --- SYSTEM DATABASE & ENVIRONMENT ENDPOINTS (ROOT ADMIN) ---
+
+  // Get current DB Config and System Status
+  app.get('/api/system/db-config', (_req, res) => {
+    let dbSize = 0;
+    try {
+      if (fs.existsSync(DB_PATH)) {
+        dbSize = fs.statSync(DB_PATH).size;
+      }
+    } catch {}
+
+    const { baseUrl, projId } = getActiveFirestoreParams();
+
+    res.json({
+      mode: dbModeConfig.mode,
+      dbPath: DB_PATH,
+      dbSize,
+      isProduction,
+      firestoreConfigured: !!baseUrl,
+      firestoreProjectId: projId || null,
+      customFirestoreProjectId: dbModeConfig.customFirestoreProjectId || '',
+      customFirestoreApiKey: dbModeConfig.customFirestoreApiKey || '',
+      customRemoteUrl: dbModeConfig.customRemoteUrl || '',
+      updatedAt: dbModeConfig.updatedAt,
+      updatedBy: dbModeConfig.updatedBy
+    });
+  });
+
+  // Update DB Config (Root Admin)
+  app.post('/api/system/db-config', (req, res) => {
+    const { mode, customFirestoreProjectId, customFirestoreApiKey, customRemoteUrl } = req.body;
+    if (!mode || !['hybrid', 'local_sqlite', 'firestore_only'].includes(mode)) {
+      return res.status(400).json({ error: 'Ogiltigt databasläge. Välj hybrid, local_sqlite eller firestore_only.' });
+    }
+
+    dbModeConfig.mode = mode;
+    dbModeConfig.customFirestoreProjectId = (customFirestoreProjectId || '').trim();
+    dbModeConfig.customFirestoreApiKey = (customFirestoreApiKey || '').trim();
+    dbModeConfig.customRemoteUrl = (customRemoteUrl || '').trim();
+    dbModeConfig.updatedAt = Date.now();
+    dbModeConfig.updatedBy = 'root_admin';
+
+    const serialized = JSON.stringify(dbModeConfig);
+
+    try {
+      db.prepare(`
+        INSERT INTO system_docs (path, data, updatedAt)
+        VALUES ('system/db_config', ?, ?)
+        ON CONFLICT(path) DO UPDATE SET data = excluded.data, updatedAt = excluded.updatedAt
+      `).run(serialized, dbModeConfig.updatedAt);
+
+      if (mode !== 'local_sqlite') {
+        setFirestoreDoc('app_docs/system_db_config', { data: serialized, updatedAt: dbModeConfig.updatedAt })
+          .catch(err => console.error('Error syncing system db config to firestore:', err));
+      }
+
+      console.log(`[DB Config] Updated database mode to: ${mode}`);
+      res.json({ success: true, dbModeConfig });
+    } catch (e: any) {
+      console.error('[DB Config] Failed to save database configuration:', e);
+      res.status(500).json({ error: 'Kunde inte spara databasinställningar' });
+    }
+  });
+
+  // Export Database Dump as JSON
+  app.get('/api/system/db-export', (_req, res) => {
+    try {
+      const users = db.prepare('SELECT id, email, created_at FROM users').all();
+      const users_data = db.prepare('SELECT userId, segment, data, updatedAt FROM users_data').all();
+      const clubs_data = db.prepare('SELECT clubId, teamId, segment, data, updatedAt FROM clubs_data').all();
+      const shared_leaderboards = db.prepare('SELECT id, data, updatedAt, coachUid FROM shared_leaderboards').all();
+      const system_docs = db.prepare('SELECT path, data, updatedAt FROM system_docs').all();
+
+      const dump = {
+        version: '1.0',
+        exportedAt: Date.now(),
+        dbMode: dbModeConfig.mode,
+        tables: {
+          users,
+          users_data,
+          clubs_data,
+          shared_leaderboards,
+          system_docs
+        }
+      };
+
+      res.setHeader('Content-Type', 'application/json');
+      res.setHeader('Content-Disposition', `attachment; filename="coachassist_backup_${new Date().toISOString().slice(0, 10)}.json"`);
+      res.send(JSON.stringify(dump, null, 2));
+    } catch (e: any) {
+      console.error('Error exporting database dump:', e);
+      res.status(500).json({ error: 'Kunde inte exportera databasen' });
+    }
+  });
+
+  // Import Database Dump from JSON
+  app.post('/api/system/db-import', (req, res) => {
+    const dump = req.body;
+    if (!dump || !dump.tables) {
+      return res.status(400).json({ error: 'Ogiltigt säkerhetskopieformat' });
+    }
+
+    try {
+      const { users = [], users_data = [], clubs_data = [], shared_leaderboards = [], system_docs = [] } = dump.tables;
+
+      const transaction = db.transaction(() => {
+        // Users
+        const stmtUser = db.prepare(`
+          INSERT INTO users (id, email, password_hash, created_at)
+          VALUES (?, ?, ?, ?)
+          ON CONFLICT(id) DO UPDATE SET email = excluded.email
+        `);
+        for (const u of users) {
+          stmtUser.run(u.id, u.email, u.password_hash || 'imported_user', u.created_at || Date.now());
+        }
+
+        // Users data
+        const stmtUserData = db.prepare(`
+          INSERT INTO users_data (userId, segment, data, updatedAt)
+          VALUES (?, ?, ?, ?)
+          ON CONFLICT(userId, segment) DO UPDATE SET data = excluded.data, updatedAt = excluded.updatedAt
+        `);
+        for (const ud of users_data) {
+          const rawData = typeof ud.data === 'string' ? ud.data : JSON.stringify(ud.data);
+          stmtUserData.run(ud.userId, ud.segment, rawData, ud.updatedAt || Date.now());
+        }
+
+        // Clubs data
+        const stmtClubData = db.prepare(`
+          INSERT INTO clubs_data (clubId, teamId, segment, data, updatedAt)
+          VALUES (?, ?, ?, ?)
+          ON CONFLICT(clubId, teamId, segment) DO UPDATE SET data = excluded.data, updatedAt = excluded.updatedAt
+        `);
+        for (const cd of clubs_data) {
+          const rawData = typeof cd.data === 'string' ? cd.data : JSON.stringify(cd.data);
+          stmtClubData.run(cd.clubId, cd.teamId, cd.segment, rawData, cd.updatedAt || Date.now());
+        }
+
+        // Leaderboards
+        const stmtLeaderboard = db.prepare(`
+          INSERT INTO shared_leaderboards (id, data, updatedAt, coachUid)
+          VALUES (?, ?, ?, ?)
+          ON CONFLICT(id) DO UPDATE SET data = excluded.data, updatedAt = excluded.updatedAt
+        `);
+        for (const lb of shared_leaderboards) {
+          const rawData = typeof lb.data === 'string' ? lb.data : JSON.stringify(lb.data);
+          stmtLeaderboard.run(lb.id, rawData, lb.updatedAt || Date.now(), lb.coachUid || null);
+        }
+
+        // System docs
+        const stmtSysDoc = db.prepare(`
+          INSERT INTO system_docs (path, data, updatedAt)
+          VALUES (?, ?, ?)
+          ON CONFLICT(path) DO UPDATE SET data = excluded.data, updatedAt = excluded.updatedAt
+        `);
+        for (const sd of system_docs) {
+          const rawData = typeof sd.data === 'string' ? sd.data : JSON.stringify(sd.data);
+          stmtSysDoc.run(sd.path, rawData, sd.updatedAt || Date.now());
+        }
+      });
+
+      transaction();
+
+      console.log('[DB Import] Successfully imported database dump.');
+      res.json({ success: true, importedRecords: users.length + users_data.length + clubs_data.length });
+    } catch (e: any) {
+      console.error('[DB Import] Error importing database:', e);
+      res.status(500).json({ error: 'Kunde inte importera databasen: ' + e.message });
+    }
+  });
+
+  // Manual Sync between SQLite and Firestore
+  app.post('/api/system/db-sync-now', async (_req, res) => {
+    if (dbModeConfig.mode === 'local_sqlite') {
+      return res.status(400).json({ error: 'Databasen är inställd på Fristående Lokal SQLite. Slå på Hybrid-läge först för att synka med molnet.' });
+    }
+
+    try {
+      let syncedCount = 0;
+
+      // Sync users_data
+      const userRows: any[] = db.prepare('SELECT userId, segment, data, updatedAt FROM users_data').all();
+      for (const row of userRows) {
+        const docPath = `app_docs/users_${row.userId}_data_${row.segment}`;
+        const rawData = typeof row.data === 'string' ? row.data : JSON.stringify(row.data);
+        await setFirestoreDoc(docPath, { data: rawData, updatedAt: row.updatedAt });
+        syncedCount++;
+      }
+
+      // Sync clubs_data
+      const clubRows: any[] = db.prepare('SELECT clubId, teamId, segment, data, updatedAt FROM clubs_data').all();
+      for (const row of clubRows) {
+        const docPath = `app_docs/clubs_${row.clubId}_teams_${row.teamId}_data_${row.segment}`;
+        const rawData = typeof row.data === 'string' ? row.data : JSON.stringify(row.data);
+        await setFirestoreDoc(docPath, { data: rawData, updatedAt: row.updatedAt });
+        syncedCount++;
+      }
+
+      res.json({ success: true, syncedCount, message: `Synkroniserade ${syncedCount} poster till Firestore.` });
+    } catch (e: any) {
+      console.error('Manual DB sync error:', e);
+      res.status(500).json({ error: 'Synkroniseringen misslyckades: ' + e.message });
+    }
   });
 
   // --- AUTHENTICATION ENDPOINTS ---
@@ -770,42 +1010,44 @@ async function startServer() {
         res.status(500).json({ error: 'Failed to fetch shared leaderboard' });
       }
     } else if (pathStr.startsWith('users/')) {
-      const authHeader = req.headers.authorization;
-      if (!authHeader) return res.status(401).json({ error: 'Unauthorized' });
+      const parts = pathStr.split('/');
+      const userId = parts[1];
+      const segment = parts[3];
 
-      try {
-        const authStr = Array.isArray(authHeader) ? authHeader[0] : authHeader;
-        const partsAuth = authStr.split(' ');
-        const token = partsAuth.length > 1 ? partsAuth[1] : partsAuth[0];
+      if (userId !== 'guest') {
+        const authHeader = req.headers.authorization;
+        if (!authHeader) return res.status(401).json({ error: 'Unauthorized' });
 
-        const decoded: any = jwt.verify(token, JWT_SECRET);
-        const parts = pathStr.split('/');
-        const userId = parts[1];
-        const segment = parts[3];
+        try {
+          const authStr = Array.isArray(authHeader) ? authHeader[0] : authHeader;
+          const partsAuth = authStr.split(' ');
+          const token = partsAuth.length > 1 ? partsAuth[1] : partsAuth[0];
 
-        if (decoded.id !== userId) {
-          return res.status(403).json({ error: 'Forbidden' });
-        }
-
-        let row: any = db.prepare('SELECT data FROM users_data WHERE userId = ? AND segment = ?').get(userId, segment);
-        if (!row) {
-          const fDoc = await getFirestoreDoc(`app_docs/users_${userId}_data_${segment}`);
-          if (fDoc && fDoc.data) {
-            const rawData = typeof fDoc.data === 'string' ? fDoc.data : JSON.stringify(fDoc.data);
-            db.prepare(`
-              INSERT INTO users_data (userId, segment, data, updatedAt)
-              VALUES (?, ?, ?, ?)
-              ON CONFLICT(userId, segment) DO UPDATE SET data = excluded.data, updatedAt = excluded.updatedAt
-            `).run(userId, segment, rawData, Date.now());
-            return res.json(typeof fDoc.data === 'string' ? JSON.parse(fDoc.data) : fDoc.data);
+          const decoded: any = jwt.verify(token, JWT_SECRET);
+          if (decoded.id !== userId && decoded.email !== userId) {
+            return res.status(403).json({ error: 'Forbidden' });
           }
-          return res.status(404).json({ error: 'Not found' });
+        } catch (e: any) {
+          console.error('Error verifying token for user data:', e);
+          return res.status(401).json({ error: 'Invalid session or token' });
         }
-        res.json(JSON.parse(row.data));
-      } catch (e: any) {
-        console.error('Error fetching user data:', e);
-        res.status(401).json({ error: 'Invalid session or token' });
       }
+
+      let row: any = db.prepare('SELECT data FROM users_data WHERE userId = ? AND segment = ?').get(userId, segment);
+      if (!row) {
+        const fDoc = await getFirestoreDoc(`app_docs/users_${userId}_data_${segment}`);
+        if (fDoc && fDoc.data) {
+          const rawData = typeof fDoc.data === 'string' ? fDoc.data : JSON.stringify(fDoc.data);
+          db.prepare(`
+            INSERT INTO users_data (userId, segment, data, updatedAt)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(userId, segment) DO UPDATE SET data = excluded.data, updatedAt = excluded.updatedAt
+          `).run(userId, segment, rawData, Date.now());
+          return res.json(typeof fDoc.data === 'string' ? JSON.parse(fDoc.data) : fDoc.data);
+        }
+        return res.status(404).json({ error: 'Not found' });
+      }
+      res.json(JSON.parse(row.data));
     } else if (pathStr.startsWith('clubs/')) {
       const authHeader = req.headers.authorization;
       if (!authHeader) return res.status(401).json({ error: 'Unauthorized' });
@@ -889,21 +1131,28 @@ async function startServer() {
         res.status(500).json({ error: 'Failed to save shared leaderboard' });
       }
     } else if (pathStr.startsWith('users/')) {
-      const authHeader = req.headers.authorization;
-      if (!authHeader) return res.status(401).json({ error: 'Unauthorized' });
-
       try {
-        const authStr = Array.isArray(authHeader) ? authHeader[0] : authHeader;
-        const partsAuth = authStr.split(' ');
-        const token = partsAuth.length > 1 ? partsAuth[1] : partsAuth[0];
-
-        const decoded: any = jwt.verify(token, JWT_SECRET);
         const parts = pathStr.split('/');
         const userId = parts[1];
         const segment = parts[3];
 
-        if (decoded.id !== userId) {
-          return res.status(403).json({ error: 'Forbidden' });
+        if (userId !== 'guest') {
+          const authHeader = req.headers.authorization;
+          if (!authHeader) return res.status(401).json({ error: 'Unauthorized' });
+
+          try {
+            const authStr = Array.isArray(authHeader) ? authHeader[0] : authHeader;
+            const partsAuth = authStr.split(' ');
+            const token = partsAuth.length > 1 ? partsAuth[1] : partsAuth[0];
+
+            const decoded: any = jwt.verify(token, JWT_SECRET);
+            if (decoded.id !== userId && decoded.email !== userId) {
+              return res.status(403).json({ error: 'Forbidden' });
+            }
+          } catch (e: any) {
+            console.error('Error verifying token for saving user data:', e);
+            return res.status(401).json({ error: 'Invalid session or token' });
+          }
         }
 
         const serializedData = JSON.stringify(data);

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Landmark, Trash2, Edit3, Users, Shield, Check, PlusCircle, Search, Mail, Phone, Fingerprint, Settings, ArrowRight, UserPlus, Save, Smartphone, X } from 'lucide-react';
+import { Landmark, Trash2, Edit3, Users, Shield, Check, PlusCircle, Search, Mail, Phone, Fingerprint, Settings, ArrowRight, UserPlus, Save, Smartphone, X, Database, Server, HardDrive, Cloud, RefreshCw, Download, Upload, Globe, Cpu, CheckCircle2, AlertTriangle } from 'lucide-react';
 import { Club, ClubMetadata, ClubTeam, ClubMember } from '../types';
 import { db } from '../lib/firebase';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
@@ -14,7 +14,7 @@ interface ClubAdminDashboardProps {
 
 export default function ClubAdminDashboard({ userId, userEmail, isRootAdmin = false, onBack }: ClubAdminDashboardProps) {
   // Navigation tabs within admin
-  const [activeTab, setActiveTab] = useState<'clubs' | 'teams' | 'members' | 'root_admins' | 'pwa_icons'>('clubs');
+  const [activeTab, setActiveTab] = useState<'clubs' | 'teams' | 'members' | 'root_admins' | 'pwa_icons' | 'database_env'>('clubs');
 
   // Master lists
   const [clubs, setClubs] = useState<Club[]>([]);
@@ -27,6 +27,26 @@ export default function ClubAdminDashboard({ userId, userEmail, isRootAdmin = fa
   const [newRootAdminEmail, setNewRootAdminEmail] = useState('');
   const [rootAdminActionLoading, setRootAdminActionLoading] = useState(false);
   const [rootAdminError, setRootAdminError] = useState('');
+
+  // Database & Environment Management State
+  const [dbConfig, setDbConfig] = useState<{
+    mode: 'hybrid' | 'local_sqlite' | 'firestore_only';
+    dbPath?: string;
+    dbSize?: number;
+    isProduction?: boolean;
+    firestoreConfigured?: boolean;
+    firestoreProjectId?: string | null;
+    customFirestoreProjectId?: string;
+    customFirestoreApiKey?: string;
+    customRemoteUrl?: string;
+    updatedAt?: number;
+    updatedBy?: string;
+  }>({ mode: 'hybrid' });
+  const [dbConfigLoading, setDbConfigLoading] = useState(false);
+  const [dbConfigMessage, setDbConfigMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [isSyncingNow, setIsSyncingNow] = useState(false);
+  const [importFile, setImportFile] = useState<File | null>(null);
+  const [isImporting, setIsImporting] = useState(false);
   
   // Loading & Action states
   const [isLoading, setIsLoading] = useState(false);
@@ -137,6 +157,108 @@ export default function ClubAdminDashboard({ userId, userEmail, isRootAdmin = fa
       setRootAdminError(err.message || 'Kunde inte ta bort root-admin.');
     } finally {
       setRootAdminActionLoading(false);
+    }
+  };
+
+  const fetchDbConfig = async () => {
+    setDbConfigLoading(true);
+    try {
+      const res = await fetch('/api/system/db-config');
+      if (res.ok) {
+        const data = await res.json();
+        setDbConfig(data);
+      }
+    } catch (e) {
+      console.error('Error fetching db config:', e);
+    } finally {
+      setDbConfigLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (isRootAdmin && activeTab === 'database_env') {
+      fetchDbConfig();
+    }
+  }, [isRootAdmin, activeTab]);
+
+  const handleSaveDbConfig = async (newMode: 'hybrid' | 'local_sqlite' | 'firestore_only') => {
+    setDbConfigLoading(true);
+    setDbConfigMessage(null);
+    try {
+      const res = await fetch('/api/system/db-config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          mode: newMode,
+          customFirestoreProjectId: dbConfig.customFirestoreProjectId || '',
+          customFirestoreApiKey: dbConfig.customFirestoreApiKey || '',
+          customRemoteUrl: dbConfig.customRemoteUrl || ''
+        })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setDbConfig(prev => ({ ...prev, mode: newMode }));
+        setDbConfigMessage({
+          type: 'success',
+          text: `Databasläget ändrades till "${newMode === 'local_sqlite' ? 'Fristående Lokal SQLite' : newMode === 'hybrid' ? 'Hybrid (SQLite + Cloud-synk)' : 'Endast Cloud Firestore'}".`
+        });
+      } else {
+        setDbConfigMessage({ type: 'error', text: data.error || 'Kunde inte spara inställningarna.' });
+      }
+    } catch (err) {
+      setDbConfigMessage({ type: 'error', text: 'Nätverksfel vid sparning.' });
+    } finally {
+      setDbConfigLoading(false);
+    }
+  };
+
+  const handleSyncNow = async () => {
+    setIsSyncingNow(true);
+    setDbConfigMessage(null);
+    try {
+      const res = await fetch('/api/system/db-sync-now', { method: 'POST' });
+      const data = await res.json();
+      if (res.ok) {
+        setDbConfigMessage({ type: 'success', text: data.message || 'Synkronisering slutförd!' });
+      } else {
+        setDbConfigMessage({ type: 'error', text: data.error || 'Synkronisering misslyckades.' });
+      }
+    } catch (err) {
+      setDbConfigMessage({ type: 'error', text: 'Nätverksfel vid synkronisering.' });
+    } finally {
+      setIsSyncingNow(false);
+    }
+  };
+
+  const handleExportBackup = () => {
+    window.open('/api/system/db-export', '_blank');
+  };
+
+  const handleImportBackup = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!importFile) return;
+    setIsImporting(true);
+    setDbConfigMessage(null);
+    try {
+      const text = await importFile.text();
+      const dump = JSON.parse(text);
+      const res = await fetch('/api/system/db-import', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(dump)
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setDbConfigMessage({ type: 'success', text: `Säkerhetskopia importerad framgångsrikt! (${data.importedRecords} poster)` });
+        setImportFile(null);
+        fetchDbConfig();
+      } else {
+        setDbConfigMessage({ type: 'error', text: data.error || 'Importen misslyckades.' });
+      }
+    } catch (err: any) {
+      setDbConfigMessage({ type: 'error', text: 'Ogiltig JSON-fil eller importfel: ' + err.message });
+    } finally {
+      setIsImporting(false);
     }
   };
 
@@ -549,17 +671,31 @@ export default function ClubAdminDashboard({ userId, userEmail, isRootAdmin = fa
           </button>
 
           {isRootAdmin && (
-            <button
-              onClick={() => setActiveTab('root_admins')}
-              className={`flex items-center gap-2 px-4 sm:px-5 py-2.5 sm:py-3 rounded-xl font-extrabold text-xs sm:text-sm transition-all cursor-pointer shrink-0 ${
-                activeTab === 'root_admins'
-                  ? 'bg-red-600 text-white shadow-lg shadow-red-100 dark:shadow-none'
-                  : 'bg-zinc-50 hover:bg-zinc-100 dark:bg-zinc-950 dark:hover:bg-zinc-800 text-zinc-600 dark:text-zinc-400 border border-zinc-100 dark:border-zinc-850'
-              }`}
-            >
-              <Shield size={16} />
-              <span>System-Admins ({rootAdminsList.length || 2})</span>
-            </button>
+            <>
+              <button
+                onClick={() => setActiveTab('database_env')}
+                className={`flex items-center gap-2 px-4 sm:px-5 py-2.5 sm:py-3 rounded-xl font-extrabold text-xs sm:text-sm transition-all cursor-pointer shrink-0 ${
+                  activeTab === 'database_env'
+                    ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-100 dark:shadow-none'
+                    : 'bg-zinc-50 hover:bg-zinc-100 dark:bg-zinc-950 dark:hover:bg-zinc-800 text-zinc-600 dark:text-zinc-400 border border-zinc-100 dark:border-zinc-850'
+                }`}
+              >
+                <Database size={16} />
+                <span>Databas & Miljö</span>
+              </button>
+
+              <button
+                onClick={() => setActiveTab('root_admins')}
+                className={`flex items-center gap-2 px-4 sm:px-5 py-2.5 sm:py-3 rounded-xl font-extrabold text-xs sm:text-sm transition-all cursor-pointer shrink-0 ${
+                  activeTab === 'root_admins'
+                    ? 'bg-red-600 text-white shadow-lg shadow-red-100 dark:shadow-none'
+                    : 'bg-zinc-50 hover:bg-zinc-100 dark:bg-zinc-950 dark:hover:bg-zinc-800 text-zinc-600 dark:text-zinc-400 border border-zinc-100 dark:border-zinc-850'
+                }`}
+              >
+                <Shield size={16} />
+                <span>System-Admins ({rootAdminsList.length || 2})</span>
+              </button>
+            </>
           )}
         </div>
       </div>
@@ -1107,6 +1243,264 @@ export default function ClubAdminDashboard({ userId, userEmail, isRootAdmin = fa
                   </div>
                 );
               })}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {activeTab === 'database_env' && isRootAdmin && (
+        <div className="space-y-8">
+          {/* Status Bar / Header */}
+          <div className="bg-white dark:bg-zinc-900 rounded-3xl border border-zinc-150 dark:border-zinc-800 shadow-xl p-6 sm:p-8">
+            <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-6 pb-6 border-b border-zinc-100 dark:border-zinc-800">
+              <div className="flex items-center gap-4">
+                <div className="p-3.5 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-400 rounded-2xl">
+                  <Database size={28} />
+                </div>
+                <div>
+                  <h2 className="text-xl font-black text-zinc-900 dark:text-white tracking-tight">Databas & Miljökonfiguration</h2>
+                  <p className="text-xs text-zinc-500 font-medium mt-1">
+                    Hantera aktiv databas, miljöinställningar och synkronisering för denna installation (Cloud Run vs Webbhotell / Lokal miljö).
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 self-stretch sm:self-auto">
+                <button
+                  onClick={fetchDbConfig}
+                  disabled={dbConfigLoading}
+                  className="inline-flex items-center justify-center gap-2 bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-zinc-800 dark:text-zinc-200 font-bold px-4 py-2.5 rounded-xl text-xs transition-all cursor-pointer"
+                >
+                  <RefreshCw size={14} className={dbConfigLoading ? 'animate-spin' : ''} />
+                  <span>Uppdatera status</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Alert message if any */}
+            {dbConfigMessage && (
+              <div className={`mt-6 p-4 rounded-2xl border text-xs font-bold flex items-center gap-2 ${
+                dbConfigMessage.type === 'success'
+                  ? 'bg-emerald-50 dark:bg-emerald-950/30 border-emerald-200 dark:border-emerald-900/40 text-emerald-700 dark:text-emerald-300'
+                  : 'bg-red-50 dark:bg-red-950/30 border-red-200 dark:border-red-900/40 text-red-700 dark:text-red-300'
+              }`}>
+                {dbConfigMessage.type === 'success' ? <CheckCircle2 size={16} /> : <AlertTriangle size={16} />}
+                <span>{dbConfigMessage.text}</span>
+              </div>
+            )}
+
+            {/* System Info Badges */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mt-6">
+              <div className="p-4 bg-zinc-50 dark:bg-zinc-950 rounded-2xl border border-zinc-150 dark:border-zinc-850">
+                <div className="flex items-center gap-2 text-zinc-400 mb-1">
+                  <Cpu size={14} />
+                  <span className="text-[10px] uppercase tracking-wider font-black">Aktivt Databasläge</span>
+                </div>
+                <div className="text-sm font-black text-zinc-900 dark:text-white">
+                  {dbConfig.mode === 'local_sqlite' ? 'Fristående Lokal SQLite' : dbConfig.mode === 'hybrid' ? 'Hybrid (SQLite + Cloud)' : 'Endast Firestore'}
+                </div>
+              </div>
+
+              <div className="p-4 bg-zinc-50 dark:bg-zinc-950 rounded-2xl border border-zinc-150 dark:border-zinc-850">
+                <div className="flex items-center gap-2 text-zinc-400 mb-1">
+                  <HardDrive size={14} />
+                  <span className="text-[10px] uppercase tracking-wider font-black">SQLite Storlek</span>
+                </div>
+                <div className="text-sm font-black text-zinc-900 dark:text-white">
+                  {dbConfig.dbSize ? `${(dbConfig.dbSize / 1024).toFixed(1)} KB` : '0 KB'}
+                </div>
+              </div>
+
+              <div className="p-4 bg-zinc-50 dark:bg-zinc-950 rounded-2xl border border-zinc-150 dark:border-zinc-850">
+                <div className="flex items-center gap-2 text-zinc-400 mb-1">
+                  <Cloud size={14} />
+                  <span className="text-[10px] uppercase tracking-wider font-black">Firestore Status</span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <span className={`w-2 h-2 rounded-full ${dbConfig.firestoreConfigured && dbConfig.mode !== 'local_sqlite' ? 'bg-emerald-500' : 'bg-amber-500'}`} />
+                  <span className="text-sm font-black text-zinc-900 dark:text-white">
+                    {dbConfig.mode === 'local_sqlite' ? 'Inaktiverad (Lokal)' : dbConfig.firestoreConfigured ? 'Konfigurerad' : 'Ej ansluten'}
+                  </span>
+                </div>
+              </div>
+
+              <div className="p-4 bg-zinc-50 dark:bg-zinc-950 rounded-2xl border border-zinc-150 dark:border-zinc-850">
+                <div className="flex items-center gap-2 text-zinc-400 mb-1">
+                  <Globe size={14} />
+                  <span className="text-[10px] uppercase tracking-wider font-black">Servermiljö</span>
+                </div>
+                <div className="text-sm font-black text-zinc-900 dark:text-white">
+                  {dbConfig.isProduction ? 'Produktion / Cloud Run' : 'Utveckling / Webbhotell'}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Database Mode Selector Cards */}
+          <div className="bg-white dark:bg-zinc-900 rounded-3xl border border-zinc-150 dark:border-zinc-800 shadow-xl p-6 sm:p-8">
+            <h3 className="text-base font-black text-zinc-900 dark:text-white mb-2">Välj Databas- och Lagringsstrategi för denna miljö</h3>
+            <p className="text-xs text-zinc-500 mb-6 font-medium">
+              Du kan ändra hur denna installation hanterar databasen. För ditt lokala webbhotell väljer du "Fristående Lokal SQLite", medan "Hybrid" rekommenderas för Google Cloud Run.
+            </p>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+              {/* Option 1: Hybrid */}
+              <div
+                onClick={() => handleSaveDbConfig('hybrid')}
+                className={`p-6 rounded-2xl border-2 transition-all cursor-pointer relative ${
+                  dbConfig.mode === 'hybrid'
+                    ? 'border-emerald-500 bg-emerald-50/20 dark:bg-emerald-950/20 shadow-lg'
+                    : 'border-zinc-200 dark:border-zinc-800 hover:border-zinc-300 dark:hover:border-zinc-700 bg-zinc-50/50 dark:bg-zinc-950/50'
+                }`}
+              >
+                {dbConfig.mode === 'hybrid' && (
+                  <span className="absolute top-3 right-3 bg-emerald-500 text-white p-1 rounded-full text-xs">
+                    <Check size={12} />
+                  </span>
+                )}
+                <div className="p-3 bg-emerald-100 dark:bg-emerald-900/40 text-emerald-600 dark:text-emerald-400 rounded-xl w-fit mb-4">
+                  <Server size={22} />
+                </div>
+                <h4 className="text-sm font-extrabold text-zinc-900 dark:text-white mb-1">Hybrid (SQLite + Cloud-synk)</h4>
+                <p className="text-xs text-zinc-500 dark:text-zinc-400 font-medium leading-relaxed mb-4">
+                  Blixtsnabb prestanda med lokal SQLite. Speglar automatiskt alla ändringar i Google Cloud Firestore så att ingen data försvinner om servern startar om (t.ex. på Cloud Run).
+                </p>
+                <span className="inline-block text-[10px] font-black uppercase tracking-wider text-emerald-600 dark:text-emerald-400 bg-emerald-100/60 dark:bg-emerald-950/60 px-2 py-1 rounded-md">
+                  Rekommenderad för Cloud Run
+                </span>
+              </div>
+
+              {/* Option 2: Local SQLite */}
+              <div
+                onClick={() => handleSaveDbConfig('local_sqlite')}
+                className={`p-6 rounded-2xl border-2 transition-all cursor-pointer relative ${
+                  dbConfig.mode === 'local_sqlite'
+                    ? 'border-blue-500 bg-blue-50/20 dark:bg-blue-950/20 shadow-lg'
+                    : 'border-zinc-200 dark:border-zinc-800 hover:border-zinc-300 dark:hover:border-zinc-700 bg-zinc-50/50 dark:bg-zinc-950/50'
+                }`}
+              >
+                {dbConfig.mode === 'local_sqlite' && (
+                  <span className="absolute top-3 right-3 bg-blue-500 text-white p-1 rounded-full text-xs">
+                    <Check size={12} />
+                  </span>
+                )}
+                <div className="p-3 bg-blue-100 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400 rounded-xl w-fit mb-4">
+                  <HardDrive size={22} />
+                </div>
+                <h4 className="text-sm font-extrabold text-zinc-900 dark:text-white mb-1">Fristående Lokal SQLite</h4>
+                <p className="text-xs text-zinc-500 dark:text-zinc-400 font-medium leading-relaxed mb-4">
+                  Använder enbart den lokala filbaserade SQLite-databasen (<code className="text-[11px] bg-zinc-200 dark:bg-zinc-800 px-1 py-0.5 rounded">coachassist.db</code>). Ingen koppling mot Google Cloud krävs.
+                </p>
+                <span className="inline-block text-[10px] font-black uppercase tracking-wider text-blue-600 dark:text-blue-400 bg-blue-100/60 dark:bg-blue-950/60 px-2 py-1 rounded-md">
+                  Perfekt för webbhotell & lokal test
+                </span>
+              </div>
+
+              {/* Option 3: Firestore Only */}
+              <div
+                onClick={() => handleSaveDbConfig('firestore_only')}
+                className={`p-6 rounded-2xl border-2 transition-all cursor-pointer relative ${
+                  dbConfig.mode === 'firestore_only'
+                    ? 'border-amber-500 bg-amber-50/20 dark:bg-amber-950/20 shadow-lg'
+                    : 'border-zinc-200 dark:border-zinc-800 hover:border-zinc-300 dark:hover:border-zinc-700 bg-zinc-50/50 dark:bg-zinc-950/50'
+                }`}
+              >
+                {dbConfig.mode === 'firestore_only' && (
+                  <span className="absolute top-3 right-3 bg-amber-500 text-white p-1 rounded-full text-xs">
+                    <Check size={12} />
+                  </span>
+                )}
+                <div className="p-3 bg-amber-100 dark:bg-amber-900/40 text-amber-600 dark:text-amber-400 rounded-xl w-fit mb-4">
+                  <Cloud size={22} />
+                </div>
+                <h4 className="text-sm font-extrabold text-zinc-900 dark:text-white mb-1">Endast Cloud Firestore</h4>
+                <p className="text-xs text-zinc-500 dark:text-zinc-400 font-medium leading-relaxed mb-4">
+                  Alla förfrågningar och ändringar görs direkt mot Google Cloud Firestore i molnet.
+                </p>
+                <span className="inline-block text-[10px] font-black uppercase tracking-wider text-amber-600 dark:text-amber-400 bg-amber-100/60 dark:bg-amber-950/60 px-2 py-1 rounded-md">
+                  Endast Moln
+                </span>
+              </div>
+            </div>
+          </div>
+
+          {/* Backup & Import & Manual Sync Section */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            {/* Export & Import Backup */}
+            <div className="bg-white dark:bg-zinc-900 rounded-3xl border border-zinc-150 dark:border-zinc-800 shadow-xl p-6 sm:p-8">
+              <h3 className="text-base font-black text-zinc-900 dark:text-white mb-1 flex items-center gap-2">
+                <Download size={18} className="text-indigo-500" />
+                <span>Flytta Data mellan Miljöer</span>
+              </h3>
+              <p className="text-xs text-zinc-500 mb-6 font-medium">
+                Exportera hela databasen från en miljö (t.ex. Cloud Run) och importera den direkt till ditt lokala webbhotell.
+              </p>
+
+              <div className="space-y-5">
+                <div className="p-4 bg-zinc-50 dark:bg-zinc-950 rounded-2xl border border-zinc-150 dark:border-zinc-850 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                  <div>
+                    <h4 className="text-xs font-bold text-zinc-800 dark:text-zinc-200">Exportera säkerhetskopia</h4>
+                    <p className="text-[11px] text-zinc-500 font-medium">Ladda ner alla användare, lag, trupper, övningar och inställningar som JSON.</p>
+                  </div>
+                  <button
+                    onClick={handleExportBackup}
+                    className="inline-flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold px-4 py-2.5 rounded-xl text-xs transition-all cursor-pointer shrink-0"
+                  >
+                    <Download size={14} />
+                    <span>Ladda ner JSON</span>
+                  </button>
+                </div>
+
+                <form onSubmit={handleImportBackup} className="p-4 bg-zinc-50 dark:bg-zinc-950 rounded-2xl border border-zinc-150 dark:border-zinc-850 space-y-3">
+                  <div>
+                    <h4 className="text-xs font-bold text-zinc-800 dark:text-zinc-200">Importera säkerhetskopia</h4>
+                    <p className="text-[11px] text-zinc-500 font-medium mb-3">Välj en tidigare exporterad JSON-säkerhetskopia att läsa in i denna databas.</p>
+                    <input
+                      type="file"
+                      accept=".json"
+                      onChange={(e) => setImportFile(e.target.files?.[0] || null)}
+                      className="text-xs text-zinc-600 dark:text-zinc-400 file:mr-3 file:py-2 file:px-3 file:rounded-xl file:border-0 file:text-xs file:font-bold file:bg-zinc-200 dark:file:bg-zinc-800 file:text-zinc-800 dark:file:text-zinc-200 hover:file:bg-zinc-300 cursor-pointer"
+                    />
+                  </div>
+
+                  {importFile && (
+                    <button
+                      type="submit"
+                      disabled={isImporting}
+                      className="w-full inline-flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold px-4 py-2.5 rounded-xl text-xs transition-all cursor-pointer disabled:opacity-50"
+                    >
+                      <Upload size={14} />
+                      <span>{isImporting ? 'Importerar data...' : 'Verkställ Import'}</span>
+                    </button>
+                  )}
+                </form>
+              </div>
+            </div>
+
+            {/* Manual Sync Card */}
+            <div className="bg-white dark:bg-zinc-900 rounded-3xl border border-zinc-150 dark:border-zinc-800 shadow-xl p-6 sm:p-8 flex flex-col justify-between">
+              <div>
+                <h3 className="text-base font-black text-zinc-900 dark:text-white mb-1 flex items-center gap-2">
+                  <RefreshCw size={18} className="text-emerald-500" />
+                  <span>Manuell Molnsynkronisering</span>
+                </h3>
+                <p className="text-xs text-zinc-500 mb-6 font-medium">
+                  Trigg en manuell fullständig synkronisering mellan den lokala SQLite-databasen och Google Cloud Firestore.
+                </p>
+
+                <div className="p-4 bg-emerald-50/50 dark:bg-emerald-950/20 rounded-2xl border border-emerald-100 dark:border-emerald-900/30 text-xs text-emerald-800 dark:text-emerald-300 font-medium leading-relaxed mb-6">
+                  Detta skickar alla uppdaterade poster i din lokala databas direkt till molnet så att alla klienter ser den senaste datan omedelbart.
+                </div>
+              </div>
+
+              <button
+                onClick={handleSyncNow}
+                disabled={isSyncingNow || dbConfig.mode === 'local_sqlite'}
+                className="w-full inline-flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 text-white font-extrabold px-5 py-3 rounded-xl transition-all active:scale-95 cursor-pointer text-xs uppercase tracking-wider"
+              >
+                <RefreshCw size={16} className={isSyncingNow ? 'animate-spin' : ''} />
+                <span>{isSyncingNow ? 'Synkroniserar poster...' : 'Synka till Firestore nu'}</span>
+              </button>
             </div>
           </div>
         </div>
