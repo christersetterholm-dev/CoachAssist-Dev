@@ -409,6 +409,12 @@ async function startServer() {
     } catch {}
 
     const { baseUrl, projId } = getActiveFirestoreParams();
+    const dbId = firebaseConfig?.firestoreDatabaseId || '(default)';
+    const firestoreUrl = projId 
+      ? (dbId && dbId !== '(default)'
+          ? `https://console.firebase.google.com/project/${projId}/firestore/databases/${dbId}/data`
+          : `https://console.firebase.google.com/project/${projId}/firestore/data`)
+      : null;
 
     res.json({
       mode: dbModeConfig.mode,
@@ -417,6 +423,8 @@ async function startServer() {
       isProduction,
       firestoreConfigured: !!baseUrl,
       firestoreProjectId: projId || null,
+      firestoreDatabaseId: dbId,
+      firestoreUrl,
       customFirestoreProjectId: dbModeConfig.customFirestoreProjectId || '',
       customFirestoreApiKey: dbModeConfig.customFirestoreApiKey || '',
       customRemoteUrl: dbModeConfig.customRemoteUrl || '',

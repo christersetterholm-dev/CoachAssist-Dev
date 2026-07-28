@@ -96,6 +96,8 @@ export default function ClubAdminDashboard({
     isProduction?: boolean;
     firestoreConfigured?: boolean;
     firestoreProjectId?: string | null;
+    firestoreDatabaseId?: string | null;
+    firestoreUrl?: string | null;
     customFirestoreProjectId?: string;
     customFirestoreApiKey?: string;
     customRemoteUrl?: string;
@@ -1987,11 +1989,25 @@ export default function ClubAdminDashboard({
                   <Cloud size={14} />
                   <span className="text-[10px] uppercase tracking-wider font-black">Firestore Status</span>
                 </div>
-                <div className="flex items-center gap-1.5">
-                  <span className={`w-2 h-2 rounded-full ${dbConfig.firestoreConfigured && dbConfig.mode !== 'local_sqlite' ? 'bg-emerald-500' : 'bg-amber-500'}`} />
-                  <span className="text-sm font-black text-zinc-900 dark:text-white">
-                    {dbConfig.mode === 'local_sqlite' ? 'Inaktiverad (Lokal)' : dbConfig.firestoreConfigured ? 'Konfigurerad' : 'Ej ansluten'}
-                  </span>
+                <div className="flex items-center justify-between gap-1">
+                  <div className="flex items-center gap-1.5">
+                    <span className={`w-2 h-2 rounded-full ${dbConfig.firestoreConfigured && dbConfig.mode !== 'local_sqlite' ? 'bg-emerald-500' : 'bg-amber-500'}`} />
+                    <span className="text-sm font-black text-zinc-900 dark:text-white">
+                      {dbConfig.mode === 'local_sqlite' ? 'Inaktiverad (Lokal)' : dbConfig.firestoreConfigured ? 'Konfigurerad' : 'Ej ansluten'}
+                    </span>
+                  </div>
+                  {dbConfig.firestoreUrl && dbConfig.mode !== 'local_sqlite' && (
+                    <a
+                      href={dbConfig.firestoreUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1 text-[11px] font-bold text-amber-600 hover:text-amber-700 dark:text-amber-400 dark:hover:text-amber-300 transition-colors"
+                      title="Öppna databasen i Google Firebase Console"
+                    >
+                      <ExternalLink size={12} />
+                      <span className="hidden sm:inline">Console</span>
+                    </a>
+                  )}
                 </div>
               </div>
 
@@ -2088,11 +2104,61 @@ export default function ClubAdminDashboard({
                 <p className="text-xs text-zinc-500 dark:text-zinc-400 font-medium leading-relaxed mb-4">
                   Alla förfrågningar och ändringar görs direkt mot Google Cloud Firestore i molnet.
                 </p>
-                <span className="inline-block text-[10px] font-black uppercase tracking-wider text-amber-600 dark:text-amber-400 bg-amber-100/60 dark:bg-amber-950/60 px-2 py-1 rounded-md">
-                  Endast Moln
-                </span>
+                <div className="flex items-center justify-between gap-2 flex-wrap pt-1">
+                  <span className="inline-block text-[10px] font-black uppercase tracking-wider text-amber-600 dark:text-amber-400 bg-amber-100/60 dark:bg-amber-950/60 px-2 py-1 rounded-md">
+                    Endast Moln
+                  </span>
+                  {dbConfig.firestoreUrl && (
+                    <a
+                      href={dbConfig.firestoreUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      onClick={(e) => e.stopPropagation()}
+                      className="inline-flex items-center gap-1 text-[11px] font-bold text-amber-600 hover:text-amber-700 dark:text-amber-400 dark:hover:text-amber-300 underline underline-offset-2 transition-colors"
+                    >
+                      <ExternalLink size={12} />
+                      <span>Öppna i Console</span>
+                    </a>
+                  )}
+                </div>
               </div>
             </div>
+
+            {/* Active Cloud Firestore Database Banner */}
+            {dbConfig.mode !== 'local_sqlite' && dbConfig.firestoreUrl && (
+              <div className="mt-6 p-5 bg-gradient-to-r from-amber-50/90 to-amber-100/50 dark:from-amber-950/40 dark:to-amber-900/20 border border-amber-200 dark:border-amber-800/60 rounded-2xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 shadow-sm">
+                <div className="flex items-start gap-3.5">
+                  <div className="p-3 bg-amber-100 dark:bg-amber-900/60 text-amber-600 dark:text-amber-400 rounded-xl shrink-0 mt-0.5 sm:mt-0">
+                    <Cloud size={22} />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <h4 className="text-xs font-black text-amber-950 dark:text-amber-100 uppercase tracking-wide">
+                        Aktiv Cloud Firestore-databas
+                      </h4>
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-amber-200/80 dark:bg-amber-900/80 text-amber-900 dark:text-amber-200">
+                        {dbConfig.mode === 'firestore_only' ? 'Endast Cloud Firestore' : 'Hybrid (SQLite + Cloud)'}
+                      </span>
+                    </div>
+                    <p className="text-xs text-amber-900/80 dark:text-amber-200/80 font-medium mt-1 flex flex-wrap items-center gap-2">
+                      <span>Projekt: <code className="font-bold bg-amber-100/80 dark:bg-amber-900/80 px-1.5 py-0.5 rounded text-[11px] text-amber-950 dark:text-amber-100">{dbConfig.firestoreProjectId || 'Standard'}</code></span>
+                      {dbConfig.firestoreDatabaseId && dbConfig.firestoreDatabaseId !== '(default)' && (
+                        <span>Databas: <code className="font-bold bg-amber-100/80 dark:bg-amber-900/80 px-1.5 py-0.5 rounded text-[11px] text-amber-950 dark:text-amber-100">{dbConfig.firestoreDatabaseId}</code></span>
+                      )}
+                    </p>
+                  </div>
+                </div>
+                <a
+                  href={dbConfig.firestoreUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center justify-center gap-2 bg-amber-500 hover:bg-amber-600 text-zinc-950 font-extrabold px-4 py-2.5 rounded-xl text-xs transition-all active:scale-95 shadow-md shadow-amber-500/20 shrink-0 cursor-pointer"
+                >
+                  <ExternalLink size={14} />
+                  <span>Öppna i Firebase Console</span>
+                </a>
+              </div>
+            )}
           </div>
 
           {/* Backup & Import & Manual Sync Section */}
