@@ -6,6 +6,7 @@ import { auth, signInWithGoogle, db, handleFirestoreError, OperationType } from 
 import { onAuthStateChanged, signOut, User } from 'firebase/auth';
 import { doc, onSnapshot, setDoc, getDoc } from 'firebase/firestore';
 import { calculateLeaderboard } from './lib/leaderboardUtils';
+import { syncSquadToClubMembers, getMergedSquadAndClubMembers } from './lib/clubUtils';
 
 import GameSetup from './components/GameSetup';
 import PlayerCard from './components/PlayerCard';
@@ -573,6 +574,19 @@ export default function App() {
       } else {
         setUserRoles(['admin', 'coach']);
       }
+
+      if (updatedProfile.activeClubId && updatedProfile.activeTeamId) {
+        getMergedSquadAndClubMembers(data.squad, updatedProfile.activeClubId, updatedProfile.activeTeamId)
+          .then(({ mergedSquad, hasChanges }) => {
+            if (hasChanges) {
+              setData(prev => ({ ...prev, squad: mergedSquad }));
+              setSessionActionCount(prev => prev + 1);
+            }
+            syncSquadToClubMembers(mergedSquad, updatedProfile.activeClubId!, updatedProfile.activeTeamId!)
+              .catch(err => console.error('Failed to sync squad on profile update:', err));
+          })
+          .catch(err => console.error('Failed to merge squad on profile update:', err));
+      }
     }
   };
 
@@ -658,6 +672,17 @@ export default function App() {
         trainingSettings: settingsSnap.exists() ? (settingsSnap.data().trainingSettings || INITIAL_DATA.trainingSettings) : INITIAL_DATA.trainingSettings,
         activeExerciseId: settingsSnap.exists() ? (settingsSnap.data().activeExerciseId || null) : null,
       };
+
+      if (userProfile.activeClubId && userProfile.activeTeamId) {
+        const { mergedSquad } = await getMergedSquadAndClubMembers(
+          updatedState.squad,
+          userProfile.activeClubId,
+          userProfile.activeTeamId
+        );
+        updatedState.squad = mergedSquad;
+        syncSquadToClubMembers(mergedSquad, userProfile.activeClubId, userProfile.activeTeamId)
+          .catch(err => console.error("Error syncing squad in pullLatestData:", err));
+      }
 
       setData(updatedState);
       lastCloudDataRef.current = updatedState;
@@ -903,6 +928,17 @@ export default function App() {
               activeExerciseId: settingsSnap.exists() ? (settingsSnap.data().activeExerciseId || null) : null,
             };
           }
+        }
+
+        if (userProfile.activeClubId && userProfile.activeTeamId) {
+          const { mergedSquad } = await getMergedSquadAndClubMembers(
+            loadedState.squad,
+            userProfile.activeClubId,
+            userProfile.activeTeamId
+          );
+          loadedState.squad = mergedSquad;
+          syncSquadToClubMembers(mergedSquad, userProfile.activeClubId, userProfile.activeTeamId)
+            .catch(err => console.error("Error syncing squad on initial load:", err));
         }
 
         if (isSubscribed) {
@@ -2136,6 +2172,11 @@ export default function App() {
       };
     });
     setSessionActionCount(prev => prev + 1);
+
+    if (userProfile.activeClubId && userProfile.activeTeamId) {
+      syncSquadToClubMembers(newSquad, userProfile.activeClubId, userProfile.activeTeamId)
+        .catch(err => console.error("Error syncing squad to club members:", err));
+    }
   };
 
   const onUpdateSettings = (settings: TrainingSettings) => {

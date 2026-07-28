@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Landmark, Trash2, Edit3, Users, Shield, Check, PlusCircle, Search, Mail, Phone, Fingerprint, Settings, ArrowRight, UserPlus, Save, Smartphone, X, Database, Server, HardDrive, Cloud, RefreshCw, Download, Upload, Globe, Cpu, CheckCircle2, AlertTriangle } from 'lucide-react';
-import { Club, ClubMetadata, ClubTeam, ClubMember } from '../types';
+import { Club, ClubMetadata, ClubTeam, ClubMember, SquadPlayer } from '../types';
 import { db } from '../lib/firebase';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 import PwaIconGenerator from './PwaIconGenerator';
@@ -506,9 +506,51 @@ export default function ClubAdminDashboard({ userId, userEmail, isRootAdmin = fa
 
       await setDoc(doc(db, 'clubs', selectedClub.id, 'teams', 'club_global', 'data', 'members'), { members: updatedMembers });
       
+      // Also sync member into each selected team's squad
+      for (const teamId of memberTeams) {
+        try {
+          const squadRef = doc(db, 'clubs', selectedClub.id, 'teams', teamId, 'data', 'squad');
+          const squadSnap = await getDoc(squadRef);
+          let teamSquad: SquadPlayer[] = squadSnap.exists() ? (squadSnap.data().squad || []) : [];
+
+          const isLeader = newOrUpdatedMember.roles.includes('coach') || newOrUpdatedMember.roles.includes('admin');
+          const role: 'leader' | 'player' = isLeader ? 'leader' : 'player';
+
+          const existingIdx = teamSquad.findIndex(sp => 
+            (newOrUpdatedMember.userId && sp.id === newOrUpdatedMember.userId) ||
+            (cleanEmail && sp.email && sp.email.trim().toLowerCase() === cleanEmail) ||
+            (sp.name.trim().toLowerCase() === newOrUpdatedMember.fullName.trim().toLowerCase())
+          );
+
+          if (existingIdx !== -1) {
+            teamSquad[existingIdx] = {
+              ...teamSquad[existingIdx],
+              name: newOrUpdatedMember.fullName,
+              email: newOrUpdatedMember.email,
+              phone: newOrUpdatedMember.phone || teamSquad[existingIdx].phone,
+              personnummer: newOrUpdatedMember.personnummer || teamSquad[existingIdx].personnummer,
+              role
+            };
+          } else {
+            teamSquad.push({
+              id: newOrUpdatedMember.userId || crypto.randomUUID(),
+              name: newOrUpdatedMember.fullName,
+              email: newOrUpdatedMember.email,
+              phone: newOrUpdatedMember.phone,
+              personnummer: newOrUpdatedMember.personnummer,
+              role
+            });
+          }
+
+          await setDoc(squadRef, { squad: teamSquad, updatedAt: Date.now() });
+        } catch (err) {
+          console.error(`Error syncing member to team squad for ${teamId}:`, err);
+        }
+      }
+
       setMembers(updatedMembers);
       setShowMemberForm(false);
-      setActionStatus({ type: 'save', status: 'success', message: editingMember ? 'Medlemsuppgifter uppdaterade!' : 'Medlem tillagd i föreningen!' });
+      setActionStatus({ type: 'save', status: 'success', message: editingMember ? 'Medlemsuppgifter uppdaterade!' : 'Medlem tillagd i föreningen och laget!' });
       setTimeout(() => setActionStatus({ type: 'save', status: 'idle' }), 3000);
     } catch (err) {
       console.error('Failed to save member:', err);

@@ -5,6 +5,9 @@ export interface SquadPlayer {
   number?: string;
   photoUrl?: string;
   role?: 'player' | 'leader';
+  email?: string;
+  phone?: string;
+  personnummer?: string;
 }
 
 export interface LineupPlayer {
