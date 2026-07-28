@@ -1,9 +1,11 @@
-import React, { useState, useEffect } from 'react';
-import { Landmark, Trash2, Edit3, Users, Shield, Check, PlusCircle, Search, Mail, Phone, Fingerprint, Settings, ArrowRight, UserPlus, Save, Smartphone, X, Database, Server, HardDrive, Cloud, RefreshCw, Download, Upload, Globe, Cpu, CheckCircle2, AlertTriangle, Calendar, Link, Copy, ExternalLink } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { Landmark, Trash2, Edit3, Users, Shield, Check, PlusCircle, Search, Mail, Phone, Fingerprint, Settings, ArrowRight, UserPlus, Save, Smartphone, X, Database, Server, HardDrive, Cloud, RefreshCw, Download, Upload, Globe, Cpu, CheckCircle2, AlertTriangle, Calendar, Link, Copy, ExternalLink, FileSpreadsheet, FileText } from 'lucide-react';
 import { Club, ClubMetadata, ClubTeam, ClubMember, SquadPlayer } from '../types';
 import { db } from '../lib/firebase';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 import PwaIconGenerator from './PwaIconGenerator';
+import * as XLSX from 'xlsx';
+import Papa from 'papaparse';
 
 interface ClubAdminDashboardProps {
   userId: string;
@@ -16,6 +18,11 @@ interface ClubAdminDashboardProps {
   onUpdateAdminUrl?: (url: string) => void;
   seriesUrl?: string;
   onUpdateSeriesUrl?: (url: string) => void;
+  activeClubId?: string | null;
+  activeTeamId?: string | null;
+  onSelectActiveTeam?: (clubId: string, teamId: string) => void;
+  activeSquad?: SquadPlayer[];
+  onUpdateSquad?: (squad: SquadPlayer[]) => void;
 }
 
 export default function ClubAdminDashboard({
@@ -29,6 +36,11 @@ export default function ClubAdminDashboard({
   onUpdateAdminUrl,
   seriesUrl = 'https://minfotboll.svenskfotboll.se/',
   onUpdateSeriesUrl,
+  activeClubId,
+  activeTeamId,
+  onSelectActiveTeam,
+  activeSquad: _activeSquad,
+  onUpdateSquad,
 }: ClubAdminDashboardProps) {
   // Navigation tabs within admin
   const [activeTab, setActiveTab] = useState<'clubs' | 'teams' | 'members' | 'calendar_sync' | 'pwa_icons' | 'database_env' | 'root_admins'>('clubs');
@@ -51,6 +63,25 @@ export default function ClubAdminDashboard({
   const [tempSeriesUrl, setTempSeriesUrl] = useState(seriesUrl);
   const [calSyncSaved, setCalSyncSaved] = useState(false);
   const [copiedCalFeed, setCopiedCalFeed] = useState(false);
+
+  // Import Modal State
+  const [showImportModal, setShowImportModal] = useState(false);
+  const [importSourceTab, setImportSourceTab] = useState<'file' | 'paste'>('file');
+  const [importPasteText, setImportPasteText] = useState('');
+  const [importSelectedTeamIds, setImportSelectedTeamIds] = useState<string[]>([]);
+  const [importRoleMode, setImportRoleMode] = useState<'auto' | 'force_player' | 'force_coach'>('auto');
+  const [parsedImportMembers, setParsedImportMembers] = useState<Array<{
+    id: string;
+    fullName: string;
+    email: string;
+    phone: string;
+    personnummer: string;
+    role: 'coach' | 'player';
+    position?: string;
+    number?: string;
+  }>>([]);
+  const [isProcessingImport, setIsProcessingImport] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     setTempTeamUrl(teamUrl);
@@ -397,7 +428,7 @@ export default function ClubAdminDashboard({
               userId: userId,
               email: userEmail,
               fullName: userEmail.split('@')[0],
-              roles: ['admin'],
+              roles: ['admin', 'coach'],
               teams: []
             }
           ]
@@ -435,11 +466,302 @@ export default function ClubAdminDashboard({
       
       setClubMetadata(updatedMeta);
       setNewTeamName('');
+
+      // Auto set active team if user has none set
+      if ((!activeClubId || !activeTeamId) && onSelectActiveTeam) {
+        onSelectActiveTeam(selectedClub.id, newTeam.id);
+      }
+
       setActionStatus({ type: 'save', status: 'success', message: `Laget "${newTeam.name}" har lagts till!` });
       setTimeout(() => setActionStatus({ type: 'save', status: 'idle' }), 3000);
     } catch (err) {
       console.error('Failed to add team:', err);
       setActionStatus({ type: 'save', status: 'error', message: 'Kunde inte lägga till laget.' });
+    }
+  };
+
+  // Process and parse raw imported rows for Members & Squads
+  const processParsedImportRows = (rows: string[][], overrideRoleMode?: 'auto' | 'force_player' | 'force_coach') => {
+    const roleMode = overrideRoleMode || importRoleMode;
+    const result: Array<{
+      id: string;
+      fullName: string;
+      email: string;
+      phone: string;
+      personnummer: string;
+      role: 'coach' | 'player';
+      position?: string;
+      number?: string;
+    }> = [];
+
+    const leaderKeywords = [
+      'tränare', 'ledare', 'lagledare', 'coach', 'manager', 'materialförvaltare', 
+      'materialare', 'kiropraktor', 'fysio', 'physio', 'fysioterapeut', 'naprapat', 'massör',
+      'analytiker', 'läkare', 'fys', 'assisterande', 'huvudtränare', 'målvaktstränare', 'fystränare', 'ledarskap'
+    ];
+
+    for (let rowIdx = 0; rowIdx < rows.length; rowIdx++) {
+      const rawRow = rows[rowIdx];
+      if (!rawRow || rawRow.length === 0) continue;
+
+      const cells = rawRow.map(c => String(c || '').trim());
+      const lineText = cells.join(' ').toLowerCase();
+
+      // Skip header
+      if (rowIdx === 0 && (lineText.includes('namn') || lineText.includes('e-post') || lineText.includes('email') || lineText.includes('telefon') || lineText.includes('roll'))) {
+        continue;
+      }
+
+      let fullName = '';
+      let email = '';
+      let phone = '';
+      let personnummer = '';
+      let position = '';
+      let number = '';
+      let isLeader = false;
+
+      for (const cell of cells) {
+        if (!cell) continue;
+
+        // Email
+        if (cell.includes('@') && cell.includes('.')) {
+          email = cell.toLowerCase();
+          continue;
+        }
+
+        // Phone
+        if (/^[\+\d\s\-]{7,16}$/.test(cell) && !/^\d{10,12}$/.test(cell.replace(/\D/g, ''))) {
+          phone = cell;
+          continue;
+        }
+
+        // Personnummer
+        const digitsOnly = cell.replace(/\D/g, '');
+        if ((digitsOnly.length === 10 || digitsOnly.length === 12) && (cell.includes('-') || /^(19|20)\d{8,10}$/.test(cell) || /^\d{6}\-\d{4}$/.test(cell))) {
+          personnummer = cell;
+          continue;
+        }
+
+        // Role / Position
+        const lowerCell = cell.toLowerCase();
+        if (leaderKeywords.some(kw => lowerCell.includes(kw))) {
+          isLeader = true;
+          position = cell;
+          continue;
+        }
+
+        // Jersey number
+        if (/^\d{1,3}$/.test(cell) && parseInt(cell) <= 99 && !number) {
+          number = cell;
+          continue;
+        }
+
+        // Name
+        if (!fullName && cell.length >= 2 && !/^\d+$/.test(cell)) {
+          fullName = cell;
+        } else if (fullName && !position && cell.length <= 15 && !/^\d+$/.test(cell)) {
+          position = cell;
+        }
+      }
+
+      if (!fullName) continue;
+
+      let finalRole: 'coach' | 'player' = isLeader ? 'coach' : 'player';
+      if (roleMode === 'force_player') finalRole = 'player';
+      if (roleMode === 'force_coach') finalRole = 'coach';
+
+      result.push({
+        id: crypto.randomUUID(),
+        fullName,
+        email,
+        phone,
+        personnummer,
+        role: finalRole,
+        position: position || undefined,
+        number: number || undefined
+      });
+    }
+
+    setParsedImportMembers(result);
+  };
+
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    const extension = file.name.split('.').pop()?.toLowerCase();
+
+    if (extension === 'csv') {
+      Papa.parse(file, {
+        complete: (results) => {
+          const rows = results.data as string[][];
+          processParsedImportRows(rows);
+        },
+        header: false
+      });
+    } else if (extension === 'xlsx' || extension === 'xls') {
+      reader.onload = (evt) => {
+        const bstr = evt.target?.result;
+        const wb = XLSX.read(bstr, { type: 'binary' });
+        const wsname = wb.SheetNames[0];
+        const ws = wb.Sheets[wsname];
+        const data = XLSX.utils.sheet_to_json(ws, { header: 1 }) as string[][];
+        processParsedImportRows(data);
+      };
+      reader.readAsBinaryString(file);
+    }
+
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  };
+
+  const handlePasteImport = (text: string) => {
+    const lines = text.split('\n').filter(l => l.trim());
+    const rows = lines.map(line => {
+      if (line.includes('\t')) return line.split('\t');
+      if (line.includes(';')) return line.split(';');
+      if (line.includes(',')) return line.split(',');
+      return [line];
+    });
+    processParsedImportRows(rows);
+  };
+
+  // Execute import to global club members + team squads
+  const handleExecuteImport = async () => {
+    if (!selectedClub || parsedImportMembers.length === 0) return;
+    if (importSelectedTeamIds.length === 0) {
+      alert("Välj minst ett lag som de importerade personerna ska kopplas till.");
+      return;
+    }
+
+    setIsProcessingImport(true);
+    try {
+      const membersRef = doc(db, 'clubs', selectedClub.id, 'teams', 'club_global', 'data', 'members');
+      const membersSnap = await getDoc(membersRef);
+      let currentMembers: ClubMember[] = membersSnap.exists() ? (membersSnap.data().members || []) : [];
+
+      let countNew = 0;
+      let countUpdated = 0;
+
+      for (const item of parsedImportMembers) {
+        const cleanName = item.fullName.trim();
+        const cleanEmail = item.email.trim().toLowerCase();
+
+        const idx = currentMembers.findIndex(m => {
+          const mEmail = (m.email || '').trim().toLowerCase();
+          const mName = (m.fullName || '').trim().toLowerCase();
+          return (
+            (cleanEmail && mEmail === cleanEmail) ||
+            (mName === cleanName.toLowerCase())
+          );
+        });
+
+        if (idx !== -1) {
+          const existing = currentMembers[idx];
+          const existingRoles = existing.roles || [];
+          const existingTeams = existing.teams || [];
+
+          const updatedRoles = Array.from(new Set([...existingRoles, item.role]));
+          const updatedTeams = Array.from(new Set([...existingTeams, ...importSelectedTeamIds]));
+
+          currentMembers[idx] = {
+            ...existing,
+            fullName: cleanName,
+            email: item.email || existing.email || '',
+            phone: item.phone || existing.phone,
+            personnummer: item.personnummer || existing.personnummer,
+            roles: updatedRoles,
+            teams: updatedTeams
+          };
+          countUpdated++;
+        } else {
+          const newMember: ClubMember = {
+            userId: item.id || 'player_' + Math.random().toString(36).substring(2, 10),
+            email: item.email || '',
+            fullName: cleanName,
+            phone: item.phone || undefined,
+            personnummer: item.personnummer || undefined,
+            roles: [item.role],
+            teams: [...importSelectedTeamIds]
+          };
+          currentMembers.push(newMember);
+          countNew++;
+        }
+      }
+
+      await setDoc(membersRef, { members: currentMembers, updatedAt: Date.now() });
+      setMembers(currentMembers);
+
+      // Sync into each selected team's squad document
+      for (const teamId of importSelectedTeamIds) {
+        try {
+          const squadRef = doc(db, 'clubs', selectedClub.id, 'teams', teamId, 'data', 'squad');
+          const squadSnap = await getDoc(squadRef);
+          let teamSquad: SquadPlayer[] = squadSnap.exists() ? (squadSnap.data().squad || []) : [];
+
+          for (const item of parsedImportMembers) {
+            const cleanName = item.fullName.trim();
+            const cleanEmail = item.email.trim().toLowerCase();
+            const targetSquadRole: 'leader' | 'player' = item.role === 'coach' ? 'leader' : 'player';
+
+            const spIdx = teamSquad.findIndex(sp => {
+              const spEmail = (sp.email || '').trim().toLowerCase();
+              const spName = (sp.name || '').trim().toLowerCase();
+              return (
+                (cleanEmail && spEmail === cleanEmail) ||
+                (spName === cleanName.toLowerCase())
+              );
+            });
+
+            if (spIdx !== -1) {
+              teamSquad[spIdx] = {
+                ...teamSquad[spIdx],
+                name: cleanName,
+                email: item.email || teamSquad[spIdx].email,
+                phone: item.phone || teamSquad[spIdx].phone,
+                personnummer: item.personnummer || teamSquad[spIdx].personnummer,
+                role: targetSquadRole,
+                position: item.position || teamSquad[spIdx].position,
+                number: item.number || teamSquad[spIdx].number
+              };
+            } else {
+              teamSquad.push({
+                id: item.id || crypto.randomUUID(),
+                name: cleanName,
+                email: item.email || undefined,
+                phone: item.phone || undefined,
+                personnummer: item.personnummer || undefined,
+                role: targetSquadRole,
+                position: item.position || undefined,
+                number: item.number || undefined
+              });
+            }
+          }
+
+          await setDoc(squadRef, { squad: teamSquad, updatedAt: Date.now() });
+
+          if (activeTeamId === teamId && onUpdateSquad) {
+            onUpdateSquad(teamSquad);
+          }
+        } catch (err) {
+          console.error(`Failed to sync squad for team ${teamId}:`, err);
+        }
+      }
+
+      setShowImportModal(false);
+      setParsedImportMembers([]);
+      setImportPasteText('');
+      setActionStatus({
+        type: 'save',
+        status: 'success',
+        message: `Importering klar! ${countNew} nya och ${countUpdated} uppdaterade medlemmar sparades och synkades till dina valda lag.`
+      });
+      setTimeout(() => setActionStatus({ type: 'save', status: 'idle' }), 4000);
+    } catch (err) {
+      console.error('Failed to execute import:', err);
+      setActionStatus({ type: 'save', status: 'error', message: 'Kunde inte genomföra importeringen.' });
+    } finally {
+      setIsProcessingImport(false);
     }
   };
 
@@ -910,12 +1232,31 @@ export default function ClubAdminDashboard({
                         <p className="text-[10px] text-zinc-400 font-bold uppercase tracking-wider mt-0.5">ID: {team.id}</p>
                       </div>
                     </div>
-                    <button
-                      onClick={() => handleDeleteTeam(team.id)}
-                      className="text-red-500 hover:text-red-650 p-2 hover:bg-red-50 dark:hover:bg-red-950/30 rounded-xl transition-all cursor-pointer"
-                    >
-                      <Trash2 size={16} />
-                    </button>
+                    <div className="flex items-center gap-2">
+                      {selectedClub.id === activeClubId && team.id === activeTeamId ? (
+                        <span className="text-emerald-600 dark:text-emerald-400 text-xs font-black bg-emerald-50 dark:bg-emerald-950/40 px-3 py-1.5 rounded-xl border border-emerald-200 dark:border-emerald-800 flex items-center gap-1.5">
+                          <Check size={14} />
+                          <span>Aktivt lag</span>
+                        </span>
+                      ) : (
+                        onSelectActiveTeam && (
+                          <button
+                            type="button"
+                            onClick={() => onSelectActiveTeam(selectedClub.id, team.id)}
+                            className="text-xs font-bold text-zinc-600 dark:text-zinc-300 hover:text-indigo-600 dark:hover:text-indigo-400 bg-zinc-100 dark:bg-zinc-800 hover:bg-indigo-50 dark:hover:bg-indigo-950/40 px-3 py-1.5 rounded-xl transition-all cursor-pointer"
+                          >
+                            Välj som aktivt lag
+                          </button>
+                        )
+                      )}
+                      <button
+                        onClick={() => handleDeleteTeam(team.id)}
+                        className="text-red-500 hover:text-red-650 p-2 hover:bg-red-50 dark:hover:bg-red-950/30 rounded-xl transition-all cursor-pointer"
+                        title="Ta bort lag"
+                      >
+                        <Trash2 size={16} />
+                      </button>
+                    </div>
                   </div>
                 ))}
               </div>
@@ -948,13 +1289,27 @@ export default function ClubAdminDashboard({
                 />
               </div>
 
-              <button
-                onClick={() => openMemberForm(null)}
-                className="bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-3.5 rounded-2xl font-extrabold text-sm flex items-center justify-center gap-2 active:scale-95 transition-all cursor-pointer shadow-md shadow-indigo-100 dark:shadow-none shrink-0"
-              >
-                <UserPlus size={18} />
-                <span>Lägg till medlem</span>
-              </button>
+              <div className="flex flex-wrap items-center gap-2 shrink-0">
+                <button
+                  onClick={() => {
+                    setImportSelectedTeamIds(clubMetadata?.teams?.map(t => t.id) || []);
+                    setParsedImportMembers([]);
+                    setShowImportModal(true);
+                  }}
+                  className="bg-emerald-600 hover:bg-emerald-700 text-white px-5 py-3.5 rounded-2xl font-extrabold text-sm flex items-center justify-center gap-2 active:scale-95 transition-all cursor-pointer shadow-md shadow-emerald-100 dark:shadow-none"
+                >
+                  <Upload size={18} />
+                  <span>Importera trupp / medlemmar</span>
+                </button>
+
+                <button
+                  onClick={() => openMemberForm(null)}
+                  className="bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-3.5 rounded-2xl font-extrabold text-sm flex items-center justify-center gap-2 active:scale-95 transition-all cursor-pointer shadow-md shadow-indigo-100 dark:shadow-none"
+                >
+                  <UserPlus size={18} />
+                  <span>Lägg till medlem</span>
+                </button>
+              </div>
             </div>
           </div>
 
@@ -1237,6 +1592,241 @@ export default function ClubAdminDashboard({
               </div>
             )}
           </div>
+
+          {/* IMPORT MEMBERS & SQUAD MODAL */}
+          {showImportModal && selectedClub && (
+            <div 
+              className="fixed inset-0 z-[100] flex items-center justify-center p-3 sm:p-6 bg-black/60 backdrop-blur-sm overflow-y-auto"
+              onClick={() => setShowImportModal(false)}
+            >
+              <div 
+                className="bg-white dark:bg-zinc-900 rounded-3xl border border-zinc-200 dark:border-zinc-800 shadow-2xl p-5 sm:p-8 w-full max-w-3xl max-h-[90vh] overflow-y-auto my-auto animate-in fade-in zoom-in-95 duration-200"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div className="flex items-center justify-between mb-5 border-b border-zinc-100 dark:border-zinc-800 pb-4">
+                  <div>
+                    <h3 className="text-base sm:text-lg font-black text-zinc-900 dark:text-white flex items-center gap-2">
+                      <Upload size={20} className="text-emerald-600 dark:text-emerald-400" />
+                      <span>Importera spelare & ledare till {selectedClub.name}</span>
+                    </h3>
+                    <p className="text-xs text-zinc-500 font-medium mt-0.5">
+                      Ladda upp Excel / CSV eller klistra in en lista. Importerade medlemmar sparas i medlemsregistret och synkas till valda lag.
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => setShowImportModal(false)}
+                    className="text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 p-2 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-xl transition-all cursor-pointer"
+                  >
+                    <X size={20} />
+                  </button>
+                </div>
+
+                <div className="space-y-6">
+                  {/* Source Tabs */}
+                  <div className="flex items-center gap-2 p-1 bg-zinc-100 dark:bg-zinc-950 rounded-2xl border border-zinc-200 dark:border-zinc-800">
+                    <button
+                      type="button"
+                      onClick={() => setImportSourceTab('file')}
+                      className={`flex-1 py-2.5 px-4 rounded-xl text-xs font-black transition-all flex items-center justify-center gap-2 cursor-pointer ${
+                        importSourceTab === 'file'
+                          ? 'bg-white dark:bg-zinc-900 text-zinc-900 dark:text-white shadow-sm'
+                          : 'text-zinc-500 hover:text-zinc-900 dark:hover:text-white'
+                      }`}
+                    >
+                      <FileSpreadsheet size={16} />
+                      <span>Excel / CSV Fil</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setImportSourceTab('paste')}
+                      className={`flex-1 py-2.5 px-4 rounded-xl text-xs font-black transition-all flex items-center justify-center gap-2 cursor-pointer ${
+                        importSourceTab === 'paste'
+                          ? 'bg-white dark:bg-zinc-900 text-zinc-900 dark:text-white shadow-sm'
+                          : 'text-zinc-500 hover:text-zinc-900 dark:hover:text-white'
+                      }`}
+                    >
+                      <FileText size={16} />
+                      <span>Klistra in Text</span>
+                    </button>
+                  </div>
+
+                  {/* Input Controls */}
+                  {importSourceTab === 'file' ? (
+                    <div>
+                      <label className="block text-xs font-black text-zinc-650 dark:text-zinc-400 uppercase tracking-wider mb-2">Välj Excel- (.xlsx, .xls) eller CSV-fil</label>
+                      <div 
+                        onClick={() => fileInputRef.current?.click()}
+                        className="border-2 border-dashed border-zinc-200 dark:border-zinc-800 hover:border-emerald-500 dark:hover:border-emerald-500 bg-zinc-50 dark:bg-zinc-950 hover:bg-emerald-50/20 dark:hover:bg-emerald-950/10 p-8 rounded-2xl text-center cursor-pointer transition-all"
+                      >
+                        <FileSpreadsheet size={40} className="mx-auto mb-3 text-emerald-600 dark:text-emerald-400" />
+                        <p className="text-sm font-extrabold text-zinc-900 dark:text-white">Klicka för att bläddra eller släpp filen här</p>
+                        <p className="text-xs text-zinc-400 font-medium mt-1">Stödjer kolumner för Namn, E-post, Telefon, Personnummer, Roll/Position, Tröjnummer</p>
+                        <input
+                          ref={fileInputRef}
+                          type="file"
+                          accept=".xlsx, .xls, .csv"
+                          onChange={handleFileUpload}
+                          className="hidden"
+                        />
+                      </div>
+                    </div>
+                  ) : (
+                    <div>
+                      <label className="block text-xs font-black text-zinc-650 dark:text-zinc-400 uppercase tracking-wider mb-2">Klistra in rader (från Excel / Google Sheets / Text)</label>
+                      <textarea
+                        rows={5}
+                        placeholder={"Kalle Nilsson\tkalle@exempel.se\t0701234567\tSpelare\nAnna Svensson\tanna@exempel.se\tTränare"}
+                        value={importPasteText}
+                        onChange={(e) => {
+                          setImportPasteText(e.target.value);
+                          handlePasteImport(e.target.value);
+                        }}
+                        className="w-full p-4 bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-white border border-zinc-200 dark:border-zinc-800 rounded-2xl focus:outline-none focus:border-emerald-500 font-mono text-xs"
+                      />
+                    </div>
+                  )}
+
+                  {/* Team Assignments */}
+                  {clubMetadata?.teams && clubMetadata.teams.length > 0 && (
+                    <div className="border-t border-zinc-100 dark:border-zinc-800 pt-4">
+                      <label className="block text-xs font-black text-zinc-650 dark:text-zinc-400 uppercase tracking-wider mb-2">
+                        Välj vilka lag de importerade medlemmarna ska kopplas till
+                      </label>
+                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                        {clubMetadata.teams.map(t => {
+                          const active = importSelectedTeamIds.includes(t.id);
+                          return (
+                            <button
+                              key={t.id}
+                              type="button"
+                              onClick={() => {
+                                if (active) {
+                                  setImportSelectedTeamIds(importSelectedTeamIds.filter(id => id !== t.id));
+                                } else {
+                                  setImportSelectedTeamIds([...importSelectedTeamIds, t.id]);
+                                }
+                              }}
+                              className={`py-2.5 px-3 rounded-xl border text-xs font-bold text-center transition-all truncate cursor-pointer ${
+                                active
+                                  ? 'bg-emerald-50 border-emerald-500 text-emerald-900 dark:bg-emerald-950/30 dark:text-emerald-300 dark:border-emerald-500/60'
+                                  : 'bg-zinc-50 border-zinc-200 text-zinc-600 dark:bg-zinc-950 dark:border-zinc-800 dark:text-zinc-400'
+                              }`}
+                            >
+                              {active ? '✓ ' : ''}{t.name}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Role Detection Mode */}
+                  <div className="border-t border-zinc-100 dark:border-zinc-800 pt-4">
+                    <label className="block text-xs font-black text-zinc-650 dark:text-zinc-400 uppercase tracking-wider mb-2">Rolltilldelning</label>
+                    <div className="grid grid-cols-3 gap-2">
+                      {[
+                        { id: 'auto', label: 'Automatisk (Tränare/Spelare)' },
+                        { id: 'force_player', label: 'Tvinga alla som Spelare' },
+                        { id: 'force_coach', label: 'Tvinga alla som Tränare' }
+                      ].map(m => (
+                        <button
+                          key={m.id}
+                          type="button"
+                          onClick={() => {
+                            setImportRoleMode(m.id as any);
+                            if (parsedImportMembers.length > 0) {
+                              setParsedImportMembers(prev => prev.map(p => ({
+                                ...p,
+                                role: m.id === 'force_player' ? 'player' : m.id === 'force_coach' ? 'coach' : p.role
+                              })));
+                            }
+                          }}
+                          className={`py-2 px-3 rounded-xl border text-xs font-bold transition-all text-center cursor-pointer ${
+                            importRoleMode === m.id
+                              ? 'bg-indigo-50 border-indigo-500 text-indigo-900 dark:bg-indigo-950/30 dark:text-indigo-300'
+                              : 'bg-zinc-50 border-zinc-200 text-zinc-600 dark:bg-zinc-950 dark:border-zinc-800 dark:text-zinc-400'
+                          }`}
+                        >
+                          {m.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Parsed Preview Table */}
+                  {parsedImportMembers.length > 0 && (
+                    <div className="border-t border-zinc-100 dark:border-zinc-800 pt-4">
+                      <div className="flex items-center justify-between mb-3">
+                        <span className="text-xs font-black text-zinc-900 dark:text-white uppercase tracking-wider">
+                          Förhandsgranskning ({parsedImportMembers.length} personer hittades)
+                        </span>
+                        <span className="text-xs text-emerald-600 dark:text-emerald-400 font-bold">
+                          {parsedImportMembers.filter(p => p.role === 'coach').length} ledare, {parsedImportMembers.filter(p => p.role === 'player').length} spelare
+                        </span>
+                      </div>
+
+                      <div className="max-h-56 overflow-y-auto border border-zinc-200 dark:border-zinc-800 rounded-2xl">
+                        <table className="w-full text-left text-xs">
+                          <thead className="bg-zinc-100 dark:bg-zinc-950 text-zinc-500 sticky top-0 font-bold">
+                            <tr>
+                              <th className="p-3">Namn</th>
+                              <th className="p-3">Roll</th>
+                              <th className="p-3">E-post</th>
+                              <th className="p-3">Telefon</th>
+                              <th className="p-3">Personnr</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
+                            {parsedImportMembers.map((m, idx) => (
+                              <tr key={idx} className="hover:bg-zinc-50 dark:hover:bg-zinc-950/50">
+                                <td className="p-3 font-extrabold text-zinc-900 dark:text-white">{m.fullName}</td>
+                                <td className="p-3">
+                                  <span className={`px-2 py-0.5 rounded-md text-[10px] font-black uppercase ${
+                                    m.role === 'coach'
+                                      ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
+                                      : 'bg-sky-100 text-sky-800 dark:bg-sky-950 dark:text-sky-300'
+                                  }`}>
+                                    {m.role === 'coach' ? 'Tränare/Ledare' : 'Spelare'}
+                                  </span>
+                                </td>
+                                <td className="p-3 text-zinc-600 dark:text-zinc-400 font-medium">{m.email || '-'}</td>
+                                <td className="p-3 text-zinc-600 dark:text-zinc-400 font-medium">{m.phone || '-'}</td>
+                                <td className="p-3 text-zinc-600 dark:text-zinc-400 font-medium">{m.personnummer || '-'}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Submit Actions */}
+                  <div className="flex items-center justify-end gap-3 pt-4 border-t border-zinc-100 dark:border-zinc-800">
+                    <button
+                      type="button"
+                      onClick={() => setShowImportModal(false)}
+                      className="px-5 py-3 rounded-xl border border-zinc-200 dark:border-zinc-800 text-zinc-600 dark:text-zinc-400 font-bold text-xs hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-all cursor-pointer"
+                    >
+                      Avbryt
+                    </button>
+                    <button
+                      type="button"
+                      disabled={parsedImportMembers.length === 0 || importSelectedTeamIds.length === 0 || isProcessingImport}
+                      onClick={handleExecuteImport}
+                      className="bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-black px-6 py-3 rounded-xl text-xs flex items-center gap-2 active:scale-95 transition-all cursor-pointer shadow-md shadow-emerald-100 dark:shadow-none"
+                    >
+                      {isProcessingImport ? (
+                        <RefreshCw size={16} className="animate-spin" />
+                      ) : (
+                        <Check size={16} />
+                      )}
+                      <span>Importera och Synka Till Lag ({parsedImportMembers.length})</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       )}
 

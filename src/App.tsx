@@ -2832,6 +2832,18 @@ export default function App() {
                 onUpdateAdminUrl={handleUpdateAdminUrl}
                 seriesUrl={seriesUrl}
                 onUpdateSeriesUrl={handleUpdateSeriesUrl}
+                activeClubId={userProfile.activeClubId || null}
+                activeTeamId={userProfile.activeTeamId || null}
+                onSelectActiveTeam={(clubId, teamId) => {
+                  const updated = { ...userProfile, activeClubId: clubId, activeTeamId: teamId };
+                  if (user) {
+                    setDoc(doc(db, 'users', user.uid, 'data', 'profile'), updated, { merge: true })
+                      .catch(err => console.error("Failed to save active team profile:", err));
+                  }
+                  handleProfileUpdated(updated);
+                }}
+                activeSquad={squad}
+                onUpdateSquad={handleUpdateSquad}
               />
             </motion.div>
           )}

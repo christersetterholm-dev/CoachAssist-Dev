@@ -12,7 +12,7 @@ export async function syncSquadToClubMembers(
   clubId: string,
   teamId: string
 ): Promise<void> {
-  if (!clubId || !teamId || !squad) return;
+  if (!clubId || !teamId || !squad || squad.length === 0) return;
 
   try {
     const membersRef = doc(db, 'clubs', clubId, 'teams', 'club_global', 'data', 'members');
@@ -28,11 +28,15 @@ export async function syncSquadToClubMembers(
       const targetRole: 'coach' | 'player' = player.role === 'leader' ? 'coach' : 'player';
 
       // Find existing member by id, email, or name
-      const idx = members.findIndex(m => 
-        (player.id && m.userId === player.id) ||
-        (cleanEmail && m.email.trim().toLowerCase() === cleanEmail) ||
-        (m.fullName.trim().toLowerCase() === cleanName.toLowerCase())
-      );
+      const idx = members.findIndex(m => {
+        const mEmail = (m.email || '').trim().toLowerCase();
+        const mName = (m.fullName || '').trim().toLowerCase();
+        return (
+          (player.id && m.userId === player.id) ||
+          (cleanEmail && mEmail === cleanEmail) ||
+          (mName && mName === cleanName.toLowerCase())
+        );
+      });
 
       if (idx !== -1) {
         const existing = members[idx];
@@ -47,12 +51,14 @@ export async function syncSquadToClubMembers(
           updatedTeams.length !== existingTeams.length ||
           existing.fullName !== cleanName ||
           (player.phone && existing.phone !== player.phone) ||
-          (player.personnummer && existing.personnummer !== player.personnummer);
+          (player.personnummer && existing.personnummer !== player.personnummer) ||
+          (cleanEmail && (existing.email || '').trim().toLowerCase() !== cleanEmail);
 
         if (hasChanged) {
           members[idx] = {
             ...existing,
             fullName: cleanName,
+            email: player.email || existing.email || '',
             phone: player.phone || existing.phone,
             personnummer: player.personnummer || existing.personnummer,
             roles: updatedRoles,
@@ -86,7 +92,8 @@ export async function syncSquadToClubMembers(
 
 /**
  * Fetches club members for a team and merges any members with role player/coach/admin
- * into the team's squad list if they aren't in squad yet.
+ * into the team's squad list if they aren't in squad yet. Also pushes any missing
+ * squad players into the club members list.
  */
 export async function getMergedSquadAndClubMembers(
   squad: SquadPlayer[],
@@ -98,7 +105,13 @@ export async function getMergedSquadAndClubMembers(
   try {
     const membersRef = doc(db, 'clubs', clubId, 'teams', 'club_global', 'data', 'members');
     const membersSnap = await getDoc(membersRef);
-    if (!membersSnap.exists()) return { mergedSquad: squad, hasChanges: false };
+    if (!membersSnap.exists()) {
+      // If members doc doesn't exist yet, push squad to members if squad has items
+      if (squad && squad.length > 0) {
+        await syncSquadToClubMembers(squad, clubId, teamId);
+      }
+      return { mergedSquad: squad, hasChanges: false };
+    }
 
     const members: ClubMember[] = membersSnap.data().members || [];
     const teamMembers = members.filter(m => m.teams && m.teams.includes(teamId));
@@ -111,13 +124,17 @@ export async function getMergedSquadAndClubMembers(
       const cleanName = member.fullName.trim();
       const cleanEmail = (member.email || '').trim().toLowerCase();
 
-      const existsInSquad = updatedSquad.some(sp => 
-        (member.userId && sp.id === member.userId) ||
-        (cleanEmail && sp.email && sp.email.trim().toLowerCase() === cleanEmail) ||
-        (sp.name.trim().toLowerCase() === cleanName.toLowerCase())
-      );
+      const squadIdx = updatedSquad.findIndex(sp => {
+        const spEmail = (sp.email || '').trim().toLowerCase();
+        const spName = (sp.name || '').trim().toLowerCase();
+        return (
+          (member.userId && sp.id === member.userId) ||
+          (cleanEmail && spEmail === cleanEmail) ||
+          (spName === cleanName.toLowerCase())
+        );
+      });
 
-      if (!existsInSquad) {
+      if (squadIdx === -1) {
         const isLeader = member.roles?.some(r => r === 'coach' || r === 'admin');
         const newSquadPlayer: SquadPlayer = {
           id: member.userId || crypto.randomUUID(),
@@ -129,7 +146,42 @@ export async function getMergedSquadAndClubMembers(
         };
         updatedSquad.push(newSquadPlayer);
         hasChanges = true;
+      } else {
+        // Update existing squad player if member has richer details
+        const existingSp = updatedSquad[squadIdx];
+        const newEmail = member.email || existingSp.email;
+        const newPhone = member.phone || existingSp.phone;
+        const newPnr = member.personnummer || existingSp.personnummer;
+
+        if (newEmail !== existingSp.email || newPhone !== existingSp.phone || newPnr !== existingSp.personnummer) {
+          updatedSquad[squadIdx] = {
+            ...existingSp,
+            email: newEmail,
+            phone: newPhone,
+            personnummer: newPnr
+          };
+          hasChanges = true;
+        }
       }
+    }
+
+    // Bi-directional check: If squad has players not in global members, trigger background sync
+    const missingInMembers = updatedSquad.some(sp => {
+      const spEmail = (sp.email || '').trim().toLowerCase();
+      const spName = (sp.name || '').trim().toLowerCase();
+      return !members.some(m => {
+        const mEmail = (m.email || '').trim().toLowerCase();
+        const mName = (m.fullName || '').trim().toLowerCase();
+        return (
+          (sp.id && m.userId === sp.id) ||
+          (spEmail && mEmail === spEmail) ||
+          (spName && mName === spName)
+        );
+      });
+    });
+
+    if (missingInMembers) {
+      await syncSquadToClubMembers(updatedSquad, clubId, teamId);
     }
 
     return { mergedSquad: updatedSquad, hasChanges };
@@ -138,3 +190,4 @@ export async function getMergedSquadAndClubMembers(
     return { mergedSquad: squad, hasChanges: false };
   }
 }
+
