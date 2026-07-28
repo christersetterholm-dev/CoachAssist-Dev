@@ -2696,7 +2696,13 @@ export default function App() {
                 </button>
               </motion.div>
             ) : (
-              <SquadManager key="squad" squad={squad} onUpdateSquad={handleUpdateSquad} />
+              <SquadManager
+                key="squad"
+                squad={squad}
+                onUpdateSquad={handleUpdateSquad}
+                activeClubId={userProfile.activeClubId}
+                activeTeamId={userProfile.activeTeamId}
+              />
             )
           )}
 

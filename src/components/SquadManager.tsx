@@ -1,9 +1,10 @@
 import React, { useState, useRef, useMemo } from 'react';
-import { UserPlus, Trash2, Edit2, X, Users, Upload, FileSpreadsheet, FileText, ClipboardList, Camera, Loader2, ArrowUpDown } from 'lucide-react';
+import { UserPlus, Trash2, Edit2, X, Users, Upload, FileSpreadsheet, FileText, ClipboardList, Camera, Loader2, ArrowUpDown, Check, Search } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { storage } from '../lib/firebase';
+import { storage, db } from '../lib/firebase';
+import { doc, getDoc } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
-import { SquadPlayer } from '../types';
+import { SquadPlayer, ClubMember, ClubTeam } from '../types';
 import * as XLSX from 'xlsx';
 import Papa from 'papaparse';
 import ImageCropper from './ImageCropper';
@@ -88,10 +89,12 @@ const compareByLastName = (a: SquadPlayer, b: SquadPlayer) => {
 interface SquadManagerProps {
   squad: SquadPlayer[];
   onUpdateSquad: (squad: SquadPlayer[]) => void;
+  activeClubId?: string | null;
+  activeTeamId?: string | null;
   key?: React.Key;
 }
 
-export default function SquadManager({ squad, onUpdateSquad }: SquadManagerProps) {
+export default function SquadManager({ squad, onUpdateSquad, activeClubId, activeTeamId }: SquadManagerProps) {
   const [isAdding, setIsAdding] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
   const [newName, setNewName] = useState('');
@@ -108,6 +111,16 @@ export default function SquadManager({ squad, onUpdateSquad }: SquadManagerProps
   const [imageToCrop, setImageToCrop] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Fetch team members state
+  const [showFetchMembersModal, setShowFetchMembersModal] = useState(false);
+  const [isFetchingMembers, setIsFetchingMembers] = useState(false);
+  const [fetchedMembers, setFetchedMembers] = useState<ClubMember[]>([]);
+  const [selectedMemberUserIds, setSelectedMemberUserIds] = useState<string[]>([]);
+  const [activeTeamName, setActiveTeamName] = useState<string>('');
+  const [fetchFilterShowAll, setFetchFilterShowAll] = useState(false);
+  const [fetchSearchQuery, setFetchSearchQuery] = useState('');
+  const [fetchStatusMessage, setFetchStatusMessage] = useState<{ text: string; type: 'success' | 'error' | 'info' } | null>(null);
+
   const [sortBy, setSortBy] = useState<SortOption>(() => {
     return (localStorage.getItem('squad_sort_by') as SortOption) || 'standard';
   });
@@ -116,6 +129,152 @@ export default function SquadManager({ squad, onUpdateSquad }: SquadManagerProps
     setSortBy(option);
     localStorage.setItem('squad_sort_by', option);
   };
+
+  const handleOpenFetchMembersModal = async () => {
+    setIsFetchingMembers(true);
+    setShowFetchMembersModal(true);
+    setFetchSearchQuery('');
+    setFetchFilterShowAll(false);
+
+    try {
+      let clubIdToUse = activeClubId;
+      let teamIdToUse = activeTeamId;
+
+      if (!clubIdToUse) {
+        const storedClubId = localStorage.getItem('last_active_club_id');
+        if (storedClubId) clubIdToUse = storedClubId;
+      }
+      if (!teamIdToUse) {
+        const storedTeamId = localStorage.getItem('last_active_team_id');
+        if (storedTeamId) teamIdToUse = storedTeamId;
+      }
+
+      if (!clubIdToUse) {
+        setIsFetchingMembers(false);
+        setFetchedMembers([]);
+        setSelectedMemberUserIds([]);
+        return;
+      }
+
+      const membersRef = doc(db, 'clubs', clubIdToUse, 'teams', 'club_global', 'data', 'members');
+      const membersSnap = await getDoc(membersRef);
+
+      const metaRef = doc(db, 'clubs', clubIdToUse, 'teams', 'club_global', 'data', 'metadata');
+      const metaSnap = await getDoc(metaRef);
+      if (metaSnap.exists()) {
+        const teams: ClubTeam[] = metaSnap.data().teams || [];
+        if (teamIdToUse) {
+          const currentT = teams.find(t => t.id === teamIdToUse);
+          if (currentT) setActiveTeamName(currentT.name);
+        } else {
+          setActiveTeamName(metaSnap.data().name || '');
+        }
+      }
+
+      if (membersSnap.exists()) {
+        const members: ClubMember[] = membersSnap.data().members || [];
+        setFetchedMembers(members);
+
+        const relevantMembers = teamIdToUse 
+          ? members.filter(m => m.teams && m.teams.includes(teamIdToUse))
+          : members;
+
+        const autoSelected = relevantMembers
+          .filter(m => {
+            const cleanEmail = (m.email || '').trim().toLowerCase();
+            const cleanName = (m.fullName || '').trim().toLowerCase();
+            return !squad.some(sp => 
+              (m.userId && sp.id === m.userId) ||
+              (cleanEmail && sp.email && sp.email.trim().toLowerCase() === cleanEmail) ||
+              (sp.name.trim().toLowerCase() === cleanName)
+            );
+          })
+          .map(m => m.userId || m.fullName);
+
+        setSelectedMemberUserIds(autoSelected);
+      } else {
+        setFetchedMembers([]);
+        setSelectedMemberUserIds([]);
+      }
+    } catch (err) {
+      console.error("Error fetching team members:", err);
+    } finally {
+      setIsFetchingMembers(false);
+    }
+  };
+
+  const handleExecuteAddFetchedMembers = () => {
+    if (selectedMemberUserIds.length === 0) return;
+
+    const membersToAdd = fetchedMembers.filter(m => 
+      selectedMemberUserIds.includes(m.userId || m.fullName)
+    );
+
+    let updatedSquad = [...squad];
+    let countAdded = 0;
+    let countUpdated = 0;
+
+    for (const member of membersToAdd) {
+      const cleanName = member.fullName.trim();
+      const cleanEmail = (member.email || '').trim().toLowerCase();
+
+      const idx = updatedSquad.findIndex(sp => 
+        (member.userId && sp.id === member.userId) ||
+        (cleanEmail && sp.email && sp.email.trim().toLowerCase() === cleanEmail) ||
+        (sp.name.trim().toLowerCase() === cleanName.toLowerCase())
+      );
+
+      const isLeader = member.roles?.some(r => r === 'coach' || r === 'admin');
+      const targetRole: 'leader' | 'player' = isLeader ? 'leader' : 'player';
+
+      if (idx !== -1) {
+        updatedSquad[idx] = {
+          ...updatedSquad[idx],
+          name: cleanName,
+          email: member.email || updatedSquad[idx].email,
+          phone: member.phone || updatedSquad[idx].phone,
+          personnummer: member.personnummer || updatedSquad[idx].personnummer,
+          role: targetRole
+        };
+        countUpdated++;
+      } else {
+        const newPlayer: SquadPlayer = {
+          id: member.userId || crypto.randomUUID(),
+          name: cleanName,
+          email: member.email || undefined,
+          phone: member.phone || undefined,
+          personnummer: member.personnummer || undefined,
+          role: targetRole
+        };
+        updatedSquad.push(newPlayer);
+        countAdded++;
+      }
+    }
+
+    onUpdateSquad(updatedSquad);
+    setShowFetchMembersModal(false);
+    setFetchStatusMessage({
+      text: `${countAdded} nya medlemmar lagdes till och ${countUpdated} uppdaterades i truppen!`,
+      type: 'success'
+    });
+    setTimeout(() => setFetchStatusMessage(null), 4500);
+  };
+
+  const displayMembers = useMemo(() => {
+    let list = fetchedMembers;
+    if (activeTeamId && !fetchFilterShowAll) {
+      list = list.filter(m => m.teams && m.teams.includes(activeTeamId));
+    }
+    if (fetchSearchQuery.trim()) {
+      const q = fetchSearchQuery.trim().toLowerCase();
+      list = list.filter(m => 
+        m.fullName.toLowerCase().includes(q) ||
+        (m.email && m.email.toLowerCase().includes(q)) ||
+        (m.phone && m.phone.includes(q))
+      );
+    }
+    return list;
+  }, [fetchedMembers, activeTeamId, fetchFilterShowAll, fetchSearchQuery]);
 
   const sortedPlayers = useMemo(() => {
     const players = Array.from(new Map(squad.filter(p => p.role !== 'leader').map(p => [p.id, p])).values());
@@ -352,7 +511,32 @@ export default function SquadManager({ squad, onUpdateSquad }: SquadManagerProps
 
   return (
     <div className="w-full max-w-4xl lg:max-w-5xl xl:max-w-6xl 2xl:max-w-7xl mx-auto p-4 sm:p-6 pb-32 min-w-0">
-      <div className="flex items-center justify-end gap-2 mb-8">
+      {fetchStatusMessage && (
+        <div className={`p-4 mb-6 rounded-2xl border text-xs sm:text-sm font-extrabold flex items-center justify-between shadow-sm animate-in fade-in ${
+          fetchStatusMessage.type === 'success' 
+            ? 'bg-emerald-50 text-emerald-900 border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-200 dark:border-emerald-800'
+            : 'bg-zinc-100 text-zinc-900 border-zinc-200 dark:bg-zinc-900 dark:text-zinc-100 dark:border-zinc-800'
+        }`}>
+          <div className="flex items-center gap-2">
+            <Check size={18} className="text-emerald-600 dark:text-emerald-400 shrink-0" />
+            <span>{fetchStatusMessage.text}</span>
+          </div>
+          <button onClick={() => setFetchStatusMessage(null)} className="text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 p-1 cursor-pointer">
+            <X size={16} />
+          </button>
+        </div>
+      )}
+
+      <div className="flex flex-wrap items-center justify-end gap-2 mb-8">
+        <button
+          onClick={handleOpenFetchMembersModal}
+          className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2.5 rounded-xl font-black text-xs sm:text-sm transition-all shadow-md shadow-emerald-100 dark:shadow-none cursor-pointer"
+          title="Hämta personer från medlemsregistret/laget"
+        >
+          <Users size={18} />
+          <span>Hämta medlemmar från laget</span>
+        </button>
+
         <button
           onClick={() => {
             setNewName('');
@@ -361,24 +545,24 @@ export default function SquadManager({ squad, onUpdateSquad }: SquadManagerProps
             setNewPhotoUrl('');
             setIsAdding(true);
           }}
-          className="p-2 bg-indigo-600 text-white rounded-xl font-bold hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-200 dark:shadow-none"
+          className="p-2.5 bg-indigo-600 text-white rounded-xl font-bold hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-200 dark:shadow-none cursor-pointer"
           title="Lägg till i truppen"
         >
-          <UserPlus size={20} />
+          <UserPlus size={18} />
         </button>
         <button
           onClick={() => setIsImporting(true)}
-          className="flex items-center gap-2 bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300 px-4 py-2 rounded-xl font-bold hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-all border border-zinc-200 dark:border-zinc-700"
+          className="flex items-center gap-2 bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300 px-4 py-2.5 rounded-xl font-bold text-xs sm:text-sm hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-all border border-zinc-200 dark:border-zinc-700 cursor-pointer"
         >
-          <Upload size={20} />
-          <span>Importera</span>
+          <Upload size={18} />
+          <span>Importera fil</span>
         </button>
         {squad.length > 0 && (
           <button
             onClick={() => setShowClearConfirm(true)}
-            className="flex items-center gap-2 bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 px-4 py-2 rounded-xl font-bold hover:bg-red-100 dark:hover:bg-red-900/40 transition-all border border-red-100 dark:border-red-900/30"
+            className="flex items-center gap-2 bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 px-4 py-2.5 rounded-xl font-bold text-xs sm:text-sm hover:bg-red-100 dark:hover:bg-red-900/40 transition-all border border-red-100 dark:border-red-900/30 cursor-pointer"
           >
-            <Trash2 size={20} />
+            <Trash2 size={18} />
             <span>Rensa</span>
           </button>
         )}
@@ -1030,23 +1214,236 @@ Kalle Karlsson	Mittback	4	https://image.url"
             <Users size={40} />
           </div>
           <h3 className="text-xl font-bold text-zinc-900 dark:text-white mb-2">Truppen är tom</h3>
-          <p className="text-zinc-500 dark:text-zinc-400 mb-8">Börja med att lägga till eller importera medlemmarna i ditt lag.</p>
+          <p className="text-zinc-500 dark:text-zinc-400 mb-8 max-w-md mx-auto">
+            Börja med att hämta in registrerade medlemmar från laget, eller lägg till/importera medlemmar direkt.
+          </p>
           <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
             <button
+              onClick={handleOpenFetchMembersModal}
+              className="w-full sm:w-auto bg-emerald-600 hover:bg-emerald-700 text-white px-6 py-3 rounded-2xl font-bold transition-all shadow-md shadow-emerald-100 dark:shadow-none flex items-center justify-center gap-2 cursor-pointer"
+            >
+              <Users size={18} />
+              <span>Hämta medlemmar från laget</span>
+            </button>
+            <button
               onClick={() => setIsAdding(true)}
-              className="w-full sm:w-auto bg-indigo-600 text-white px-8 py-3 rounded-2xl font-bold hover:bg-indigo-700 transition-all"
+              className="w-full sm:w-auto bg-indigo-600 text-white px-6 py-3 rounded-2xl font-bold hover:bg-indigo-700 transition-all cursor-pointer"
             >
               Lägg till i truppen
             </button>
             <button
               onClick={() => setIsImporting(true)}
-              className="w-full sm:w-auto bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300 px-8 py-3 rounded-2xl font-bold hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-all"
+              className="w-full sm:w-auto bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300 px-6 py-3 rounded-2xl font-bold hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-all cursor-pointer"
             >
-              Importera trupp
+              Importera fil
             </button>
           </div>
         </div>
       )}
+
+      {/* FETCH MEMBERS FROM TEAM MODAL */}
+      <AnimatePresence>
+        {showFetchMembersModal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/50 backdrop-blur-sm z-[100] flex items-center justify-center p-3 sm:p-6 overflow-y-auto"
+            onClick={() => setShowFetchMembersModal(false)}
+          >
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="bg-white dark:bg-zinc-900 rounded-3xl p-5 sm:p-8 max-w-2xl w-full shadow-2xl border border-zinc-100 dark:border-zinc-800 my-auto"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {/* Header */}
+              <div className="flex items-center justify-between mb-5 border-b border-zinc-100 dark:border-zinc-800 pb-4">
+                <div>
+                  <h3 className="text-base sm:text-lg font-black text-zinc-900 dark:text-white flex items-center gap-2">
+                    <Users size={22} className="text-emerald-600 dark:text-emerald-400" />
+                    <span>Hämta medlemmar till truppen</span>
+                  </h3>
+                  <p className="text-xs text-zinc-500 font-medium mt-0.5">
+                    {activeTeamName ? `Kopplade medlemmar för ${activeTeamName}` : 'Välj medlemmar att hämta in till truppen'}
+                  </p>
+                </div>
+                <button
+                  onClick={() => setShowFetchMembersModal(false)}
+                  className="text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 p-2 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-xl transition-all cursor-pointer"
+                >
+                  <X size={20} />
+                </button>
+              </div>
+
+              {/* Body */}
+              {isFetchingMembers ? (
+                <div className="py-12 text-center space-y-3">
+                  <Loader2 size={36} className="animate-spin text-emerald-600 mx-auto" />
+                  <p className="text-sm font-bold text-zinc-600 dark:text-zinc-300">Hämtar medlemmar från laget...</p>
+                </div>
+              ) : fetchedMembers.length === 0 ? (
+                <div className="py-8 text-center space-y-4">
+                  <div className="w-16 h-16 bg-zinc-100 dark:bg-zinc-800 rounded-2xl flex items-center justify-center text-zinc-400 mx-auto">
+                    <Users size={32} />
+                  </div>
+                  <div>
+                    <h4 className="text-sm font-bold text-zinc-900 dark:text-white">Inga medlemmar hittades</h4>
+                    <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1 max-w-md mx-auto">
+                      {!activeClubId || !activeTeamId
+                        ? 'Inget aktivt lag är valt. Välj ett aktivt lag i Klubb & Lag-menyn för att hämta medlemmar kopplade till ditt lag.'
+                        : 'Inga medlemmar har lagts till i medlemsregistret för detta lag än. Du kan lägga till eller importera medlemmar under Klubb & Lag i menyn.'}
+                    </p>
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {/* Filters & Search */}
+                  <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
+                    <div className="relative flex-1">
+                      <Search size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-zinc-400" />
+                      <input
+                        type="text"
+                        placeholder="Sök medlem..."
+                        value={fetchSearchQuery}
+                        onChange={(e) => setFetchSearchQuery(e.target.value)}
+                        className="w-full pl-9 pr-4 py-2 bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-white border border-zinc-200 dark:border-zinc-800 rounded-xl text-xs font-bold focus:outline-none focus:border-emerald-500"
+                      />
+                    </div>
+
+                    <div className="flex items-center gap-2 shrink-0">
+                      {activeTeamId && (
+                        <button
+                          type="button"
+                          onClick={() => setFetchFilterShowAll(!fetchFilterShowAll)}
+                          className={`px-3 py-2 rounded-xl text-xs font-bold transition-all border cursor-pointer ${
+                            fetchFilterShowAll
+                              ? 'bg-emerald-50 border-emerald-300 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300'
+                              : 'bg-zinc-50 border-zinc-200 text-zinc-600 dark:bg-zinc-950 dark:border-zinc-800 dark:text-zinc-400'
+                          }`}
+                        >
+                          {fetchFilterShowAll ? 'Visar alla i klubben' : 'Visar lagets medlemmar'}
+                        </button>
+                      )}
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const visibleIds = displayMembers.map(m => m.userId || m.fullName);
+                          if (selectedMemberUserIds.length === visibleIds.length) {
+                            setSelectedMemberUserIds([]);
+                          } else {
+                            setSelectedMemberUserIds(visibleIds);
+                          }
+                        }}
+                        className="text-xs font-bold text-indigo-600 dark:text-indigo-400 hover:underline px-2 py-1 cursor-pointer"
+                      >
+                        {selectedMemberUserIds.length === displayMembers.length ? 'Avmarkera alla' : 'Välj alla'}
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* List */}
+                  <div className="max-h-64 overflow-y-auto border border-zinc-200 dark:border-zinc-800 rounded-2xl divide-y divide-zinc-100 dark:divide-zinc-800">
+                    {displayMembers.length === 0 ? (
+                      <div className="p-6 text-center text-xs text-zinc-500">Inga medlemmar matchade sökningen.</div>
+                    ) : (
+                      displayMembers.map((member) => {
+                        const mId = member.userId || member.fullName;
+                        const isSelected = selectedMemberUserIds.includes(mId);
+
+                        const cleanEmail = (member.email || '').trim().toLowerCase();
+                        const cleanName = (member.fullName || '').trim().toLowerCase();
+                        const alreadyInSquad = squad.some(sp => 
+                          (member.userId && sp.id === member.userId) ||
+                          (cleanEmail && sp.email && sp.email.trim().toLowerCase() === cleanEmail) ||
+                          (sp.name.trim().toLowerCase() === cleanName)
+                        );
+
+                        const isCoach = member.roles?.some(r => r === 'coach' || r === 'admin');
+
+                        return (
+                          <div
+                            key={mId}
+                            onClick={() => {
+                              if (isSelected) {
+                                setSelectedMemberUserIds(selectedMemberUserIds.filter(id => id !== mId));
+                              } else {
+                                setSelectedMemberUserIds([...selectedMemberUserIds, mId]);
+                              }
+                            }}
+                            className={`p-3.5 flex items-center justify-between cursor-pointer transition-all hover:bg-zinc-50 dark:hover:bg-zinc-950/50 ${
+                              isSelected ? 'bg-emerald-50/50 dark:bg-emerald-950/20' : ''
+                            }`}
+                          >
+                            <div className="flex items-center gap-3">
+                              <input
+                                type="checkbox"
+                                checked={isSelected}
+                                onChange={() => {}}
+                                className="w-4 h-4 text-emerald-600 rounded border-zinc-300 focus:ring-emerald-500 cursor-pointer"
+                              />
+                              <div>
+                                <div className="flex items-center gap-2">
+                                  <span className="text-xs font-black text-zinc-900 dark:text-white">{member.fullName}</span>
+                                  <span className={`px-2 py-0.5 rounded text-[10px] font-black uppercase ${
+                                    isCoach
+                                      ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
+                                      : 'bg-sky-100 text-sky-800 dark:bg-sky-950 dark:text-sky-300'
+                                  }`}>
+                                    {isCoach ? 'Tränare / Ledare' : 'Spelare'}
+                                  </span>
+                                </div>
+                                <div className="text-[11px] text-zinc-500 dark:text-zinc-400 font-medium mt-0.5 flex items-center gap-3">
+                                  {member.email && <span>{member.email}</span>}
+                                  {member.phone && <span>{member.phone}</span>}
+                                </div>
+                              </div>
+                            </div>
+
+                            <div className="shrink-0">
+                              {alreadyInSquad ? (
+                                <span className="bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400 text-[10px] font-bold px-2.5 py-1 rounded-lg">
+                                  I truppen
+                                </span>
+                              ) : (
+                                <span className="bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 text-[10px] font-black px-2.5 py-1 rounded-lg">
+                                  Ny
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+
+                  {/* Actions */}
+                  <div className="flex items-center justify-end gap-3 pt-4 border-t border-zinc-100 dark:border-zinc-800">
+                    <button
+                      type="button"
+                      onClick={() => setShowFetchMembersModal(false)}
+                      className="px-5 py-2.5 rounded-xl border border-zinc-200 dark:border-zinc-800 text-zinc-600 dark:text-zinc-400 font-bold text-xs hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-all cursor-pointer"
+                    >
+                      Avbryt
+                    </button>
+                    <button
+                      type="button"
+                      disabled={selectedMemberUserIds.length === 0}
+                      onClick={handleExecuteAddFetchedMembers}
+                      className="bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-black px-6 py-2.5 rounded-xl text-xs flex items-center gap-2 active:scale-95 transition-all cursor-pointer shadow-md shadow-emerald-100 dark:shadow-none"
+                    >
+                      <Check size={16} />
+                      <span>Hämta valda medlemmar ({selectedMemberUserIds.length})</span>
+                    </button>
+                  </div>
+                </div>
+              )}
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       <AnimatePresence>
         {imageToCrop && (
