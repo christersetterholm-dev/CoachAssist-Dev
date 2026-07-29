@@ -101,7 +101,8 @@ export default function PwaIconGenerator({ initialLogoUrl, clubName = 'CoachAssi
 
     // Background
     if (!useTransparentBg) {
-      ctx.fillStyle = isValidHex(bgColor) ? bgColor : '#4f46e5';
+      const cleanHex = /^#[0-9a-fA-F]{6}$/.test(bgColor) ? bgColor.toLowerCase() : '#4f46e5';
+      ctx.fillStyle = cleanHex;
       if (isMaskable) {
         // Maskable fills full canvas without rounded corners
         ctx.fillRect(0, 0, size, size);
@@ -246,7 +247,8 @@ export default function PwaIconGenerator({ initialLogoUrl, clubName = 'CoachAssi
       const url = URL.createObjectURL(content);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `pwa-icons-${appName.toLowerCase().replace(/\s+/g, '-')}.zip`;
+      const cleanAppName = appName.replace(/[^a-zA-Z0-9åäöÅÄÖ _-]/g, '').trim() || 'CoachAssist';
+      a.download = `pwa-icons-${cleanAppName.toLowerCase().replace(/\s+/g, '-')}.zip`;
       a.click();
       URL.revokeObjectURL(url);
     } catch (err) {
@@ -275,15 +277,21 @@ export default function PwaIconGenerator({ initialLogoUrl, clubName = 'CoachAssi
       }
 
       const token = localStorage.getItem('coachassist_token');
+      const isValidToken = token && typeof token === 'string' && /^[A-Za-z0-9._~+/-]+=*$/.test(token.trim());
+      
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json'
+      };
+      if (isValidToken) {
+        headers['Authorization'] = `Bearer ${token.trim()}`;
+      }
+
       const response = await fetch('/api/pwa-icons', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(token ? { Authorization: `Bearer ${token}` } : {})
-        },
+        headers,
         body: JSON.stringify({
           appName,
-          themeColor: bgColor,
+          themeColor: /^#[0-9a-fA-F]{6}$/.test(bgColor) ? bgColor.toLowerCase() : '#4f46e5',
           icons: iconsPayload
         })
       });
@@ -500,7 +508,7 @@ export default function PwaIconGenerator({ initialLogoUrl, clubName = 'CoachAssi
                 <div className="flex items-center gap-3">
                   <input
                     type="color"
-                    value={/^#[0-9a-fA-F]{6}$/i.test(bgColor) ? bgColor : '#4f46e5'}
+                    value={/^#[0-9a-fA-F]{6}$/.test(bgColor) ? bgColor.toLowerCase() : '#4f46e5'}
                     onChange={(e) => setBgColor(e.target.value)}
                     className="w-10 h-10 rounded-xl cursor-pointer border-0 bg-transparent"
                   />

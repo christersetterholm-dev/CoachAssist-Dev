@@ -166,7 +166,7 @@ export default function ColorPicker({ selectedColor, onChange, direction = 'down
             <div className="relative group shrink-0">
               <input
                 type="color"
-                value={selectedColor.length === 7 ? selectedColor : '#6366f1'}
+                value={/^#[0-9a-fA-F]{6}$/.test(selectedColor) ? selectedColor.toLowerCase() : '#6366f1'}
                 onChange={(e) => onChange(e.target.value)}
                 className="w-10 h-10 rounded-xl border border-zinc-800 p-0.5 cursor-pointer bg-zinc-950"
               />
