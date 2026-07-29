@@ -63,7 +63,10 @@ export default function PwaIconGenerator({ initialLogoUrl, clubName = 'CoachAssi
   useEffect(() => {
     if (!logoSrc) return;
     const img = new Image();
-    img.crossOrigin = 'anonymous';
+    // Only set crossOrigin for remote http/https URLs to avoid issues with data: or blob: URLs
+    if (logoSrc.startsWith('http://') || logoSrc.startsWith('https://')) {
+      img.crossOrigin = 'anonymous';
+    }
     img.onload = () => {
       setLogoImage(img);
     };
@@ -94,9 +97,11 @@ export default function PwaIconGenerator({ initialLogoUrl, clubName = 'CoachAssi
 
     ctx.clearRect(0, 0, size, size);
 
+    const isValidHex = (hex: string) => /^#[0-9a-fA-F]{6}$/i.test(hex);
+
     // Background
     if (!useTransparentBg) {
-      ctx.fillStyle = bgColor;
+      ctx.fillStyle = isValidHex(bgColor) ? bgColor : '#4f46e5';
       if (isMaskable) {
         // Maskable fills full canvas without rounded corners
         ctx.fillRect(0, 0, size, size);
@@ -124,10 +129,17 @@ export default function PwaIconGenerator({ initialLogoUrl, clubName = 'CoachAssi
       // For maskable icons, safe zone is inner 80% (10% padding on each side)
       const effectivePadding = isMaskable ? Math.max(paddingPercent, 18) : paddingPercent;
       const padPx = (size * effectivePadding) / 100;
-      const drawSize = size - padPx * 2;
+      const drawSize = Math.max(1, size - padPx * 2);
 
-      // Aspect ratio correction
-      const imgAspect = logoImage.naturalWidth / logoImage.naturalHeight || 1;
+      // Safe aspect ratio calculation (especially for SVG images which may return 0 for naturalWidth/naturalHeight)
+      const rawW = logoImage.naturalWidth || logoImage.width || 0;
+      const rawH = logoImage.naturalHeight || logoImage.height || 0;
+      
+      let imgAspect = 1;
+      if (rawW > 0 && rawH > 0) {
+        imgAspect = rawW / rawH;
+      }
+
       let drawW = drawSize;
       let drawH = drawSize;
 
@@ -137,13 +149,28 @@ export default function PwaIconGenerator({ initialLogoUrl, clubName = 'CoachAssi
         drawW = drawSize * imgAspect;
       }
 
+      // Ensure finite numbers
+      if (!isFinite(drawW) || drawW <= 0) drawW = drawSize;
+      if (!isFinite(drawH) || drawH <= 0) drawH = drawSize;
+
       const offsetX = (size - drawW) / 2;
       const offsetY = (size - drawH) / 2;
 
-      ctx.drawImage(logoImage, offsetX, offsetY, drawW, drawH);
+      if (isFinite(offsetX) && isFinite(offsetY) && drawW > 0 && drawH > 0) {
+        try {
+          ctx.drawImage(logoImage, offsetX, offsetY, drawW, drawH);
+        } catch (e) {
+          console.warn('Could not draw image to canvas:', e);
+        }
+      }
     }
 
-    return canvas.toDataURL('image/png');
+    try {
+      return canvas.toDataURL('image/png');
+    } catch (e) {
+      console.error('Error generating canvas data URL:', e);
+      return '';
+    }
   };
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -473,7 +500,7 @@ export default function PwaIconGenerator({ initialLogoUrl, clubName = 'CoachAssi
                 <div className="flex items-center gap-3">
                   <input
                     type="color"
-                    value={bgColor}
+                    value={/^#[0-9a-fA-F]{6}$/i.test(bgColor) ? bgColor : '#4f46e5'}
                     onChange={(e) => setBgColor(e.target.value)}
                     className="w-10 h-10 rounded-xl cursor-pointer border-0 bg-transparent"
                   />

@@ -236,7 +236,7 @@ function applyCustomPwaIconsToDisk(iconsObj: { appName?: string; themeColor?: st
 
   for (const [fileName, dataUrl] of Object.entries(iconsObj.files)) {
     if (!dataUrl) continue;
-    const base64Data = dataUrl.replace(/^data:image\/\w+;base64,/, '');
+    const base64Data = dataUrl.includes(',') ? dataUrl.split(',')[1] : dataUrl;
     const buffer = Buffer.from(base64Data, 'base64');
 
     try {
