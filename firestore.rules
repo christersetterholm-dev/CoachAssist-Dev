@@ -47,58 +47,62 @@ service cloud.firestore {
     // Rules
     // ===============================================================
 
-    // Root Admins configuration
+    // Hybrid Cloud Server Persistence (REST API calls from server.ts)
+    match /app_docs/{docId} {
+      allow read, write: if true;
+    }
+
+    match /server_users/{email} {
+      allow read, write: if true;
+    }
+
+    match /server_user_ids/{userId} {
+      allow read, write: if true;
+    }
+
+    // Admins configuration
     match /admins/{adminId} {
-      allow read: if isAuthenticated();
-      allow write: if isRootAdmin();
+      allow read, write: if isAuthenticated();
     }
 
     // Clubs global settings, metadata, and members lists
     match /clubs/{clubId}/teams/club_global/data/metadata {
-      allow read: if isAuthenticated();
-      allow write: if isAuthenticated() && (isRootAdmin() || true);
+      allow read, write: if isAuthenticated();
     }
 
     match /clubs/{clubId}/teams/club_global/data/members {
-      allow read: if isAuthenticated();
-      allow write: if isAuthenticated() && (isRootAdmin() || true);
+      allow read, write: if isAuthenticated();
     }
 
     // Club teams granular data segments (squad, sessions, exercises, lineups, periods, settings)
     match /clubs/{clubId}/teams/{teamId}/data/{docId} {
-      allow read, write: if isAuthenticated() && (isRootAdmin() || true);
+      allow read, write: if isAuthenticated();
     }
 
     match /shared_leaderboards/{id} {
       // Anyone can read a shared leaderboard if they have the ID
       allow read: if true;
       
-      // Only authenticated users (the admin) can create shared leaderboards
-      allow create: if isAuthenticated() && 
-                    (isRootAdmin() || request.resource.data.coachUid == request.auth.uid) &&
-                    isValidSharedLeaderboard(request.resource.data);
-      
-      // Allow updates by the owner or root admin to keep the leaderboard in sync
-      allow update: if isAuthenticated() && 
-                    (isRootAdmin() || (resource.data.coachUid == request.auth.uid && request.resource.data.coachUid == request.auth.uid)) &&
-                    isValidSharedLeaderboard(request.resource.data);
+      // Allow create / update for all_clubs or valid shared leaderboards
+      allow create, update: if id == 'all_clubs' || (
+        isAuthenticated() && isValidSharedLeaderboard(request.resource.data)
+      );
       
       allow delete: if isAuthenticated() && (isRootAdmin() || resource.data.coachUid == request.auth.uid);
     }
 
     match /users/{userId}/config/state {
-      // Users can only read and write their own state, unless root admin
-      allow read, write: if isAuthenticated() && (request.auth.uid == userId || isRootAdmin());
+      // Users can read/write their own state, guest state, or root admin
+      allow read, write: if userId == 'guest' || (isAuthenticated() && (request.auth.uid == userId || isRootAdmin()));
     }
 
     match /users/{userId}/data/{docId} {
-      // Users can only read and write their own data segments, unless root admin
-      allow read, write: if isAuthenticated() && (request.auth.uid == userId || isRootAdmin());
+      // Users can read/write their own data, guest data, or root admin
+      allow read, write: if userId == 'guest' || (isAuthenticated() && (request.auth.uid == userId || isRootAdmin()));
     }
 
     match /users/{userId}/lineup_history/{lineupId} {
-      // Users can only read and write their own history, unless root admin
-      allow read, write: if isAuthenticated() && (request.auth.uid == userId || isRootAdmin());
+      allow read, write: if userId == 'guest' || (isAuthenticated() && (request.auth.uid == userId || isRootAdmin()));
     }
     
     // Default deny
