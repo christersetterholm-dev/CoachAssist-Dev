@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { RotateCcw, Trophy, ArrowLeft, Check, Sun, Moon, Timer as TimerIcon, Edit2, Zap, Rocket, Users, LayoutDashboard, Unlock, LogIn, LogOut, User as UserIcon, ShieldCheck, Cloud, Layout, Globe, AlertTriangle, Calendar, Settings, RefreshCw } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { SquadPlayer, Exercise, Team, PointsConfig, Period, PeriodStandings, Lineup, TrainingSession, TrainingSettings, CoachData, BankExercise, SessionMoment, UserProfile, ClubMember } from './types';
-import { auth, signInWithGoogle, db, handleFirestoreError, OperationType } from './lib/firebase';
+import { auth, signInWithGoogle, db, handleFirestoreError, OperationType, getApiUrl } from './lib/firebase';
 import { onAuthStateChanged, signOut, User } from 'firebase/auth';
 import { doc, onSnapshot, setDoc, getDoc } from 'firebase/firestore';
 import { calculateLeaderboard } from './lib/leaderboardUtils';
@@ -270,6 +270,45 @@ export default function App() {
     } catch (e) {}
     return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
   });
+
+  // Sync PWA Custom App Name and Meta tags on app load
+  useEffect(() => {
+    fetch(getApiUrl('/api/pwa-icons'))
+      .then(r => r.json())
+      .then(data => {
+        if (data && data.appName) {
+          const cleanName = data.appName.trim();
+          document.title = cleanName;
+
+          let appleTitle = document.querySelector('meta[name="apple-mobile-web-app-title"]') as HTMLMetaElement;
+          if (!appleTitle) {
+            appleTitle = document.createElement('meta');
+            appleTitle.name = 'apple-mobile-web-app-title';
+            document.head.appendChild(appleTitle);
+          }
+          appleTitle.content = cleanName;
+
+          let appNameMeta = document.querySelector('meta[name="application-name"]') as HTMLMetaElement;
+          if (!appNameMeta) {
+            appNameMeta = document.createElement('meta');
+            appNameMeta.name = 'application-name';
+            document.head.appendChild(appNameMeta);
+          }
+          appNameMeta.content = cleanName;
+
+          if (data.themeColor) {
+            let themeMeta = document.querySelector('meta[name="theme-color"]') as HTMLMetaElement;
+            if (!themeMeta) {
+              themeMeta = document.createElement('meta');
+              themeMeta.name = 'theme-color';
+              document.head.appendChild(themeMeta);
+            }
+            themeMeta.content = data.themeColor;
+          }
+        }
+      })
+      .catch(() => {});
+  }, []);
   
   const [view, _setView] = useState<View>(() => {
     const params = new URLSearchParams(window.location.search);

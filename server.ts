@@ -311,13 +311,11 @@ async function startServer() {
   // Restore custom PWA icons from Firestore on startup
   loadAndApplyPwaIconsFromFirestore();
 
-  // --- CUSTOM PWA ICONS SERVING MIDDLEWARE ---
+  // --- CUSTOM PWA ICONS & MANIFEST SERVING MIDDLEWARE ---
   app.use((req, res, next) => {
-    if (!customPwaIcons) return next();
-
     const reqPath = req.path.replace(/^\//, '');
 
-    if (customPwaIcons.files && customPwaIcons.files[reqPath]) {
+    if (customPwaIcons && customPwaIcons.files && customPwaIcons.files[reqPath]) {
       const dataUrl = customPwaIcons.files[reqPath];
       const base64Data = dataUrl.replace(/^data:image\/\w+;base64,/, '');
       const imgBuffer = Buffer.from(base64Data, 'base64');
@@ -326,16 +324,18 @@ async function startServer() {
       return res.send(imgBuffer);
     }
 
-    if (reqPath === 'manifest.webmanifest' && customPwaIcons.appName) {
+    if (reqPath === 'manifest.webmanifest' || reqPath === 'manifest.json') {
+      const appName = customPwaIcons?.appName || 'CoachAssist';
+      const themeColor = customPwaIcons?.themeColor || '#4f46e5';
       const manifestObj = {
-        name: customPwaIcons.appName,
-        short_name: customPwaIcons.appName,
-        description: `${customPwaIcons.appName} PWA App`,
+        name: appName,
+        short_name: appName,
+        description: `${appName} PWA App`,
         start_url: '/',
         display: 'standalone',
         orientation: 'portrait',
-        background_color: customPwaIcons.themeColor || '#4f46e5',
-        theme_color: customPwaIcons.themeColor || '#4f46e5',
+        background_color: themeColor,
+        theme_color: themeColor,
         icons: [
           { src: '/icon-192.png', sizes: '192x192', type: 'image/png' },
           { src: '/icon-512.png', sizes: '512x512', type: 'image/png' },
@@ -387,7 +387,8 @@ async function startServer() {
     next();
   });
 
-  app.use(express.json());
+  app.use(express.json({ limit: '50mb' }));
+  app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
   // Static serving of uploaded images
   app.use('/uploads', express.static(UPLOADS_DIR));

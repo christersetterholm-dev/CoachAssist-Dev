@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Landmark, Trash2, Edit3, Users, Shield, Check, PlusCircle, Search, Mail, Phone, Fingerprint, Settings, ArrowRight, UserPlus, Save, Smartphone, X, Database, Server, HardDrive, Cloud, RefreshCw, Download, Upload, Globe, Cpu, CheckCircle2, AlertTriangle, Calendar, Link, Copy, ExternalLink, FileSpreadsheet, FileText } from 'lucide-react';
 import { Club, ClubMetadata, ClubTeam, ClubMember, SquadPlayer } from '../types';
-import { db } from '../lib/firebase';
+import { db, getApiUrl } from '../lib/firebase';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 import PwaIconGenerator from './PwaIconGenerator';
 import * as XLSX from 'xlsx';
@@ -225,7 +225,7 @@ export default function ClubAdminDashboard({
   const fetchDbConfig = async () => {
     setDbConfigLoading(true);
     try {
-      const res = await fetch('/api/system/db-config');
+      const res = await fetch(getApiUrl('/api/system/db-config'));
       if (res.ok) {
         const data = await res.json();
         setDbConfig(data);
@@ -247,7 +247,7 @@ export default function ClubAdminDashboard({
     setDbConfigLoading(true);
     setDbConfigMessage(null);
     try {
-      const res = await fetch('/api/system/db-config', {
+      const res = await fetch(getApiUrl('/api/system/db-config'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -278,7 +278,7 @@ export default function ClubAdminDashboard({
     setIsSyncingNow(true);
     setDbConfigMessage(null);
     try {
-      const res = await fetch('/api/system/db-sync-now', { method: 'POST' });
+      const res = await fetch(getApiUrl('/api/system/db-sync-now'), { method: 'POST' });
       const data = await res.json();
       if (res.ok) {
         setDbConfigMessage({ type: 'success', text: data.message || 'Synkronisering slutförd!' });
@@ -293,7 +293,7 @@ export default function ClubAdminDashboard({
   };
 
   const handleExportBackup = () => {
-    window.open('/api/system/db-export', '_blank');
+    window.open(getApiUrl('/api/system/db-export'), '_blank');
   };
 
   const handleImportBackup = async (e: React.FormEvent) => {
@@ -304,7 +304,7 @@ export default function ClubAdminDashboard({
     try {
       const text = await importFile.text();
       const dump = JSON.parse(text);
-      const res = await fetch('/api/system/db-import', {
+      const res = await fetch(getApiUrl('/api/system/db-import'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(dump)

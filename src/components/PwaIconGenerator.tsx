@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Download, Upload, RefreshCw, Smartphone, Layers, Check, Copy, Sparkles, CheckCircle2, AlertCircle, UploadCloud } from 'lucide-react';
 import JSZip from 'jszip';
+import { getApiUrl } from '../lib/firebase';
 
 interface PwaIconGeneratorProps {
   initialLogoUrl?: string;
@@ -58,6 +59,30 @@ export default function PwaIconGenerator({ initialLogoUrl, clubName = 'CoachAssi
   const [previewDataUrls, setPreviewDataUrls] = useState<{ [key: string]: string }>({});
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Fetch existing saved PWA metadata on mount
+  useEffect(() => {
+    fetch(getApiUrl('/api/pwa-icons'))
+      .then(res => res.json())
+      .then(data => {
+        if (data) {
+          if (data.appName) {
+            setAppName(data.appName);
+          }
+          if (data.themeColor) {
+            setBgColor(data.themeColor);
+          }
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  // Sync if clubName changes from props
+  useEffect(() => {
+    if (clubName && clubName !== 'CoachAssist') {
+      setAppName(clubName);
+    }
+  }, [clubName]);
 
   // Load image when logoSrc changes
   useEffect(() => {
@@ -247,11 +272,18 @@ export default function PwaIconGenerator({ initialLogoUrl, clubName = 'CoachAssi
       const url = URL.createObjectURL(content);
       const a = document.createElement('a');
       a.href = url;
-      const cleanAppName = appName.replace(/[^a-zA-Z0-9åäöÅÄÖ _-]/g, '').trim() || 'CoachAssist';
-      a.download = `pwa-icons-${cleanAppName.toLowerCase().replace(/\s+/g, '-')}.zip`;
+      const cleanAppName = appName.replace(/[^a-zA-Z0-9åäöÅÄÖ _\-]/g, '').trim() || 'CoachAssist';
+      const zipFileName = `pwa-icons-${cleanAppName.toLowerCase().replace(/\s+/g, '-')}.zip`;
+      a.download = zipFileName;
       a.click();
-      URL.revokeObjectURL(url);
-    } catch (err) {
+      setTimeout(() => {
+        try {
+          URL.revokeObjectURL(url);
+        } catch {
+          // ignore
+        }
+      }, 1000);
+    } catch (err: any) {
       console.error('Failed to create zip package:', err);
     } finally {
       setIsGenerating(false);
@@ -276,40 +308,88 @@ export default function PwaIconGenerator({ initialLogoUrl, clubName = 'CoachAssi
         }
       }
 
-      const token = localStorage.getItem('coachassist_token');
-      const isValidToken = token && typeof token === 'string' && /^[A-Za-z0-9._~+/-]+=*$/.test(token.trim());
-      
-      const headers: Record<string, string> = {
-        'Content-Type': 'application/json'
-      };
-      if (isValidToken) {
-        headers['Authorization'] = `Bearer ${token.trim()}`;
-      }
-
-      const response = await fetch('/api/pwa-icons', {
+      const endpoint = getApiUrl('/api/pwa-icons');
+      const response = await fetch(endpoint, {
         method: 'POST',
-        headers,
+        headers: {
+          'Content-Type': 'application/json'
+        },
         body: JSON.stringify({
-          appName,
+          appName: (appName || 'CoachAssist').trim(),
           themeColor: /^#[0-9a-fA-F]{6}$/.test(bgColor) ? bgColor.toLowerCase() : '#4f46e5',
           icons: iconsPayload
         })
       });
 
-      const data = await response.json();
+      let data: any = {};
+      try {
+        const text = await response.text();
+        try {
+          data = JSON.parse(text);
+        } catch {
+          data = { error: 'Servern returnerade ett okänt svar.' };
+        }
+      } catch {
+        data = {};
+      }
+
       if (response.ok && data.success) {
+        const cleanName = (appName || 'CoachAssist').trim();
+        const cleanColor = /^#[0-9a-fA-F]{6}$/.test(bgColor) ? bgColor.toLowerCase() : '#4f46e5';
+
+        // Update DOM meta tags immediately
+        document.title = cleanName;
+
+        let appleTitle = document.querySelector('meta[name="apple-mobile-web-app-title"]') as HTMLMetaElement;
+        if (!appleTitle) {
+          appleTitle = document.createElement('meta');
+          appleTitle.name = 'apple-mobile-web-app-title';
+          document.head.appendChild(appleTitle);
+        }
+        appleTitle.content = cleanName;
+
+        let appNameMeta = document.querySelector('meta[name="application-name"]') as HTMLMetaElement;
+        if (!appNameMeta) {
+          appNameMeta = document.createElement('meta');
+          appNameMeta.name = 'application-name';
+          document.head.appendChild(appNameMeta);
+        }
+        appNameMeta.content = cleanName;
+
+        let themeMeta = document.querySelector('meta[name="theme-color"]') as HTMLMetaElement;
+        if (!themeMeta) {
+          themeMeta = document.createElement('meta');
+          themeMeta.name = 'theme-color';
+          document.head.appendChild(themeMeta);
+        }
+        themeMeta.content = cleanColor;
+
+        let manifestLink = document.querySelector('link[rel="manifest"]') as HTMLLinkElement;
+        if (!manifestLink) {
+          manifestLink = document.createElement('link');
+          manifestLink.rel = 'manifest';
+          document.head.appendChild(manifestLink);
+        }
+        manifestLink.href = `/manifest.webmanifest?v=${Date.now()}`;
+
         setApplyStatus({
           type: 'success',
-          message: 'Appens PWA-ikoner har uppdaterats direkt i appen! De nya ikonerna är nu sparade och live.'
+          message: `Appnamnet '${cleanName}' och ikonerna har sparats! När du eller en ledare nu sparar appen på mobilens hemskärm kommer '${cleanName}' upp som namn.`
         });
       } else {
         throw new Error(data.error || 'Kunde inte uppdatera ikonerna i appen.');
       }
     } catch (err: any) {
       console.error('Failed to apply PWA icons to app:', err);
+      const rawMsg = err?.message || String(err || '');
+      // Translate any internal DOM/browser exception strings to clear Swedish feedback
+      let userMsg = rawMsg;
+      if (!rawMsg || rawMsg.includes('pattern') || rawMsg.includes('SyntaxError') || rawMsg.includes('TypeError')) {
+        userMsg = 'Ett tillfälligt kommunikationsfel uppstod vid sparandet av ikonerna. Vänligen försök igen.';
+      }
       setApplyStatus({
         type: 'error',
-        message: err.message || 'Ett fel uppstod när ikonerna skulle sparats.'
+        message: userMsg
       });
     } finally {
       setIsApplyingToApp(false);
@@ -475,15 +555,18 @@ export default function PwaIconGenerator({ initialLogoUrl, clubName = 'CoachAssi
           {/* App Name */}
           <div className="space-y-2">
             <label className="block text-xs font-black uppercase text-zinc-500 dark:text-zinc-400 tracking-wider">
-              Appnamn för Hemskärm
+              2. Appnamn för Hemskärm (Föreningsnamn)
             </label>
             <input
               type="text"
               value={appName}
               onChange={(e) => setAppName(e.target.value)}
-              placeholder="CoachAssist"
+              placeholder="Ex. KSK-appen, Kungsgårdens SK eller CoachAssist"
               className="w-full px-4 py-3 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-2xl text-sm font-bold text-zinc-900 dark:text-white focus:outline-none focus:border-indigo-500"
             />
+            <p className="text-[11px] text-zinc-500 dark:text-zinc-400 leading-relaxed">
+              Detta namn visas direkt under ikonen på mobilens hemskärm (iPhone & Android) samt i webbläsarens titel. Varje förening (t.ex. Kungsgårdens SK eller KSK-appen) kan sätta sitt eget anpassade namnet här.
+            </p>
           </div>
 
           {/* Background Color Customization */}
