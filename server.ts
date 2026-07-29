@@ -281,6 +281,15 @@ function applyCustomPwaIconsToDisk(iconsObj: { appName?: string; themeColor?: st
     try {
       if (fs.existsSync(distDir)) {
         fs.writeFileSync(path.join(distDir, 'manifest.webmanifest'), manifestStr, 'utf-8');
+        const assetsDir = path.join(distDir, 'assets');
+        if (fs.existsSync(assetsDir)) {
+          const files = fs.readdirSync(assetsDir);
+          for (const f of files) {
+            if (f.endsWith('.webmanifest')) {
+              fs.writeFileSync(path.join(assetsDir, f), manifestStr, 'utf-8');
+            }
+          }
+        }
       }
     } catch (e) {}
   }
@@ -311,6 +320,37 @@ async function startServer() {
   // Restore custom PWA icons from Firestore on startup
   loadAndApplyPwaIconsFromFirestore();
 
+  // Helper to inject current PWA app name and theme color into server-rendered HTML
+  function injectPwaMetaToHtml(html: string): string {
+    const appName = customPwaIcons?.appName || 'CoachAssist';
+    const themeColor = customPwaIcons?.themeColor || '#4f46e5';
+
+    let updated = html;
+    if (/<title>.*?<\/title>/gi.test(updated)) {
+      updated = updated.replace(/<title>.*?<\/title>/gi, `<title>${appName}</title>`);
+    } else {
+      updated = updated.replace('</head>', `<title>${appName}</title></head>`);
+    }
+
+    if (/apple-mobile-web-app-title/gi.test(updated)) {
+      updated = updated.replace(/<meta\s+name="apple-mobile-web-app-title"\s+content=".*?"\s*\/?>/gi, `<meta name="apple-mobile-web-app-title" content="${appName}" />`);
+    } else {
+      updated = updated.replace('</head>', `<meta name="apple-mobile-web-app-title" content="${appName}" /></head>`);
+    }
+
+    if (/application-name/gi.test(updated)) {
+      updated = updated.replace(/<meta\s+name="application-name"\s+content=".*?"\s*\/?>/gi, `<meta name="application-name" content="${appName}" />`);
+    } else {
+      updated = updated.replace('</head>', `<meta name="application-name" content="${appName}" /></head>`);
+    }
+
+    if (/theme-color/gi.test(updated)) {
+      updated = updated.replace(/<meta\s+name="theme-color"\s+content=".*?"\s*\/?>/gi, `<meta name="theme-color" content="${themeColor}" />`);
+    }
+
+    return updated;
+  }
+
   // --- CUSTOM PWA ICONS & MANIFEST SERVING MIDDLEWARE ---
   app.use((req, res, next) => {
     const reqPath = req.path.replace(/^\//, '');
@@ -324,7 +364,12 @@ async function startServer() {
       return res.send(imgBuffer);
     }
 
-    if (reqPath === 'manifest.webmanifest' || reqPath === 'manifest.json') {
+    if (
+      reqPath === 'manifest.webmanifest' ||
+      reqPath === 'manifest.json' ||
+      reqPath.endsWith('.webmanifest') ||
+      reqPath.includes('manifest')
+    ) {
       const appName = customPwaIcons?.appName || 'CoachAssist';
       const themeColor = customPwaIcons?.themeColor || '#4f46e5';
       const manifestObj = {
@@ -346,6 +391,37 @@ async function startServer() {
       };
       res.setHeader('Content-Type', 'application/manifest+json');
       return res.json(manifestObj);
+    }
+
+    // Intercept HTML responses to dynamically inject app title & PWA meta tags
+    const accept = req.headers.accept || '';
+    if (req.method === 'GET' && (accept.includes('text/html') || req.path === '/' || req.path.endsWith('.html'))) {
+      const originalSend = res.send;
+      const originalEnd = res.end;
+
+      res.send = function (body?: any) {
+        if (typeof body === 'string' && body.includes('<html')) {
+          body = injectPwaMetaToHtml(body);
+        } else if (Buffer.isBuffer(body)) {
+          const str = body.toString('utf-8');
+          if (str.includes('<html')) {
+            body = Buffer.from(injectPwaMetaToHtml(str), 'utf-8');
+          }
+        }
+        return originalSend.call(this, body);
+      };
+
+      res.end = function (chunk?: any, encoding?: any, cb?: any) {
+        if (typeof chunk === 'string' && chunk.includes('<html')) {
+          chunk = injectPwaMetaToHtml(chunk);
+        } else if (Buffer.isBuffer(chunk)) {
+          const str = chunk.toString('utf-8');
+          if (str.includes('<html')) {
+            chunk = Buffer.from(injectPwaMetaToHtml(str), 'utf-8');
+          }
+        }
+        return originalEnd.call(this, chunk, encoding, cb);
+      };
     }
 
     next();
@@ -1280,27 +1356,27 @@ async function startServer() {
   app.post('/api/pwa-icons', express.json({ limit: '15mb' }), async (req, res) => {
     try {
       const { appName, themeColor, icons } = req.body;
-      if (!icons || !Array.isArray(icons)) {
-        return res.status(400).json({ error: 'Inga ikoner skickades med' });
-      }
 
-      const filesMap: Record<string, string> = {};
-      for (const item of icons) {
-        if (item.fileName && item.dataUrl) {
-          filesMap[item.fileName] = item.dataUrl;
+      let filesMap: Record<string, string> = customPwaIcons?.files || {};
+      if (Array.isArray(icons) && icons.length > 0) {
+        filesMap = { ...filesMap };
+        for (const item of icons) {
+          if (item.fileName && item.dataUrl) {
+            filesMap[item.fileName] = item.dataUrl;
 
-          // Map aliases
-          if (item.fileName === 'icon-192x192.png') {
-            filesMap['icon-192.png'] = item.dataUrl;
-          }
-          if (item.fileName === 'icon-512x512.png') {
-            filesMap['icon-512.png'] = item.dataUrl;
-          }
-          if (item.fileName === 'apple-touch-icon.png') {
-            filesMap['apple-touch-icon-precomposed.png'] = item.dataUrl;
-          }
-          if (item.fileName === 'favicon-48x48.png' || item.fileName === 'favicon-32x32.png') {
-            filesMap['favicon.png'] = item.dataUrl;
+            // Map aliases
+            if (item.fileName === 'icon-192x192.png') {
+              filesMap['icon-192.png'] = item.dataUrl;
+            }
+            if (item.fileName === 'icon-512x512.png') {
+              filesMap['icon-512.png'] = item.dataUrl;
+            }
+            if (item.fileName === 'apple-touch-icon.png') {
+              filesMap['apple-touch-icon-precomposed.png'] = item.dataUrl;
+            }
+            if (item.fileName === 'favicon-48x48.png' || item.fileName === 'favicon-32x32.png') {
+              filesMap['favicon.png'] = item.dataUrl;
+            }
           }
         }
       }
