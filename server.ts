@@ -292,6 +292,48 @@ function applyCustomPwaIconsToDisk(iconsObj: { appName?: string; themeColor?: st
         }
       }
     } catch (e) {}
+
+    // Update HTML files on disk so index.html statically contains the new title & meta tags
+    if (iconsObj.appName) {
+      const appName = iconsObj.appName;
+      const themeColor = iconsObj.themeColor || '#4f46e5';
+
+      const updateHtmlFile = (filePath: string) => {
+        if (!fs.existsSync(filePath)) return;
+        try {
+          let content = fs.readFileSync(filePath, 'utf-8');
+          if (/<title>.*?<\/title>/gi.test(content)) {
+            content = content.replace(/<title>.*?<\/title>/gi, `<title>${appName}</title>`);
+          } else {
+            content = content.replace('</head>', `<title>${appName}</title></head>`);
+          }
+
+          if (/apple-mobile-web-app-title/gi.test(content)) {
+            content = content.replace(/<meta\s+name="apple-mobile-web-app-title"\s+content=".*?"\s*\/?>/gi, `<meta name="apple-mobile-web-app-title" content="${appName}" />`);
+          } else {
+            content = content.replace('</head>', `<meta name="apple-mobile-web-app-title" content="${appName}" /></head>`);
+          }
+
+          if (/application-name/gi.test(content)) {
+            content = content.replace(/<meta\s+name="application-name"\s+content=".*?"\s*\/?>/gi, `<meta name="application-name" content="${appName}" />`);
+          } else {
+            content = content.replace('</head>', `<meta name="application-name" content="${appName}" /></head>`);
+          }
+
+          if (/theme-color/gi.test(content)) {
+            content = content.replace(/<meta\s+name="theme-color"\s+content=".*?"\s*\/?>/gi, `<meta name="theme-color" content="${themeColor}" />`);
+          }
+
+          fs.writeFileSync(filePath, content, 'utf-8');
+        } catch (e) {
+          console.error(`Error updating HTML file at ${filePath}:`, e);
+        }
+      };
+
+      updateHtmlFile(path.join(process.cwd(), 'index.html'));
+      updateHtmlFile(path.join(publicDir, 'index.html'));
+      updateHtmlFile(path.join(distDir, 'index.html'));
+    }
   }
 }
 
@@ -1067,6 +1109,94 @@ async function startServer() {
     }
   });
 
+  // Change Password for Logged-In User
+  app.post('/api/auth/change-password', async (req, res) => {
+    const authHeader = req.headers.authorization;
+    if (!authHeader) {
+      return res.status(401).json({ error: 'Du måste vara inloggad för att ändra lösenord.' });
+    }
+
+    try {
+      const authStr = Array.isArray(authHeader) ? authHeader[0] : authHeader;
+      const partsAuth = authStr.split(' ');
+      const token = partsAuth.length > 1 ? partsAuth[1] : partsAuth[0];
+
+      const decoded: any = jwt.verify(token, JWT_SECRET);
+      const userId = decoded.id;
+
+      const { currentPassword, newPassword } = req.body;
+      if (!currentPassword || !newPassword) {
+        return res.status(400).json({ error: 'Både nuvarande och nytt lösenord krävs.' });
+      }
+
+      if (typeof newPassword !== 'string' || newPassword.length < 6) {
+        return res.status(400).json({ error: 'Det nya lösenordet måste vara minst 6 tecken långt.' });
+      }
+
+      // Find user row in SQLite
+      let userRow: any = db.prepare('SELECT * FROM users WHERE id = ?').get(userId);
+      if (!userRow && decoded.email) {
+        userRow = db.prepare('SELECT * FROM users WHERE email = ?').get(decoded.email.trim().toLowerCase());
+      }
+
+      // If user row not in local SQLite, restore from Firestore
+      if (!userRow) {
+        const fUser = (await getFirestoreDoc(`server_user_ids/${encodeURIComponent(userId)}`)) ||
+                      (decoded.email ? await getFirestoreDoc(`server_users/${encodeURIComponent(decoded.email.trim().toLowerCase())}`) : null);
+        if (fUser && fUser.password_hash) {
+          userRow = {
+            id: fUser.id || userId,
+            email: fUser.email || decoded.email,
+            password_hash: fUser.password_hash,
+            created_at: fUser.created_at || Date.now()
+          };
+        }
+      }
+
+      if (!userRow || !userRow.password_hash) {
+        return res.status(404).json({ error: 'Användarkontot kunde inte hittas.' });
+      }
+
+      // Verify current password
+      const isCurrentValid = await bcrypt.compare(currentPassword, userRow.password_hash);
+      if (!isCurrentValid) {
+        return res.status(400).json({ error: 'Det nuvarande lösenordet är felaktigt.' });
+      }
+
+      // Hash new password
+      const newPasswordHash = await bcrypt.hash(newPassword, 10);
+
+      // Save updated user to SQLite
+      db.prepare('INSERT OR REPLACE INTO users (id, email, password_hash, created_at) VALUES (?, ?, ?, ?)').run(
+        userRow.id,
+        userRow.email,
+        newPasswordHash,
+        userRow.created_at || Date.now()
+      );
+
+      // Asynchronously update Cloud Firestore
+      const trimmedEmail = userRow.email.trim().toLowerCase();
+      setFirestoreDoc(`server_users/${encodeURIComponent(trimmedEmail)}`, {
+        id: userRow.id,
+        email: trimmedEmail,
+        password_hash: newPasswordHash,
+        created_at: userRow.created_at || Date.now()
+      }).catch(e => console.error('Firestore change password update error:', e));
+
+      setFirestoreDoc(`server_user_ids/${encodeURIComponent(userRow.id)}`, {
+        id: userRow.id,
+        email: trimmedEmail,
+        password_hash: newPasswordHash,
+        created_at: userRow.created_at || Date.now()
+      }).catch(e => console.error('Firestore change password update error:', e));
+
+      res.json({ success: true, message: 'Ditt lösenord har uppdaterats!' });
+    } catch (error: any) {
+      console.error('Change password error:', error);
+      res.status(500).json({ error: 'Kunde inte ändra lösenordet. Kontrollera din inloggning.' });
+    }
+  });
+
   // --- DOCUMENTS SYNC ENDPOINTS (Firestore simulation) ---
 
   // GET Document Data
@@ -1489,6 +1619,21 @@ async function startServer() {
   // --- VITE AND SPA SERVING ---
 
   if (!isProduction) {
+    // In dev mode, handle root GET html requests to inject custom app name into index.html
+    app.get(['/', '/index.html'], (req, res, next) => {
+      const accept = req.headers.accept || '';
+      if (req.method === 'GET' && accept.includes('text/html')) {
+        const rootIndex = path.join(process.cwd(), 'index.html');
+        if (fs.existsSync(rootIndex)) {
+          let html = fs.readFileSync(rootIndex, 'utf-8');
+          html = injectPwaMetaToHtml(html);
+          res.setHeader('Content-Type', 'text/html; charset=utf-8');
+          return res.send(html);
+        }
+      }
+      next();
+    });
+
     const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
       server: { middlewareMode: true },
@@ -1500,8 +1645,15 @@ async function startServer() {
     // Serve assets with absolute precision to prevent any rewrite or subfolder routing issues
     app.use('/assets', express.static(path.join(distPath, 'assets')));
     app.use(express.static(distPath));
-    app.get('*', (_req, res) => {
-      res.sendFile(path.join(distPath, 'index.html'));
+    app.get('*', (req, res) => {
+      const indexPath = path.join(distPath, 'index.html');
+      if (fs.existsSync(indexPath)) {
+        let html = fs.readFileSync(indexPath, 'utf-8');
+        html = injectPwaMetaToHtml(html);
+        res.setHeader('Content-Type', 'text/html; charset=utf-8');
+        return res.send(html);
+      }
+      res.sendFile(indexPath);
     });
   }
 

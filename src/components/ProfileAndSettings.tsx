@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { User, Phone, Fingerprint, Check, Save, Landmark, Info } from 'lucide-react';
+import { User, Phone, Fingerprint, Check, Save, Landmark, Info, Lock, Key, ShieldCheck, AlertCircle } from 'lucide-react';
 import { UserProfile, Club, ClubMetadata, ClubMember } from '../types';
-import { db } from '../lib/firebase';
+import { db, getApiUrl } from '../lib/firebase';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 
 interface ProfileAndSettingsProps {
@@ -28,6 +28,13 @@ export default function ProfileAndSettings({
   const [memberships, setMemberships] = useState<{ club: Club; roles: string[]; teams: string[]; availableTeams: { id: string; name: string }[] }[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'success' | 'error'>('idle');
+
+  // Password change state
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [passwordStatus, setPasswordStatus] = useState<'idle' | 'saving' | 'success' | 'error'>('idle');
+  const [passwordMsg, setPasswordMsg] = useState('');
 
   // Load all clubs and memberships on mount
   useEffect(() => {
@@ -134,9 +141,62 @@ export default function ProfileAndSettings({
     }).catch(err => console.error('Failed to save active club/team selection:', err));
   };
 
+  const handleChangePassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setPasswordMsg('');
+    
+    if (!currentPassword) {
+      setPasswordStatus('error');
+      setPasswordMsg('Ange ditt nuvarande lösenord.');
+      return;
+    }
+    if (newPassword.length < 6) {
+      setPasswordStatus('error');
+      setPasswordMsg('Det nya lösenordet måste vara minst 6 tecken långt.');
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      setPasswordStatus('error');
+      setPasswordMsg('De nya lösenorden matchar inte.');
+      return;
+    }
+
+    setPasswordStatus('saving');
+    try {
+      const token = localStorage.getItem('token');
+      if (!token) {
+        throw new Error('Ingen inloggningstoken hittades. Vänligen logga in igen.');
+      }
+
+      const res = await fetch(getApiUrl('/api/auth/change-password'), {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ currentPassword, newPassword })
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || 'Kunde inte ändra lösenordet.');
+      }
+
+      setPasswordStatus('success');
+      setPasswordMsg('Ditt lösenord har uppdaterats!');
+      setCurrentPassword('');
+      setNewPassword('');
+      setConfirmPassword('');
+      setTimeout(() => setPasswordStatus('idle'), 4000);
+    } catch (err: any) {
+      setPasswordStatus('error');
+      setPasswordMsg(err.message || 'Ett fel uppstod vid byte av lösenord.');
+    }
+  };
+
   return (
     <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 max-w-6xl mx-auto p-4 sm:p-6" id="profile-settings-page">
-      {/* Profile Form (Left Column) */}
+      {/* Profile Form & Password Change (Left Column) */}
       <div className="lg:col-span-7 space-y-6">
         <div className="bg-white dark:bg-zinc-900 rounded-3xl border border-zinc-150 dark:border-zinc-800 shadow-xl p-6 sm:p-8">
           <div className="flex items-center gap-3.5 mb-6">
@@ -250,6 +310,116 @@ export default function ProfileAndSettings({
             {saveStatus === 'error' && (
               <p className="text-xs text-red-500 font-bold text-center">Något gick fel när profilinställningarna sparades. Prova igen.</p>
             )}
+          </form>
+        </div>
+
+        {/* Change Password Card */}
+        <div className="bg-white dark:bg-zinc-900 rounded-3xl border border-zinc-150 dark:border-zinc-800 shadow-xl p-6 sm:p-8">
+          <div className="flex items-center gap-3.5 mb-6">
+            <div className="w-12 h-12 rounded-2xl bg-amber-500/10 dark:bg-amber-950/40 flex items-center justify-center text-amber-600 dark:text-amber-400">
+              <Lock size={24} />
+            </div>
+            <div>
+              <h2 className="text-xl font-black text-zinc-900 dark:text-white tracking-tight">Byt lösenord</h2>
+              <p className="text-xs text-zinc-500 dark:text-zinc-400 font-medium">Säkra ditt konto genom att uppdatera ditt lösenord.</p>
+            </div>
+          </div>
+
+          <form onSubmit={handleChangePassword} className="space-y-4">
+            <div>
+              <label className="block text-xs font-black text-zinc-650 dark:text-zinc-400 uppercase tracking-wider mb-2">Nuvarande lösenord</label>
+              <div className="relative">
+                <span className="absolute left-4 top-3.5 text-zinc-400">
+                  <Key size={18} />
+                </span>
+                <input
+                  type="password"
+                  required
+                  autoCapitalize="none"
+                  autoCorrect="off"
+                  spellCheck={false}
+                  placeholder="••••••••"
+                  value={currentPassword}
+                  onChange={e => setCurrentPassword(e.target.value)}
+                  className="w-full pl-11 pr-4 py-3 bg-zinc-50 hover:bg-zinc-100/70 focus:bg-white dark:bg-zinc-950 dark:hover:bg-zinc-950/70 dark:focus:bg-zinc-950 rounded-2xl border border-zinc-200 dark:border-zinc-800 focus:border-indigo-500 focus:outline-none transition-all font-semibold text-zinc-900 dark:text-white text-sm"
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-xs font-black text-zinc-650 dark:text-zinc-400 uppercase tracking-wider mb-2">Nytt lösenord</label>
+                <div className="relative">
+                  <span className="absolute left-4 top-3.5 text-zinc-400">
+                    <Lock size={18} />
+                  </span>
+                  <input
+                    type="password"
+                    required
+                    minLength={6}
+                    autoCapitalize="none"
+                    autoCorrect="off"
+                    spellCheck={false}
+                    placeholder="Minst 6 tecken"
+                    value={newPassword}
+                    onChange={e => setNewPassword(e.target.value)}
+                    className="w-full pl-11 pr-4 py-3 bg-zinc-50 hover:bg-zinc-100/70 focus:bg-white dark:bg-zinc-950 dark:hover:bg-zinc-950/70 dark:focus:bg-zinc-950 rounded-2xl border border-zinc-200 dark:border-zinc-800 focus:border-indigo-500 focus:outline-none transition-all font-semibold text-zinc-900 dark:text-white text-sm"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-black text-zinc-650 dark:text-zinc-400 uppercase tracking-wider mb-2">Bekräfta nytt lösenord</label>
+                <div className="relative">
+                  <span className="absolute left-4 top-3.5 text-zinc-400">
+                    <Lock size={18} />
+                  </span>
+                  <input
+                    type="password"
+                    required
+                    minLength={6}
+                    autoCapitalize="none"
+                    autoCorrect="off"
+                    spellCheck={false}
+                    placeholder="Upprepa nytt lösenord"
+                    value={confirmPassword}
+                    onChange={e => setConfirmPassword(e.target.value)}
+                    className="w-full pl-11 pr-4 py-3 bg-zinc-50 hover:bg-zinc-100/70 focus:bg-white dark:bg-zinc-950 dark:hover:bg-zinc-950/70 dark:focus:bg-zinc-950 rounded-2xl border border-zinc-200 dark:border-zinc-800 focus:border-indigo-500 focus:outline-none transition-all font-semibold text-zinc-900 dark:text-white text-sm"
+                  />
+                </div>
+              </div>
+            </div>
+
+            {passwordMsg && (
+              <div className={`p-3.5 rounded-2xl text-xs font-bold flex items-center gap-2 ${
+                passwordStatus === 'success'
+                  ? 'bg-emerald-50 text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800'
+                  : 'bg-red-50 text-red-700 dark:bg-red-950/50 dark:text-red-300 border border-red-200 dark:border-red-800'
+              }`}>
+                {passwordStatus === 'success' ? <ShieldCheck size={18} /> : <AlertCircle size={18} />}
+                <span>{passwordMsg}</span>
+              </div>
+            )}
+
+            <div className="pt-2">
+              <button
+                type="submit"
+                disabled={passwordStatus === 'saving'}
+                className="w-full bg-zinc-900 hover:bg-zinc-800 dark:bg-zinc-100 dark:hover:bg-white text-white dark:text-zinc-900 py-3.5 px-6 rounded-2xl font-extrabold flex items-center justify-center gap-2 transition-all shadow-md active:scale-95 disabled:opacity-50 cursor-pointer text-sm"
+              >
+                {passwordStatus === 'saving' ? (
+                  <>
+                    <div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin"></div>
+                    <span>Uppdaterar lösenord...</span>
+                  </>
+                ) : (
+                  <>
+                    <Key size={18} />
+                    <span>Uppdatera lösenord</span>
+                  </>
+                )}
+              </button>
+            </div>
           </form>
         </div>
       </div>

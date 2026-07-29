@@ -105,12 +105,12 @@ export const signInWithGoogle = async (_forceSelect = false): Promise<User> => {
         <form id="auth-form" class="space-y-4">
           <div id="auth-email-container">
             <label class="block text-xs font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider mb-1.5" for="auth-email">E-postadress</label>
-            <input type="email" id="auth-email" required class="w-full px-4 py-3 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl text-sm text-zinc-800 dark:text-zinc-100 placeholder-zinc-400 focus:outline-none focus:border-indigo-500 dark:focus:border-indigo-500 transition-colors" placeholder="coach@lag.se" />
+            <input type="email" id="auth-email" required autocapitalize="none" autocorrect="off" spellcheck="false" class="w-full px-4 py-3 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl text-sm text-zinc-800 dark:text-zinc-100 placeholder-zinc-400 focus:outline-none focus:border-indigo-500 dark:focus:border-indigo-500 transition-colors" placeholder="coach@lag.se" />
           </div>
 
           <div id="auth-code-container" class="hidden">
             <label class="block text-xs font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider mb-1.5" for="auth-code">6-siffrig verifieringskod</label>
-            <input type="text" id="auth-code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" class="w-full px-4 py-3 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl text-center text-xl font-mono font-bold tracking-widest text-indigo-600 dark:text-indigo-400 placeholder-zinc-400 focus:outline-none focus:border-indigo-500 dark:focus:border-indigo-500 transition-colors" placeholder="123456" autocomplete="one-time-code" />
+            <input type="text" id="auth-code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocapitalize="none" autocorrect="off" spellcheck="false" class="w-full px-4 py-3 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl text-center text-xl font-mono font-bold tracking-widest text-indigo-600 dark:text-indigo-400 placeholder-zinc-400 focus:outline-none focus:border-indigo-500 dark:focus:border-indigo-500 transition-colors" placeholder="123456" autocomplete="one-time-code" />
           </div>
 
           <div id="auth-password-container">
@@ -118,7 +118,7 @@ export const signInWithGoogle = async (_forceSelect = false): Promise<User> => {
               <label id="auth-password-label" class="block text-xs font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider" for="auth-password">Lösenord</label>
               <button type="button" id="auth-forgot-btn" class="text-xs text-indigo-500 hover:text-indigo-600 dark:text-indigo-400 underline font-medium transition-colors">Glömt lösenord?</button>
             </div>
-            <input type="password" id="auth-password" required class="w-full px-4 py-3 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl text-sm text-zinc-800 dark:text-zinc-100 placeholder-zinc-400 focus:outline-none focus:border-indigo-500 dark:focus:border-indigo-500 transition-colors" placeholder="••••••••" minlength="6" />
+            <input type="password" id="auth-password" required autocapitalize="none" autocorrect="off" spellcheck="false" class="w-full px-4 py-3 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl text-sm text-zinc-800 dark:text-zinc-100 placeholder-zinc-400 focus:outline-none focus:border-indigo-500 dark:focus:border-indigo-500 transition-colors" placeholder="••••••••" minlength="6" />
           </div>
 
           <div id="auth-info" class="hidden text-xs font-medium text-emerald-800 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800/40 px-3.5 py-2.5 rounded-xl"></div>
