@@ -118,7 +118,12 @@ export const signInWithGoogle = async (_forceSelect = false): Promise<User> => {
               <label id="auth-password-label" class="block text-xs font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider" for="auth-password">Lösenord</label>
               <button type="button" id="auth-forgot-btn" class="text-xs text-indigo-500 hover:text-indigo-600 dark:text-indigo-400 underline font-medium transition-colors">Glömt lösenord?</button>
             </div>
-            <input type="password" id="auth-password" required autocapitalize="none" autocorrect="off" spellcheck="false" class="w-full px-4 py-3 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl text-sm text-zinc-800 dark:text-zinc-100 placeholder-zinc-400 focus:outline-none focus:border-indigo-500 dark:focus:border-indigo-500 transition-colors" placeholder="••••••••" minlength="6" />
+            <div class="relative">
+              <input type="password" id="auth-password" required autocapitalize="none" autocorrect="off" spellcheck="false" class="w-full pl-4 pr-10 py-3 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl text-sm text-zinc-800 dark:text-zinc-100 placeholder-zinc-400 focus:outline-none focus:border-indigo-500 dark:focus:border-indigo-500 transition-colors" placeholder="••••••••" minlength="6" />
+              <button type="button" id="auth-toggle-pwd" class="absolute right-3 top-3 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 transition-colors p-0.5 rounded-lg focus:outline-none" title="Visa/dölj lösenord">
+                <svg id="pwd-eye-icon" xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>
+              </button>
+            </div>
           </div>
 
           <div id="auth-info" class="hidden text-xs font-medium text-emerald-800 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800/40 px-3.5 py-2.5 rounded-xl"></div>
@@ -166,6 +171,17 @@ export const signInWithGoogle = async (_forceSelect = false): Promise<User> => {
     const emailInput = modal.querySelector('#auth-email') as HTMLInputElement;
     const codeInput = modal.querySelector('#auth-code') as HTMLInputElement;
     const passwordInput = modal.querySelector('#auth-password') as HTMLInputElement;
+    const togglePwdBtn = modal.querySelector('#auth-toggle-pwd') as HTMLButtonElement;
+
+    if (togglePwdBtn && passwordInput) {
+      togglePwdBtn.onclick = () => {
+        const isPwd = passwordInput.type === 'password';
+        passwordInput.type = isPwd ? 'text' : 'password';
+        togglePwdBtn.innerHTML = isPwd
+          ? `<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9.88 9.88a3 3 0 1 0 4.24 4.24"/><path d="M10.73 5.08A10.43 10.43 0 0 1 12 5c7 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68"/><path d="M6.61 6.61A13.52 13.52 0 0 0 2 12s3 7 10 7a9.74 9.74 0 0 0 5.39-1.61"/><line x1="2" x2="22" y1="2" y2="22"/></svg>`
+          : `<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>`;
+      };
+    }
 
     const emailContainer = modal.querySelector('#auth-email-container') as HTMLElement;
     const codeContainer = modal.querySelector('#auth-code-container') as HTMLElement;

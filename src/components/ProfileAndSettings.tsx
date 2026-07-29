@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { User, Phone, Fingerprint, Check, Save, Landmark, Info, Lock, Key, ShieldCheck, AlertCircle } from 'lucide-react';
+import { User, Phone, Fingerprint, Check, Save, Landmark, Info, Lock, Key, ShieldCheck, AlertCircle, Eye, EyeOff } from 'lucide-react';
 import { UserProfile, Club, ClubMetadata, ClubMember } from '../types';
 import { db, getApiUrl } from '../lib/firebase';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
@@ -33,6 +33,9 @@ export default function ProfileAndSettings({
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [showCurrentPassword, setShowCurrentPassword] = useState(false);
+  const [showNewPassword, setShowNewPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [passwordStatus, setPasswordStatus] = useState<'idle' | 'saving' | 'success' | 'error'>('idle');
   const [passwordMsg, setPasswordMsg] = useState('');
 
@@ -333,7 +336,7 @@ export default function ProfileAndSettings({
                   <Key size={18} />
                 </span>
                 <input
-                  type="password"
+                  type={showCurrentPassword ? "text" : "password"}
                   required
                   autoCapitalize="none"
                   autoCorrect="off"
@@ -341,8 +344,16 @@ export default function ProfileAndSettings({
                   placeholder="••••••••"
                   value={currentPassword}
                   onChange={e => setCurrentPassword(e.target.value)}
-                  className="w-full pl-11 pr-4 py-3 bg-zinc-50 hover:bg-zinc-100/70 focus:bg-white dark:bg-zinc-950 dark:hover:bg-zinc-950/70 dark:focus:bg-zinc-950 rounded-2xl border border-zinc-200 dark:border-zinc-800 focus:border-indigo-500 focus:outline-none transition-all font-semibold text-zinc-900 dark:text-white text-sm"
+                  className="w-full pl-11 pr-12 py-3 bg-zinc-50 hover:bg-zinc-100/70 focus:bg-white dark:bg-zinc-950 dark:hover:bg-zinc-950/70 dark:focus:bg-zinc-950 rounded-2xl border border-zinc-200 dark:border-zinc-800 focus:border-indigo-500 focus:outline-none transition-all font-semibold text-zinc-900 dark:text-white text-sm"
                 />
+                <button
+                  type="button"
+                  onClick={() => setShowCurrentPassword(!showCurrentPassword)}
+                  className="absolute right-3.5 top-3.5 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 transition-colors p-0.5 rounded-lg focus:outline-none"
+                  title={showCurrentPassword ? "Dölj lösenord" : "Visa lösenord"}
+                >
+                  {showCurrentPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                </button>
               </div>
             </div>
 
@@ -354,7 +365,7 @@ export default function ProfileAndSettings({
                     <Lock size={18} />
                   </span>
                   <input
-                    type="password"
+                    type={showNewPassword ? "text" : "password"}
                     required
                     minLength={6}
                     autoCapitalize="none"
@@ -363,8 +374,16 @@ export default function ProfileAndSettings({
                     placeholder="Minst 6 tecken"
                     value={newPassword}
                     onChange={e => setNewPassword(e.target.value)}
-                    className="w-full pl-11 pr-4 py-3 bg-zinc-50 hover:bg-zinc-100/70 focus:bg-white dark:bg-zinc-950 dark:hover:bg-zinc-950/70 dark:focus:bg-zinc-950 rounded-2xl border border-zinc-200 dark:border-zinc-800 focus:border-indigo-500 focus:outline-none transition-all font-semibold text-zinc-900 dark:text-white text-sm"
+                    className="w-full pl-11 pr-12 py-3 bg-zinc-50 hover:bg-zinc-100/70 focus:bg-white dark:bg-zinc-950 dark:hover:bg-zinc-950/70 dark:focus:bg-zinc-950 rounded-2xl border border-zinc-200 dark:border-zinc-800 focus:border-indigo-500 focus:outline-none transition-all font-semibold text-zinc-900 dark:text-white text-sm"
                   />
+                  <button
+                    type="button"
+                    onClick={() => setShowNewPassword(!showNewPassword)}
+                    className="absolute right-3.5 top-3.5 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 transition-colors p-0.5 rounded-lg focus:outline-none"
+                    title={showNewPassword ? "Dölj lösenord" : "Visa lösenord"}
+                  >
+                    {showNewPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                  </button>
                 </div>
               </div>
 
@@ -375,7 +394,7 @@ export default function ProfileAndSettings({
                     <Lock size={18} />
                   </span>
                   <input
-                    type="password"
+                    type={showConfirmPassword ? "text" : "password"}
                     required
                     minLength={6}
                     autoCapitalize="none"
@@ -384,8 +403,16 @@ export default function ProfileAndSettings({
                     placeholder="Upprepa nytt lösenord"
                     value={confirmPassword}
                     onChange={e => setConfirmPassword(e.target.value)}
-                    className="w-full pl-11 pr-4 py-3 bg-zinc-50 hover:bg-zinc-100/70 focus:bg-white dark:bg-zinc-950 dark:hover:bg-zinc-950/70 dark:focus:bg-zinc-950 rounded-2xl border border-zinc-200 dark:border-zinc-800 focus:border-indigo-500 focus:outline-none transition-all font-semibold text-zinc-900 dark:text-white text-sm"
+                    className="w-full pl-11 pr-12 py-3 bg-zinc-50 hover:bg-zinc-100/70 focus:bg-white dark:bg-zinc-950 dark:hover:bg-zinc-950/70 dark:focus:bg-zinc-950 rounded-2xl border border-zinc-200 dark:border-zinc-800 focus:border-indigo-500 focus:outline-none transition-all font-semibold text-zinc-900 dark:text-white text-sm"
                   />
+                  <button
+                    type="button"
+                    onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                    className="absolute right-3.5 top-3.5 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 transition-colors p-0.5 rounded-lg focus:outline-none"
+                    title={showConfirmPassword ? "Dölj lösenord" : "Visa lösenord"}
+                  >
+                    {showConfirmPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                  </button>
                 </div>
               </div>
             </div>
