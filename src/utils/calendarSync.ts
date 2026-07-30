@@ -140,8 +140,9 @@ export async function syncTeamCalendar(
           return `${String(endH).padStart(2, '0')}:${String(minRem).padStart(2, '0')}`;
         };
 
+        const now = Date.now();
         const newSession: TrainingSession = {
-          id: `session_${Math.random().toString(36).substring(2, 9)}_${Date.now()}`,
+          id: `session_${Math.random().toString(36).substring(2, 9)}_${now}`,
           externalId: ev.externalId,
           title: ev.title,
           date: ev.date,
@@ -152,7 +153,9 @@ export async function syncTeamCalendar(
           isCompleted: false,
           attendance: [],
           moments: [],
-          notes: ''
+          notes: '',
+          createdAt: now,
+          updatedAt: now
         };
 
         newSessionsToAdd.push(newSession);

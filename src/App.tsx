@@ -861,14 +861,14 @@ export default function App() {
         const savedExerciseBankCategories = localStorage.getItem('football_exercise_bank_categories');
 
         const cachedSquad = savedSquad ? (Array.from(new Map(JSON.parse(savedSquad).map((p: any) => [p.id, p])).values()) as SquadPlayer[]) : [];
-        const cachedSessions = savedSessions ? deduplicateById(JSON.parse(savedSessions)) : [];
-        const cachedDeletedSessions = savedDeletedSessions ? deduplicateById(JSON.parse(savedDeletedSessions)) : [];
-        const cachedExercises = savedExercises ? deduplicateById(JSON.parse(savedExercises)) : [];
-        const cachedExerciseBank = savedExerciseBank ? deduplicateById(JSON.parse(savedExerciseBank)) : [];
+        const cachedSessions = savedSessions ? deduplicateById<TrainingSession>(JSON.parse(savedSessions)) : [];
+        const cachedDeletedSessions = savedDeletedSessions ? deduplicateById<TrainingSession>(JSON.parse(savedDeletedSessions)) : [];
+        const cachedExercises = savedExercises ? deduplicateById<Exercise>(JSON.parse(savedExercises)) : [];
+        const cachedExerciseBank = savedExerciseBank ? deduplicateById<BankExercise>(JSON.parse(savedExerciseBank)) : [];
         const cachedExerciseBankCategories = savedExerciseBankCategories ? JSON.parse(savedExerciseBankCategories) : [];
-        const cachedLineups = savedLineups ? deduplicateById(JSON.parse(savedLineups)) : [];
-        const cachedPeriods = savedPeriods ? deduplicateById(JSON.parse(savedPeriods)) : [];
-        const cachedCustomFormations = localStorage.getItem('custom_formations') ? deduplicateById(JSON.parse(localStorage.getItem('custom_formations')!)) : [];
+        const cachedLineups = savedLineups ? deduplicateById<Lineup>(JSON.parse(savedLineups)) : [];
+        const cachedPeriods = savedPeriods ? deduplicateById<Period>(JSON.parse(savedPeriods)) : [];
+        const cachedCustomFormations = localStorage.getItem('custom_formations') ? deduplicateById<any>(JSON.parse(localStorage.getItem('custom_formations')!)) : [];
         const cachedPinnedFormations = localStorage.getItem('pinned_formations') ? JSON.parse(localStorage.getItem('pinned_formations')!) : ['4-2-3-1', '4-4-2', '4-3-3'];
         const cachedSettings = savedSettings ? JSON.parse(savedSettings) : INITIAL_DATA.trainingSettings;
 
@@ -2552,7 +2552,7 @@ export default function App() {
         </div>
       )}
 
-      <main className={`flex-1 flex flex-col min-h-0 ${view === 'exercise' || view === 'teampage' ? 'overflow-hidden' : 'overflow-y-auto pb-24 sm:pb-28'}`}>
+      <main className={`flex-1 flex flex-col min-h-0 w-full max-w-full overflow-x-hidden ${view === 'exercise' || view === 'teampage' ? 'overflow-hidden' : 'overflow-y-auto pb-24 sm:pb-28'}`}>
         <AnimatePresence mode="wait">
           {view === 'training' && (
             sharedLeaderboardId ? (
@@ -2927,7 +2927,7 @@ export default function App() {
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -20 }}
-              className="max-w-6xl mx-auto p-4 sm:p-8"
+              className="w-full max-w-6xl mx-auto px-1.5 sm:px-6 py-2 sm:py-6 min-w-0 overflow-x-hidden"
             >
               <ClubAdminDashboard
                 userId={user.uid}

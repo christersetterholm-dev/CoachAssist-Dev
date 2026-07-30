@@ -20,67 +20,105 @@ const _dirname = typeof import.meta !== 'undefined' && import.meta.url
 
 // Environment variables for persistence on cloud platforms
 const isProduction = process.env.NODE_ENV === 'production' || _dirname.includes('dist') || _dirname.includes('\\dist');
-const DATA_DIR = process.env.DATA_DIR || (isProduction ? path.join(_dirname, '..') : process.cwd());
+let DATA_DIR = process.env.DATA_DIR || (isProduction ? path.join(_dirname, '..') : process.cwd());
+
+try {
+  fs.mkdirSync(DATA_DIR, { recursive: true });
+  fs.accessSync(DATA_DIR, fs.constants.W_OK);
+} catch (e) {
+  console.warn('[Server] Selected DATA_DIR is not writable, falling back to /tmp:', e);
+  DATA_DIR = '/tmp';
+}
+
 const UPLOADS_DIR = process.env.UPLOADS_DIR || path.join(DATA_DIR, 'uploads');
 const DB_PATH = process.env.DATABASE_PATH || path.join(DATA_DIR, 'coachassist.db');
 
-// Ensure the local upload folder exists
-fs.mkdirSync(UPLOADS_DIR, { recursive: true });
+try {
+  fs.mkdirSync(UPLOADS_DIR, { recursive: true });
+} catch (e) {
+  console.warn('[Server] Could not create UPLOADS_DIR:', e);
+}
 
-// Initialize SQLite database
-const db = new Database(DB_PATH);
+// Initialize SQLite database with self-healing recovery if malformed/corrupted
+function initDatabase(): InstanceType<typeof Database> {
+  const createSchema = (database: InstanceType<typeof Database>) => {
+    database.exec(`
+      CREATE TABLE IF NOT EXISTS users (
+        id TEXT PRIMARY KEY,
+        email TEXT UNIQUE NOT NULL,
+        password_hash TEXT NOT NULL,
+        created_at INTEGER NOT NULL
+      );
 
-// Create database schema
-db.exec(`
-  CREATE TABLE IF NOT EXISTS users (
-    id TEXT PRIMARY KEY,
-    email TEXT UNIQUE NOT NULL,
-    password_hash TEXT NOT NULL,
-    created_at INTEGER NOT NULL
-  );
+      CREATE TABLE IF NOT EXISTS users_data (
+        userId TEXT NOT NULL,
+        segment TEXT NOT NULL,
+        data TEXT NOT NULL,
+        updatedAt INTEGER NOT NULL,
+        PRIMARY KEY (userId, segment),
+        FOREIGN KEY (userId) REFERENCES users(id) ON DELETE CASCADE
+      );
 
-  CREATE TABLE IF NOT EXISTS users_data (
-    userId TEXT NOT NULL,
-    segment TEXT NOT NULL,
-    data TEXT NOT NULL,
-    updatedAt INTEGER NOT NULL,
-    PRIMARY KEY (userId, segment),
-    FOREIGN KEY (userId) REFERENCES users(id) ON DELETE CASCADE
-  );
+      CREATE TABLE IF NOT EXISTS shared_leaderboards (
+        id TEXT PRIMARY KEY,
+        data TEXT NOT NULL,
+        updatedAt INTEGER NOT NULL,
+        coachUid TEXT,
+        FOREIGN KEY (coachUid) REFERENCES users(id) ON DELETE SET NULL
+      );
 
-  CREATE TABLE IF NOT EXISTS shared_leaderboards (
-    id TEXT PRIMARY KEY,
-    data TEXT NOT NULL,
-    updatedAt INTEGER NOT NULL,
-    coachUid TEXT,
-    FOREIGN KEY (coachUid) REFERENCES users(id) ON DELETE SET NULL
-  );
+      CREATE TABLE IF NOT EXISTS clubs_data (
+        clubId TEXT NOT NULL,
+        teamId TEXT NOT NULL,
+        segment TEXT NOT NULL,
+        data TEXT NOT NULL,
+        updatedAt INTEGER NOT NULL,
+        PRIMARY KEY (clubId, teamId, segment)
+      );
 
-  CREATE TABLE IF NOT EXISTS clubs_data (
-    clubId TEXT NOT NULL,
-    teamId TEXT NOT NULL,
-    segment TEXT NOT NULL,
-    data TEXT NOT NULL,
-    updatedAt INTEGER NOT NULL,
-    PRIMARY KEY (clubId, teamId, segment)
-  );
+      CREATE TABLE IF NOT EXISTS system_docs (
+        path TEXT PRIMARY KEY,
+        data TEXT NOT NULL,
+        updatedAt INTEGER NOT NULL
+      );
 
-  CREATE TABLE IF NOT EXISTS system_docs (
-    path TEXT PRIMARY KEY,
-    data TEXT NOT NULL,
-    updatedAt INTEGER NOT NULL
-  );
+      CREATE TABLE IF NOT EXISTS password_resets (
+        id TEXT PRIMARY KEY,
+        email TEXT NOT NULL,
+        code_hash TEXT NOT NULL,
+        expires_at INTEGER NOT NULL,
+        attempts INTEGER NOT NULL DEFAULT 0,
+        used INTEGER NOT NULL DEFAULT 0,
+        created_at INTEGER NOT NULL
+      );
+    `);
+  };
 
-  CREATE TABLE IF NOT EXISTS password_resets (
-    id TEXT PRIMARY KEY,
-    email TEXT NOT NULL,
-    code_hash TEXT NOT NULL,
-    expires_at INTEGER NOT NULL,
-    attempts INTEGER NOT NULL DEFAULT 0,
-    used INTEGER NOT NULL DEFAULT 0,
-    created_at INTEGER NOT NULL
-  );
-`);
+  try {
+    const database = new Database(DB_PATH);
+    database.pragma('quick_check');
+    createSchema(database);
+    return database;
+  } catch (err: any) {
+    console.error('[SQLite Init] Database initialization failed (e.g. malformed DB):', err?.message || err);
+    if (fs.existsSync(DB_PATH)) {
+      try {
+        const corruptPath = `${DB_PATH}.corrupt.${Date.now()}`;
+        fs.renameSync(DB_PATH, corruptPath);
+        console.warn(`[SQLite Recovery] Moved corrupted database file to ${corruptPath}`);
+      } catch (e: any) {
+        console.error('[SQLite Recovery] Failed to rename corrupt database, removing file:', e?.message || e);
+        try { fs.unlinkSync(DB_PATH); } catch (_) {}
+      }
+    }
+    const freshDb = new Database(DB_PATH);
+    createSchema(freshDb);
+    console.log('[SQLite Recovery] Fresh SQLite database initialized successfully.');
+    return freshDb;
+  }
+}
+
+const db = initDatabase();
 
 const JWT_SECRET = process.env.JWT_SECRET || 'coachassist-local-secret-key-12345';
 

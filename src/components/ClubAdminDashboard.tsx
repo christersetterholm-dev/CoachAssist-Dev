@@ -1030,46 +1030,46 @@ export default function ClubAdminDashboard({
   });
 
   return (
-    <div className="max-w-6xl mx-auto p-4 sm:p-6" id="club-admin-dashboard">
+    <div className="w-full max-w-6xl mx-auto p-1.5 sm:p-6 min-w-0 overflow-x-hidden" id="club-admin-dashboard">
       {/* Upper Navigation & Club Select Panel */}
-      <div className="bg-white dark:bg-zinc-900 rounded-3xl border border-zinc-150 dark:border-zinc-800 shadow-xl p-5 sm:p-7 mb-6">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-5 pb-6 border-b border-zinc-100 dark:border-zinc-800">
-          <div className="flex items-center gap-3.5">
+      <div className="bg-white dark:bg-zinc-900 rounded-2xl sm:rounded-3xl border border-zinc-150 dark:border-zinc-800 shadow-xl p-3.5 sm:p-7 mb-6 w-full min-w-0">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-5 sm:pb-6 border-b border-zinc-100 dark:border-zinc-800 w-full min-w-0">
+          <div className="flex items-center gap-3 sm:gap-3.5 min-w-0 flex-1">
             {onBack && (
               <button
                 onClick={onBack}
-                className="w-10 h-10 rounded-xl border border-zinc-200 dark:border-zinc-800 hover:bg-zinc-50 dark:hover:bg-zinc-800 flex items-center justify-center text-zinc-600 dark:text-zinc-400 cursor-pointer active:scale-95 transition-all shrink-0"
+                className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl border border-zinc-200 dark:border-zinc-800 hover:bg-zinc-50 dark:hover:bg-zinc-800 flex items-center justify-center text-zinc-600 dark:text-zinc-400 cursor-pointer active:scale-95 transition-all shrink-0"
                 title="Tillbaka till profil"
               >
                 <ArrowRight size={18} className="rotate-180" />
               </button>
             )}
-            <div className="w-12 h-12 rounded-2xl bg-indigo-50/50 dark:bg-indigo-950/40 flex items-center justify-center text-indigo-600 dark:text-indigo-400 shrink-0">
-              <Shield size={24} />
+            <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-2xl bg-indigo-50/50 dark:bg-indigo-950/40 flex items-center justify-center text-indigo-600 dark:text-indigo-400 shrink-0">
+              <Shield size={22} />
             </div>
-            <div>
-              <div className="flex flex-wrap items-center gap-2">
-                <h1 className="text-2xl font-black text-zinc-900 dark:text-white tracking-tight">Klubb- & Lagadministration</h1>
+            <div className="min-w-0 flex-1">
+              <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
+                <h1 className="text-lg sm:text-2xl font-black text-zinc-900 dark:text-white tracking-tight break-words">Klubb- & Lagadministration</h1>
                 {isRootAdmin && (
                   <span className="text-[10px] font-black uppercase tracking-wider bg-red-50 dark:bg-red-950/40 text-red-600 dark:text-red-400 px-2 py-0.5 rounded-md border border-red-100/40 dark:border-red-900/40 animate-pulse">
                     Root Admin
                   </span>
                 )}
               </div>
-              <p className="text-xs text-zinc-500 dark:text-zinc-400 font-medium">Skala din verksamhet, hantera medlemsroller och skapa nya lag.</p>
+              <p className="text-[11px] sm:text-xs text-zinc-500 dark:text-zinc-400 font-medium truncate">Skala din verksamhet, hantera medlemsroller och skapa nya lag.</p>
             </div>
           </div>
 
           {/* Club Dropdown */}
-          <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3 w-full sm:w-auto">
-            <label className="text-xs font-black uppercase text-zinc-400 shrink-0">Välj förening:</label>
+          <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3 w-full sm:w-auto min-w-0">
+            <label className="text-[11px] sm:text-xs font-black uppercase text-zinc-400 shrink-0">Välj förening:</label>
             <select
               value={selectedClub?.id || ''}
               onChange={(e) => {
                 const found = clubs.find(c => c.id === e.target.value);
                 if (found) setSelectedClub(found);
               }}
-              className="w-full sm:w-auto px-4 py-2.5 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 text-zinc-800 dark:text-zinc-200 rounded-xl font-bold text-sm focus:outline-none focus:border-indigo-500 cursor-pointer"
+              className="w-full sm:w-auto px-3.5 py-2 sm:py-2.5 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 text-zinc-800 dark:text-zinc-200 rounded-xl font-bold text-xs sm:text-sm focus:outline-none focus:border-indigo-500 cursor-pointer min-w-0 truncate"
             >
               {clubs.map(c => (
                 <option key={c.id} value={c.id}>{c.name}</option>
@@ -1080,7 +1080,7 @@ export default function ClubAdminDashboard({
         </div>
 
         {/* Tab Selection */}
-        <div className="flex flex-wrap items-center gap-2 mt-4 sm:mt-5 overflow-x-auto pb-1 no-scrollbar">
+        <div className="flex items-center gap-1.5 sm:gap-2 mt-3.5 sm:mt-5 overflow-x-auto pb-2 no-scrollbar w-full min-w-0 snap-x">
           <button
             onClick={() => setActiveTab('clubs')}
             className={`flex items-center gap-2 px-4 sm:px-5 py-2.5 sm:py-3 rounded-xl font-extrabold text-xs sm:text-sm transition-all cursor-pointer shrink-0 ${
@@ -1289,18 +1289,18 @@ export default function ClubAdminDashboard({
                 {clubMetadata.teams.map(team => (
                   <div
                     key={team.id}
-                    className="flex items-center justify-between p-4 rounded-2xl border border-zinc-150 dark:border-zinc-800 bg-zinc-55/30 dark:bg-zinc-950"
+                    className="flex flex-col sm:flex-row sm:items-center justify-between p-3.5 sm:p-4 rounded-2xl border border-zinc-150 dark:border-zinc-800 bg-zinc-55/30 dark:bg-zinc-950 gap-3 min-w-0"
                   >
-                    <div className="flex items-center gap-3.5">
-                      <div className="w-10 h-10 rounded-xl bg-emerald-55/10 dark:bg-emerald-950/20 text-emerald-600 dark:text-emerald-400 flex items-center justify-center">
-                        <Settings size={20} />
+                    <div className="flex items-center gap-3 sm:gap-3.5 min-w-0 flex-1">
+                      <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-emerald-55/10 dark:bg-emerald-950/20 text-emerald-600 dark:text-emerald-400 flex items-center justify-center shrink-0">
+                        <Settings size={18} />
                       </div>
-                      <div>
-                        <h3 className="font-extrabold text-sm text-zinc-900 dark:text-white">{team.name}</h3>
-                        <p className="text-[10px] text-zinc-400 font-bold uppercase tracking-wider mt-0.5">ID: {team.id}</p>
+                      <div className="min-w-0 flex-1">
+                        <h3 className="font-extrabold text-sm text-zinc-900 dark:text-white truncate">{team.name}</h3>
+                        <p className="text-[10px] text-zinc-400 font-bold uppercase tracking-wider mt-0.5 truncate">ID: {team.id}</p>
                       </div>
                     </div>
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center justify-between sm:justify-end gap-2 w-full sm:w-auto shrink-0 border-t sm:border-t-0 pt-2 sm:pt-0 border-zinc-100 dark:border-zinc-800/60">
                       {selectedClub.id === activeClubId && team.id === activeTeamId ? (
                         <span className="text-emerald-600 dark:text-emerald-400 text-xs font-black bg-emerald-50 dark:bg-emerald-950/40 px-3 py-1.5 rounded-xl border border-emerald-200 dark:border-emerald-800 flex items-center gap-1.5">
                           <Check size={14} />
@@ -1342,10 +1342,10 @@ export default function ClubAdminDashboard({
       {activeTab === 'members' && selectedClub && (
         <div className="space-y-6">
           {/* Members search & Add button */}
-          <div className="bg-white dark:bg-zinc-900 rounded-3xl border border-zinc-150 dark:border-zinc-800 shadow-xl p-6">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-              <div className="relative flex-1">
-                <span className="absolute left-4 top-3.5 text-zinc-400">
+          <div className="bg-white dark:bg-zinc-900 rounded-2xl sm:rounded-3xl border border-zinc-150 dark:border-zinc-800 shadow-xl p-3.5 sm:p-6 w-full min-w-0">
+            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 sm:gap-4 w-full min-w-0">
+              <div className="relative flex-1 w-full min-w-0">
+                <span className="absolute left-3.5 top-3 text-zinc-400">
                   <Search size={18} />
                 </span>
                 <input
@@ -1353,28 +1353,28 @@ export default function ClubAdminDashboard({
                   placeholder="Sök bland medlemmar på namn, e-post eller telefon..."
                   value={memberSearchQuery}
                   onChange={(e) => setMemberSearchQuery(e.target.value)}
-                  className="w-full pl-11 pr-4 py-3 bg-zinc-50 hover:bg-zinc-100/50 dark:bg-zinc-950 dark:hover:bg-zinc-950/50 rounded-2xl border border-zinc-200 dark:border-zinc-800 focus:outline-none focus:border-indigo-500 font-semibold text-sm"
+                  className="w-full pl-10 pr-4 py-2.5 sm:py-3 bg-zinc-50 hover:bg-zinc-100/50 dark:bg-zinc-950 dark:hover:bg-zinc-950/50 rounded-xl sm:rounded-2xl border border-zinc-200 dark:border-zinc-800 focus:outline-none focus:border-indigo-500 font-semibold text-xs sm:text-sm min-w-0"
                 />
               </div>
 
-              <div className="flex flex-wrap items-center gap-2 shrink-0">
+              <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 w-full lg:w-auto shrink-0">
                 <button
                   onClick={() => {
                     setImportSelectedTeamIds(clubMetadata?.teams?.map(t => t.id) || []);
                     setParsedImportMembers([]);
                     setShowImportModal(true);
                   }}
-                  className="bg-emerald-600 hover:bg-emerald-700 text-white px-5 py-3.5 rounded-2xl font-extrabold text-sm flex items-center justify-center gap-2 active:scale-95 transition-all cursor-pointer shadow-md shadow-emerald-100 dark:shadow-none"
+                  className="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2.5 sm:py-3 rounded-xl sm:rounded-2xl font-extrabold text-xs sm:text-sm flex items-center justify-center gap-2 active:scale-95 transition-all cursor-pointer shadow-md shadow-emerald-100 dark:shadow-none w-full sm:w-auto flex-1 sm:flex-none"
                 >
-                  <Upload size={18} />
+                  <Upload size={16} />
                   <span>Importera trupp / medlemmar</span>
                 </button>
 
                 <button
                   onClick={() => openMemberForm(null)}
-                  className="bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-3.5 rounded-2xl font-extrabold text-sm flex items-center justify-center gap-2 active:scale-95 transition-all cursor-pointer shadow-md shadow-indigo-100 dark:shadow-none"
+                  className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2.5 sm:py-3 rounded-xl sm:rounded-2xl font-extrabold text-xs sm:text-sm flex items-center justify-center gap-2 active:scale-95 transition-all cursor-pointer shadow-md shadow-indigo-100 dark:shadow-none w-full sm:w-auto flex-1 sm:flex-none"
                 >
-                  <UserPlus size={18} />
+                  <UserPlus size={16} />
                   <span>Lägg till medlem</span>
                 </button>
               </div>
@@ -1567,18 +1567,18 @@ export default function ClubAdminDashboard({
                 {filteredMembers.map(member => (
                   <div
                     key={member.email}
-                    className="p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 hover:bg-zinc-50/50 dark:hover:bg-zinc-950/40 transition-all"
+                    className="p-3.5 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4 hover:bg-zinc-50/50 dark:hover:bg-zinc-950/40 transition-all w-full min-w-0"
                   >
-                    <div className="flex items-start gap-3.5">
-                      <div className="w-10 h-10 rounded-xl bg-zinc-100 dark:bg-zinc-800/80 text-zinc-600 dark:text-zinc-400 flex items-center justify-center shrink-0">
+                    <div className="flex items-start gap-3 sm:gap-3.5 min-w-0 flex-1">
+                      <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-zinc-100 dark:bg-zinc-800/80 text-zinc-600 dark:text-zinc-400 flex items-center justify-center shrink-0">
                         <Users size={18} />
                       </div>
-                      <div>
-                        <h4 className="font-extrabold text-sm text-zinc-900 dark:text-white leading-tight">{member.fullName}</h4>
-                        <div className="flex flex-wrap items-center gap-2.5 mt-1 text-[11px] text-zinc-500 dark:text-zinc-400 font-bold">
-                          <span className="flex items-center gap-1.5 shrink-0">
-                            <Mail size={12} />
-                            <span>{member.email}</span>
+                      <div className="min-w-0 flex-1">
+                        <h4 className="font-extrabold text-sm text-zinc-900 dark:text-white leading-tight truncate">{member.fullName}</h4>
+                        <div className="flex flex-wrap items-center gap-2 mt-1 text-[11px] text-zinc-500 dark:text-zinc-400 font-bold min-w-0">
+                          <span className="flex items-center gap-1.5 min-w-0 max-w-full">
+                            <Mail size={12} className="shrink-0" />
+                            <span className="truncate max-w-[200px] sm:max-w-none">{member.email}</span>
                           </span>
                           {member.phone && (
                             <span className="flex items-center gap-1.5 shrink-0">
@@ -1596,12 +1596,12 @@ export default function ClubAdminDashboard({
 
                         {/* Display member teams */}
                         {clubMetadata?.teams && member.teams && member.teams.length > 0 && (
-                          <div className="flex flex-wrap gap-1 mt-2">
+                          <div className="flex flex-wrap gap-1 mt-2 min-w-0">
                             <span className="text-[10px] text-zinc-400 font-bold uppercase tracking-wider mr-1 mt-0.5">Lag:</span>
                             {member.teams.map(tid => {
                               const t = clubMetadata.teams.find(team => team.id === tid);
                               return t ? (
-                                <span key={tid} className="text-[10px] font-bold bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 px-2 py-0.5 rounded">
+                                <span key={tid} className="text-[10px] font-bold bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 px-2 py-0.5 rounded truncate max-w-[120px]">
                                   {t.name}
                                 </span>
                               ) : null;
@@ -1612,8 +1612,8 @@ export default function ClubAdminDashboard({
                     </div>
 
                     {/* Member roles and action buttons */}
-                    <div className="flex items-center justify-between sm:justify-end gap-4 shrink-0">
-                      <div className="flex gap-1.5">
+                    <div className="flex items-center justify-between sm:justify-end gap-3 shrink-0 border-t sm:border-t-0 pt-2 sm:pt-0 border-zinc-100 dark:border-zinc-800/60 w-full sm:w-auto">
+                      <div className="flex flex-wrap gap-1.5">
                         {member.roles.map(r => (
                           <span
                             key={r}
@@ -1833,7 +1833,7 @@ export default function ClubAdminDashboard({
                         </span>
                       </div>
 
-                      <div className="max-h-56 overflow-y-auto border border-zinc-200 dark:border-zinc-800 rounded-2xl">
+                      <div className="max-h-56 overflow-y-auto overflow-x-auto border border-zinc-200 dark:border-zinc-800 rounded-2xl w-full min-w-0">
                         <table className="w-full text-left text-xs">
                           <thead className="bg-zinc-100 dark:bg-zinc-950 text-zinc-500 sticky top-0 font-bold">
                             <tr>

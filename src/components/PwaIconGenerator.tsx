@@ -428,32 +428,32 @@ export default function PwaIconGenerator({ initialLogoUrl, clubName = 'CoachAssi
   const mainMaskable512 = previewDataUrls['icon-maskable-512x512.png'] || '';
 
   return (
-    <div className="bg-white dark:bg-zinc-900 rounded-3xl border border-zinc-150 dark:border-zinc-800 shadow-xl p-6 sm:p-8 space-y-8">
+    <div className="bg-white dark:bg-zinc-900 rounded-2xl sm:rounded-3xl border border-zinc-150 dark:border-zinc-800 shadow-xl p-3.5 sm:p-8 space-y-6 sm:space-y-8 w-full min-w-0 overflow-x-hidden">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-zinc-100 dark:border-zinc-800/80 pb-6">
-        <div className="flex items-center gap-3.5">
-          <div className="w-12 h-12 rounded-2xl bg-indigo-600/10 dark:bg-indigo-950/50 text-indigo-600 dark:text-indigo-400 flex items-center justify-center font-bold">
-            <Smartphone size={24} />
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-zinc-100 dark:border-zinc-800/80 pb-6 w-full min-w-0">
+        <div className="flex items-center gap-3 sm:gap-3.5 min-w-0">
+          <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-2xl bg-indigo-600/10 dark:bg-indigo-950/50 text-indigo-600 dark:text-indigo-400 flex items-center justify-center font-bold shrink-0">
+            <Smartphone size={22} />
           </div>
-          <div>
-            <h2 className="text-xl font-black text-zinc-900 dark:text-white tracking-tight flex items-center gap-2">
-              PWA-Ikonpaket & Generator
+          <div className="min-w-0 flex-1">
+            <h2 className="text-lg sm:text-xl font-black text-zinc-900 dark:text-white tracking-tight flex items-center gap-2 flex-wrap">
+              <span>PWA-Ikonpaket & Generator</span>
               <span className="text-[10px] bg-indigo-100 dark:bg-indigo-950/80 text-indigo-700 dark:text-indigo-300 px-2.5 py-0.5 rounded-full font-bold uppercase tracking-wider">
                 Admin
               </span>
             </h2>
-            <p className="text-xs text-zinc-500 dark:text-zinc-400 font-medium">
-              Skapa perfekta hemskärmsikoner (iOS/Android) och tillämpa dem direkt i appen.
+            <p className="text-[11px] sm:text-xs text-zinc-500 dark:text-zinc-400 font-medium truncate">
+              Skapa hemskärmsikoner (iOS/Android) och tillämpa dem direkt.
             </p>
           </div>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2.5">
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 w-full sm:w-auto shrink-0">
           <button
             type="button"
             onClick={handleApplyToApp}
             disabled={!logoImage || isApplyingToApp}
-            className="bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-extrabold px-5 py-3 rounded-2xl text-xs flex items-center justify-center gap-2 transition-all shadow-lg shadow-emerald-100 dark:shadow-none active:scale-95 cursor-pointer"
+            className="bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-extrabold px-4 sm:px-5 py-2.5 sm:py-3 rounded-xl sm:rounded-2xl text-xs flex items-center justify-center gap-2 transition-all shadow-lg shadow-emerald-100 dark:shadow-none active:scale-95 cursor-pointer w-full sm:w-auto"
           >
             {isApplyingToApp ? (
               <>
