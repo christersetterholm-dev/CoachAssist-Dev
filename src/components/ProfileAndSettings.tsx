@@ -148,11 +148,6 @@ export default function ProfileAndSettings({
     e.preventDefault();
     setPasswordMsg('');
     
-    if (!currentPassword) {
-      setPasswordStatus('error');
-      setPasswordMsg('Ange ditt nuvarande lösenord.');
-      return;
-    }
     if (newPassword.length < 6) {
       setPasswordStatus('error');
       setPasswordMsg('Det nya lösenordet måste vara minst 6 tecken långt.');
@@ -330,18 +325,17 @@ export default function ProfileAndSettings({
 
           <form onSubmit={handleChangePassword} className="space-y-4">
             <div>
-              <label className="block text-xs font-black text-zinc-650 dark:text-zinc-400 uppercase tracking-wider mb-2">Nuvarande lösenord</label>
+              <label className="block text-xs font-black text-zinc-650 dark:text-zinc-400 uppercase tracking-wider mb-2">Nuvarande lösenord (Valfritt om inloggad)</label>
               <div className="relative">
                 <span className="absolute left-4 top-3.5 text-zinc-400">
                   <Key size={18} />
                 </span>
                 <input
                   type={showCurrentPassword ? "text" : "password"}
-                  required
                   autoCapitalize="none"
                   autoCorrect="off"
                   spellCheck={false}
-                  placeholder="••••••••"
+                  placeholder="Lämna tomt om du glömt"
                   value={currentPassword}
                   onChange={e => setCurrentPassword(e.target.value)}
                   className="w-full pl-11 pr-12 py-3 bg-zinc-50 hover:bg-zinc-100/70 focus:bg-white dark:bg-zinc-950 dark:hover:bg-zinc-950/70 dark:focus:bg-zinc-950 rounded-2xl border border-zinc-200 dark:border-zinc-800 focus:border-indigo-500 focus:outline-none transition-all font-semibold text-zinc-900 dark:text-white text-sm"

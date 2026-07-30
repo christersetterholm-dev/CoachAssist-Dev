@@ -122,8 +122,6 @@ export default function PwaIconGenerator({ initialLogoUrl, clubName = 'CoachAssi
 
     ctx.clearRect(0, 0, size, size);
 
-    const isValidHex = (hex: string) => /^#[0-9a-fA-F]{6}$/i.test(hex);
-
     // Background
     if (!useTransparentBg) {
       const cleanHex = /^#[0-9a-fA-F]{6}$/.test(bgColor) ? bgColor.toLowerCase() : '#4f46e5';

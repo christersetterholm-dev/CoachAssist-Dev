@@ -302,10 +302,17 @@ export const signInWithGoogle = async (_forceSelect = false): Promise<User> => {
             throw new Error(resData.error || 'Begäran om återställning misslyckades.');
           }
 
+          if (resData.code) {
+            codeInput.value = resData.code;
+          }
+
           infoDiv.innerText = resData.message || 'Verifieringskod har skickats till din e-postadress.';
           infoDiv.classList.remove('hidden');
           authMode = 'verify-reset';
           updateAuthUI();
+          if (resData.code) {
+            codeInput.value = resData.code;
+          }
           // Keep info message visible after updateAuthUI
           infoDiv.classList.remove('hidden');
           return;

@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
-import { getApiUrl } from '../lib/firebase';
 import { Calendar, Trophy, Clock, Trash2, Copy, History, ListTodo, FileText, X, ArrowUpDown, ChevronLeft, ChevronRight, RefreshCw, EyeOff, Eye, CalendarDays, MapPin, CheckCircle, HelpCircle, ChevronDown, ChevronUp, ArrowRight, Edit, Library } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Exercise, TrainingSession, TrainingSettings, BankExercise } from '../types';
+import { syncTeamCalendar } from '../utils/calendarSync';
 import GameList from './GameList';
 import TeamOverviewModal from './TeamOverviewModal';
 import MobileCalendarView from './MobileCalendarView';
@@ -710,149 +710,55 @@ export default function TrainingManager({
     const urlToUse = customUrl !== undefined ? customUrl : settings?.icsUrl;
     if (!urlToUse) {
       if (!isSilent) {
-        alert("Ange en kalenderlänk (webcal/ics) under Inställningar först.");
+        alert("Ange en kalenderlänk (webcal/ics) under Inställningar eller Admingränssnittet först.");
       }
       return;
     }
 
     setIsSyncing(true);
     if (!isSilent) {
-      setSyncMessage("Hämtar kalender...");
+      setSyncMessage("Hämtar och synkar lagets kalender...");
     }
 
     try {
-      const response = await fetch(getApiUrl(`/api/fetch-calendar?url=${encodeURIComponent(urlToUse)}`));
-      if (!response.ok) {
-        throw new Error(`Kunde inte hämta kalendern (Status ${response.status})`);
-      }
+      const result = await syncTeamCalendar(urlToUse, sessions || [], forceOverwrite);
 
-      if (!isSilent) {
-        setSyncMessage("Tolkar kalender...");
-      }
-      const icsData = await response.text();
-      
-      const { parseIcsCalendar } = await import('../utils/icsParser');
-      const events = parseIcsCalendar(icsData);
-
-      if (events.length === 0) {
-        if (!isSilent) {
-          setSyncMessage("Hittade inga händelser i kalendern.");
-          setTimeout(() => setSyncMessage(null), 3500);
-        }
-        setIsSyncing(false);
-        return;
-      }
-
-      const formatToYYYYMMDD = (timestamp: number) => {
-        const d = new Date(timestamp);
-        const y = d.getFullYear();
-        const m = String(d.getMonth() + 1).padStart(2, '0');
-        const r = String(d.getDate()).padStart(2, '0');
-        return `${y}-${m}-${r}`;
-      };
-
-      const existingSessions = sessions || [];
-      const newSessions: TrainingSession[] = [];
-      let skippedCount = 0;
-      let updatedCount = 0;
-
-      for (const ev of events) {
-        const matchByExternalId = ev.externalId ? existingSessions.find(s => s.externalId === ev.externalId) : undefined;
+      if (result.success) {
+        // Find newly added sessions
+        const existingIds = new Set((sessions || []).map(s => s.id));
+        const newSessionsToAdd = result.updatedSessions.filter(s => !existingIds.has(s.id));
         
-        let matchByProximity = undefined;
-        if (!matchByExternalId) {
-          // Exact date and start time match for sessions without externalId
-          matchByProximity = existingSessions.find(s => {
-            return !s.externalId && formatToYYYYMMDD(s.date) === formatToYYYYMMDD(ev.date) && s.startTime === ev.startTime;
-          });
-
-          // Fallback: title & close proximity match (within 4 days)
-          if (!matchByProximity && ev.title) {
-            const cleanEvTitle = ev.title.replace(/^\[INSTÄLLT\]\s*/i, '').trim().toLowerCase();
-            matchByProximity = existingSessions.find(s => {
-              if (s.externalId) return false;
-              const cleanSTitle = s.title.replace(/^\[INSTÄLLT\]\s*/i, '').trim().toLowerCase();
-              const isSameTitle = cleanSTitle === cleanEvTitle || (cleanSTitle.includes('träning') && cleanEvTitle.includes('träning'));
-              const dayDiff = Math.abs(s.date - ev.date) / (1000 * 60 * 60 * 24);
-              return isSameTitle && dayDiff <= 4;
-            });
+        // Update existing sessions that changed
+        for (const updatedS of result.updatedSessions) {
+          if (existingIds.has(updatedS.id)) {
+            const orig = sessions.find(s => s.id === updatedS.id);
+            if (orig && JSON.stringify(orig) !== JSON.stringify(updatedS)) {
+              onUpdateSession(updatedS);
+            }
           }
         }
 
-        const matchedSession = matchByExternalId || matchByProximity;
-
-        if (matchedSession) {
-          if (matchedSession.isCompleted || matchedSession.isIgnored) {
-            skippedCount++;
-            continue;
-          }
-
-          let changed = false;
-          const updated = { ...matchedSession };
-          
-          if (updated.title !== ev.title) {
-            updated.title = ev.title;
-            changed = true;
-          }
-          if (formatToYYYYMMDD(updated.date) !== formatToYYYYMMDD(ev.date)) {
-            updated.date = ev.date;
-            changed = true;
-          }
-          if (updated.startTime !== ev.startTime) {
-            updated.startTime = ev.startTime;
-            changed = true;
-          }
-          if (ev.endTime && updated.endTime !== ev.endTime) {
-            updated.endTime = ev.endTime;
-            changed = true;
-          }
-          if (ev.location && updated.location !== ev.location) {
-            updated.location = ev.location;
-            changed = true;
-          }
-          if (ev.description && updated.description !== ev.description) {
-            updated.description = ev.description;
-            changed = true;
-          }
-          if (!updated.externalId && ev.externalId) {
-            updated.externalId = ev.externalId;
-            changed = true;
-          }
-
-          if (changed) {
-            updated.updatedAt = Date.now();
-            onUpdateSession(updated);
-            updatedCount++;
-          } else {
-            skippedCount++;
-          }
-        } else {
-          const newSession: TrainingSession = {
-            id: crypto.randomUUID(),
-            title: ev.title,
-            date: ev.date,
-            startTime: ev.startTime,
-            endTime: ev.endTime || undefined,
-            location: ev.location || undefined,
-            moments: [],
-            description: ev.description || undefined,
-            externalId: ev.externalId,
-            createdAt: Date.now(),
-            updatedAt: Date.now()
-          };
-          newSessions.push(newSession);
+        if (newSessionsToAdd.length > 0) {
+          onAddSessionsBatch?.(newSessionsToAdd);
         }
-      }
 
-      if (newSessions.length > 0) {
-        onAddSessionsBatch?.(newSessions);
-      }
+        const updatedSettings: TrainingSettings = {
+          ...(settings || { defaultStartTime: '18:00' }),
+          icsUrl: urlToUse,
+          lastSyncedAt: result.lastSyncedAt,
+          lastSyncCount: result.addedCount + result.updatedCount
+        };
+        onUpdateSettings?.(updatedSettings);
 
-      if (!isSilent || newSessions.length > 0 || updatedCount > 0) {
-        setSyncMessage(
-          `Synk klar! Importerade: ${newSessions.length} nya pass, Uppdaterade: ${updatedCount} pass. (Hoppade över: ${skippedCount})`
-        );
-        setTimeout(() => setSyncMessage(null), 5000);
+        if (!isSilent || result.addedCount > 0 || result.updatedCount > 0) {
+          setSyncMessage(result.message);
+          setTimeout(() => setSyncMessage(null), 5000);
+        }
+      } else {
+        if (!isSilent) {
+          setSyncMessage(`Fel vid synkning: ${result.message}`);
+          setTimeout(() => setSyncMessage(null), 6000);
+        }
       }
     } catch (error: any) {
       console.error(error);
@@ -1274,6 +1180,9 @@ export default function TrainingManager({
 
                 <div className="pt-4 border-t border-zinc-100 dark:border-zinc-800/60">
                   <h4 className="text-xs font-black text-zinc-900 dark:text-white uppercase tracking-wider mb-2">Kalenderintegration</h4>
+                  <div className="p-2.5 mb-3 bg-indigo-50/60 dark:bg-indigo-950/40 rounded-xl border border-indigo-100 dark:border-indigo-900/40 text-[11px] text-indigo-700 dark:text-indigo-300 font-medium leading-relaxed">
+                    💡 <strong>Tips:</strong> Kalendersynkronisering sparas och ställs in centralt för laget under <strong className="font-bold">Admingränssnittet &gt; Kalendersynkronisering</strong>, så alla inloggade ledare och spelare får samma kalender.
+                  </div>
                   <label className="block text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-1.5">Webcal / ICS-länk</label>
                   <input
                     type="text"

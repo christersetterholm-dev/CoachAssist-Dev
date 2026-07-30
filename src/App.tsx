@@ -2952,6 +2952,13 @@ export default function App() {
                 }}
                 activeSquad={squad}
                 onUpdateSquad={handleUpdateSquad}
+                trainingSettings={trainingSettings}
+                onUpdateSettings={onUpdateSettings}
+                sessions={sessions}
+                onUpdateSessions={(newSessions) => {
+                  setData(prev => ({ ...prev, sessions: newSessions }));
+                  setSessionActionCount(prev => prev + 1);
+                }}
               />
             </motion.div>
           )}

@@ -138,6 +138,8 @@ export interface TrainingSettings {
   defaultEndTime?: string;
   defaultDuration?: number;
   icsUrl?: string;
+  lastSyncedAt?: number;
+  lastSyncCount?: number;
 }
 
 export interface CoachData {

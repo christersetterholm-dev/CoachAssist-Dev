@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Landmark, Trash2, Edit3, Users, Shield, Check, PlusCircle, Search, Mail, Phone, Fingerprint, Settings, ArrowRight, UserPlus, Save, Smartphone, X, Database, Server, HardDrive, Cloud, RefreshCw, Download, Upload, Globe, Cpu, CheckCircle2, AlertTriangle, Calendar, Link, Copy, ExternalLink, FileSpreadsheet, FileText } from 'lucide-react';
-import { Club, ClubMetadata, ClubTeam, ClubMember, SquadPlayer } from '../types';
+import { Club, ClubMetadata, ClubTeam, ClubMember, SquadPlayer, TrainingSettings, TrainingSession } from '../types';
 import { db, getApiUrl } from '../lib/firebase';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 import PwaIconGenerator from './PwaIconGenerator';
+import { syncTeamCalendar } from '../utils/calendarSync';
 import * as XLSX from 'xlsx';
 import Papa from 'papaparse';
 
@@ -23,6 +24,10 @@ interface ClubAdminDashboardProps {
   onSelectActiveTeam?: (clubId: string, teamId: string) => void;
   activeSquad?: SquadPlayer[];
   onUpdateSquad?: (squad: SquadPlayer[]) => void;
+  trainingSettings?: TrainingSettings;
+  onUpdateSettings?: (settings: TrainingSettings) => void;
+  sessions?: TrainingSession[];
+  onUpdateSessions?: (sessions: TrainingSession[]) => void;
 }
 
 export default function ClubAdminDashboard({
@@ -41,6 +46,10 @@ export default function ClubAdminDashboard({
   onSelectActiveTeam,
   activeSquad: _activeSquad,
   onUpdateSquad,
+  trainingSettings,
+  onUpdateSettings,
+  sessions,
+  onUpdateSessions,
 }: ClubAdminDashboardProps) {
   // Navigation tabs within admin
   const [activeTab, setActiveTab] = useState<'clubs' | 'teams' | 'members' | 'calendar_sync' | 'pwa_icons' | 'database_env' | 'root_admins'>('clubs');
@@ -61,6 +70,13 @@ export default function ClubAdminDashboard({
   const [tempTeamUrl, setTempTeamUrl] = useState(teamUrl);
   const [tempAdminUrl, setTempAdminUrl] = useState(adminUrl);
   const [tempSeriesUrl, setTempSeriesUrl] = useState(seriesUrl);
+
+  // Calendar Sync State for Team
+  const [tempIcsUrl, setTempIcsUrl] = useState(trainingSettings?.icsUrl || '');
+  const [forceOverwriteCalendar, setForceOverwriteCalendar] = useState(false);
+  const [isSyncingCalendar, setIsSyncingCalendar] = useState(false);
+  const [calendarSyncMsg, setCalendarSyncMsg] = useState<{ type: 'success' | 'error' | 'info'; text: string } | null>(null);
+
   const [calSyncSaved, setCalSyncSaved] = useState(false);
   const [copiedCalFeed, setCopiedCalFeed] = useState(false);
 
@@ -87,7 +103,57 @@ export default function ClubAdminDashboard({
     setTempTeamUrl(teamUrl);
     setTempAdminUrl(adminUrl);
     setTempSeriesUrl(seriesUrl);
-  }, [teamUrl, adminUrl, seriesUrl]);
+    if (trainingSettings?.icsUrl) {
+      setTempIcsUrl(trainingSettings.icsUrl);
+    }
+  }, [teamUrl, adminUrl, seriesUrl, trainingSettings?.icsUrl]);
+
+  const handleSyncTeamCalendar = async () => {
+    const urlToUse = tempIcsUrl.trim();
+    if (!urlToUse) {
+      setCalendarSyncMsg({ type: 'error', text: 'Ange en giltig kalenderlänk (webcal/ics) för laget först.' });
+      return;
+    }
+
+    setIsSyncingCalendar(true);
+    setCalendarSyncMsg({ type: 'info', text: 'Hämtar och tolkar lagets kalenderhändelser...' });
+
+    try {
+      const result = await syncTeamCalendar(urlToUse, sessions || [], forceOverwriteCalendar);
+
+      if (result.success) {
+        if (onUpdateSessions) {
+          onUpdateSessions(result.updatedSessions);
+        }
+        const updatedSettings: TrainingSettings = {
+          ...(trainingSettings || { defaultStartTime: '18:00' }),
+          icsUrl: urlToUse,
+          lastSyncedAt: result.lastSyncedAt,
+          lastSyncCount: result.addedCount + result.updatedCount
+        };
+        if (onUpdateSettings) {
+          onUpdateSettings(updatedSettings);
+        }
+
+        setCalendarSyncMsg({
+          type: 'success',
+          text: result.message
+        });
+      } else {
+        setCalendarSyncMsg({
+          type: 'error',
+          text: result.message
+        });
+      }
+    } catch (err: any) {
+      setCalendarSyncMsg({
+        type: 'error',
+        text: err?.message || 'Ett oväntat fel uppstod vid synkning.'
+      });
+    } finally {
+      setIsSyncingCalendar(false);
+    }
+  };
 
   const [dbConfig, setDbConfig] = useState<{
     mode: 'hybrid' | 'local_sqlite' | 'firestore_only';
@@ -2245,6 +2311,104 @@ export default function ClubAdminDashboard({
 
       {activeTab === 'calendar_sync' && (
         <div className="space-y-6">
+          {/* Central Kalendersynkronisering för Laget */}
+          <div className="bg-white dark:bg-zinc-900 rounded-3xl border border-zinc-150 dark:border-zinc-800 shadow-xl p-6 sm:p-8">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6 pb-4 border-b border-zinc-100 dark:border-zinc-800">
+              <div>
+                <h2 className="text-lg font-black text-zinc-900 dark:text-white tracking-tight flex items-center gap-2">
+                  <Calendar className="text-indigo-600 dark:text-indigo-400" size={20} />
+                  <span>Lagets Kalendersynkronisering (Svenskalag / Laget.se / SportAdmin)</span>
+                </h2>
+                <p className="text-xs text-zinc-500 font-medium mt-0.5">
+                  Ange lagets iCal/Webcal-kalenderlänk. Kalendern sparas centralt för laget i molnet och alla inloggade ledare och spelare får automatiskt den uppdaterade kalendern.
+                </p>
+              </div>
+              {trainingSettings?.lastSyncedAt && (
+                <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-indigo-50 dark:bg-indigo-950/40 text-indigo-600 dark:text-indigo-400 font-bold text-xs shrink-0">
+                  <RefreshCw size={13} />
+                  <span>Senast synkad: {new Date(trainingSettings.lastSyncedAt).toLocaleString('sv-SE', { dateStyle: 'short', timeStyle: 'short' })}</span>
+                </span>
+              )}
+            </div>
+
+            {calendarSyncMsg && (
+              <div className={`p-4 rounded-2xl mb-6 text-xs font-semibold flex items-center gap-2 ${
+                calendarSyncMsg.type === 'success' ? 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800' :
+                calendarSyncMsg.type === 'error' ? 'bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800' :
+                'bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800'
+              }`}>
+                {calendarSyncMsg.type === 'success' && <Check size={16} className="shrink-0 text-emerald-500" />}
+                {calendarSyncMsg.type === 'error' && <AlertTriangle size={16} className="shrink-0 text-rose-500" />}
+                {calendarSyncMsg.type === 'info' && <RefreshCw size={16} className="shrink-0 text-blue-500 animate-spin" />}
+                <span>{calendarSyncMsg.text}</span>
+              </div>
+            )}
+
+            <div className="space-y-4">
+              <div>
+                <label className="block text-xs font-black text-zinc-500 dark:text-zinc-400 uppercase tracking-wider mb-2">
+                  Lagets Webcal / ICS Kalenderlänk
+                </label>
+                <div className="flex flex-col sm:flex-row gap-2">
+                  <div className="relative flex-1">
+                    <Link size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-zinc-400" />
+                    <input
+                      type="url"
+                      value={tempIcsUrl}
+                      onChange={(e) => setTempIcsUrl(e.target.value)}
+                      placeholder="webcal://www.svenskalag.se/ical/eller_https://..."
+                      className="w-full bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl pl-10 pr-4 py-3 text-sm font-medium text-zinc-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const updated = {
+                        ...(trainingSettings || { defaultStartTime: '18:00' }),
+                        icsUrl: tempIcsUrl.trim()
+                      };
+                      if (onUpdateSettings) onUpdateSettings(updated);
+                      setCalendarSyncMsg({ type: 'success', text: 'Kalenderlänk sparad för laget!' });
+                      setTimeout(() => setCalendarSyncMsg(null), 3000);
+                    }}
+                    className="px-5 py-3 bg-zinc-800 hover:bg-zinc-900 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-white font-bold text-xs rounded-xl flex items-center justify-center gap-2 transition-all cursor-pointer shrink-0"
+                  >
+                    <Save size={15} />
+                    <span>Spara Länk</span>
+                  </button>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-3 pt-1">
+                <input
+                  type="checkbox"
+                  id="forceOverwriteCalendar"
+                  checked={forceOverwriteCalendar}
+                  onChange={(e) => setForceOverwriteCalendar(e.target.checked)}
+                  className="w-4 h-4 rounded border-zinc-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+                />
+                <label htmlFor="forceOverwriteCalendar" className="text-xs text-zinc-600 dark:text-zinc-400 font-medium cursor-pointer">
+                  Tvinga uppdatering av redan avslutade eller dolda pass
+                </label>
+              </div>
+
+              <div className="pt-2 flex flex-col sm:flex-row items-center justify-between gap-3 border-t border-zinc-100 dark:border-zinc-800 mt-4">
+                <p className="text-[11px] text-zinc-500 font-medium">
+                  Hämtar och importerar alla matcher och träningar från kalenderlänken till laget.
+                </p>
+                <button
+                  type="button"
+                  onClick={handleSyncTeamCalendar}
+                  disabled={isSyncingCalendar || !tempIcsUrl.trim()}
+                  className="w-full sm:w-auto inline-flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white font-black px-6 py-3 rounded-xl text-xs transition-all cursor-pointer shadow-md shadow-indigo-100 dark:shadow-none active:scale-95 uppercase tracking-wider shrink-0"
+                >
+                  <RefreshCw size={16} className={isSyncingCalendar ? 'animate-spin' : ''} />
+                  <span>{isSyncingCalendar ? 'Hämtar kalender...' : 'Synka Lagets Kalender Nu'}</span>
+                </button>
+              </div>
+            </div>
+          </div>
+
           <div className="bg-white dark:bg-zinc-900 rounded-3xl border border-zinc-150 dark:border-zinc-800 shadow-xl p-6 sm:p-8">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6 pb-4 border-b border-zinc-100 dark:border-zinc-800">
               <div>
