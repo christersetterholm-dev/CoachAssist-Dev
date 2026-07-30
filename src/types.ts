@@ -329,6 +329,9 @@ export interface ClubMember {
   fullName: string;
   phone?: string;
   personnummer?: string;
+  position?: string;
+  number?: string;
+  photoUrl?: string;
   roles: ('admin' | 'coach' | 'player' | 'parent')[];
   teams: string[]; // List of team IDs within the club
 }

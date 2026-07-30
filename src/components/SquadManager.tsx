@@ -1,10 +1,11 @@
 import React, { useState, useRef, useMemo } from 'react';
-import { UserPlus, Trash2, Edit2, X, Users, Upload, FileSpreadsheet, FileText, ClipboardList, Camera, Loader2, ArrowUpDown, Check, Search } from 'lucide-react';
+import { UserPlus, Trash2, Edit2, X, Users, Upload, FileSpreadsheet, FileText, ClipboardList, Camera, Loader2, ArrowUpDown, Check, Search, AlertTriangle } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { storage, db } from '../lib/firebase';
 import { doc, getDoc } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { SquadPlayer, ClubMember, ClubTeam } from '../types';
+import { deduplicateSquad } from '../lib/clubUtils';
 import * as XLSX from 'xlsx';
 import Papa from 'papaparse';
 import ImageCropper from './ImageCropper';
@@ -234,6 +235,9 @@ export default function SquadManager({ squad, onUpdateSquad, activeClubId, activ
           email: member.email || updatedSquad[idx].email,
           phone: member.phone || updatedSquad[idx].phone,
           personnummer: member.personnummer || updatedSquad[idx].personnummer,
+          position: member.position || updatedSquad[idx].position,
+          number: member.number || updatedSquad[idx].number,
+          photoUrl: member.photoUrl || updatedSquad[idx].photoUrl,
           role: targetRole
         };
         countUpdated++;
@@ -244,6 +248,9 @@ export default function SquadManager({ squad, onUpdateSquad, activeClubId, activ
           email: member.email || undefined,
           phone: member.phone || undefined,
           personnummer: member.personnummer || undefined,
+          position: member.position || undefined,
+          number: member.number || undefined,
+          photoUrl: member.photoUrl || undefined,
           role: targetRole
         };
         updatedSquad.push(newPlayer);
@@ -414,6 +421,98 @@ export default function SquadManager({ squad, onUpdateSquad, activeClubId, activ
     }
   };
 
+  // Import conflict state
+  const [pendingImportPlayers, setPendingImportPlayers] = useState<SquadPlayer[] | null>(null);
+  const [importConflicts, setImportConflicts] = useState<Array<{ imported: SquadPlayer; existing: SquadPlayer }>>([]);
+  const [importConflictOption, setImportConflictOption] = useState<'merge' | 'skip' | 'add_all'>('merge');
+  const [showImportConflictModal, setShowImportConflictModal] = useState(false);
+
+  const executeImportDirect = (playersToImport: SquadPlayer[], mode: 'merge' | 'skip' | 'add_all') => {
+    let updatedSquad: SquadPlayer[] = [...squad];
+
+    if (mode === 'merge') {
+      for (const np of playersToImport) {
+        const npName = np.name.trim().toLowerCase();
+        const npPnr = (np.personnummer || '').replace(/\D/g, '');
+        const npEmail = (np.email || '').trim().toLowerCase();
+        const npNum = (np.number || '').trim();
+
+        const idx = updatedSquad.findIndex(ex => {
+          const exName = ex.name.trim().toLowerCase();
+          const exPnr = (ex.personnummer || '').replace(/\D/g, '');
+          const exEmail = (ex.email || '').trim().toLowerCase();
+          const exNum = (ex.number || '').trim();
+
+          if (npPnr && exPnr && npPnr === exPnr) return true;
+          if (npEmail && exEmail && npEmail === exEmail) return true;
+          if (exName === npName) {
+            if (npNum && exNum) return npNum === exNum;
+            return true;
+          }
+          return false;
+        });
+
+        if (idx !== -1) {
+          const existing = updatedSquad[idx];
+          const targetRole: 'leader' | 'player' = (existing.role === 'leader' || np.role === 'leader') ? 'leader' : 'player';
+          updatedSquad[idx] = {
+            ...existing,
+            position: np.position || existing.position,
+            number: np.number || existing.number,
+            photoUrl: np.photoUrl || existing.photoUrl,
+            email: np.email || existing.email,
+            phone: np.phone || existing.phone,
+            personnummer: np.personnummer || existing.personnummer,
+            role: targetRole
+          };
+        } else {
+          updatedSquad.push(np);
+        }
+      }
+    } else if (mode === 'skip') {
+      for (const np of playersToImport) {
+        const npName = np.name.trim().toLowerCase();
+        const npPnr = (np.personnummer || '').replace(/\D/g, '');
+        const npEmail = (np.email || '').trim().toLowerCase();
+        const npNum = (np.number || '').trim();
+
+        const exists = updatedSquad.some(ex => {
+          const exName = ex.name.trim().toLowerCase();
+          const exPnr = (ex.personnummer || '').replace(/\D/g, '');
+          const exEmail = (ex.email || '').trim().toLowerCase();
+          const exNum = (ex.number || '').trim();
+
+          if (npPnr && exPnr && npPnr === exPnr) return true;
+          if (npEmail && exEmail && npEmail === exEmail) return true;
+          if (exName === npName) {
+            if (npNum && exNum) return npNum === exNum;
+            return true;
+          }
+          return false;
+        });
+
+        if (!exists) {
+          updatedSquad.push(np);
+        }
+      }
+    } else {
+      updatedSquad = [...updatedSquad, ...playersToImport];
+    }
+
+    const cleanResult = deduplicateSquad(updatedSquad);
+    onUpdateSquad(cleanResult);
+    setPendingImportPlayers(null);
+    setImportConflicts([]);
+    setShowImportConflictModal(false);
+    setIsImporting(false);
+    setPasteData('');
+    setFetchStatusMessage({
+      type: 'success',
+      text: `Import klar! ${playersToImport.length} personer bearbetades och truppen sparades utan dubbletter.`
+    });
+    setTimeout(() => setFetchStatusMessage(null), 4000);
+  };
+
   const processImportedData = (rows: string[][]) => {
     // rows is an array of [name, position, number, photoUrl]
     const newPlayers: SquadPlayer[] = rows
@@ -462,9 +561,44 @@ export default function SquadManager({ squad, onUpdateSquad, activeClubId, activ
     
     if (newPlayers.length === 0) return;
 
-    onUpdateSquad([...squad, ...newPlayers]);
-    setIsImporting(false);
-    setPasteData('');
+    // Check for conflicts with existing squad
+    const conflicts: Array<{ imported: SquadPlayer; existing: SquadPlayer }> = [];
+
+    for (const np of newPlayers) {
+      const npName = np.name.trim().toLowerCase();
+      const npPnr = (np.personnummer || '').replace(/\D/g, '');
+      const npEmail = (np.email || '').trim().toLowerCase();
+      const npNum = (np.number || '').trim();
+
+      const match = squad.find(ex => {
+        const exName = ex.name.trim().toLowerCase();
+        const exPnr = (ex.personnummer || '').replace(/\D/g, '');
+        const exEmail = (ex.email || '').trim().toLowerCase();
+        const exNum = (ex.number || '').trim();
+
+        if (npPnr && exPnr && npPnr === exPnr) return true;
+        if (npEmail && exEmail && npEmail === exEmail) return true;
+        if (exName === npName) {
+          if (npNum && exNum) return npNum === exNum;
+          return true;
+        }
+        return false;
+      });
+
+      if (match) {
+        conflicts.push({ imported: np, existing: match });
+      }
+    }
+
+    if (conflicts.length > 0) {
+      setPendingImportPlayers(newPlayers);
+      setImportConflicts(conflicts);
+      setImportConflictOption('merge');
+      setShowImportConflictModal(true);
+      setIsImporting(false);
+    } else {
+      executeImportDirect(newPlayers, 'merge');
+    }
   };
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -675,6 +809,115 @@ Kalle Karlsson	Mittback	4	https://image.url"
                 <p className="text-xs text-center text-zinc-400">
                   Tips: Du kan kopiera en kolumn med namn direkt från Excel eller Google Sheets och klistra in här.
                 </p>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+
+        {showImportConflictModal && pendingImportPlayers && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+            onClick={() => {
+              setShowImportConflictModal(false);
+              setPendingImportPlayers(null);
+            }}
+          >
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="bg-white dark:bg-zinc-900 rounded-3xl p-6 sm:p-8 max-w-xl w-full shadow-2xl border border-zinc-100 dark:border-zinc-800"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-start gap-4 mb-6">
+                <div className="w-12 h-12 bg-amber-100 dark:bg-amber-950/60 rounded-2xl flex items-center justify-center text-amber-600 dark:text-amber-400 shrink-0">
+                  <AlertTriangle size={24} />
+                </div>
+                <div>
+                  <h3 className="text-lg font-black text-zinc-900 dark:text-white">
+                    Dubbletter eller befintliga medlemmar hittades
+                  </h3>
+                  <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1 leading-relaxed">
+                    Vi hittade {importConflicts.length} personer i importfilen som har samma namn och nummer/roll som personer som redan finns i truppen.
+                  </p>
+                </div>
+              </div>
+
+              {/* Conflict Preview List */}
+              <div className="mb-6 max-h-40 overflow-y-auto border border-zinc-200 dark:border-zinc-800 rounded-2xl p-3 bg-zinc-50 dark:bg-zinc-950 space-y-2">
+                {importConflicts.map((c, idx) => (
+                  <div key={idx} className="flex items-center justify-between text-xs p-2 bg-white dark:bg-zinc-900 rounded-xl border border-zinc-100 dark:border-zinc-800">
+                    <div className="font-extrabold text-zinc-900 dark:text-white">
+                      {c.imported.name} {c.imported.number ? `#${c.imported.number}` : ''}
+                    </div>
+                    <div className="text-[11px] font-bold text-amber-600 dark:text-amber-400">
+                      Befintlig: {c.existing.role === 'leader' ? 'Ledare' : 'Spelare'} {c.existing.number ? `#${c.existing.number}` : ''}
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Options */}
+              <div className="space-y-3 mb-8">
+                <label className="block text-xs font-black uppercase text-zinc-400 tracking-wider">
+                  Hur vill du hantera dessa dubbletter?
+                </label>
+                {[
+                  {
+                    id: 'merge',
+                    title: 'Slå ihop & Uppdatera (Rekommenderat)',
+                    desc: 'Uppdatera befintliga personer i truppen med ny information och lägg till helt nya personer.'
+                  },
+                  {
+                    id: 'skip',
+                    title: 'Hoppa över dubbletter',
+                    desc: 'Importera endast nya personer och lämna alla befintliga helt orörda.'
+                  },
+                  {
+                    id: 'add_all',
+                    title: 'Skapa alla som nya',
+                    desc: 'Skapa nya poster för alla rader utan att slå ihop.'
+                  }
+                ].map(opt => (
+                  <button
+                    key={opt.id}
+                    type="button"
+                    onClick={() => setImportConflictOption(opt.id as any)}
+                    className={`w-full text-left p-4 rounded-2xl border-2 transition-all cursor-pointer ${
+                      importConflictOption === opt.id
+                        ? 'border-indigo-600 bg-indigo-50/50 dark:bg-indigo-950/30 text-indigo-900 dark:text-indigo-200'
+                        : 'border-zinc-200 dark:border-zinc-800 hover:border-zinc-300 dark:hover:border-zinc-700 bg-white dark:bg-zinc-900 text-zinc-700 dark:text-zinc-300'
+                    }`}
+                  >
+                    <div className="font-extrabold text-xs">{opt.title}</div>
+                    <div className="text-[11px] text-zinc-500 dark:text-zinc-400 mt-0.5">{opt.desc}</div>
+                  </button>
+                ))}
+              </div>
+
+              {/* Actions */}
+              <div className="flex items-center justify-end gap-3 pt-4 border-t border-zinc-100 dark:border-zinc-800">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowImportConflictModal(false);
+                    setPendingImportPlayers(null);
+                  }}
+                  className="px-5 py-3 rounded-xl border border-zinc-200 dark:border-zinc-800 text-zinc-600 dark:text-zinc-400 font-bold text-xs hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-all cursor-pointer"
+                >
+                  Avbryt
+                </button>
+                <button
+                  type="button"
+                  onClick={() => executeImportDirect(pendingImportPlayers, importConflictOption)}
+                  className="bg-indigo-600 hover:bg-indigo-700 text-white font-black px-6 py-3 rounded-xl text-xs flex items-center gap-2 active:scale-95 transition-all cursor-pointer shadow-md shadow-indigo-100 dark:shadow-none"
+                >
+                  <Check size={16} />
+                  <span>Verkställ import</span>
+                </button>
               </div>
             </motion.div>
           </motion.div>

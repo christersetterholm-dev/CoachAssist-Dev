@@ -6,7 +6,7 @@ import { auth, signInWithGoogle, db, handleFirestoreError, OperationType, getApi
 import { onAuthStateChanged, signOut, User } from 'firebase/auth';
 import { doc, onSnapshot, setDoc, getDoc } from 'firebase/firestore';
 import { calculateLeaderboard } from './lib/leaderboardUtils';
-import { syncSquadToClubMembers, getMergedSquadAndClubMembers } from './lib/clubUtils';
+import { syncSquadToClubMembers, getMergedSquadAndClubMembers, deduplicateSquad } from './lib/clubUtils';
 
 import GameSetup from './components/GameSetup';
 import PlayerCard from './components/PlayerCard';
@@ -2264,19 +2264,20 @@ export default function App() {
   };
 
   const handleUpdateSquad = (newSquad: SquadPlayer[]) => {
+    const cleanSquad = deduplicateSquad(newSquad);
     setData(prev => {
-      if (JSON.stringify(prev.squad) === JSON.stringify(newSquad)) {
+      if (JSON.stringify(prev.squad) === JSON.stringify(cleanSquad)) {
         return prev;
       }
       return { 
         ...prev, 
-        squad: newSquad
+        squad: cleanSquad
       };
     });
     setSessionActionCount(prev => prev + 1);
 
     if (userProfile.activeClubId && userProfile.activeTeamId) {
-      syncSquadToClubMembers(newSquad, userProfile.activeClubId, userProfile.activeTeamId)
+      syncSquadToClubMembers(cleanSquad, userProfile.activeClubId, userProfile.activeTeamId)
         .catch(err => console.error("Error syncing squad to club members:", err));
     }
   };
@@ -2303,7 +2304,7 @@ export default function App() {
   return (
     <div className={`flex flex-col bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100 font-sans selection:bg-indigo-100 transition-colors duration-500 h-[100dvh] overflow-hidden ${view === 'exercise' || view === 'teampage' ? 'select-none' : ''}`}>
       {view !== 'lineup' && (
-        <header className={`bg-white dark:bg-zinc-900 border-b border-zinc-200 dark:border-zinc-800 z-30 transition-colors duration-500 shrink-0 ${view === 'exercise' ? 'sticky top-0' : ''}`}>
+        <header className={`bg-white dark:bg-zinc-900 border-b border-zinc-200 dark:border-zinc-800 z-30 transition-colors duration-500 shrink-0 pt-safe ${view === 'exercise' ? 'sticky top-0' : ''}`}>
           <div className="max-w-4xl lg:max-w-5xl xl:max-w-6xl 2xl:max-w-7xl mx-auto px-4 h-14 sm:h-16 flex items-center justify-between">
             <div 
               className={`flex items-center gap-3 cursor-pointer group min-w-0 ${view === 'lineup' ? 'hover:opacity-70' : ''}`}
@@ -3210,7 +3211,7 @@ export default function App() {
 
       {/* Bottom Navigation */}
       {view !== 'exercise' && (
-        <nav className="fixed bottom-0 left-0 right-0 bg-white dark:bg-zinc-900 border-t border-zinc-200 dark:border-zinc-800 px-6 py-3 z-40 shadow-[0_-4px_20px_rgba(0,0,0,0.05)]">
+        <nav className="fixed bottom-0 left-0 right-0 bg-white dark:bg-zinc-900 border-t border-zinc-200 dark:border-zinc-800 px-6 pt-3 pb-[calc(0.75rem+env(safe-area-inset-bottom,0px))] z-40 shadow-[0_-4px_20px_rgba(0,0,0,0.05)]">
           <div className="max-w-xl mx-auto flex items-center justify-between gap-1">
             <button
               onClick={() => setView('training')}

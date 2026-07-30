@@ -3517,11 +3517,11 @@ export default function LineupBuilder({
 
   return (
     <div 
-      className={`mx-auto transition-all duration-500 w-full px-0 sm:px-6 ${isMaximized ? 'fixed inset-0 z-50 bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100 p-1 xs:p-2 md:p-3 overflow-hidden flex flex-col items-center justify-center' : 'max-w-[1600px] pt-0 sm:pt-4 pb-32'}`}
+      className={`mx-auto transition-all duration-500 w-full px-0 sm:px-6 ${isMaximized ? 'fixed inset-0 z-50 bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100 p-1 xs:p-2 md:p-3 pt-safe overflow-hidden flex flex-col items-center justify-center' : 'max-w-[1600px] pt-safe sm:pt-4 pb-32'}`}
     >
       {isMaximized && (
         <>
-          <div className="fixed top-3 left-3 right-3 z-[100] flex justify-end pointer-events-none">
+          <div className="fixed top-[calc(0.75rem+env(safe-area-inset-top,0px))] left-3 right-3 z-[100] flex justify-end pointer-events-none">
             <div className="flex items-center gap-1.5 overflow-x-auto whitespace-nowrap scrollbar-none touch-pan-x py-1 px-2 pointer-events-auto max-w-full">
               <button
                 onClick={() => setIsDrawingsVisible(!isDrawingsVisible)}

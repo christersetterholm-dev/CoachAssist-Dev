@@ -5,6 +5,7 @@ import { db, getApiUrl } from '../lib/firebase';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 import PwaIconGenerator from './PwaIconGenerator';
 import { syncTeamCalendar } from '../utils/calendarSync';
+import { deduplicateClubMembers, deduplicateSquad } from '../lib/clubUtils';
 import * as XLSX from 'xlsx';
 import Papa from 'papaparse';
 
@@ -86,6 +87,7 @@ export default function ClubAdminDashboard({
   const [importPasteText, setImportPasteText] = useState('');
   const [importSelectedTeamIds, setImportSelectedTeamIds] = useState<string[]>([]);
   const [importRoleMode, setImportRoleMode] = useState<'auto' | 'force_player' | 'force_coach'>('auto');
+  const [importDuplicateMode, setImportDuplicateMode] = useState<'merge' | 'skip' | 'add_all'>('merge');
   const [parsedImportMembers, setParsedImportMembers] = useState<Array<{
     id: string;
     fullName: string;
@@ -191,6 +193,9 @@ export default function ClubAdminDashboard({
   const [memberName, setMemberName] = useState('');
   const [memberPhone, setMemberPhone] = useState('');
   const [memberPersonnummer, setMemberPersonnummer] = useState('');
+  const [memberPosition, setMemberPosition] = useState('');
+  const [memberNumber, setMemberNumber] = useState('');
+  const [memberPhotoUrl, setMemberPhotoUrl] = useState('');
   const [memberRoles, setMemberRoles] = useState<('admin' | 'coach' | 'player' | 'parent')[]>([]);
   const [memberTeams, setMemberTeams] = useState<string[]>([]);
   const [memberSearchQuery, setMemberSearchQuery] = useState('');
@@ -560,6 +565,7 @@ export default function ClubAdminDashboard({
       role: 'coach' | 'player';
       position?: string;
       number?: string;
+      photoUrl?: string;
     }> = [];
 
     const leaderKeywords = [
@@ -586,10 +592,17 @@ export default function ClubAdminDashboard({
       let personnummer = '';
       let position = '';
       let number = '';
+      let photoUrl = '';
       let isLeader = false;
 
       for (const cell of cells) {
         if (!cell) continue;
+
+        // Photo URL / Image
+        if (cell.startsWith('http://') || cell.startsWith('https://') || cell.startsWith('data:image/') || /\.(jpg|jpeg|png|webp|svg)($|\?)/i.test(cell)) {
+          photoUrl = cell;
+          continue;
+        }
 
         // Email
         if (cell.includes('@') && cell.includes('.')) {
@@ -646,7 +659,8 @@ export default function ClubAdminDashboard({
         personnummer,
         role: finalRole,
         position: position || undefined,
-        number: number || undefined
+        number: number || undefined,
+        photoUrl: photoUrl || undefined
       });
     }
 
@@ -707,6 +721,7 @@ export default function ClubAdminDashboard({
       const membersRef = doc(db, 'clubs', selectedClub.id, 'teams', 'club_global', 'data', 'members');
       const membersSnap = await getDoc(membersRef);
       let currentMembers: ClubMember[] = membersSnap.exists() ? (membersSnap.data().members || []) : [];
+      currentMembers = deduplicateClubMembers(currentMembers);
 
       let countNew = 0;
       let countUpdated = 0;
@@ -714,34 +729,66 @@ export default function ClubAdminDashboard({
       for (const item of parsedImportMembers) {
         const cleanName = item.fullName.trim();
         const cleanEmail = item.email.trim().toLowerCase();
+        const cleanPnr = (item.personnummer || '').replace(/\D/g, '');
+        const cleanNum = (item.number || '').trim();
 
         const idx = currentMembers.findIndex(m => {
           const mEmail = (m.email || '').trim().toLowerCase();
           const mName = (m.fullName || '').trim().toLowerCase();
-          return (
-            (cleanEmail && mEmail === cleanEmail) ||
-            (mName === cleanName.toLowerCase())
-          );
+          const mPnr = (m.personnummer || '').replace(/\D/g, '');
+          const mNum = (m.number || '').trim();
+
+          if (item.id && m.userId === item.id) return true;
+          if (cleanPnr && mPnr && cleanPnr === mPnr) return true;
+          if (cleanEmail && mEmail === cleanEmail) return true;
+          if (mName === cleanName.toLowerCase()) {
+            if (cleanNum && mNum) return cleanNum === mNum;
+            return true;
+          }
+          return false;
         });
 
         if (idx !== -1) {
-          const existing = currentMembers[idx];
-          const existingRoles = existing.roles || [];
-          const existingTeams = existing.teams || [];
+          if (importDuplicateMode === 'skip') {
+            continue;
+          }
 
-          const updatedRoles = Array.from(new Set([...existingRoles, item.role]));
-          const updatedTeams = Array.from(new Set([...existingTeams, ...importSelectedTeamIds]));
+          if (importDuplicateMode === 'merge') {
+            const existing = currentMembers[idx];
+            const existingRoles = existing.roles || [];
+            const existingTeams = existing.teams || [];
 
-          currentMembers[idx] = {
-            ...existing,
-            fullName: cleanName,
-            email: item.email || existing.email || '',
-            phone: item.phone || existing.phone,
-            personnummer: item.personnummer || existing.personnummer,
-            roles: updatedRoles,
-            teams: updatedTeams
-          };
-          countUpdated++;
+            const updatedRoles = Array.from(new Set([...existingRoles, item.role]));
+            const updatedTeams = Array.from(new Set([...existingTeams, ...importSelectedTeamIds]));
+
+            currentMembers[idx] = {
+              ...existing,
+              fullName: cleanName,
+              email: item.email || existing.email || '',
+              phone: item.phone || existing.phone,
+              personnummer: item.personnummer || existing.personnummer,
+              position: item.position || existing.position,
+              number: item.number || existing.number,
+              photoUrl: item.photoUrl || existing.photoUrl,
+              roles: updatedRoles,
+              teams: updatedTeams
+            };
+            countUpdated++;
+          } else if (importDuplicateMode === 'add_all') {
+            currentMembers.push({
+              userId: 'player_' + Math.random().toString(36).substring(2, 10),
+              email: item.email || '',
+              fullName: cleanName,
+              phone: item.phone || undefined,
+              personnummer: item.personnummer || undefined,
+              position: item.position || undefined,
+              number: item.number || undefined,
+              photoUrl: item.photoUrl || undefined,
+              roles: [item.role],
+              teams: [...importSelectedTeamIds]
+            });
+            countNew++;
+          }
         } else {
           const newMember: ClubMember = {
             userId: item.id || 'player_' + Math.random().toString(36).substring(2, 10),
@@ -749,6 +796,9 @@ export default function ClubAdminDashboard({
             fullName: cleanName,
             phone: item.phone || undefined,
             personnummer: item.personnummer || undefined,
+            position: item.position || undefined,
+            number: item.number || undefined,
+            photoUrl: item.photoUrl || undefined,
             roles: [item.role],
             teams: [...importSelectedTeamIds]
           };
@@ -757,6 +807,7 @@ export default function ClubAdminDashboard({
         }
       }
 
+      currentMembers = deduplicateClubMembers(currentMembers);
       await setDoc(membersRef, { members: currentMembers, updatedAt: Date.now() });
       setMembers(currentMembers);
 
@@ -766,32 +817,58 @@ export default function ClubAdminDashboard({
           const squadRef = doc(db, 'clubs', selectedClub.id, 'teams', teamId, 'data', 'squad');
           const squadSnap = await getDoc(squadRef);
           let teamSquad: SquadPlayer[] = squadSnap.exists() ? (squadSnap.data().squad || []) : [];
+          teamSquad = deduplicateSquad(teamSquad);
 
           for (const item of parsedImportMembers) {
             const cleanName = item.fullName.trim();
             const cleanEmail = item.email.trim().toLowerCase();
+            const cleanPnr = (item.personnummer || '').replace(/\D/g, '');
+            const cleanNum = (item.number || '').trim();
             const targetSquadRole: 'leader' | 'player' = item.role === 'coach' ? 'leader' : 'player';
 
             const spIdx = teamSquad.findIndex(sp => {
               const spEmail = (sp.email || '').trim().toLowerCase();
               const spName = (sp.name || '').trim().toLowerCase();
-              return (
-                (cleanEmail && spEmail === cleanEmail) ||
-                (spName === cleanName.toLowerCase())
-              );
+              const spPnr = (sp.personnummer || '').replace(/\D/g, '');
+              const spNum = (sp.number || '').trim();
+
+              if (item.id && sp.id === item.id) return true;
+              if (cleanPnr && spPnr && cleanPnr === spPnr) return true;
+              if (cleanEmail && spEmail === cleanEmail) return true;
+              if (spName === cleanName.toLowerCase()) {
+                if (cleanNum && spNum) return cleanNum === spNum;
+                return true;
+              }
+              return false;
             });
 
             if (spIdx !== -1) {
-              teamSquad[spIdx] = {
-                ...teamSquad[spIdx],
-                name: cleanName,
-                email: item.email || teamSquad[spIdx].email,
-                phone: item.phone || teamSquad[spIdx].phone,
-                personnummer: item.personnummer || teamSquad[spIdx].personnummer,
-                role: targetSquadRole,
-                position: item.position || teamSquad[spIdx].position,
-                number: item.number || teamSquad[spIdx].number
-              };
+              if (importDuplicateMode === 'skip') continue;
+              if (importDuplicateMode === 'merge') {
+                teamSquad[spIdx] = {
+                  ...teamSquad[spIdx],
+                  name: cleanName,
+                  email: item.email || teamSquad[spIdx].email,
+                  phone: item.phone || teamSquad[spIdx].phone,
+                  personnummer: item.personnummer || teamSquad[spIdx].personnummer,
+                  role: targetSquadRole,
+                  position: item.position || teamSquad[spIdx].position,
+                  number: item.number || teamSquad[spIdx].number,
+                  photoUrl: item.photoUrl || teamSquad[spIdx].photoUrl
+                };
+              } else if (importDuplicateMode === 'add_all') {
+                teamSquad.push({
+                  id: crypto.randomUUID(),
+                  name: cleanName,
+                  email: item.email || undefined,
+                  phone: item.phone || undefined,
+                  personnummer: item.personnummer || undefined,
+                  role: targetSquadRole,
+                  position: item.position || undefined,
+                  number: item.number || undefined,
+                  photoUrl: item.photoUrl || undefined
+                });
+              }
             } else {
               teamSquad.push({
                 id: item.id || crypto.randomUUID(),
@@ -801,11 +878,13 @@ export default function ClubAdminDashboard({
                 personnummer: item.personnummer || undefined,
                 role: targetSquadRole,
                 position: item.position || undefined,
-                number: item.number || undefined
+                number: item.number || undefined,
+                photoUrl: item.photoUrl || undefined
               });
             }
           }
 
+          teamSquad = deduplicateSquad(teamSquad);
           await setDoc(squadRef, { squad: teamSquad, updatedAt: Date.now() });
 
           if (activeTeamId === teamId && onUpdateSquad) {
@@ -874,6 +953,9 @@ export default function ClubAdminDashboard({
       setMemberName(member.fullName);
       setMemberPhone(member.phone || '');
       setMemberPersonnummer(member.personnummer || '');
+      setMemberPosition(member.position || '');
+      setMemberNumber(member.number || '');
+      setMemberPhotoUrl(member.photoUrl || '');
       setMemberRoles(member.roles || []);
       setMemberTeams(member.teams || []);
     } else {
@@ -882,6 +964,9 @@ export default function ClubAdminDashboard({
       setMemberName('');
       setMemberPhone('');
       setMemberPersonnummer('');
+      setMemberPosition('');
+      setMemberNumber('');
+      setMemberPhotoUrl('');
       setMemberRoles(['player']);
       setMemberTeams([]);
     }
@@ -904,6 +989,9 @@ export default function ClubAdminDashboard({
         fullName: memberName.trim(),
         phone: memberPhone.trim() || undefined,
         personnummer: memberPersonnummer.trim() || undefined,
+        position: memberPosition.trim() || undefined,
+        number: memberNumber.trim() || undefined,
+        photoUrl: memberPhotoUrl.trim() || undefined,
         roles: memberRoles,
         teams: memberTeams
       };
@@ -948,6 +1036,9 @@ export default function ClubAdminDashboard({
               email: newOrUpdatedMember.email,
               phone: newOrUpdatedMember.phone || teamSquad[existingIdx].phone,
               personnummer: newOrUpdatedMember.personnummer || teamSquad[existingIdx].personnummer,
+              position: newOrUpdatedMember.position || teamSquad[existingIdx].position,
+              number: newOrUpdatedMember.number || teamSquad[existingIdx].number,
+              photoUrl: newOrUpdatedMember.photoUrl || teamSquad[existingIdx].photoUrl,
               role
             };
           } else {
@@ -957,6 +1048,9 @@ export default function ClubAdminDashboard({
               email: newOrUpdatedMember.email,
               phone: newOrUpdatedMember.phone,
               personnummer: newOrUpdatedMember.personnummer,
+              position: newOrUpdatedMember.position,
+              number: newOrUpdatedMember.number,
+              photoUrl: newOrUpdatedMember.photoUrl,
               role
             });
           }
@@ -1471,6 +1565,41 @@ export default function ClubAdminDashboard({
                     </div>
                   </div>
 
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-xs font-black text-zinc-650 dark:text-zinc-400 uppercase tracking-wider mb-2">Position / Roll (Valfritt)</label>
+                      <input
+                        type="text"
+                        placeholder="t.ex. MV, MB, Forward eller Tränare"
+                        value={memberPosition}
+                        onChange={(e) => setMemberPosition(e.target.value)}
+                        className="w-full px-4 py-2.5 bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-white border border-zinc-200 dark:border-zinc-800 rounded-xl focus:outline-none focus:border-indigo-500 font-semibold text-sm"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-black text-zinc-650 dark:text-zinc-400 uppercase tracking-wider mb-2">Tröjnummer (Valfritt)</label>
+                      <input
+                        type="text"
+                        placeholder="t.ex. 10"
+                        value={memberNumber}
+                        onChange={(e) => setMemberNumber(e.target.value)}
+                        className="w-full px-4 py-2.5 bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-white border border-zinc-200 dark:border-zinc-800 rounded-xl focus:outline-none focus:border-indigo-500 font-semibold text-sm"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-black text-zinc-650 dark:text-zinc-400 uppercase tracking-wider mb-2">Profilbild URL (Valfritt)</label>
+                    <input
+                      type="url"
+                      placeholder="https://exempel.se/bild.jpg"
+                      value={memberPhotoUrl}
+                      onChange={(e) => setMemberPhotoUrl(e.target.value)}
+                      className="w-full px-4 py-2.5 bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-white border border-zinc-200 dark:border-zinc-800 rounded-xl focus:outline-none focus:border-indigo-500 font-semibold text-sm"
+                    />
+                  </div>
+
                   {/* Role Toggles */}
                   <div className="border-t border-zinc-100 dark:border-zinc-800 pt-4">
                     <label className="block text-xs font-black text-zinc-650 dark:text-zinc-400 uppercase tracking-wider mb-3">Roll(er) i föreningen</label>
@@ -1570,8 +1699,12 @@ export default function ClubAdminDashboard({
                     className="p-3.5 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4 hover:bg-zinc-50/50 dark:hover:bg-zinc-950/40 transition-all w-full min-w-0"
                   >
                     <div className="flex items-start gap-3 sm:gap-3.5 min-w-0 flex-1">
-                      <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-zinc-100 dark:bg-zinc-800/80 text-zinc-600 dark:text-zinc-400 flex items-center justify-center shrink-0">
-                        <Users size={18} />
+                      <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-zinc-100 dark:bg-zinc-800/80 text-zinc-600 dark:text-zinc-400 flex items-center justify-center shrink-0 overflow-hidden">
+                        {member.photoUrl ? (
+                          <img src={member.photoUrl} alt={member.fullName} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                        ) : (
+                          <Users size={18} />
+                        )}
                       </div>
                       <div className="min-w-0 flex-1">
                         <h4 className="font-extrabold text-sm text-zinc-900 dark:text-white leading-tight truncate">{member.fullName}</h4>
@@ -1590,6 +1723,16 @@ export default function ClubAdminDashboard({
                             <span className="flex items-center gap-1.5 shrink-0 bg-zinc-100 dark:bg-zinc-800 px-1.5 py-0.5 rounded text-[10px] font-semibold">
                               <Fingerprint size={10} />
                               <span>{member.personnummer}</span>
+                            </span>
+                          )}
+                          {member.position && (
+                            <span className="flex items-center gap-1 shrink-0 bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300 px-1.5 py-0.5 rounded text-[10px] font-bold">
+                              <span>{member.position}</span>
+                            </span>
+                          )}
+                          {member.number && (
+                            <span className="flex items-center gap-1 shrink-0 bg-zinc-100 dark:bg-zinc-800 text-zinc-800 dark:text-zinc-200 px-1.5 py-0.5 rounded text-[10px] font-black">
+                              <span>#{member.number}</span>
                             </span>
                           )}
                         </div>
@@ -1816,6 +1959,34 @@ export default function ClubAdminDashboard({
                           }`}
                         >
                           {m.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Duplicate Strategy Option */}
+                  <div className="border-t border-zinc-100 dark:border-zinc-800 pt-4">
+                    <label className="block text-xs font-black text-zinc-650 dark:text-zinc-400 uppercase tracking-wider mb-2">
+                      Hantering av befintliga medlemmar (Dubbletter)
+                    </label>
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                      {[
+                        { id: 'merge', label: 'Slå ihop & Uppdatera', desc: 'Uppdatera befintliga poster och lägg till nya' },
+                        { id: 'skip', label: 'Hoppa över befintliga', desc: 'Importera endast helt nya personer' },
+                        { id: 'add_all', label: 'Skapa som nya', desc: 'Skapa nya poster för alla rader' }
+                      ].map(opt => (
+                        <button
+                          key={opt.id}
+                          type="button"
+                          onClick={() => setImportDuplicateMode(opt.id as any)}
+                          className={`p-2.5 rounded-xl border text-left transition-all cursor-pointer ${
+                            importDuplicateMode === opt.id
+                              ? 'bg-emerald-50 border-emerald-500 text-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-500'
+                              : 'bg-zinc-50 border-zinc-200 text-zinc-600 dark:bg-zinc-950 dark:border-zinc-800 dark:text-zinc-400'
+                          }`}
+                        >
+                          <div className="font-extrabold text-xs">{opt.label}</div>
+                          <div className="text-[10px] text-zinc-500 dark:text-zinc-400 mt-0.5">{opt.desc}</div>
                         </button>
                       ))}
                     </div>
