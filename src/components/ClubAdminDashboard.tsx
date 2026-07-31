@@ -1,11 +1,13 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Landmark, Trash2, Edit3, Users, Shield, Check, PlusCircle, Search, Mail, Phone, Fingerprint, Settings, ArrowRight, UserPlus, Save, Smartphone, X, Database, Server, HardDrive, Cloud, RefreshCw, Download, Upload, Globe, Cpu, CheckCircle2, AlertTriangle, Calendar, Link, Copy, ExternalLink, FileSpreadsheet, FileText } from 'lucide-react';
+import { Landmark, Trash2, Edit3, Users, Shield, Check, PlusCircle, Search, Mail, Phone, Fingerprint, Settings, ArrowRight, UserPlus, Save, Smartphone, X, Database, Server, HardDrive, Cloud, RefreshCw, Download, Upload, Globe, Cpu, CheckCircle2, AlertTriangle, Calendar, Link, Copy, ExternalLink, FileSpreadsheet, FileText, Camera, Loader2 } from 'lucide-react';
 import { Club, ClubMetadata, ClubTeam, ClubMember, SquadPlayer, TrainingSettings, TrainingSession } from '../types';
-import { db, getApiUrl } from '../lib/firebase';
+import { db, storage, getApiUrl } from '../lib/firebase';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
+import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import PwaIconGenerator from './PwaIconGenerator';
+import ImageCropper from './ImageCropper';
 import { syncTeamCalendar } from '../utils/calendarSync';
-import { deduplicateClubMembers, deduplicateSquad } from '../lib/clubUtils';
+import { deduplicateClubMembers, deduplicateSquad, syncAllTeamSquadsToClubMembers } from '../lib/clubUtils';
 import * as XLSX from 'xlsx';
 import Papa from 'papaparse';
 
@@ -196,6 +198,45 @@ export default function ClubAdminDashboard({
   const [memberPosition, setMemberPosition] = useState('');
   const [memberNumber, setMemberNumber] = useState('');
   const [memberPhotoUrl, setMemberPhotoUrl] = useState('');
+  const [imageToCrop, setImageToCrop] = useState<string | null>(null);
+  const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
+
+  const handleMemberPhotoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.addEventListener('load', () => setImageToCrop(reader.result as string));
+    reader.readAsDataURL(file);
+
+    if (e.target) e.target.value = '';
+  };
+
+  const onCropCompleteMemberPhoto = async (croppedBlob: Blob) => {
+    setImageToCrop(null);
+    setIsUploadingPhoto(true);
+
+    try {
+      const extension = croppedBlob.type === 'image/png' ? 'png' : 'jpg';
+      const fileName = `member_${Date.now()}.${extension}`;
+      const memberPath = editingMember ? `members/${editingMember.userId}/${fileName}` : `members/temp/${fileName}`;
+      const storageRef = ref(storage, memberPath);
+      
+      const uploadResult = await uploadBytes(storageRef, croppedBlob);
+      const downloadURL = await getDownloadURL(uploadResult.ref);
+
+      setMemberPhotoUrl(downloadURL);
+    } catch (err) {
+      console.error('Failed to upload member photo to storage:', err);
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setMemberPhotoUrl(reader.result as string);
+      };
+      reader.readAsDataURL(croppedBlob);
+    } finally {
+      setIsUploadingPhoto(false);
+    }
+  };
   const [memberRoles, setMemberRoles] = useState<('admin' | 'coach' | 'player' | 'parent')[]>([]);
   const [memberTeams, setMemberTeams] = useState<string[]>([]);
   const [memberSearchQuery, setMemberSearchQuery] = useState('');
@@ -463,6 +504,15 @@ export default function ClubAdminDashboard({
           ];
           await setDoc(membersRef, { members: defaultMembers });
           setMembers(defaultMembers);
+        }
+
+        // Auto-sync squad photos & player info from all team squads in this club
+        const teamIds = (metaSnap.exists() ? (metaSnap.data() as ClubMetadata).teams : []).map(t => t.id);
+        if (teamIds.length > 0) {
+          const syncedMembers = await syncAllTeamSquadsToClubMembers(selectedClub!.id, teamIds);
+          if (syncedMembers && syncedMembers.length > 0) {
+            setMembers(syncedMembers);
+          }
         }
       } catch (err) {
         console.error('Failed to load club details:', err);
@@ -1590,14 +1640,43 @@ export default function ClubAdminDashboard({
                   </div>
 
                   <div>
-                    <label className="block text-xs font-black text-zinc-650 dark:text-zinc-400 uppercase tracking-wider mb-2">Profilbild URL (Valfritt)</label>
-                    <input
-                      type="url"
-                      placeholder="https://exempel.se/bild.jpg"
-                      value={memberPhotoUrl}
-                      onChange={(e) => setMemberPhotoUrl(e.target.value)}
-                      className="w-full px-4 py-2.5 bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-white border border-zinc-200 dark:border-zinc-800 rounded-xl focus:outline-none focus:border-indigo-500 font-semibold text-sm"
-                    />
+                    <label className="block text-xs font-black text-zinc-650 dark:text-zinc-400 uppercase tracking-wider mb-2">Profilbild</label>
+                    <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4 p-3.5 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-2xl">
+                      <div className="w-16 h-16 rounded-2xl bg-zinc-200 dark:bg-zinc-800 text-zinc-500 flex items-center justify-center shrink-0 overflow-hidden relative shadow-inner">
+                        {isUploadingPhoto ? (
+                          <Loader2 size={22} className="animate-spin text-indigo-600" />
+                        ) : memberPhotoUrl ? (
+                          <img src={memberPhotoUrl} alt="Profilbild" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                        ) : (
+                          <Users size={28} />
+                        )}
+                      </div>
+                      <div className="flex-1 min-w-0 w-full space-y-2">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <label className="bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold text-xs px-3.5 py-2 rounded-xl flex items-center gap-1.5 cursor-pointer transition-all shadow-sm">
+                            <Camera size={14} />
+                            <span>Ladda upp bild</span>
+                            <input type="file" className="hidden" accept="image/*" onChange={handleMemberPhotoUpload} />
+                          </label>
+                          {memberPhotoUrl && (
+                            <button
+                              type="button"
+                              onClick={() => setMemberPhotoUrl('')}
+                              className="text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/40 font-bold text-xs px-3 py-2 rounded-xl border border-red-200 dark:border-red-900/40 transition-all cursor-pointer"
+                            >
+                              Ta bort bild
+                            </button>
+                          )}
+                        </div>
+                        <input
+                          type="url"
+                          placeholder="Eller klistra in bild-URL (https://...)"
+                          value={memberPhotoUrl}
+                          onChange={(e) => setMemberPhotoUrl(e.target.value)}
+                          className="w-full px-3 py-1.5 bg-white dark:bg-zinc-900 text-zinc-900 dark:text-white border border-zinc-200 dark:border-zinc-800 rounded-lg focus:outline-none focus:border-indigo-500 font-medium text-xs"
+                        />
+                      </div>
+                    </div>
                   </div>
 
                   {/* Role Toggles */}
@@ -2769,6 +2848,15 @@ export default function ClubAdminDashboard({
         <PwaIconGenerator
           initialLogoUrl="/icon.svg"
           clubName={selectedClub?.name || 'CoachAssist'}
+        />
+      )}
+
+      {imageToCrop && (
+        <ImageCropper
+          image={imageToCrop}
+          onCropComplete={onCropCompleteMemberPhoto}
+          onCancel={() => setImageToCrop(null)}
+          aspect={1}
         />
       )}
     </div>

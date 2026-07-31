@@ -198,6 +198,7 @@ export async function syncSquadToClubMembers(
 
         const updatedRoles = Array.from(new Set([...existingRoles, targetRole]));
         const updatedTeams = Array.from(new Set([...existingTeams, teamId]));
+        const targetPhoto = player.photoUrl || existing.photoUrl;
 
         const hasChanged = 
           updatedRoles.length !== existingRoles.length ||
@@ -219,7 +220,7 @@ export async function syncSquadToClubMembers(
             personnummer: player.personnummer || existing.personnummer,
             position: player.position || existing.position,
             number: player.number || existing.number,
-            photoUrl: player.photoUrl || existing.photoUrl,
+            photoUrl: targetPhoto,
             roles: updatedRoles,
             teams: updatedTeams
           };
@@ -248,6 +249,120 @@ export async function syncSquadToClubMembers(
     }
   } catch (err) {
     console.error('Failed to sync squad to club members:', err);
+  }
+}
+
+/**
+ * Scans all team squads in a club and syncs their player photos, roles, and details
+ * into the club's global members document.
+ */
+export async function syncAllTeamSquadsToClubMembers(
+  clubId: string,
+  teamIds: string[]
+): Promise<ClubMember[]> {
+  if (!clubId) return [];
+  try {
+    const membersRef = doc(db, 'clubs', clubId, 'teams', 'club_global', 'data', 'members');
+    const membersSnap = await getDoc(membersRef);
+    let members: ClubMember[] = membersSnap.exists() ? (membersSnap.data().members || []) : [];
+    members = deduplicateClubMembers(members);
+
+    let isModified = false;
+
+    if (teamIds && teamIds.length > 0) {
+      for (const teamId of teamIds) {
+        try {
+          const squadRef = doc(db, 'clubs', clubId, 'teams', teamId, 'data', 'squad');
+          const squadSnap = await getDoc(squadRef);
+          if (!squadSnap.exists()) continue;
+
+          const squad: SquadPlayer[] = squadSnap.data().squad || [];
+          for (const sp of squad) {
+            if (!sp.name || !sp.name.trim()) continue;
+            const cleanName = sp.name.trim();
+            const cleanEmail = (sp.email || '').trim().toLowerCase();
+            const cleanPnr = (sp.personnummer || '').replace(/\D/g, '');
+            const cleanNum = (sp.number || '').trim();
+            const targetRole: 'coach' | 'player' = sp.role === 'leader' ? 'coach' : 'player';
+
+            const idx = members.findIndex(m => {
+              const mEmail = (m.email || '').trim().toLowerCase();
+              const mName = (m.fullName || '').trim().toLowerCase();
+              const mPnr = (m.personnummer || '').replace(/\D/g, '');
+              const mNum = (m.number || '').trim();
+
+              if (sp.id && m.userId === sp.id) return true;
+              if (cleanPnr && mPnr && cleanPnr === mPnr) return true;
+              if (cleanEmail && mEmail === cleanEmail) return true;
+
+              if (mName === cleanName.toLowerCase()) {
+                if (cleanNum && mNum) return cleanNum === mNum;
+                return true;
+              }
+              return false;
+            });
+
+            if (idx !== -1) {
+              const existing = members[idx];
+              const updatedRoles = Array.from(new Set([...(existing.roles || []), targetRole]));
+              const updatedTeams = Array.from(new Set([...(existing.teams || []), teamId]));
+              const targetPhoto = sp.photoUrl || existing.photoUrl;
+
+              const hasChanged = 
+                updatedRoles.length !== (existing.roles || []).length ||
+                updatedTeams.length !== (existing.teams || []).length ||
+                (sp.photoUrl && existing.photoUrl !== sp.photoUrl) ||
+                (sp.phone && existing.phone !== sp.phone) ||
+                (sp.personnummer && existing.personnummer !== sp.personnummer) ||
+                (sp.position && existing.position !== sp.position) ||
+                (sp.number && existing.number !== sp.number);
+
+              if (hasChanged) {
+                members[idx] = {
+                  ...existing,
+                  fullName: existing.fullName || cleanName,
+                  email: sp.email || existing.email || '',
+                  phone: sp.phone || existing.phone,
+                  personnummer: sp.personnummer || existing.personnummer,
+                  position: sp.position || existing.position,
+                  number: sp.number || existing.number,
+                  photoUrl: targetPhoto,
+                  roles: updatedRoles,
+                  teams: updatedTeams
+                };
+                isModified = true;
+              }
+            } else {
+              const newMember: ClubMember = {
+                userId: sp.id || 'player_' + Math.random().toString(36).substring(2, 10),
+                email: sp.email || '',
+                fullName: cleanName,
+                phone: sp.phone || undefined,
+                personnummer: sp.personnummer || undefined,
+                position: sp.position || undefined,
+                number: sp.number || undefined,
+                photoUrl: sp.photoUrl || undefined,
+                roles: [targetRole],
+                teams: [teamId]
+              };
+              members.push(newMember);
+              isModified = true;
+            }
+          }
+        } catch (e) {
+          console.error(`Failed syncing squad for team ${teamId}:`, e);
+        }
+      }
+    }
+
+    if (isModified) {
+      await setDoc(membersRef, { members, updatedAt: Date.now() });
+    }
+
+    return members;
+  } catch (err) {
+    console.error('Failed to sync all team squads to club members:', err);
+    return [];
   }
 }
 
@@ -327,7 +442,7 @@ export async function getMergedSquadAndClubMembers(
         const newPnr = member.personnummer || existingSp.personnummer;
         const newPos = member.position || existingSp.position;
         const newNum = member.number || existingSp.number;
-        const newPhoto = member.photoUrl || existingSp.photoUrl;
+        const newPhoto = existingSp.photoUrl || member.photoUrl;
 
         updatedSquad[squadIdx] = {
           ...existingSp,
@@ -344,33 +459,40 @@ export async function getMergedSquadAndClubMembers(
     const finalMergedSquad = deduplicateSquad(updatedSquad);
     const hasChanges = JSON.stringify(finalMergedSquad) !== JSON.stringify(squad);
 
-    const missingInMembers = finalMergedSquad.some(sp => {
+    const needsSyncToMembers = finalMergedSquad.some(sp => {
+      if (!sp.name) return false;
       const spEmail = (sp.email || '').trim().toLowerCase();
       const spName = (sp.name || '').trim().toLowerCase();
       const spPnr = (sp.personnummer || '').replace(/\D/g, '');
       const spNum = (sp.number || '').trim();
 
-      return !members.some(m => {
-        const mEmail = (m.email || '').trim().toLowerCase();
-        const mName = (m.fullName || '').trim().toLowerCase();
-        const mPnr = (m.personnummer || '').replace(/\D/g, '');
-        const mNum = (m.number || '').trim();
+      const m = members.find(mem => {
+        const mEmail = (mem.email || '').trim().toLowerCase();
+        const mName = (mem.fullName || '').trim().toLowerCase();
+        const mPnr = (mem.personnummer || '').replace(/\D/g, '');
+        const mNum = (mem.number || '').trim();
 
-        if (sp.id && m.userId === sp.id) return true;
+        if (sp.id && mem.userId === sp.id) return true;
         if (spPnr && mPnr && spPnr === mPnr) return true;
         if (spEmail && mEmail === spEmail) return true;
 
         if (spName === mName.toLowerCase()) {
-          if (spNum && mNum) {
-            return spNum === mNum;
-          }
+          if (spNum && mNum) return spNum === mNum;
           return true;
         }
         return false;
       });
+
+      if (!m) return true;
+      if (sp.photoUrl && m.photoUrl !== sp.photoUrl) return true;
+      if (sp.phone && m.phone !== sp.phone) return true;
+      if (sp.personnummer && m.personnummer !== sp.personnummer) return true;
+      if (sp.position && m.position !== sp.position) return true;
+      if (sp.number && m.number !== sp.number) return true;
+      return false;
     });
 
-    if (missingInMembers) {
+    if (needsSyncToMembers) {
       await syncSquadToClubMembers(finalMergedSquad, clubId, teamId);
     }
 
