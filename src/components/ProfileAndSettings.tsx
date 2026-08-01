@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { User, Phone, Fingerprint, Check, Save, Landmark, Info, Lock, Key, ShieldCheck, AlertCircle, Eye, EyeOff } from 'lucide-react';
+import { User, Phone, Fingerprint, Check, Save, AtSign, Lock, Key, Eye, EyeOff, ShieldCheck, AlertCircle, Landmark, Info } from 'lucide-react';
 import { UserProfile, Club, ClubMetadata, ClubMember } from '../types';
-import { db, getApiUrl } from '../lib/firebase';
+import { db, getApiUrl, auth } from '../lib/firebase';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 
 interface ProfileAndSettingsProps {
@@ -27,10 +27,12 @@ export default function ProfileAndSettings({
   });
 
   const [emailInput, setEmailInput] = useState<string>(currentProfile.email || userEmail || '');
+  const [usernameInput, setUsernameInput] = useState<string>(currentProfile.username || (auth.currentUser?.username || ''));
   const [memberships, setMemberships] = useState<{ club: Club; roles: string[]; teams: string[]; availableTeams: { id: string; name: string }[] }[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'success' | 'error'>('idle');
   const [emailUpdateError, setEmailUpdateError] = useState<string>('');
+  const [usernameError, setUsernameError] = useState<string>('');
 
   // Sync state when props change
   useEffect(() => {
@@ -39,10 +41,12 @@ export default function ProfileAndSettings({
       phone: currentProfile.phone || '',
       personnummer: currentProfile.personnummer || '',
       email: currentProfile.email || userEmail || '',
+      username: currentProfile.username || (auth.currentUser?.username || ''),
       activeClubId: currentProfile.activeClubId || null,
       activeTeamId: currentProfile.activeTeamId || null,
     });
     setEmailInput(currentProfile.email || userEmail || '');
+    setUsernameInput(currentProfile.username || (auth.currentUser?.username || ''));
   }, [currentProfile, userEmail]);
 
   // Password change state
@@ -105,13 +109,45 @@ export default function ProfileAndSettings({
     e.preventDefault();
     setSaveStatus('saving');
     setEmailUpdateError('');
+    setUsernameError('');
 
     const cleanEmail = emailInput.trim().toLowerCase();
+    const cleanUsername = usernameInput.trim().toLowerCase();
+    const currentUsername = profile.username || (auth.currentUser?.username || '');
 
     try {
-      // If email has changed, update email in auth backend
+      const token = localStorage.getItem('token');
+
+      // 1. If username has changed, update username in auth backend
+      if (cleanUsername && cleanUsername !== currentUsername.trim().toLowerCase()) {
+        if (token) {
+          const res = await fetch(getApiUrl('/api/auth/update-username'), {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${token}`
+            },
+            body: JSON.stringify({ newUsername: cleanUsername })
+          });
+
+          const data = await res.json();
+          if (!res.ok) {
+            setUsernameError(data.error || 'Kunde inte uppdatera användarnamnet.');
+            setSaveStatus('error');
+            return;
+          }
+
+          if (data.token) {
+            localStorage.setItem('token', data.token);
+          }
+          if (auth.currentUser) {
+            auth.currentUser.username = cleanUsername;
+          }
+        }
+      }
+
+      // 2. If email has changed, update email in auth backend
       if (cleanEmail && cleanEmail !== userEmail.trim().toLowerCase()) {
-        const token = localStorage.getItem('token');
         if (token) {
           const res = await fetch(getApiUrl('/api/auth/update-email'), {
             method: 'POST',
@@ -138,6 +174,7 @@ export default function ProfileAndSettings({
       const updatedProfile: UserProfile = {
         ...profile,
         email: cleanEmail,
+        username: cleanUsername,
         updatedAt: Date.now(),
       } as any;
 
@@ -298,6 +335,27 @@ export default function ProfileAndSettings({
               </div>
 
               <div>
+                <label className="block text-xs font-black text-zinc-650 dark:text-zinc-400 uppercase tracking-wider mb-2">Användarnamn (Inloggning)</label>
+                <div className="relative">
+                  <span className="absolute left-4 top-3.5 text-zinc-400">
+                    <AtSign size={18} />
+                  </span>
+                  <input
+                    type="text"
+                    value={usernameInput}
+                    onChange={e => setUsernameInput(e.target.value)}
+                    placeholder="valfritt_anvandarnamn"
+                    className="w-full pl-11 pr-4 py-3 bg-zinc-50 hover:bg-zinc-100/70 focus:bg-white dark:bg-zinc-950 dark:hover:bg-zinc-950/70 dark:focus:bg-zinc-950 rounded-2xl border border-zinc-200 dark:border-zinc-800 focus:border-indigo-500 focus:outline-none transition-all font-semibold text-zinc-900 dark:text-white text-sm"
+                  />
+                </div>
+                {usernameError && (
+                  <p className="text-xs font-bold text-red-500 mt-1.5">{usernameError}</p>
+                )}
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
                 <label className="block text-xs font-black text-zinc-650 dark:text-zinc-400 uppercase tracking-wider mb-2">Mobilnummer</label>
                 <div className="relative">
                   <span className="absolute left-4 top-3.5 text-zinc-400">
@@ -312,28 +370,25 @@ export default function ProfileAndSettings({
                   />
                 </div>
               </div>
-            </div>
 
-            <div>
-              <div className="flex items-center justify-between mb-2">
-                <label className="block text-xs font-black text-zinc-650 dark:text-zinc-400 uppercase tracking-wider">Personnummer (Valfritt)</label>
-                <span className="text-[10px] text-zinc-400 font-bold bg-zinc-100 dark:bg-zinc-800 px-2 py-0.5 rounded-full">Sverige</span>
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <label className="block text-xs font-black text-zinc-650 dark:text-zinc-400 uppercase tracking-wider">Personnummer (Valfritt)</label>
+                  <span className="text-[10px] text-zinc-400 font-bold bg-zinc-100 dark:bg-zinc-800 px-2 py-0.5 rounded-full">Sverige</span>
+                </div>
+                <div className="relative">
+                  <span className="absolute left-4 top-3.5 text-zinc-400">
+                    <Fingerprint size={18} />
+                  </span>
+                  <input
+                    type="text"
+                    placeholder="ÅÅÅÅMMDD-XXXX"
+                    value={profile.personnummer || ''}
+                    onChange={e => setProfile(prev => ({ ...prev, personnummer: e.target.value }))}
+                    className="w-full pl-11 pr-4 py-3 bg-zinc-50 hover:bg-zinc-100/70 focus:bg-white dark:bg-zinc-950 dark:hover:bg-zinc-950/70 dark:focus:bg-zinc-950 rounded-2xl border border-zinc-200 dark:border-zinc-800 focus:border-indigo-500 focus:outline-none transition-all font-semibold text-zinc-900 dark:text-white text-sm"
+                  />
+                </div>
               </div>
-              <div className="relative">
-                <span className="absolute left-4 top-3.5 text-zinc-400">
-                  <Fingerprint size={18} />
-                </span>
-                <input
-                  type="text"
-                  placeholder="ÅÅÅÅMMDD-XXXX"
-                  value={profile.personnummer || ''}
-                  onChange={e => setProfile(prev => ({ ...prev, personnummer: e.target.value }))}
-                  className="w-full pl-11 pr-4 py-3 bg-zinc-50 hover:bg-zinc-100/70 focus:bg-white dark:bg-zinc-950 dark:hover:bg-zinc-950/70 dark:focus:bg-zinc-950 rounded-2xl border border-zinc-200 dark:border-zinc-800 focus:border-indigo-500 focus:outline-none transition-all font-semibold text-zinc-900 dark:text-white text-sm"
-                />
-              </div>
-              <p className="text-[11px] text-zinc-400 mt-1.5 font-medium leading-relaxed">
-                Personnummer är helt valfritt och används av klubbar för bidragsansökningar (t.ex. LOK-stöd) samt säker identifiering. Spara i formatet ÅÅÅÅMMDD-XXXX.
-              </p>
             </div>
 
             <div className="pt-2">

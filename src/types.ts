@@ -359,6 +359,7 @@ export interface UserProfile {
   phone?: string;
   personnummer?: string;
   email?: string;
+  username?: string;
   activeClubId?: string | null;
   activeTeamId?: string | null;
   status?: 'pending' | 'approved' | 'rejected';

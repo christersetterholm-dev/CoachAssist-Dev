@@ -46,6 +46,7 @@ function initDatabase(): InstanceType<typeof Database> {
       CREATE TABLE IF NOT EXISTS users (
         id TEXT PRIMARY KEY,
         email TEXT UNIQUE NOT NULL,
+        username TEXT,
         password_hash TEXT NOT NULL,
         created_at INTEGER NOT NULL
       );
@@ -92,6 +93,12 @@ function initDatabase(): InstanceType<typeof Database> {
         created_at INTEGER NOT NULL
       );
     `);
+
+    try {
+      database.exec('ALTER TABLE users ADD COLUMN username TEXT;');
+    } catch (_) {
+      // Column already exists
+    }
   };
 
   try {
@@ -771,40 +778,72 @@ async function startServer() {
 
   // Register
   app.post('/api/auth/register', async (req, res) => {
-    const { email, password } = req.body;
+    const { email, password, username } = req.body;
     if (!email || !password) {
-      return res.status(400).json({ error: 'E-post och lösenord krävs' });
+      return res.status(400).json({ error: 'E-post och lösenord krävs.' });
     }
 
     const trimmedEmail = email.trim().toLowerCase();
+    const trimmedUsername = username ? username.trim().toLowerCase() : '';
+
+    if (trimmedUsername) {
+      if (!/^[a-zA-Z0-9_\.-]{3,20}$/.test(trimmedUsername)) {
+        return res.status(400).json({
+          error: 'Användarnamnet måste vara 3–20 tecken långt och endast innehålla bokstäver, siffror, understreck eller bindestreck.'
+        });
+      }
+    }
+
     try {
-      let existing = db.prepare('SELECT id FROM users WHERE email = ?').get(trimmedEmail);
-      if (!existing) {
+      // 1. Check if email already registered
+      let existingByEmail = db.prepare('SELECT id, email FROM users WHERE LOWER(email) = ?').get(trimmedEmail);
+      if (!existingByEmail) {
         const fUser = await getFirestoreDoc(`server_users/${encodeURIComponent(trimmedEmail)}`);
         if (fUser && fUser.id) {
-          existing = fUser;
+          existingByEmail = fUser;
         }
       }
 
-      if (existing) {
-        return res.status(400).json({ error: 'E-postadressen är redan registrerad' });
+      if (existingByEmail) {
+        return res.status(400).json({
+          error: `E-postadressen '${trimmedEmail}' är redan registrerad i CoachAssist. Vänligen logga in eller återställ ditt lösenord om du glömt det.`
+        });
+      }
+
+      // 2. Check if username already taken
+      if (trimmedUsername) {
+        let existingByUsername = db.prepare('SELECT id FROM users WHERE LOWER(username) = ?').get(trimmedUsername);
+        if (!existingByUsername) {
+          const fUser = await getFirestoreDoc(`server_usernames/${encodeURIComponent(trimmedUsername)}`);
+          if (fUser && fUser.id) {
+            existingByUsername = fUser;
+          }
+        }
+
+        if (existingByUsername) {
+          return res.status(400).json({
+            error: `Användarnamnet '${trimmedUsername}' är tyvärr redan upptaget. Välj ett annat användarnamn.`
+          });
+        }
       }
 
       const userId = crypto.randomUUID();
       const passwordHash = await bcrypt.hash(password, 10);
       const createdAt = Date.now();
 
-      db.prepare('INSERT INTO users (id, email, password_hash, created_at) VALUES (?, ?, ?, ?)').run(
+      db.prepare('INSERT INTO users (id, email, username, password_hash, created_at) VALUES (?, ?, ?, ?, ?)').run(
         userId,
         trimmedEmail,
+        trimmedUsername || null,
         passwordHash,
         createdAt
       );
 
-      // Asynchronously persist to Cloud Firestore for permanent storage across container restarts
+      // Asynchronously persist to Cloud Firestore
       setFirestoreDoc(`server_users/${encodeURIComponent(trimmedEmail)}`, {
         id: userId,
         email: trimmedEmail,
+        username: trimmedUsername || null,
         password_hash: passwordHash,
         created_at: createdAt
       }).catch(e => console.error('Firestore user save error:', e));
@@ -812,17 +851,27 @@ async function startServer() {
       setFirestoreDoc(`server_user_ids/${encodeURIComponent(userId)}`, {
         id: userId,
         email: trimmedEmail,
+        username: trimmedUsername || null,
         password_hash: passwordHash,
         created_at: createdAt
       }).catch(e => console.error('Firestore user_id save error:', e));
 
-      const token = jwt.sign({ id: userId, email: trimmedEmail }, JWT_SECRET, { expiresIn: '30d' });
+      if (trimmedUsername) {
+        setFirestoreDoc(`server_usernames/${encodeURIComponent(trimmedUsername)}`, {
+          id: userId,
+          email: trimmedEmail,
+          username: trimmedUsername
+        }).catch(e => console.error('Firestore username save error:', e));
+      }
+
+      const token = jwt.sign({ id: userId, email: trimmedEmail, username: trimmedUsername }, JWT_SECRET, { expiresIn: '30d' });
       res.json({
         token,
         user: {
           uid: userId,
           email: trimmedEmail,
-          displayName: trimmedEmail.split('@')[0],
+          username: trimmedUsername || null,
+          displayName: trimmedUsername || trimmedEmail.split('@')[0],
           photoURL: null
         }
       });
@@ -832,31 +881,43 @@ async function startServer() {
     }
   });
 
-  // Login
+  // Login (supports Email OR Username)
   app.post('/api/auth/login', async (req, res) => {
-    const { email, password } = req.body;
-    if (!email || !password) {
-      return res.status(400).json({ error: 'E-post och lösenord krävs' });
+    const { email, identifier, password } = req.body;
+    const loginInput = (email || identifier || '').trim().toLowerCase();
+
+    if (!loginInput || !password) {
+      return res.status(400).json({ error: 'E-post/användarnamn och lösenord krävs.' });
     }
 
-    const trimmedEmail = email.trim().toLowerCase();
     try {
-      let userRow: any = db.prepare('SELECT * FROM users WHERE email = ?').get(trimmedEmail);
+      let userRow: any = db.prepare('SELECT * FROM users WHERE LOWER(email) = ? OR LOWER(username) = ?').get(loginInput, loginInput);
 
       // If user not found in local SQLite (e.g. fresh container restart), restore from Cloud Firestore
       if (!userRow) {
-        const fUser = await getFirestoreDoc(`server_users/${encodeURIComponent(trimmedEmail)}`);
+        let fUser = await getFirestoreDoc(`server_users/${encodeURIComponent(loginInput)}`);
+        if (!fUser || !fUser.id) {
+          const uMapping = await getFirestoreDoc(`server_usernames/${encodeURIComponent(loginInput)}`);
+          if (uMapping && uMapping.email) {
+            fUser = await getFirestoreDoc(`server_users/${encodeURIComponent(uMapping.email)}`);
+          } else if (uMapping && uMapping.id) {
+            fUser = await getFirestoreDoc(`server_user_ids/${encodeURIComponent(uMapping.id)}`);
+          }
+        }
+
         if (fUser && fUser.id && fUser.password_hash) {
           try {
-            db.prepare('INSERT OR REPLACE INTO users (id, email, password_hash, created_at) VALUES (?, ?, ?, ?)').run(
+            db.prepare('INSERT OR REPLACE INTO users (id, email, username, password_hash, created_at) VALUES (?, ?, ?, ?, ?)').run(
               fUser.id,
-              fUser.email || trimmedEmail,
+              fUser.email || loginInput,
+              fUser.username || null,
               fUser.password_hash,
               fUser.created_at || Date.now()
             );
             userRow = {
               id: fUser.id,
-              email: fUser.email || trimmedEmail,
+              email: fUser.email || loginInput,
+              username: fUser.username || null,
               password_hash: fUser.password_hash,
               created_at: fUser.created_at || Date.now()
             };
@@ -867,21 +928,22 @@ async function startServer() {
       }
 
       if (!userRow) {
-        return res.status(400).json({ error: 'Fel e-post eller lösenord' });
+        return res.status(400).json({ error: 'Fel e-post/användarnamn eller lösenord.' });
       }
 
       const isValid = await bcrypt.compare(password, userRow.password_hash);
       if (!isValid) {
-        return res.status(400).json({ error: 'Fel e-post eller lösenord' });
+        return res.status(400).json({ error: 'Fel e-post/användarnamn eller lösenord.' });
       }
 
-      const token = jwt.sign({ id: userRow.id, email: userRow.email }, JWT_SECRET, { expiresIn: '30d' });
+      const token = jwt.sign({ id: userRow.id, email: userRow.email, username: userRow.username }, JWT_SECRET, { expiresIn: '30d' });
       res.json({
         token,
         user: {
           uid: userRow.id,
           email: userRow.email,
-          displayName: userRow.email.split('@')[0],
+          username: userRow.username || null,
+          displayName: userRow.username || userRow.email.split('@')[0],
           photoURL: null
         }
       });
@@ -1116,7 +1178,7 @@ async function startServer() {
       const token = partsAuth.length > 1 ? partsAuth[1] : partsAuth[0];
 
       const decoded: any = jwt.verify(token, JWT_SECRET);
-      let userRow: any = db.prepare('SELECT id, email FROM users WHERE id = ?').get(decoded.id);
+      let userRow: any = db.prepare('SELECT id, email, username FROM users WHERE id = ?').get(decoded.id);
 
       if (!userRow) {
         // Attempt restore from Firestore
@@ -1124,17 +1186,19 @@ async function startServer() {
                       (decoded.email ? await getFirestoreDoc(`server_users/${encodeURIComponent(decoded.email)}`) : null);
         
         const userEmail = fUser?.email || decoded.email || 'user@coachassist.app';
+        const username = fUser?.username || decoded.username || null;
         const passwordHash = fUser?.password_hash || 'restored_session';
         const createdAt = fUser?.created_at || Date.now();
 
         try {
-          db.prepare('INSERT OR REPLACE INTO users (id, email, password_hash, created_at) VALUES (?, ?, ?, ?)').run(
+          db.prepare('INSERT OR REPLACE INTO users (id, email, username, password_hash, created_at) VALUES (?, ?, ?, ?, ?)').run(
             decoded.id,
             userEmail,
+            username,
             passwordHash,
             createdAt
           );
-          userRow = { id: decoded.id, email: userEmail };
+          userRow = { id: decoded.id, email: userEmail, username };
         } catch (e) {
           console.error('Error auto-restoring user in SQLite:', e);
         }
@@ -1147,11 +1211,94 @@ async function startServer() {
       res.json({
         uid: userRow.id,
         email: userRow.email,
-        displayName: userRow.email.split('@')[0],
+        username: userRow.username || null,
+        displayName: userRow.username || userRow.email.split('@')[0],
         photoURL: null
       });
     } catch (err) {
       res.status(401).json({ error: 'Token är ogiltig eller har gått ut' });
+    }
+  });
+
+  // Update Username Endpoint
+  app.post('/api/auth/update-username', async (req, res) => {
+    const authHeader = req.headers.authorization;
+    if (!authHeader) {
+      return res.status(401).json({ error: 'Du måste vara inloggad för att välja eller ändra användarnamn.' });
+    }
+
+    try {
+      const authStr = Array.isArray(authHeader) ? authHeader[0] : authHeader;
+      const partsAuth = authStr.split(' ');
+      const token = partsAuth.length > 1 ? partsAuth[1] : partsAuth[0];
+
+      const decoded: any = jwt.verify(token, JWT_SECRET);
+      const userId = decoded.id;
+
+      const { newUsername } = req.body;
+      const cleanUsername = newUsername ? newUsername.trim().toLowerCase() : '';
+
+      if (!cleanUsername || !/^[a-zA-Z0-9_\.-]{3,20}$/.test(cleanUsername)) {
+        return res.status(400).json({
+          error: 'Användarnamnet måste vara 3–20 tecken och endast innehålla bokstäver, siffror, understreck eller bindestreck.'
+        });
+      }
+
+      // Check if username is taken
+      let existingByUsername = db.prepare('SELECT id FROM users WHERE LOWER(username) = ? AND id != ?').get(cleanUsername, userId);
+      if (!existingByUsername) {
+        const fUser = await getFirestoreDoc(`server_usernames/${encodeURIComponent(cleanUsername)}`);
+        if (fUser && fUser.id && fUser.id !== userId) {
+          existingByUsername = fUser;
+        }
+      }
+
+      if (existingByUsername) {
+        return res.status(400).json({ error: `Användarnamnet '${cleanUsername}' är tyvärr redan upptaget. Välj ett annat.` });
+      }
+
+      // Update in SQLite
+      db.prepare('UPDATE users SET username = ? WHERE id = ?').run(cleanUsername, userId);
+
+      // Find user row for full email and hash
+      let userRow: any = db.prepare('SELECT * FROM users WHERE id = ?').get(userId);
+
+      // Update Firestore
+      if (userRow) {
+        setFirestoreDoc(`server_users/${encodeURIComponent(userRow.email)}`, {
+          id: userId,
+          email: userRow.email,
+          username: cleanUsername,
+          password_hash: userRow.password_hash,
+          created_at: userRow.created_at || Date.now()
+        }).catch(() => {});
+
+        setFirestoreDoc(`server_user_ids/${encodeURIComponent(userId)}`, {
+          id: userId,
+          email: userRow.email,
+          username: cleanUsername,
+          password_hash: userRow.password_hash,
+          created_at: userRow.created_at || Date.now()
+        }).catch(() => {});
+      }
+
+      setFirestoreDoc(`server_usernames/${encodeURIComponent(cleanUsername)}`, {
+        id: userId,
+        email: userRow?.email || decoded.email,
+        username: cleanUsername
+      }).catch(() => {});
+
+      const newToken = jwt.sign({ id: userId, email: userRow?.email || decoded.email, username: cleanUsername }, JWT_SECRET, { expiresIn: '30d' });
+
+      res.json({
+        success: true,
+        message: 'Användarnamnet har uppdaterats!',
+        token: newToken,
+        username: cleanUsername
+      });
+    } catch (error: any) {
+      console.error('Update username error:', error);
+      res.status(500).json({ error: 'Kunde inte uppdatera användarnamnet.' });
     }
   });
 

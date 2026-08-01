@@ -103,9 +103,15 @@ export const signInWithGoogle = async (_forceSelect = false): Promise<User> => {
         </div>
 
         <form id="auth-form" class="space-y-4">
+          <div id="auth-username-container" class="hidden">
+            <label class="block text-xs font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider mb-1.5" for="auth-username">Användarnamn (rekommenderas)</label>
+            <input type="text" id="auth-username" autocapitalize="none" autocorrect="off" spellcheck="false" class="w-full px-4 py-3 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl text-sm text-zinc-800 dark:text-zinc-100 placeholder-zinc-400 focus:outline-none focus:border-indigo-500 dark:focus:border-indigo-500 transition-colors" placeholder="tränare123" />
+            <p class="text-[11px] text-zinc-400 dark:text-zinc-500 mt-1">Gör det lättare att logga in om du ändrar din e-postadress.</p>
+          </div>
+
           <div id="auth-email-container">
-            <label class="block text-xs font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider mb-1.5" for="auth-email">E-postadress</label>
-            <input type="email" id="auth-email" required autocapitalize="none" autocorrect="off" spellcheck="false" class="w-full px-4 py-3 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl text-sm text-zinc-800 dark:text-zinc-100 placeholder-zinc-400 focus:outline-none focus:border-indigo-500 dark:focus:border-indigo-500 transition-colors" placeholder="coach@lag.se" />
+            <label id="auth-email-label" class="block text-xs font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider mb-1.5" for="auth-email">E-postadress eller användarnamn</label>
+            <input type="text" id="auth-email" required autocapitalize="none" autocorrect="off" spellcheck="false" class="w-full px-4 py-3 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl text-sm text-zinc-800 dark:text-zinc-100 placeholder-zinc-400 focus:outline-none focus:border-indigo-500 dark:focus:border-indigo-500 transition-colors" placeholder="coach@lag.se eller användarnamn" />
           </div>
 
           <div id="auth-code-container" class="hidden">
@@ -168,7 +174,10 @@ export const signInWithGoogle = async (_forceSelect = false): Promise<User> => {
     const subtitle = modal.querySelector('#auth-subtitle') as HTMLElement;
     const switchText = modal.querySelector('#auth-switch-text') as HTMLElement;
     const passwordLabel = modal.querySelector('#auth-password-label') as HTMLElement;
+    const emailLabel = modal.querySelector('#auth-email-label') as HTMLElement;
     const emailInput = modal.querySelector('#auth-email') as HTMLInputElement;
+    const usernameInput = modal.querySelector('#auth-username') as HTMLInputElement;
+    const usernameContainer = modal.querySelector('#auth-username-container') as HTMLElement;
     const codeInput = modal.querySelector('#auth-code') as HTMLInputElement;
     const passwordInput = modal.querySelector('#auth-password') as HTMLInputElement;
     const togglePwdBtn = modal.querySelector('#auth-toggle-pwd') as HTMLButtonElement;
@@ -210,8 +219,11 @@ export const signInWithGoogle = async (_forceSelect = false): Promise<User> => {
 
       if (authMode === 'register') {
         title.innerText = 'Skapa nytt konto';
-        subtitle.innerText = 'Skapa ett konto för att säkert spara din spelartrupp och träningspass.';
+        subtitle.innerText = 'Skapa ett konto för att spara din spelartrupp och träningspass.';
         passwordLabel.innerText = 'Lösenord';
+        if (emailLabel) emailLabel.innerText = 'E-postadress';
+        if (emailInput) emailInput.placeholder = 'coach@lag.se';
+        usernameContainer.classList.remove('hidden');
         emailContainer.classList.remove('hidden');
         codeContainer.classList.add('hidden');
         passwordContainer.classList.remove('hidden');
@@ -224,6 +236,9 @@ export const signInWithGoogle = async (_forceSelect = false): Promise<User> => {
       } else if (authMode === 'request-reset') {
         title.innerText = 'Återställ lösenord';
         subtitle.innerText = 'Ange din e-postadress för att få en 6-siffrig verifieringskod.';
+        if (emailLabel) emailLabel.innerText = 'E-postadress';
+        if (emailInput) emailInput.placeholder = 'coach@lag.se';
+        usernameContainer.classList.add('hidden');
         emailContainer.classList.remove('hidden');
         codeContainer.classList.add('hidden');
         passwordContainer.classList.add('hidden');
@@ -237,6 +252,9 @@ export const signInWithGoogle = async (_forceSelect = false): Promise<User> => {
         title.innerText = 'Mata in verifieringskod';
         subtitle.innerText = 'Ange den 6-siffriga koden vi skickat samt ditt nya lösenord.';
         passwordLabel.innerText = 'Nytt lösenord';
+        if (emailLabel) emailLabel.innerText = 'E-postadress';
+        if (emailInput) emailInput.placeholder = 'coach@lag.se';
+        usernameContainer.classList.add('hidden');
         emailContainer.classList.remove('hidden');
         codeContainer.classList.remove('hidden');
         passwordContainer.classList.remove('hidden');
@@ -248,8 +266,11 @@ export const signInWithGoogle = async (_forceSelect = false): Promise<User> => {
         switchBtn.innerText = 'Tillbaka till inloggning';
       } else {
         title.innerText = 'Logga in till ditt konto';
-        subtitle.innerText = 'Ange din e-postadress och lösenord för att hantera din trupp.';
+        subtitle.innerText = 'Logga in med e-post eller användarnamn och lösenord.';
         passwordLabel.innerText = 'Lösenord';
+        if (emailLabel) emailLabel.innerText = 'E-postadress eller användarnamn';
+        if (emailInput) emailInput.placeholder = 'coach@lag.se eller användarnamn';
+        usernameContainer.classList.add('hidden');
         emailContainer.classList.remove('hidden');
         codeContainer.classList.add('hidden');
         passwordContainer.classList.remove('hidden');
@@ -281,6 +302,7 @@ export const signInWithGoogle = async (_forceSelect = false): Promise<User> => {
     form.onsubmit = async (e) => {
       e.preventDefault();
       const email = emailInput.value.trim();
+      const username = usernameInput ? usernameInput.value.trim() : '';
       const password = passwordInput.value;
       const code = codeInput.value.trim();
 
@@ -313,17 +335,16 @@ export const signInWithGoogle = async (_forceSelect = false): Promise<User> => {
           if (resData.code) {
             codeInput.value = resData.code;
           }
-          // Keep info message visible after updateAuthUI
           infoDiv.classList.remove('hidden');
           return;
         }
 
         let endpoint = '/api/auth/login';
-        let bodyPayload: any = { email, password };
+        let bodyPayload: any = { identifier: email, email, password };
 
         if (authMode === 'register') {
           endpoint = '/api/auth/register';
-          bodyPayload = { email, password };
+          bodyPayload = { email, username, password };
         } else if (authMode === 'verify-reset') {
           endpoint = '/api/auth/reset-password';
           bodyPayload = { email, code, newPassword: password };
