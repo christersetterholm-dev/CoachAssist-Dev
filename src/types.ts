@@ -195,6 +195,7 @@ export interface TrainingSession {
   isIgnored?: boolean;
   isPlanned?: boolean;
   isLocallyEdited?: boolean;
+  hideContentForPlayers?: boolean;
   actualStartTime?: number;
   notes?: string;
   description?: string;

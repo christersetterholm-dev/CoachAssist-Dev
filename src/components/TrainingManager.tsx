@@ -44,6 +44,8 @@ interface TrainingManagerProps {
   onAddBankExercise?: (exercise: Omit<BankExercise, "id" | "createdAt">) => void;
   onUpdateBankExercise?: (id: string, updates: Partial<BankExercise>) => void;
   onRemoveBankExercise?: (id: string) => void;
+  user?: any;
+  userRoles?: string[];
 }
 
 const isSessionPassed = (session: TrainingSession) => {
@@ -541,7 +543,9 @@ export default function TrainingManager({
   onRemoveBankCategory,
   onAddBankExercise,
   onUpdateBankExercise,
-  onRemoveBankExercise
+  onRemoveBankExercise,
+  user,
+  userRoles
 }: TrainingManagerProps) {
   const [sessionToDelete, setSessionToDelete] = useState<string | null>(null);
   const [sessionToPermanentDelete, setSessionToPermanentDelete] = useState<string | null>(null);
@@ -967,6 +971,8 @@ export default function TrainingManager({
           onNewSession={onNewSession}
           onOpenTrash={() => setShowTrashModal(true)}
           onOpenSeriesCreator={() => setShowSeriesModal(true)}
+          user={user}
+          userRoles={userRoles}
         />
       ) : (
         <div className="px-4 sm:px-0">

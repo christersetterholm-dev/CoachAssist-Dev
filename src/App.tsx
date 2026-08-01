@@ -2659,6 +2659,8 @@ export default function App() {
                   onAddBankExercise={addBankExercise}
                   onUpdateBankExercise={updateBankExercise}
                   onRemoveBankExercise={removeBankExercise}
+                  user={user}
+                  userRoles={userRoles}
                   onSelectExercise={(id) => {
                     setData(prev => ({ ...prev, activeExerciseId: id }));
                     setView('exercise');

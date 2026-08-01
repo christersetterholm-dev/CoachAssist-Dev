@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useRef, useEffect } from 'react';
-import { ArrowLeft, Trash2, GripVertical, Clock, Calendar, Check, ListTodo, Save, ChevronDown, ChevronUp, Play, PlusCircle, Users, UserPlus, X, ClipboardList, Edit2, Image as ImageIcon, Link as LinkIcon, Youtube, ExternalLink, Maximize2, Upload, Loader2, FileText, Copy, Library, Download, ChevronRight, ShieldCheck, Layout, Bell } from 'lucide-react';
+import { ArrowLeft, Trash2, GripVertical, Clock, Calendar, Check, ListTodo, Save, ChevronDown, ChevronUp, Play, PlusCircle, Users, UserPlus, X, ClipboardList, Edit2, Image as ImageIcon, Link as LinkIcon, Youtube, ExternalLink, Maximize2, Upload, Loader2, FileText, Copy, Library, Download, ChevronRight, ShieldCheck, Layout, Bell, Eye, EyeOff } from 'lucide-react';
 import { motion, AnimatePresence, Reorder, useDragControls } from 'motion/react';
 import { ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
 import { storage } from '../lib/firebase';
@@ -862,6 +862,11 @@ export default function SessionEditor({
   const sessionRef = useRef(session);
   sessionRef.current = session;
 
+  const isCoachOrAdmin = useMemo(() => {
+    if (!user) return true; // Offline or fallback mode
+    return userRoles?.includes('admin') || userRoles?.includes('coach') || false;
+  }, [user, userRoles]);
+
   // Auto-resize notes textarea
   useEffect(() => {
     const adjustHeight = () => {
@@ -1179,6 +1184,31 @@ export default function SessionEditor({
               </span>
             </button>
 
+            {isCoachOrAdmin && (
+              <button
+                type="button"
+                onClick={() => onUpdate({ ...session, hideContentForPlayers: !session.hideContentForPlayers, updatedAt: Date.now() })}
+                className={`px-3 h-11 rounded-xl font-black text-[10px] md:text-xs uppercase tracking-tight flex items-center justify-center gap-1.5 border transition-all cursor-pointer w-full sm:w-auto ${
+                  session.hideContentForPlayers
+                    ? 'bg-amber-500 text-white border-amber-600 shadow-md hover:bg-amber-600'
+                    : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300 border-zinc-200 dark:border-zinc-700 hover:bg-zinc-200 dark:hover:bg-zinc-700'
+                }`}
+                title={session.hideContentForPlayers ? 'Passinnehållet är dolt för spelare. Klicka för att göra synligt.' : 'Passinnehållet är synligt för spelare. Klicka för att dölja.'}
+              >
+                {session.hideContentForPlayers ? (
+                  <>
+                    <EyeOff size={14} className="shrink-0" />
+                    <span className="truncate">Innehåll dolt för spelare</span>
+                  </>
+                ) : (
+                  <>
+                    <Eye size={14} className="shrink-0 text-zinc-400" />
+                    <span className="truncate">Synligt för spelare</span>
+                  </>
+                )}
+              </button>
+            )}
+
             {!session.isCompleted ? (
               <button
                 onClick={() => onUpdate({ ...session, isCompleted: true })}
@@ -1455,101 +1485,143 @@ export default function SessionEditor({
                 </motion.div>
               )}
 
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-2">
-                <h3 className="text-sm font-black text-zinc-400 uppercase tracking-widest flex items-center gap-2">
-                  <ListTodo size={16} />
-                  Schema ({totalPlannedMinutes} minuter)
-                </h3>
-                {mode === 'live' && !session.isStarted && (
+              {isCoachOrAdmin && session.hideContentForPlayers && (
+                <div className="bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800/60 rounded-2xl p-4 mb-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-amber-800 dark:text-amber-300 text-xs font-bold">
+                  <div className="flex items-center gap-2.5">
+                    <EyeOff size={18} className="text-amber-600 dark:text-amber-400 shrink-0" />
+                    <span>Innehållet på detta pass är dolt för spelare. Spelare ser endast tid, plats och anmälan.</span>
+                  </div>
                   <button
-                    onClick={() => {
-                      if ('Notification' in window && Notification.permission === 'default') {
-                        Notification.requestPermission();
-                      }
-                      onUpdate({ ...session, isStarted: true, actualStartTime: Date.now(), updatedAt: Date.now() });
-                    }}
-                    className="flex items-center gap-2 bg-indigo-600 text-white px-6 py-2.5 rounded-2xl font-black text-xs uppercase tracking-widest shadow-xl shadow-indigo-200 dark:shadow-none hover:bg-indigo-700 transition-all active:scale-95"
+                    type="button"
+                    onClick={() => onUpdate({ ...session, hideContentForPlayers: false, updatedAt: Date.now() })}
+                    className="px-3 py-1.5 bg-amber-600 text-white hover:bg-amber-700 rounded-xl font-black text-[10px] uppercase tracking-wider shrink-0 transition-all cursor-pointer shadow-sm"
                   >
-                    <Play size={14} fill="currentColor" />
-                    Starta passet (aktiverar notiser)
+                    Gör synligt
                   </button>
-                )}
-                {mode === 'live' && session.isStarted && (
-                   <div className="flex items-center gap-2 px-3 py-1.5 bg-indigo-50 dark:bg-indigo-900/20 border border-indigo-100 dark:border-indigo-900/30 rounded-xl">
-                     <div className="w-2 h-2 rounded-full bg-indigo-500 animate-pulse" />
-                     <span className="text-[10px] font-black text-indigo-600 dark:text-indigo-400 uppercase tracking-widest">Passet är igång</span>
-                     <button
-                        onClick={() => onUpdate({ ...session, isStarted: false, updatedAt: Date.now() })}
-                        className="ml-2 text-[8px] font-bold text-zinc-400 hover:text-red-500 uppercase"
-                     >
-                        Nollställ
-                     </button>
-                   </div>
-                )}
-                {mode === 'plan' && (
-                  <div className="flex flex-wrap items-center gap-2">
-                    <motion.button
-                      whileTap={{ scale: 0.95 }}
-                      onClick={() => addMoment()}
-                      className="flex items-center justify-center gap-2 bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400 px-5 py-2.5 rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-indigo-100 dark:hover:bg-indigo-900/40 transition-colors shadow-sm"
+                </div>
+              )}
+
+              {(!isCoachOrAdmin && session.hideContentForPlayers) ? (
+                <div className="bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800/60 rounded-3xl p-6 sm:p-8 text-center space-y-4 my-4">
+                  <div className="w-14 h-14 bg-amber-100 dark:bg-amber-900/40 text-amber-600 dark:text-amber-400 rounded-2xl flex items-center justify-center mx-auto shadow-sm">
+                    <EyeOff size={28} />
+                  </div>
+                  <div className="space-y-1">
+                    <h4 className="text-base sm:text-lg font-black text-amber-900 dark:text-amber-200 uppercase tracking-tight">Passinnehållet är dolt för spelare</h4>
+                    <p className="text-xs sm:text-sm font-medium text-amber-800/90 dark:text-amber-300/90 max-w-md mx-auto leading-relaxed">
+                      Tränaren har valt att inte visa passets övningar och taktiska detaljer än. Du hittar samlingsnoteringar, tid, plats och kallelse under fliken <strong>Anmälan</strong>.
+                    </p>
+                  </div>
+                  <div className="pt-2">
+                    <button
+                      type="button"
+                      onClick={() => setActiveTab('rsvp')}
+                      className="px-5 py-2.5 bg-amber-600 hover:bg-amber-700 text-white rounded-xl font-black text-xs uppercase tracking-widest transition-all shadow-md shadow-amber-200 dark:shadow-none inline-flex items-center gap-2 cursor-pointer"
                     >
-                      <PlusCircle size={16} />
-                      Lägg till moment
-                    </motion.button>
-                    {allSessions && onUpdateSession && (
-                      <motion.button
-                        whileTap={{ scale: 0.95 }}
-                        onClick={() => setShowCopyModal(true)}
-                        className="flex items-center justify-center gap-2 bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-350 px-5 py-2.5 rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-colors shadow-sm border border-zinc-200/50 dark:border-zinc-700/50"
+                      <Bell size={14} />
+                      <span>Svara på anmälan</span>
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <>
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-2">
+                    <h3 className="text-sm font-black text-zinc-400 uppercase tracking-widest flex items-center gap-2">
+                      <ListTodo size={16} />
+                      Schema ({totalPlannedMinutes} minuter)
+                    </h3>
+                    {mode === 'live' && !session.isStarted && (
+                      <button
+                        onClick={() => {
+                          if ('Notification' in window && Notification.permission === 'default') {
+                            Notification.requestPermission();
+                          }
+                          onUpdate({ ...session, isStarted: true, actualStartTime: Date.now(), updatedAt: Date.now() });
+                        }}
+                        className="flex items-center gap-2 bg-indigo-600 text-white px-6 py-2.5 rounded-2xl font-black text-xs uppercase tracking-widest shadow-xl shadow-indigo-200 dark:shadow-none hover:bg-indigo-700 transition-all active:scale-95"
                       >
-                        <Copy size={14} />
-                        Kopiera / Hämta övningar
-                      </motion.button>
+                        <Play size={14} fill="currentColor" />
+                        Starta passet (aktiverar notiser)
+                      </button>
+                    )}
+                    {mode === 'live' && session.isStarted && (
+                       <div className="flex items-center gap-2 px-3 py-1.5 bg-indigo-50 dark:bg-indigo-900/20 border border-indigo-100 dark:border-indigo-900/30 rounded-xl">
+                         <div className="w-2 h-2 rounded-full bg-indigo-500 animate-pulse" />
+                         <span className="text-[10px] font-black text-indigo-600 dark:text-indigo-400 uppercase tracking-widest">Passet är igång</span>
+                         <button
+                            onClick={() => onUpdate({ ...session, isStarted: false, updatedAt: Date.now() })}
+                            className="ml-2 text-[8px] font-bold text-zinc-400 hover:text-red-500 uppercase"
+                         >
+                            Nollställ
+                         </button>
+                       </div>
+                    )}
+                    {mode === 'plan' && (
+                      <div className="flex flex-wrap items-center gap-2">
+                        <motion.button
+                          whileTap={{ scale: 0.95 }}
+                          onClick={() => addMoment()}
+                          className="flex items-center justify-center gap-2 bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400 px-5 py-2.5 rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-indigo-100 dark:hover:bg-indigo-900/40 transition-colors shadow-sm"
+                        >
+                          <PlusCircle size={16} />
+                          Lägg till moment
+                        </motion.button>
+                        {allSessions && onUpdateSession && (
+                          <motion.button
+                            whileTap={{ scale: 0.95 }}
+                            onClick={() => setShowCopyModal(true)}
+                            className="flex items-center justify-center gap-2 bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-350 px-5 py-2.5 rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-colors shadow-sm border border-zinc-200/50 dark:border-zinc-700/50"
+                          >
+                            <Copy size={14} />
+                            Kopiera / Hämta övningar
+                          </motion.button>
+                        )}
+                      </div>
                     )}
                   </div>
-                )}
-              </div>
 
-              <Reorder.Group axis="y" values={session.moments} onReorder={handleReorder} className="space-y-4">
-                {session.moments.map((moment, index) => (
-                  <MomentItem
-                    key={moment.id}
-                    moment={moment}
-                    details={momentDetails[index]}
-                    mode={mode}
-                    exercises={exercises}
-                    sessionDate={session.date}
-                    sessionTitle={session.title}
-                    updateMoment={updateMoment}
-                    removeMoment={removeMoment}
-                    onCreateExercise={onCreateExercise}
-                    onSelectExercise={onSelectExercise}
-                    onEditExercise={onEditExercise}
-                    onDeleteExercise={onDeleteExercise}
-                    setConfirmDeleteExercise={setExerciseToDelete}
-                    setConfirmDeleteMoment={setMomentToDelete}
-                    onShowTeams={(id) => setSelectedExerciseForTeams(id)}
-                    onViewImage={(urls, idx) => setViewingImageInfo({ urls, index: idx })}
-                    onAddAfter={() => addMoment(index)}
-                    exerciseBank={exerciseBank}
-                    onSaveToBank={onSaveToBank}
-                    onUpdateBankExercise={onUpdateBankExercise}
-                    onOpenTacticalBoard={(m) => setTacticalBoardMoment(m)}
-                  />
-                ))}
-              </Reorder.Group>
+                  <Reorder.Group axis="y" values={session.moments} onReorder={handleReorder} className="space-y-4">
+                    {session.moments.map((moment, index) => (
+                      <MomentItem
+                        key={moment.id}
+                        moment={moment}
+                        details={momentDetails[index]}
+                        mode={mode}
+                        exercises={exercises}
+                        sessionDate={session.date}
+                        sessionTitle={session.title}
+                        updateMoment={updateMoment}
+                        removeMoment={removeMoment}
+                        onCreateExercise={onCreateExercise}
+                        onSelectExercise={onSelectExercise}
+                        onEditExercise={onEditExercise}
+                        onDeleteExercise={onDeleteExercise}
+                        setConfirmDeleteExercise={setExerciseToDelete}
+                        setConfirmDeleteMoment={setMomentToDelete}
+                        onShowTeams={(id) => setSelectedExerciseForTeams(id)}
+                        onViewImage={(urls, idx) => setViewingImageInfo({ urls, index: idx })}
+                        onAddAfter={() => addMoment(index)}
+                        exerciseBank={exerciseBank}
+                        onSaveToBank={onSaveToBank}
+                        onUpdateBankExercise={onUpdateBankExercise}
+                        onOpenTacticalBoard={(m) => setTacticalBoardMoment(m)}
+                      />
+                    ))}
+                  </Reorder.Group>
 
-              {session.moments.length > 0 && mode === 'plan' && (
-                <div className="pt-4 pb-4 flex justify-center">
-                  <motion.button
-                    whileTap={{ scale: 0.95 }}
-                    onClick={() => addMoment()}
-                    className="flex items-center gap-2 bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400 px-6 py-3 rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-indigo-100 dark:hover:bg-indigo-900/40 transition-colors shadow-sm"
-                  >
-                    <PlusCircle size={18} />
-                    Lägg till moment längst ner
-                  </motion.button>
-                </div>
+                  {session.moments.length > 0 && mode === 'plan' && (
+                    <div className="pt-4 pb-4 flex justify-center">
+                      <motion.button
+                        whileTap={{ scale: 0.95 }}
+                        onClick={() => addMoment()}
+                        className="flex items-center gap-2 bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400 px-6 py-3 rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-indigo-100 dark:hover:bg-indigo-900/40 transition-colors shadow-sm"
+                      >
+                        <PlusCircle size={18} />
+                        Lägg till moment längst ner
+                      </motion.button>
+                    </div>
+                  )}
+                </>
               )}
 
               {/* Completion button at bottom - very prominent */}

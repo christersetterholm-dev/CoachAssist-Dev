@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
-import { Calendar, Clock, MapPin, Search, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, ExternalLink, RefreshCw, Trophy, HelpCircle, FileText, CheckCircle, ArrowRight, Plus, Trash2 } from 'lucide-react';
+import { Calendar, Clock, MapPin, Search, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, ExternalLink, RefreshCw, Trophy, HelpCircle, FileText, CheckCircle, ArrowRight, Plus, Trash2, Eye, EyeOff } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { TrainingSession, SquadPlayer } from '../types';
 
@@ -73,6 +73,8 @@ interface MobileCalendarViewProps {
   onOpenSeriesCreator?: () => void;
   deletedSessionsCount?: number;
   onDeleteSession?: (id: string) => void;
+  user?: any;
+  userRoles?: string[];
 }
 
 export default function MobileCalendarView({
@@ -86,8 +88,14 @@ export default function MobileCalendarView({
   onOpenTrash,
   onOpenSeriesCreator,
   deletedSessionsCount = 0,
-  onDeleteSession
+  onDeleteSession,
+  user,
+  userRoles
 }: MobileCalendarViewProps) {
+  const isCoachOrAdmin = useMemo(() => {
+    if (!user) return true;
+    return userRoles?.includes('admin') || userRoles?.includes('coach') || false;
+  }, [user, userRoles]);
   const [searchQuery, setSearchQuery] = useState('');
   const [activeFilter, setActiveFilter] = useState<'all' | 'match' | 'training' | 'other'>('all');
   const [showPast, setShowPast] = useState(false);
@@ -755,6 +763,12 @@ export default function MobileCalendarView({
                                 return rawTitle;
                               })()}
                             </span>
+                            {session.hideContentForPlayers && (
+                              <span className="inline-flex items-center gap-1 text-[9px] sm:text-[10px] font-extrabold text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/40 border border-amber-200/50 dark:border-amber-800/50 px-1.5 sm:px-2 py-0.5 rounded-full shrink-0">
+                                <EyeOff size={10} />
+                                <span className="hidden sm:inline">Dolt för spelare</span>
+                              </span>
+                            )}
                           </div>
                         </div>
 
