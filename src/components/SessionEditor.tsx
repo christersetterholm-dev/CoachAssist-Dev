@@ -1,13 +1,15 @@
 import React, { useState, useMemo, useRef, useEffect } from 'react';
-import { ArrowLeft, Trash2, GripVertical, Clock, Calendar, Check, ListTodo, Save, ChevronDown, ChevronUp, Play, PlusCircle, Users, UserPlus, X, ClipboardList, Edit2, Image as ImageIcon, Link as LinkIcon, Youtube, ExternalLink, Maximize2, Upload, Loader2, FileText, Copy, Library, Download, ChevronRight, ShieldCheck, Layout } from 'lucide-react';
+import { ArrowLeft, Trash2, GripVertical, Clock, Calendar, Check, ListTodo, Save, ChevronDown, ChevronUp, Play, PlusCircle, Users, UserPlus, X, ClipboardList, Edit2, Image as ImageIcon, Link as LinkIcon, Youtube, ExternalLink, Maximize2, Upload, Loader2, FileText, Copy, Library, Download, ChevronRight, ShieldCheck, Layout, Bell } from 'lucide-react';
 import { motion, AnimatePresence, Reorder, useDragControls } from 'motion/react';
 import { ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
 import { storage } from '../lib/firebase';
-import { TrainingSession, SessionMoment, Exercise, SquadPlayer } from '../types';
+import { TrainingSession, SessionMoment, Exercise, SquadPlayer, UserProfile } from '../types';
 import TeamOverviewModal from './TeamOverviewModal';
 import { sortLeadersByPosition } from '../lib/teamUtils';
 import MomentCopyModal from './MomentCopyModal';
 import TacticalBoardModal from './TacticalBoardModal';
+import { CachedImage } from './CachedImage';
+import { SessionRsvpView } from './SessionRsvpView';
 
 interface SessionEditorProps {
   session: TrainingSession;
@@ -15,6 +17,9 @@ interface SessionEditorProps {
   squad?: SquadPlayer[];
   onUpdate: (updated: TrainingSession) => void;
   onClose: () => void;
+  user?: any;
+  userRoles?: string[];
+  userProfile?: UserProfile;
   onCreateExercise?: (name: string, momentId: string) => string;
   onSelectExercise?: (id: string) => void;
   onEditExercise?: (id: string) => void;
@@ -23,7 +28,7 @@ interface SessionEditorProps {
   onCopyTeams?: (sourceId: string, targetId: string) => void;
   initialMode?: 'plan' | 'live';
   onModeChange?: (mode: 'plan' | 'live') => void;
-  initialTab?: 'schema' | 'attendance';
+  initialTab?: 'schema' | 'attendance' | 'rsvp';
   adminUrl?: string;
   allSessions?: TrainingSession[];
   onUpdateSession?: (updated: TrainingSession) => void;
@@ -828,7 +833,10 @@ export default function SessionEditor({
   exerciseBank = [],
   exerciseBankCategories = [],
   onSaveToBank,
-  onUpdateBankExercise
+  onUpdateBankExercise,
+  user,
+  userRoles,
+  userProfile
 }: SessionEditorProps) {
   const [showTimePicker, setShowTimePicker] = useState(false);
   const [showNotes, setShowNotes] = useState(false);
@@ -837,7 +845,7 @@ export default function SessionEditor({
   const [exerciseToDelete, setExerciseToDelete] = useState<{ exerciseId: string, momentId: string, name: string } | null>(null);
   const [momentToDelete, setMomentToDelete] = useState<{ id: string, name: string } | null>(null);
   const [viewingImageInfo, setViewingImageInfo] = useState<{ urls: string[], index: number } | null>(null);
-  const [activeTab, setActiveTab] = useState<'schema' | 'attendance'>(initialTab);
+  const [activeTab, setActiveTab] = useState<'schema' | 'attendance' | 'rsvp'>(initialTab);
   const [tacticalBoardMoment, setTacticalBoardMoment] = useState<SessionMoment | null>(null);
   const mode = initialMode;
   const setMode = onModeChange || (() => {});
@@ -1233,18 +1241,32 @@ export default function SessionEditor({
               </button>
             </div>
 
-            {/* Separat Deltagare-knapp */}
-            <button
-              onClick={() => setActiveTab('attendance')}
-              className={`px-3 h-11 rounded-xl text-[10px] md:text-xs font-black uppercase tracking-tight border transition-all flex items-center justify-center gap-1.5 w-full sm:w-auto ${
-                activeTab === 'attendance'
-                  ? 'bg-indigo-50 dark:bg-indigo-950/40 text-indigo-600 dark:text-indigo-400 border-indigo-200 dark:border-indigo-805 shadow-sm'
-                  : 'bg-white dark:bg-zinc-900 hover:bg-zinc-50 dark:hover:bg-zinc-800 text-zinc-550 dark:text-zinc-400 border-zinc-200 dark:border-zinc-800'
-              }`}
-            >
-              <Users size={12} className={activeTab === 'attendance' ? 'text-indigo-500 shrink-0' : 'text-zinc-505 dark:text-zinc-400 shrink-0'} />
-              <span className="truncate">Deltagare ({session.attendance?.length || 0})</span>
-            </button>
+            {/* Anmälan & Deltagare Knappar */}
+            <div className="flex items-center gap-2 w-full sm:w-auto">
+              <button
+                onClick={() => setActiveTab('rsvp')}
+                className={`px-3 h-11 rounded-xl text-[10px] md:text-xs font-black uppercase tracking-tight border transition-all flex items-center justify-center gap-1.5 flex-1 sm:flex-initial ${
+                  activeTab === 'rsvp'
+                    ? 'bg-indigo-600 text-white border-indigo-500 shadow-sm'
+                    : 'bg-white dark:bg-zinc-900 hover:bg-zinc-50 dark:hover:bg-zinc-800 text-zinc-550 dark:text-zinc-400 border-zinc-200 dark:border-zinc-800'
+                }`}
+              >
+                <Bell size={12} className={activeTab === 'rsvp' ? 'text-white shrink-0' : 'text-indigo-500 shrink-0'} />
+                <span className="truncate">Anmälan ({Object.keys(session.rsvps || {}).length})</span>
+              </button>
+
+              <button
+                onClick={() => setActiveTab('attendance')}
+                className={`px-3 h-11 rounded-xl text-[10px] md:text-xs font-black uppercase tracking-tight border transition-all flex items-center justify-center gap-1.5 flex-1 sm:flex-initial ${
+                  activeTab === 'attendance'
+                    ? 'bg-indigo-50 dark:bg-indigo-950/40 text-indigo-600 dark:text-indigo-400 border-indigo-200 dark:border-indigo-805 shadow-sm'
+                    : 'bg-white dark:bg-zinc-900 hover:bg-zinc-50 dark:hover:bg-zinc-800 text-zinc-550 dark:text-zinc-400 border-zinc-200 dark:border-zinc-800'
+                }`}
+              >
+                <Users size={12} className={activeTab === 'attendance' ? 'text-indigo-500 shrink-0' : 'text-zinc-505 dark:text-zinc-400 shrink-0'} />
+                <span className="truncate">Deltagare ({session.attendance?.length || 0})</span>
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -1336,7 +1358,7 @@ export default function SessionEditor({
         className="flex-1 p-4 sm:p-6"
       >
         <div className="w-full max-w-4xl lg:max-w-5xl xl:max-w-6xl 2xl:max-w-7xl mx-auto space-y-6">
-          {activeTab === 'schema' ? (
+          {activeTab === 'schema' && (
             <>
               {/* Notes Section */}
               <motion.div 
@@ -1568,7 +1590,20 @@ export default function SessionEditor({
                 </div>
               )}
             </>
-          ) : (
+          )}
+
+          {activeTab === 'rsvp' && (
+            <SessionRsvpView
+              session={session}
+              squad={squad}
+              onUpdateSession={onUpdate}
+              user={user}
+              userRoles={userRoles}
+              userProfile={userProfile}
+            />
+          )}
+
+          {activeTab === 'attendance' && (
             <ParticipantManager 
               session={session} 
               squad={squad} 
@@ -1990,7 +2025,7 @@ function ParticipantManager({
                       isPresent ? 'bg-[#16A34A] text-white' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-400 group-hover:text-zinc-600'
                     }`}>
                       {player.photoUrl ? (
-                        <img src={player.photoUrl} alt="" className="w-full h-full object-cover rounded-xl" />
+                        <CachedImage src={player.photoUrl} alt={player.name} className="w-full h-full object-cover rounded-xl" />
                       ) : (
                         <span className="text-[10px] font-black uppercase">{player.name.substring(0, 1)}</span>
                       )}
@@ -2030,7 +2065,7 @@ function ParticipantManager({
                         isPresent ? 'bg-zinc-700 text-white' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-400 group-hover:text-zinc-600'
                       }`}>
                         {player.photoUrl ? (
-                          <img src={player.photoUrl} alt="" className="w-full h-full object-cover rounded-xl" />
+                          <CachedImage src={player.photoUrl} alt={player.name} className="w-full h-full object-cover rounded-xl" />
                         ) : (
                           <span className="text-[10px] font-black uppercase">{player.name.substring(0, 1)}</span>
                         )}

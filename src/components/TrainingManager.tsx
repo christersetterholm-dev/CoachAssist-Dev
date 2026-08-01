@@ -21,7 +21,7 @@ interface TrainingManagerProps {
   onNewExercise: () => void;
   onNewSession: () => void;
   onAddSessionsBatch?: (newSessions: TrainingSession[]) => void;
-  onSelectSession: (id: string, initialTab?: 'schema' | 'attendance') => void;
+  onSelectSession: (id: string, initialTab?: 'schema' | 'attendance' | 'rsvp') => void;
   onDeleteSession: (id: string) => void;
   onRestoreSession?: (id: string) => void;
   onDeleteSessionPermanent?: (ids: string | string[]) => void;
@@ -167,7 +167,7 @@ function SessionItem({
   session: TrainingSession, 
   date: string, 
   totalMinutes: number, 
-  onSelectSession: (id: string, initialTab?: 'schema' | 'attendance') => void, 
+  onSelectSession: (id: string, initialTab?: 'schema' | 'attendance' | 'rsvp') => void, 
   setSessionToDelete: (id: string) => void,
   onCopySession: (id: string) => void,
   onUpdateSession: (updated: TrainingSession) => void,

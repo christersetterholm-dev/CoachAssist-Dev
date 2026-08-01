@@ -6,6 +6,7 @@ import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import PwaIconGenerator from './PwaIconGenerator';
 import ImageCropper from './ImageCropper';
+import { CachedImage } from './CachedImage';
 import { syncTeamCalendar } from '../utils/calendarSync';
 import { deduplicateClubMembers, deduplicateSquad, syncAllTeamSquadsToClubMembers } from '../lib/clubUtils';
 import * as XLSX from 'xlsx';
@@ -1646,7 +1647,7 @@ export default function ClubAdminDashboard({
                         {isUploadingPhoto ? (
                           <Loader2 size={22} className="animate-spin text-indigo-600" />
                         ) : memberPhotoUrl ? (
-                          <img src={memberPhotoUrl} alt="Profilbild" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                          <CachedImage src={memberPhotoUrl} alt="Profilbild" className="w-full h-full object-cover" />
                         ) : (
                           <Users size={28} />
                         )}
@@ -1780,7 +1781,7 @@ export default function ClubAdminDashboard({
                     <div className="flex items-start gap-3 sm:gap-3.5 min-w-0 flex-1">
                       <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-zinc-100 dark:bg-zinc-800/80 text-zinc-600 dark:text-zinc-400 flex items-center justify-center shrink-0 overflow-hidden">
                         {member.photoUrl ? (
-                          <img src={member.photoUrl} alt={member.fullName} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                          <CachedImage src={member.photoUrl} alt={member.fullName} className="w-full h-full object-cover" />
                         ) : (
                           <Users size={18} />
                         )}

@@ -64,7 +64,7 @@ function renderTextWithLinks(text: string) {
 interface MobileCalendarViewProps {
   sessions: TrainingSession[];
   squad: SquadPlayer[];
-  onSelectSession: (id: string, initialTab?: 'schema' | 'attendance') => void;
+  onSelectSession: (id: string, initialTab?: 'schema' | 'attendance' | 'rsvp') => void;
   isSyncing?: boolean;
   onSync?: () => Promise<void>;
   hasSyncUrl: boolean;

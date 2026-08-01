@@ -443,6 +443,63 @@ export const setDoc = async (docRef: { path: string }, data: any, _options?: { m
   }
 };
 
+export const deleteDoc = async (docRef: { path: string }) => {
+  const token = localStorage.getItem('token');
+  const headers: Record<string, string> = {};
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+
+  const res = await fetch(getApiUrl(`/api/docs?path=${encodeURIComponent(docRef.path)}`), {
+    method: 'DELETE',
+    headers
+  });
+
+  if (!res.ok && res.status !== 404) {
+    throw new Error('Failed to delete doc');
+  }
+};
+
+export const collection = (_dbObj: any, ...parts: string[]) => {
+  return { path: parts.join('/') };
+};
+
+export const getDocs = async (collectionRef: { path: string }) => {
+  const token = localStorage.getItem('token');
+  const headers: Record<string, string> = {};
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+
+  try {
+    const res = await fetch(getApiUrl(`/api/docs?path=${encodeURIComponent(collectionRef.path)}`), {
+      headers
+    });
+
+    if (!res.ok) {
+      return { docs: [], size: 0, empty: true, forEach: () => {} };
+    }
+
+    const data = await res.json();
+    const items = Array.isArray(data) ? data : (data.requests || data.items || []);
+    const docs = items.map((item: any) => ({
+      id: item.id || item.userId || item.email,
+      exists: () => true,
+      data: () => item
+    }));
+
+    return {
+      docs,
+      size: docs.length,
+      empty: docs.length === 0,
+      forEach: (cb: (doc: any) => void) => docs.forEach(cb)
+    };
+  } catch (err) {
+    console.warn(`[getDocs] Could not load collection ${collectionRef.path}:`, err);
+    return { docs: [], size: 0, empty: true, forEach: () => {} };
+  }
+};
+
 // Simulated Firestore Live Polling Listener (onSnapshot)
 export const onSnapshot = (docRef: { path: string }, callback: (snapshot: any) => void, _errorCallback?: (error: any) => void) => {
   let isStopped = false;

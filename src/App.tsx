@@ -1,10 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { RotateCcw, Trophy, ArrowLeft, Check, Sun, Moon, Timer as TimerIcon, Edit2, Zap, Rocket, Users, LayoutDashboard, Unlock, LogIn, LogOut, User as UserIcon, ShieldCheck, Cloud, Layout, Globe, AlertTriangle, Calendar, Settings, RefreshCw } from 'lucide-react';
+import { RotateCcw, Trophy, ArrowLeft, Check, Sun, Moon, Timer as TimerIcon, Edit2, Zap, Rocket, Users, LayoutDashboard, Unlock, LogIn, LogOut, User as UserIcon, ShieldCheck, Cloud, Layout, Globe, AlertTriangle, Calendar, Settings, RefreshCw, Bell } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { SquadPlayer, Exercise, Team, PointsConfig, Period, PeriodStandings, Lineup, TrainingSession, TrainingSettings, CoachData, BankExercise, SessionMoment, UserProfile, ClubMember } from './types';
-import { auth, signInWithGoogle, db, handleFirestoreError, OperationType, getApiUrl } from './lib/firebase';
+import { auth, signInWithGoogle, db, handleFirestoreError, OperationType, getApiUrl, doc, onSnapshot, setDoc, getDoc, collection, getDocs } from './lib/firebase';
 import { onAuthStateChanged, signOut, User } from 'firebase/auth';
-import { doc, onSnapshot, setDoc, getDoc } from 'firebase/firestore';
 import { calculateLeaderboard } from './lib/leaderboardUtils';
 import { syncSquadToClubMembers, getMergedSquadAndClubMembers, deduplicateSquad } from './lib/clubUtils';
 
@@ -23,6 +22,8 @@ import TeamOverviewModal from './components/TeamOverviewModal';
 import ProfileAndSettings from './components/ProfileAndSettings';
 import ClubAdminDashboard from './components/ClubAdminDashboard';
 import VersionFooter from './components/VersionFooter';
+import { OnboardingModal } from './components/OnboardingModal';
+import { PendingRequestsModal } from './components/PendingRequestsModal';
 
 type View = 'training' | 'setup' | 'exercise' | 'squad' | 'leaderboard' | 'profile' | 'lineup' | 'teampage' | 'clubadmin';
 
@@ -111,8 +112,10 @@ export default function App() {
     activeClubId: null,
     activeTeamId: null,
   });
-  const [userRoles, setUserRoles] = useState<string[]>(['admin', 'coach']);
+  const [userRoles, setUserRoles] = useState<string[]>([]);
   const [isRootAdmin, setIsRootAdmin] = useState(false);
+  const [pendingRequestsCount, setPendingRequestsCount] = useState<number>(0);
+  const [isPendingRequestsModalOpen, setIsPendingRequestsModalOpen] = useState<boolean>(false);
 
   const checkRootAdminStatus = async (uid: string, email: string) => {
     try {
@@ -330,7 +333,7 @@ export default function App() {
   const [trainingTab, setTrainingTab] = useState<'completed' | 'exercises' | 'calendar_view'>('calendar_view');
   const [openTrainingSettings, setOpenTrainingSettings] = useState(false);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
-  const [sessionEditorTab, setSessionEditorTab] = useState<'schema' | 'attendance'>('schema');
+  const [sessionEditorTab, setSessionEditorTab] = useState<'schema' | 'attendance' | 'rsvp'>('schema');
   const [sessionMode, setSessionMode] = useState<'plan' | 'live'>('plan');
   const [showResetConfirm, setShowResetConfirm] = useState(false);
   const [showFinishConfirm, setShowFinishConfirm] = useState(false);
@@ -582,7 +585,7 @@ export default function App() {
           const membersSnap = await getDoc(doc(db, 'clubs', p.activeClubId, 'teams', 'club_global', 'data', 'members'));
           if (membersSnap.exists()) {
             const members: ClubMember[] = membersSnap.data().members || [];
-            const myRecord = members.find(m => m.userId === uid || m.email.trim().toLowerCase() === email.trim().toLowerCase());
+            const myRecord = members.find(m => m.userId === uid || (m.email && m.email.trim().toLowerCase() === email.trim().toLowerCase()));
             if (myRecord) {
               setUserRoles(myRecord.roles || []);
             } else {
@@ -592,23 +595,56 @@ export default function App() {
             setUserRoles([]);
           }
         } else {
-          setUserRoles(['admin', 'coach']);
+          setUserRoles([]);
         }
       } else {
         const defaultProfile: UserProfile = {
           fullName: email.split('@')[0],
+          email: email.trim().toLowerCase(),
           activeClubId: null,
-          activeTeamId: null
+          activeTeamId: null,
+          status: 'pending',
+          onboardingCompleted: false
         };
         setUserProfile(defaultProfile);
-        setUserRoles(['admin', 'coach']);
+        setUserRoles([]);
       }
     } catch (e) {
       console.error('Failed to load user profile:', e);
+      setUserRoles([]);
     } finally {
       setIsProfileLoaded(true);
     }
   };
+
+  // Helper to refresh pending user requests count for admins
+  const refreshPendingRequestsCount = async () => {
+    if (!user) {
+      setPendingRequestsCount(0);
+      return;
+    }
+    try {
+      if (userProfile.activeClubId) {
+        const snap = await getDocs(collection(db, 'clubs', userProfile.activeClubId, 'pending_requests'));
+        setPendingRequestsCount(snap.size);
+      } else if (isRootAdmin) {
+        const snap = await getDocs(collection(db, 'pending_user_requests'));
+        setPendingRequestsCount(snap.size);
+      } else {
+        setPendingRequestsCount(0);
+      }
+    } catch (err) {
+      console.error('Failed to fetch pending requests count:', err);
+    }
+  };
+
+  useEffect(() => {
+    if (isRootAdmin || userRoles.includes('admin') || userRoles.includes('coach')) {
+      refreshPendingRequestsCount();
+    } else {
+      setPendingRequestsCount(0);
+    }
+  }, [userProfile.activeClubId, userRoles, isRootAdmin, user]);
 
   const handleProfileUpdated = (updatedProfile: UserProfile) => {
     setUserProfile(updatedProfile);
@@ -619,7 +655,7 @@ export default function App() {
         getDoc(doc(db, 'clubs', updatedProfile.activeClubId, 'teams', 'club_global', 'data', 'members')).then(membersSnap => {
           if (membersSnap.exists()) {
             const members: ClubMember[] = membersSnap.data().members || [];
-            const myRecord = members.find(m => m.userId === user.uid || m.email.trim().toLowerCase() === (user.email || '').trim().toLowerCase());
+            const myRecord = members.find(m => m.userId === user.uid || (m.email && m.email.trim().toLowerCase() === (user.email || '').trim().toLowerCase()));
             if (myRecord) {
               setUserRoles(myRecord.roles || []);
             } else {
@@ -630,7 +666,7 @@ export default function App() {
           }
         }).catch(err => console.error('Failed to load roles on profile update:', err));
       } else {
-        setUserRoles(['admin', 'coach']);
+        setUserRoles([]);
       }
 
       if (updatedProfile.activeClubId && updatedProfile.activeTeamId) {
@@ -2553,6 +2589,23 @@ export default function App() {
         </div>
       )}
 
+      {(isRootAdmin || userRoles.includes('admin') || userRoles.includes('coach')) && pendingRequestsCount > 0 && (
+        <div className="bg-indigo-600 text-white px-4 py-2.5 text-center text-xs font-bold leading-normal flex items-center justify-center gap-2 relative z-50 animate-fade-in print:hidden border-b border-indigo-700 shadow-lg">
+          <Bell size={16} className="shrink-0 animate-bounce" />
+          <span>
+            {pendingRequestsCount === 1 
+              ? '1 ny medlemsansökan väntar på godkännande!'
+              : `${pendingRequestsCount} nya medlemsansökningar väntar på godkännande!`}
+          </span>
+          <button
+            onClick={() => setIsPendingRequestsModalOpen(true)}
+            className="ml-2 px-3 py-1 bg-white text-indigo-700 hover:bg-indigo-50 font-black rounded-lg text-[11px] uppercase tracking-wider transition-all shadow-sm cursor-pointer"
+          >
+            Granska ansökningar
+          </button>
+        </div>
+      )}
+
       <main className={`flex-1 flex flex-col min-h-0 w-full max-w-full overflow-x-hidden ${view === 'exercise' || view === 'teampage' ? 'overflow-hidden' : 'overflow-y-auto pb-24 sm:pb-28'}`}>
         <AnimatePresence mode="wait">
           {view === 'training' && (
@@ -3328,6 +3381,9 @@ export default function App() {
             onCopyTeams={copyTeams}
             initialTab={sessionEditorTab}
             adminUrl={adminUrl}
+            user={user}
+            userRoles={userRoles}
+            userProfile={userProfile}
             onClose={() => {
               setActiveSessionId(null);
               setLinkToMomentId(null);
@@ -3460,6 +3516,27 @@ export default function App() {
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* Onboarding Dialog for new / pending users */}
+      {user &&
+        !isRootAdmin &&
+        isProfileLoaded &&
+        (!userProfile.onboardingCompleted || userProfile.status === 'pending' || !userProfile.activeClubId) && (
+          <OnboardingModal
+            user={user}
+            userProfile={userProfile}
+            onProfileUpdated={handleProfileUpdated}
+            onLogout={handleLogout}
+          />
+      )}
+
+      {/* Admin Approval Modal for pending requests */}
+      <PendingRequestsModal
+        activeClubId={userProfile.activeClubId || null}
+        isOpen={isPendingRequestsModalOpen}
+        onClose={() => setIsPendingRequestsModalOpen(false)}
+        onRequestHandled={refreshPendingRequestsCount}
+      />
     </div>
   );
 }

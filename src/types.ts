@@ -162,6 +162,22 @@ export interface CoachData {
   exerciseBankCategories?: string[];
 }
 
+export type RsvpStatus = 'attending' | 'declined' | 'partial';
+
+export interface PlayerRsvp {
+  status: RsvpStatus;
+  comment?: string;
+  updatedAt: number;
+  updatedBy?: string; // Name or role of person who entered the response (e.g., player or coach)
+}
+
+export interface SessionRsvpConfig {
+  deadline?: number; // Timestamp for rsvp deadline
+  notes?: string; // Info text for invitation (e.g., "Samling kl 17:15")
+  invitedAt?: number; // Timestamp when invitation notification was sent
+  invitedCount?: number;
+}
+
 export interface TrainingSession {
   id: string;
   title: string;
@@ -172,6 +188,8 @@ export interface TrainingSession {
   moments: SessionMoment[];
   attendance?: string[]; // Player IDs or names
   guestPlayers?: SquadPlayer[];
+  rsvps?: Record<string, PlayerRsvp>; // Key: playerId
+  rsvpConfig?: SessionRsvpConfig;
   isCompleted?: boolean;
   isStarted?: boolean;
   isIgnored?: boolean;
@@ -340,7 +358,29 @@ export interface UserProfile {
   fullName: string;
   phone?: string;
   personnummer?: string;
+  email?: string;
   activeClubId?: string | null;
   activeTeamId?: string | null;
+  status?: 'pending' | 'approved' | 'rejected';
+  onboardingCompleted?: boolean;
+  requestedRole?: 'player' | 'leader' | 'parent';
+  requestedClubId?: string;
+  requestedTeamId?: string;
+}
+
+export interface PendingUserRequest {
+  id: string; // user uid
+  uid: string;
+  email: string;
+  fullName: string;
+  phone?: string;
+  personnummer?: string;
+  requestedRole: 'player' | 'leader' | 'parent';
+  requestedClubId: string;
+  requestedTeamId: string;
+  requestedClubName?: string;
+  requestedTeamName?: string;
+  createdAt: number;
+  status: 'pending' | 'approved' | 'rejected';
 }
 

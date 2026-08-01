@@ -21,13 +21,29 @@ export default function ProfileAndSettings({
     fullName: currentProfile.fullName || '',
     phone: currentProfile.phone || '',
     personnummer: currentProfile.personnummer || '',
+    email: currentProfile.email || userEmail || '',
     activeClubId: currentProfile.activeClubId || null,
     activeTeamId: currentProfile.activeTeamId || null,
   });
 
+  const [emailInput, setEmailInput] = useState<string>(currentProfile.email || userEmail || '');
   const [memberships, setMemberships] = useState<{ club: Club; roles: string[]; teams: string[]; availableTeams: { id: string; name: string }[] }[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'success' | 'error'>('idle');
+  const [emailUpdateError, setEmailUpdateError] = useState<string>('');
+
+  // Sync state when props change
+  useEffect(() => {
+    setProfile({
+      fullName: currentProfile.fullName || '',
+      phone: currentProfile.phone || '',
+      personnummer: currentProfile.personnummer || '',
+      email: currentProfile.email || userEmail || '',
+      activeClubId: currentProfile.activeClubId || null,
+      activeTeamId: currentProfile.activeTeamId || null,
+    });
+    setEmailInput(currentProfile.email || userEmail || '');
+  }, [currentProfile, userEmail]);
 
   // Password change state
   const [currentPassword, setCurrentPassword] = useState('');
@@ -88,12 +104,45 @@ export default function ProfileAndSettings({
   const handleSaveProfile = async (e: React.FormEvent) => {
     e.preventDefault();
     setSaveStatus('saving');
+    setEmailUpdateError('');
+
+    const cleanEmail = emailInput.trim().toLowerCase();
+
     try {
-      // Save profile doc
-      await setDoc(doc(db, 'users', userId, 'data', 'profile'), {
+      // If email has changed, update email in auth backend
+      if (cleanEmail && cleanEmail !== userEmail.trim().toLowerCase()) {
+        const token = localStorage.getItem('token');
+        if (token) {
+          const res = await fetch(getApiUrl('/api/auth/update-email'), {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${token}`
+            },
+            body: JSON.stringify({ newEmail: cleanEmail })
+          });
+
+          const data = await res.json();
+          if (!res.ok) {
+            setEmailUpdateError(data.error || 'Kunde inte uppdatera e-postadressen.');
+            setSaveStatus('error');
+            return;
+          }
+
+          if (data.token) {
+            localStorage.setItem('token', data.token);
+          }
+        }
+      }
+
+      const updatedProfile: UserProfile = {
         ...profile,
+        email: cleanEmail,
         updatedAt: Date.now(),
-      });
+      } as any;
+
+      // Save profile doc
+      await setDoc(doc(db, 'users', userId, 'data', 'profile'), updatedProfile);
 
       // Update club global members registry to keep details sync'ed
       if (profile.activeClubId) {
@@ -106,6 +155,7 @@ export default function ProfileAndSettings({
               members[index] = {
                 ...members[index],
                 userId,
+                email: cleanEmail,
                 fullName: profile.fullName,
                 phone: profile.phone,
                 personnummer: profile.personnummer
@@ -118,7 +168,8 @@ export default function ProfileAndSettings({
         }
       }
 
-      onProfileUpdated(profile);
+      setProfile(updatedProfile);
+      onProfileUpdated(updatedProfile);
       setSaveStatus('success');
       setTimeout(() => setSaveStatus('idle'), 2500);
     } catch (err) {
@@ -234,11 +285,16 @@ export default function ProfileAndSettings({
                   </span>
                   <input
                     type="email"
-                    disabled
-                    value={userEmail}
-                    className="w-full pl-11 pr-4 py-3 bg-zinc-100 dark:bg-zinc-900 text-zinc-500 dark:text-zinc-500 rounded-2xl border border-zinc-200 dark:border-zinc-800 font-semibold text-sm cursor-not-allowed"
+                    required
+                    value={emailInput}
+                    onChange={e => setEmailInput(e.target.value)}
+                    placeholder="din.epost@doman.se"
+                    className="w-full pl-11 pr-4 py-3 bg-zinc-50 hover:bg-zinc-100/70 focus:bg-white dark:bg-zinc-950 dark:hover:bg-zinc-950/70 dark:focus:bg-zinc-950 rounded-2xl border border-zinc-200 dark:border-zinc-800 focus:border-indigo-500 focus:outline-none transition-all font-semibold text-zinc-900 dark:text-white text-sm"
                   />
                 </div>
+                {emailUpdateError && (
+                  <p className="text-xs font-bold text-red-500 mt-1.5">{emailUpdateError}</p>
+                )}
               </div>
 
               <div>

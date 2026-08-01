@@ -1242,6 +1242,87 @@ async function startServer() {
     }
   });
 
+  // Update Email for Logged-In User
+  app.post('/api/auth/update-email', async (req, res) => {
+    const authHeader = req.headers.authorization;
+    if (!authHeader) {
+      return res.status(401).json({ error: 'Du måste vara inloggad för att ändra e-post.' });
+    }
+
+    try {
+      const authStr = Array.isArray(authHeader) ? authHeader[0] : authHeader;
+      const partsAuth = authStr.split(' ');
+      const token = partsAuth.length > 1 ? partsAuth[1] : partsAuth[0];
+
+      const decoded: any = jwt.verify(token, JWT_SECRET);
+      const userId = decoded.id;
+
+      const { newEmail } = req.body;
+      if (!newEmail || typeof newEmail !== 'string' || !newEmail.includes('@')) {
+        return res.status(400).json({ error: 'Giltig e-postadress krävs.' });
+      }
+
+      const cleanNewEmail = newEmail.trim().toLowerCase();
+
+      // Check if new email is taken by another account
+      let existing = db.prepare('SELECT id FROM users WHERE email = ? AND id != ?').get(cleanNewEmail, userId);
+      if (!existing) {
+        const fUser = await getFirestoreDoc(`server_users/${encodeURIComponent(cleanNewEmail)}`);
+        if (fUser && fUser.id && fUser.id !== userId) {
+          existing = fUser;
+        }
+      }
+
+      if (existing) {
+        return res.status(400).json({ error: 'E-postadressen används redan av ett annat konto.' });
+      }
+
+      // Find current user row
+      let userRow: any = db.prepare('SELECT * FROM users WHERE id = ?').get(userId);
+      if (!userRow) {
+        const fUser = await getFirestoreDoc(`server_user_ids/${encodeURIComponent(userId)}`);
+        if (fUser) {
+          userRow = fUser;
+        }
+      }
+
+      // Update in SQLite
+      db.prepare('UPDATE users SET email = ? WHERE id = ?').run(cleanNewEmail, userId);
+
+      // Update in Firestore
+      setFirestoreDoc(`server_user_ids/${encodeURIComponent(userId)}`, {
+        id: userId,
+        email: cleanNewEmail,
+        password_hash: userRow?.password_hash || '',
+        created_at: userRow?.created_at || Date.now()
+      }).catch(e => console.error('Firestore user_id email update error:', e));
+
+      setFirestoreDoc(`server_users/${encodeURIComponent(cleanNewEmail)}`, {
+        id: userId,
+        email: cleanNewEmail,
+        password_hash: userRow?.password_hash || '',
+        created_at: userRow?.created_at || Date.now()
+      }).catch(e => console.error('Firestore user email update error:', e));
+
+      // Issue updated token
+      const newToken = jwt.sign({ id: userId, email: cleanNewEmail }, JWT_SECRET, { expiresIn: '30d' });
+
+      res.json({
+        token: newToken,
+        user: {
+          uid: userId,
+          email: cleanNewEmail,
+          displayName: cleanNewEmail.split('@')[0],
+          photoURL: null
+        },
+        message: 'E-postadressen har uppdaterats!'
+      });
+    } catch (error: any) {
+      console.error('Update email error:', error);
+      res.status(500).json({ error: 'Kunde inte uppdatera e-postadressen.' });
+    }
+  });
+
   // --- DOCUMENTS SYNC ENDPOINTS (Firestore simulation) ---
 
   // GET Document Data
