@@ -1,8 +1,7 @@
 import React, { useState, useRef, useMemo } from 'react';
 import { Search, Plus, Trash2, Edit2, Library, Clock, ExternalLink, Upload, Loader2, Save, X, FolderHeart, Check, Calendar, ChevronRight, Image as ImageIcon, ChevronDown, ChevronUp, Layout } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
-import { storage } from '../lib/firebase';
+import { storage, ref, uploadBytesResumable, getDownloadURL } from '../lib/firebase';
 import { BankExercise, TrainingSession, SquadPlayer } from '../types';
 import TacticalBoardModal from './TacticalBoardModal';
 
@@ -1057,7 +1056,7 @@ export default function ExerciseBankView({
                     Länk till video (t.ex. youtube) eller mer info
                   </label>
                   <input
-                    type="url"
+                    type="text"
                     value={formExternalLink}
                     onChange={(e) => setFormExternalLink(e.target.value)}
                     placeholder="https://www.youtube.com/... eller liknande"

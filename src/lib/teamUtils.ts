@@ -66,21 +66,29 @@ export function getLeaderRank(position?: string): number {
 }
 
 export function sortLeadersByPosition(leaders: SquadPlayer[]): SquadPlayer[] {
+  if (!Array.isArray(leaders)) return [];
   return [...leaders].sort((a, b) => {
-    const rankA = getLeaderRank(a.position);
-    const rankB = getLeaderRank(b.position);
+    if (!a && !b) return 0;
+    if (!a) return 1;
+    if (!b) return -1;
+    const rankA = getLeaderRank(a?.position);
+    const rankB = getLeaderRank(b?.position);
     
     if (rankA !== rankB) return rankA - rankB;
     
     // alphabetical if same rank
-    return a.name.localeCompare(b.name, 'sv');
+    const nameA = a?.name || '';
+    const nameB = b?.name || '';
+    return nameA.localeCompare(nameB, 'sv');
   });
 }
 
 export function sortPlayersByPosition(playerIds: string[], squad: SquadPlayer[]): string[] {
+  if (!Array.isArray(playerIds)) return [];
+  const safeSquad = Array.isArray(squad) ? squad : [];
   return [...playerIds].sort((a, b) => {
-    const playerA = squad.find(p => p.id === a);
-    const playerB = squad.find(p => p.id === b);
+    const playerA = safeSquad.find(p => p && p.id === a);
+    const playerB = safeSquad.find(p => p && p.id === b);
     
     const rankA = getPositionRank(playerA?.position);
     const rankB = getPositionRank(playerB?.position);
@@ -88,6 +96,6 @@ export function sortPlayersByPosition(playerIds: string[], squad: SquadPlayer[])
     if (rankA !== rankB) return rankA - rankB;
     
     // If same rank, sort by name
-    return (playerA?.name || '').localeCompare(playerB?.name || '');
+    return (playerA?.name || '').localeCompare(playerB?.name || '', 'sv');
   });
 }

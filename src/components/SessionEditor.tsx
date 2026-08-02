@@ -1,14 +1,11 @@
 import React, { useState, useMemo, useRef, useEffect } from 'react';
-import { ArrowLeft, Trash2, GripVertical, Clock, Calendar, Check, ListTodo, Save, ChevronDown, ChevronUp, Play, PlusCircle, Users, UserPlus, X, ClipboardList, Edit2, Image as ImageIcon, Link as LinkIcon, Youtube, ExternalLink, Maximize2, Upload, Loader2, FileText, Copy, Library, Download, ChevronRight, ShieldCheck, Layout, Bell, Eye, EyeOff } from 'lucide-react';
+import { ArrowLeft, Trash2, GripVertical, Clock, Calendar, Check, ListTodo, Save, ChevronDown, ChevronUp, Play, PlusCircle, Users, X, Edit2, Image as ImageIcon, Link as LinkIcon, Youtube, ExternalLink, Maximize2, Upload, Loader2, FileText, Copy, Library, Download, ChevronRight, Layout, Bell, Eye, EyeOff, UserCheck } from 'lucide-react';
 import { motion, AnimatePresence, Reorder, useDragControls } from 'motion/react';
-import { ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
-import { storage } from '../lib/firebase';
+import { storage, ref, uploadBytesResumable, getDownloadURL } from '../lib/firebase';
 import { TrainingSession, SessionMoment, Exercise, SquadPlayer, UserProfile } from '../types';
 import TeamOverviewModal from './TeamOverviewModal';
-import { sortLeadersByPosition } from '../lib/teamUtils';
 import MomentCopyModal from './MomentCopyModal';
 import TacticalBoardModal from './TacticalBoardModal';
-import { CachedImage } from './CachedImage';
 import { SessionRsvpView } from './SessionRsvpView';
 
 interface SessionEditorProps {
@@ -481,7 +478,7 @@ function MomentItem({
                         </div>
                         <div className="flex-1 min-w-0 flex items-center gap-2">
                           <input
-                            type="url"
+                            type="text"
                             value={moment.externalLink || ''}
                             onChange={(e) => updateMoment(moment.id, { externalLink: e.target.value })}
                             className="flex-1 min-w-0 bg-transparent border-none p-0 text-base font-bold text-zinc-900 dark:text-white focus:ring-0 placeholder:text-zinc-400"
@@ -747,7 +744,7 @@ function MomentItem({
                     className={`flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl font-black text-xs uppercase tracking-wider transition-all border shadow-sm active:scale-95 cursor-pointer ${
                       moment.tacticalBoards && moment.tacticalBoards.length > 0
                         ? 'bg-emerald-600 hover:bg-emerald-700 text-white border-emerald-500 shadow-emerald-100 dark:shadow-none'
-                        : 'bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-zinc-750 dark:text-zinc-300 border-zinc-200 dark:border-zinc-700'
+                        : 'bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-zinc-700 dark:text-zinc-300 border-zinc-200 dark:border-zinc-700'
                     }`}
                     title="Öppna rittavla för att visa övningen"
                   >
@@ -841,6 +838,8 @@ export default function SessionEditor({
   const [showTimePicker, setShowTimePicker] = useState(false);
   const [showNotes, setShowNotes] = useState(false);
   const [showCopyModal, setShowCopyModal] = useState(false);
+  const [showVisibilityInfoModal, setShowVisibilityInfoModal] = useState(false);
+  const [showCompletionInfoModal, setShowCompletionInfoModal] = useState(false);
   const [selectedExerciseForTeams, setSelectedExerciseForTeams] = useState<string | null>(null);
   const [exerciseToDelete, setExerciseToDelete] = useState<{ exerciseId: string, momentId: string, name: string } | null>(null);
   const [momentToDelete, setMomentToDelete] = useState<{ id: string, name: string } | null>(null);
@@ -1129,7 +1128,7 @@ export default function SessionEditor({
       </AnimatePresence>
 
       {/* Non-sticky Main Header Info */}
-      <div className="bg-white dark:bg-zinc-900 shrink-0 border-b border-zinc-100 dark:border-zinc-850 pt-safe">
+      <div className="bg-white dark:bg-zinc-900 shrink-0 border-b border-zinc-100 dark:border-zinc-800 pt-safe">
         <div className="max-w-4xl lg:max-w-5xl xl:max-w-6xl 2xl:max-w-7xl mx-auto px-4 py-2 sm:py-3 flex items-center gap-3">
           <button 
             onClick={onClose}
@@ -1164,22 +1163,23 @@ export default function SessionEditor({
         </div>
 
         <div className="max-w-4xl lg:max-w-5xl xl:max-w-6xl 2xl:max-w-7xl mx-auto px-4 pb-3 flex flex-col gap-2">
-          <div className="grid grid-cols-[1.6fr_1fr] sm:flex sm:items-center gap-2 w-full sm:w-auto">
+          <div className="flex items-center justify-between gap-1.5 sm:gap-2 w-full">
             <button
+              type="button"
               onClick={() => mode === 'plan' && setShowTimePicker(true)}
-              className={`flex items-center justify-center gap-1 sm:gap-1.5 px-2.5 sm:px-3 h-11 rounded-xl border transition-colors w-full sm:w-auto ${
+              className={`flex-1 min-w-0 flex items-center justify-center gap-1 sm:gap-1.5 px-2 sm:px-3 h-11 rounded-xl border transition-colors ${
                 mode === 'plan' 
                   ? 'bg-zinc-100 dark:bg-zinc-800 border-zinc-200 dark:border-zinc-700 hover:bg-zinc-200 dark:hover:bg-zinc-700' 
                   : 'bg-indigo-50 dark:bg-indigo-900/20 border-indigo-100 dark:border-indigo-900/30'
               }`}
             >
-              <Calendar size={15} className={`shrink-0 ${mode === 'plan' ? "text-zinc-500" : "text-indigo-400"}`} />
-              <span className={`text-[11px] sm:text-xs md:text-sm font-black truncate uppercase tracking-tight ${mode === 'plan' ? "text-zinc-700 dark:text-zinc-300" : "text-indigo-600 dark:text-indigo-400"}`}>
+              <Calendar size={14} className={`shrink-0 ${mode === 'plan' ? "text-zinc-500" : "text-indigo-400"}`} />
+              <span className={`text-[10px] sm:text-xs md:text-sm font-black truncate uppercase tracking-tight ${mode === 'plan' ? "text-zinc-700 dark:text-zinc-300" : "text-indigo-600 dark:text-indigo-400"}`}>
                 {new Date(session.date).toLocaleDateString('sv-SE', { weekday: 'short', day: 'numeric', month: 'short' })}
               </span>
               <div className={`w-px h-3.5 mx-0.5 sm:mx-1 shrink-0 ${mode === 'plan' ? "bg-zinc-300 dark:bg-zinc-700" : "bg-indigo-200 dark:bg-indigo-900/30"}`} />
-              <Clock size={15} className={`shrink-0 ${mode === 'plan' ? "text-zinc-500" : "text-indigo-400"}`} />
-              <span className={`text-[11px] sm:text-xs md:text-sm font-black truncate uppercase tracking-tight ${mode === 'plan' ? "text-zinc-700 dark:text-zinc-300" : "text-indigo-600 dark:text-indigo-400"}`}>
+              <Clock size={14} className={`shrink-0 ${mode === 'plan' ? "text-zinc-500" : "text-indigo-400"}`} />
+              <span className={`text-[10px] sm:text-xs md:text-sm font-black truncate uppercase tracking-tight ${mode === 'plan' ? "text-zinc-700 dark:text-zinc-300" : "text-indigo-600 dark:text-indigo-400"}`}>
                 {session.startTime} - {session.endTime || calculatedEndTime}
               </span>
             </button>
@@ -1187,45 +1187,34 @@ export default function SessionEditor({
             {isCoachOrAdmin && (
               <button
                 type="button"
-                onClick={() => onUpdate({ ...session, hideContentForPlayers: !session.hideContentForPlayers, updatedAt: Date.now() })}
-                className={`px-3 h-11 rounded-xl font-black text-[10px] md:text-xs uppercase tracking-tight flex items-center justify-center gap-1.5 border transition-all cursor-pointer w-full sm:w-auto ${
+                onClick={() => setShowVisibilityInfoModal(true)}
+                className={`h-11 w-11 shrink-0 rounded-xl flex items-center justify-center border transition-all cursor-pointer ${
                   session.hideContentForPlayers
                     ? 'bg-amber-500 text-white border-amber-600 shadow-md hover:bg-amber-600'
                     : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300 border-zinc-200 dark:border-zinc-700 hover:bg-zinc-200 dark:hover:bg-zinc-700'
                 }`}
-                title={session.hideContentForPlayers ? 'Passinnehållet är dolt för spelare. Klicka för att göra synligt.' : 'Passinnehållet är synligt för spelare. Klicka för att dölja.'}
+                title={session.hideContentForPlayers ? 'Passinnehållet är dolt för spelare (Klicka för info)' : 'Passinnehållet är synligt för spelare (Klicka för info)'}
               >
                 {session.hideContentForPlayers ? (
-                  <>
-                    <EyeOff size={14} className="shrink-0" />
-                    <span className="truncate">Innehåll dolt för spelare</span>
-                  </>
+                  <EyeOff size={18} className="shrink-0" />
                 ) : (
-                  <>
-                    <Eye size={14} className="shrink-0 text-zinc-400" />
-                    <span className="truncate">Synligt för spelare</span>
-                  </>
+                  <Eye size={18} className="shrink-0 text-zinc-500 dark:text-zinc-400" />
                 )}
               </button>
             )}
 
-            {!session.isCompleted ? (
-              <button
-                onClick={() => onUpdate({ ...session, isCompleted: true })}
-                className="px-3 h-11 bg-green-600 text-white border border-transparent rounded-xl font-black flex items-center justify-center gap-1.5 text-[10px] md:text-xs shadow-lg shadow-green-100 dark:shadow-none transition-all active:scale-95 shrink-0 hover:bg-green-700 uppercase tracking-tight w-full sm:w-auto"
-              >
-                <Check size={14} strokeWidth={3} className="shrink-0" />
-                <span className="truncate">Klarmarkera</span>
-              </button>
-            ) : (
-              <button
-                onClick={() => onUpdate({ ...session, isCompleted: false })}
-                className="px-3 h-11 bg-green-100 text-green-705 dark:bg-green-900/30 dark:text-green-400 border border-green-200 dark:border-green-800 rounded-xl font-black flex items-center justify-center gap-1.5 text-[10px] md:text-xs transition-all active:scale-95 shrink-0 uppercase tracking-tight w-full sm:w-auto"
-              >
-                <Check size={14} className="shrink-0" />
-                <span className="truncate">Genomförd</span>
-              </button>
-            )}
+            <button
+              type="button"
+              onClick={() => setShowCompletionInfoModal(true)}
+              className={`h-11 w-11 shrink-0 rounded-xl flex items-center justify-center border transition-all cursor-pointer ${
+                session.isCompleted
+                  ? 'bg-emerald-600 text-white border-emerald-700 shadow-md hover:bg-emerald-700'
+                  : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400 border-zinc-200 dark:border-zinc-700 hover:bg-zinc-200 dark:hover:bg-zinc-700'
+              }`}
+              title={session.isCompleted ? 'Passet är klarmarkerat (Klicka för info)' : 'Klarmarkera passet (Klicka för info)'}
+            >
+              <Check size={20} strokeWidth={session.isCompleted ? 3 : 2.5} className="shrink-0" />
+            </button>
           </div>
         </div>
       </div>
@@ -1271,30 +1260,18 @@ export default function SessionEditor({
               </button>
             </div>
 
-            {/* Anmälan & Deltagare Knappar */}
+            {/* Närvaro Knapp */}
             <div className="flex items-center gap-2 w-full sm:w-auto">
               <button
-                onClick={() => setActiveTab('rsvp')}
-                className={`px-3 h-11 rounded-xl text-[10px] md:text-xs font-black uppercase tracking-tight border transition-all flex items-center justify-center gap-1.5 flex-1 sm:flex-initial ${
-                  activeTab === 'rsvp'
+                onClick={() => setActiveTab('attendance')}
+                className={`px-3.5 h-11 rounded-xl text-[10px] md:text-xs font-black uppercase tracking-tight border transition-all flex items-center justify-center gap-1.5 flex-1 sm:flex-initial cursor-pointer ${
+                  activeTab === 'attendance' || activeTab === 'rsvp'
                     ? 'bg-indigo-600 text-white border-indigo-500 shadow-sm'
                     : 'bg-white dark:bg-zinc-900 hover:bg-zinc-50 dark:hover:bg-zinc-800 text-zinc-550 dark:text-zinc-400 border-zinc-200 dark:border-zinc-800'
                 }`}
               >
-                <Bell size={12} className={activeTab === 'rsvp' ? 'text-white shrink-0' : 'text-indigo-500 shrink-0'} />
-                <span className="truncate">Anmälan ({Object.keys(session.rsvps || {}).length})</span>
-              </button>
-
-              <button
-                onClick={() => setActiveTab('attendance')}
-                className={`px-3 h-11 rounded-xl text-[10px] md:text-xs font-black uppercase tracking-tight border transition-all flex items-center justify-center gap-1.5 flex-1 sm:flex-initial ${
-                  activeTab === 'attendance'
-                    ? 'bg-indigo-50 dark:bg-indigo-950/40 text-indigo-600 dark:text-indigo-400 border-indigo-200 dark:border-indigo-805 shadow-sm'
-                    : 'bg-white dark:bg-zinc-900 hover:bg-zinc-50 dark:hover:bg-zinc-800 text-zinc-550 dark:text-zinc-400 border-zinc-200 dark:border-zinc-800'
-                }`}
-              >
-                <Users size={12} className={activeTab === 'attendance' ? 'text-indigo-500 shrink-0' : 'text-zinc-505 dark:text-zinc-400 shrink-0'} />
-                <span className="truncate">Deltagare ({session.attendance?.length || 0})</span>
+                <UserCheck size={14} className={activeTab === 'attendance' || activeTab === 'rsvp' ? 'text-white shrink-0' : 'text-indigo-500 shrink-0'} />
+                <span className="truncate">Närvaro ({session.attendance?.length || 0})</span>
               </button>
             </div>
           </div>
@@ -1485,22 +1462,6 @@ export default function SessionEditor({
                 </motion.div>
               )}
 
-              {isCoachOrAdmin && session.hideContentForPlayers && (
-                <div className="bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800/60 rounded-2xl p-4 mb-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-amber-800 dark:text-amber-300 text-xs font-bold">
-                  <div className="flex items-center gap-2.5">
-                    <EyeOff size={18} className="text-amber-600 dark:text-amber-400 shrink-0" />
-                    <span>Innehållet på detta pass är dolt för spelare. Spelare ser endast tid, plats och anmälan.</span>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => onUpdate({ ...session, hideContentForPlayers: false, updatedAt: Date.now() })}
-                    className="px-3 py-1.5 bg-amber-600 text-white hover:bg-amber-700 rounded-xl font-black text-[10px] uppercase tracking-wider shrink-0 transition-all cursor-pointer shadow-sm"
-                  >
-                    Gör synligt
-                  </button>
-                </div>
-              )}
-
               {(!isCoachOrAdmin && session.hideContentForPlayers) ? (
                 <div className="bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800/60 rounded-3xl p-6 sm:p-8 text-center space-y-4 my-4">
                   <div className="w-14 h-14 bg-amber-100 dark:bg-amber-900/40 text-amber-600 dark:text-amber-400 rounded-2xl flex items-center justify-center mx-auto shadow-sm">
@@ -1664,7 +1625,7 @@ export default function SessionEditor({
             </>
           )}
 
-          {activeTab === 'rsvp' && (
+          {(activeTab === 'attendance' || activeTab === 'rsvp') && (
             <SessionRsvpView
               session={session}
               squad={squad}
@@ -1672,14 +1633,6 @@ export default function SessionEditor({
               user={user}
               userRoles={userRoles}
               userProfile={userProfile}
-            />
-          )}
-
-          {activeTab === 'attendance' && (
-            <ParticipantManager 
-              session={session} 
-              squad={squad} 
-              onUpdate={onUpdate}
               adminUrl={adminUrl}
             />
           )}
@@ -1804,533 +1757,183 @@ export default function SessionEditor({
           title={`Rittavla - ${tacticalBoardMoment.name || 'Moment'}`}
         />
       )}
-    </div>
-  );
-}
 
-function isValidPlayerName(name: string): boolean {
-  const trimmed = name.trim();
-  if (!trimmed) return false;
-
-  const lower = trimmed.toLowerCase();
-
-  // 1. Must contain at least one letter (a-z, including Swedish standard letters/accents)
-  if (!/[a-zåäöéèüíóáñæø]/i.test(trimmed)) {
-    return false;
-  }
-
-  // 2. Exact match check for common status words or phrases, including user specified words
-  const blockedExact = [
-    'ja', 'nej', 'kanske', 'deltar', 'deltar ej', 'ej svarat', 'anmäld', 'reserv',
-    'kommentar', 'svara', 'obesvarad', 'status', 'tid', 'plats', 'anmäld', 'avanmäld',
-    'gäst', 'gästspelare', 'provspelare', 'ledare', 'tränare', 'spelare', 'ej svarat',
-    'nej tack', 'skjuts', 'bil', 'bilar', 'platser', 'lediga', 'ja tack', 'platser kvar',
-    'platser lediga', 'förare', 'plats kvar', 'kör ej', 'kör', 'vill ha skjuts'
-  ];
-  if (blockedExact.includes(lower)) {
-    return false;
-  }
-
-  // 3. Regular Expression patterns for status/driving/tickets etc. (e.g. "4 platser", "2 bilar")
-  if (/\b\d+\s*(platser|plats|lediga|bilar|bil|skolkort|st|stycken)\b/i.test(lower)) {
-    return false;
-  }
-
-  if (lower.startsWith('kommentar:') || lower.startsWith('svar saknas')) {
-    return false;
-  }
-  if (lower.includes('platser') && (lower.includes('kvar') || lower.includes('lediga'))) {
-    return false;
-  }
-
-  // 4. Length check: Too short to be a name
-  if (trimmed.length < 2) {
-    return false;
-  }
-
-  return true;
-}
-
-function ParticipantManager({ 
-  session, 
-  squad, 
-  onUpdate, 
-  adminUrl,
-}: { 
-  session: TrainingSession, 
-  squad: SquadPlayer[], 
-  onUpdate: (updated: TrainingSession) => void,
-  adminUrl?: string,
-}) {
-  const [pasteMode, setPasteMode] = useState(false);
-  const [pasteValue, setPasteValue] = useState("");
-  const [guestName, setGuestName] = useState("");
-  const [guestPosition, setGuestPosition] = useState("");
-  const [sortAttendingFirst, setSortAttendingFirst] = useState(false);
-  const attendance = session.attendance || [];
-  const guestPlayers = session.guestPlayers || [];
-
-  const handleTogglePlayer = (id: string) => {
-    const newAttendance = attendance.includes(id)
-      ? attendance.filter(pid => pid !== id)
-      : [...attendance, id];
-    onUpdate({ ...session, attendance: newAttendance, updatedAt: Date.now() });
-  };
-
-  const handleAddGuest = (e?: React.FormEvent) => {
-    e?.preventDefault();
-    if (!guestName.trim()) return;
-
-    const newGuest: SquadPlayer = {
-      id: `guest_${Date.now()}_${Math.random().toString(36).substring(7)}`,
-      name: guestName.trim(),
-      position: guestPosition.trim() || undefined,
-    };
-
-    // Update both in one go to ensure consistency and prevent state overwrite
-    onUpdate({
-      ...session,
-      guestPlayers: [...guestPlayers, newGuest],
-      attendance: [...attendance, newGuest.id],
-      updatedAt: Date.now()
-    });
-    setGuestName("");
-    setGuestPosition("");
-  };
-
-  const removeGuest = (id: string) => {
-    onUpdate({
-      ...session,
-      guestPlayers: guestPlayers.filter(p => p.id !== id),
-      attendance: attendance.filter(pid => pid !== id),
-      updatedAt: Date.now()
-    });
-  };
-
-  const updateGuestPosition = (guestId: string, position: string) => {
-    onUpdate({
-      ...session,
-      guestPlayers: guestPlayers.map(p => p.id === guestId ? { ...p, position: position || undefined } : p),
-      updatedAt: Date.now()
-    });
-  };
-
-  const handlePaste = () => {
-    const lines = pasteValue.split(/[\n,;]/);
-    const parsedNames = lines
-      .map(line => {
-        let trimmed = line.trim();
-        if (trimmed.endsWith(' Deltar')) {
-          trimmed = trimmed.substring(0, trimmed.length - 7).trim();
-        }
-        return trimmed;
-      })
-      .filter(name => {
-        return name.length > 0 && isValidPlayerName(name);
-      });
-
-    const newAttendance = [...attendance];
-    const newGuestPlayers = [...guestPlayers];
-
-    parsedNames.forEach(name => {
-      const foundInSquad = squad.find(p => p.name.toLowerCase().includes(name.toLowerCase()) || name.toLowerCase().includes(p.name.toLowerCase()));
-      if (foundInSquad) {
-        if (!newAttendance.includes(foundInSquad.id)) {
-          newAttendance.push(foundInSquad.id);
-        }
-      } else {
-        const foundInGuests = newGuestPlayers.find(p => p.name.toLowerCase() === name.toLowerCase());
-        if (foundInGuests) {
-          if (!newAttendance.includes(foundInGuests.id)) {
-            newAttendance.push(foundInGuests.id);
-          }
-        } else {
-          // Create new guest
-          const guest: SquadPlayer = {
-            id: `guest_${Date.now()}_${Math.random().toString(36).substring(7)}`,
-            name: name
-          };
-          newGuestPlayers.push(guest);
-          newAttendance.push(guest.id);
-        }
-      }
-    });
-
-    // CONSOLDIDATED UPDATE
-    onUpdate({
-      ...session,
-      attendance: Array.from(new Set(newAttendance)),
-      guestPlayers: newGuestPlayers,
-      updatedAt: Date.now()
-    });
-    
-    setPasteMode(false);
-    setPasteValue("");
-  };
-
-  const sortedSquad = useMemo(() => {
-    // Deduplicate squad if needed (though it should be unique by ID)
-    const squadList = Array.from(new Map(squad.map(p => [p.id, p])).values());
-    
-    if (!sortAttendingFirst) return squadList;
-
-    // Stable sort: present players first, then maintaining original order (role)
-    return [...squadList].sort((a, b) => {
-      const aPresent = attendance.includes(a.id);
-      const bPresent = attendance.includes(b.id);
-      
-      if (aPresent === bPresent) return 0;
-      return aPresent ? -1 : 1;
-    });
-  }, [squad, attendance, sortAttendingFirst]);
-
-  const sortedPlayers = useMemo(() => {
-    return sortedSquad.filter(p => p.role !== 'leader');
-  }, [sortedSquad]);
-
-  const sortedLeaders = useMemo(() => {
-    const leadersList = sortedSquad.filter(p => p.role === 'leader');
-    if (sortAttendingFirst) {
-      const presentLeaders = sortLeadersByPosition(leadersList.filter(p => attendance.includes(p.id)));
-      const absentLeaders = sortLeadersByPosition(leadersList.filter(p => !attendance.includes(p.id)));
-      return [...presentLeaders, ...absentLeaders];
-    }
-    return sortLeadersByPosition(leadersList);
-  }, [sortedSquad, sortAttendingFirst, attendance]);
-
-  const attendingPlayersCount = useMemo(() => {
-    return attendance.filter(id => {
-      const p = squad.find(x => x.id === id);
-      return !p || p.role !== 'leader';
-    }).length;
-  }, [attendance, squad]);
-
-  const attendingLeadersCount = useMemo(() => {
-    return attendance.filter(id => {
-      const p = squad.find(x => x.id === id);
-      return p && p.role === 'leader';
-    }).length;
-  }, [attendance, squad]);
-
-  return (
-    <div className="space-y-8">
-      <div className="space-y-6">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <div>
-            <h3 className="text-sm font-black text-zinc-400 uppercase tracking-widest flex items-center gap-2">
-              <Users size={16} />
-              Närvarande ({attendingPlayersCount} spelare{squad.some(p => p.role === 'leader') ? `, ${attendingLeadersCount} ledare` : ''})
-            </h3>
-            <p className="text-[10px] text-zinc-500 font-medium mt-1">Välj medlemmar från truppen eller lägg till provspelare</p>
-          </div>
-          <div className="flex flex-wrap items-center gap-2 sm:gap-4">
-            {adminUrl && (
-              <a
-                href={adminUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="flex items-center gap-1 text-indigo-600 dark:text-indigo-400 font-bold text-xs hover:underline whitespace-nowrap transition-colors"
-                title="Öppna Adminsida"
-              >
-                <ShieldCheck size={14} />
-                <span>Öppna adminsida</span>
-              </a>
-            )}
-            {adminUrl && <div className="w-px h-3 bg-zinc-200 dark:bg-zinc-800" />}
-            <button
-              onClick={() => setPasteMode(true)}
-              className="flex items-center gap-1 text-indigo-600 dark:text-indigo-400 font-bold text-xs hover:underline whitespace-nowrap"
-            >
-              <ClipboardList size={14} />
-              Klistra in lista
-            </button>
-            <div className="w-px h-3 bg-zinc-200 dark:bg-zinc-800" />
-            <button
-              onClick={() => onUpdate({ ...session, attendance: squad.map(p => p.id), updatedAt: Date.now() })}
-              className="text-zinc-400 hover:text-indigo-600 font-bold text-[10px] uppercase whitespace-nowrap"
-            >
-              Alla närvarande
-            </button>
-            <div className="w-px h-3 bg-zinc-200 dark:bg-zinc-800" />
-            <button
-              onClick={() => onUpdate({ ...session, attendance: [], updatedAt: Date.now() })}
-              className="text-zinc-400 hover:text-red-500 font-bold text-[10px] uppercase whitespace-nowrap"
-            >
-              Ingen närvarande
-            </button>
-            <div className="w-px h-3 bg-zinc-200 dark:bg-zinc-800" />
-            <button
-              onClick={() => setSortAttendingFirst(!sortAttendingFirst)}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border font-bold text-[10px] uppercase transition-all ${
-                sortAttendingFirst 
-                  ? 'bg-indigo-600 text-white border-indigo-500 shadow-sm' 
-                  : 'bg-zinc-50 dark:bg-zinc-800 text-zinc-500 border-zinc-100 dark:border-zinc-700 hover:border-zinc-200'
-              }`}
-              title="Sortera närvarande först"
-            >
-              <Users size={12} className={sortAttendingFirst ? 'text-white' : 'text-zinc-400'} />
-              <span>Närvarande först</span>
-            </button>
-          </div>
-        </div>
-
-        <div className="space-y-6">
-          {/* Players List */}
-          <div className="space-y-2">
-            {sortedLeaders.length > 0 && (
-              <h4 className="text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest pl-1">Spelare</h4>
-            )}
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-              {sortedPlayers.map(player => {
-                const isPresent = attendance.includes(player.id);
-                return (
-                  <button
-                    key={player.id}
-                    onClick={() => handleTogglePlayer(player.id)}
-                    className={`flex items-center gap-3 p-3 rounded-2xl border transition-all text-left group ${
-                      isPresent 
-                        ? 'bg-[#16A34A]/25 dark:bg-[#16A34A]/20 border-[#16A34A]/50 dark:border-[#16A34A]/40 shadow-sm' 
-                        : 'bg-white dark:bg-zinc-900 border-zinc-100 dark:border-zinc-800 hover:border-zinc-200 dark:hover:border-zinc-700'
-                    }`}
-                  >
-                    <div className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 transition-colors ${
-                      isPresent ? 'bg-[#16A34A] text-white' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-400 group-hover:text-zinc-600'
-                    }`}>
-                      {player.photoUrl ? (
-                        <CachedImage src={player.photoUrl} alt={player.name} className="w-full h-full object-cover rounded-xl" />
-                      ) : (
-                        <span className="text-[10px] font-black uppercase">{player.name.substring(0, 1)}</span>
-                      )}
-                    </div>
-                    <div className="min-w-0">
-                      <p className="text-xs font-black truncate uppercase text-zinc-900 dark:text-zinc-100">
-                        {player.name}
-                      </p>
-                      {player.number && (
-                        <p className="text-[10px] font-bold text-zinc-400">#{player.number}</p>
-                      )}
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* Leaders List */}
-          {sortedLeaders.length > 0 && (
-            <div className="space-y-2 pt-4 border-t border-zinc-100 dark:border-zinc-800">
-              <h4 className="text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest pl-1">Ledare</h4>
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                {sortedLeaders.map(player => {
-                  const isPresent = attendance.includes(player.id);
-                  return (
-                    <button
-                      key={player.id}
-                      onClick={() => handleTogglePlayer(player.id)}
-                      className={`flex items-center gap-3 p-3 rounded-2xl border transition-all text-left group ${
-                        isPresent 
-                          ? 'bg-zinc-100 dark:bg-zinc-800 border-zinc-300 dark:border-zinc-650 shadow-sm' 
-                          : 'bg-white dark:bg-zinc-900 border-zinc-100 dark:border-zinc-800 hover:border-zinc-200 dark:hover:border-zinc-700'
-                      }`}
-                    >
-                      <div className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 transition-colors ${
-                        isPresent ? 'bg-zinc-700 text-white' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-400 group-hover:text-zinc-600'
-                      }`}>
-                        {player.photoUrl ? (
-                          <CachedImage src={player.photoUrl} alt={player.name} className="w-full h-full object-cover rounded-xl" />
-                        ) : (
-                          <span className="text-[10px] font-black uppercase">{player.name.substring(0, 1)}</span>
-                        )}
-                      </div>
-                      <div className="min-w-0">
-                        <p className="text-xs font-black truncate uppercase text-zinc-900 dark:text-zinc-100">
-                          {player.name}
-                        </p>
-                        <p className="text-[9px] font-bold text-indigo-650 dark:text-indigo-400 uppercase tracking-wider">
-                          {player.position || 'Ledare'}
-                        </p>
-                      </div>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* Guest Players Section */}
-      <div className="space-y-4 pt-6 border-t border-zinc-100 dark:border-zinc-800">
-        <div className="flex items-center justify-between">
-          <h4 className="text-[10px] font-black text-zinc-400 uppercase tracking-widest flex items-center gap-2">
-            <UserPlus size={14} />
-            Provspelare / Tillfälliga
-          </h4>
-        </div>
-
-        <form onSubmit={handleAddGuest} className="flex flex-col sm:flex-row gap-3 w-full">
-          <input
-            type="text"
-            value={guestName}
-            onChange={(e) => setGuestName(e.target.value)}
-            placeholder="Namn på provspelare..."
-            className="flex-1 bg-white dark:bg-zinc-900 border border-zinc-100 dark:border-zinc-800 rounded-xl px-4 py-3 text-base font-bold text-zinc-900 dark:text-white focus:ring-2 focus:ring-indigo-500 outline-none shadow-sm min-w-0"
-          />
-          <select
-            value={guestPosition}
-            onChange={(e) => setGuestPosition(e.target.value)}
-            className="bg-white dark:bg-zinc-900 border border-zinc-100 dark:border-zinc-800 rounded-xl px-4 py-3 text-sm font-bold text-zinc-700 dark:text-zinc-300 focus:ring-2 focus:ring-indigo-500 outline-none shadow-sm cursor-pointer"
+      {/* Modal: Innehållssekretess (Visibility Info) */}
+      {showVisibilityInfoModal && (
+        <motion.div
+          key="visibility-info-modal"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs"
+        >
+          <motion.div 
+            initial={{ scale: 0.95, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            exit={{ scale: 0.95, opacity: 0 }}
+            className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-3xl p-6 max-w-sm w-full space-y-4 shadow-2xl"
           >
-            <option value="">Position (Valfritt)</option>
-            <option value="MV">Målvakt (MV)</option>
-            <option value="MB">Mittback (MB)</option>
-            <option value="YB">Ytterback (YB)</option>
-            <option value="MF">Mittfältare (MF)</option>
-            <option value="YMF">Yttermittfältare (YMF)</option>
-            <option value="FW">Forward (FW)</option>
-          </select>
-          <button
-            type="submit"
-            className="bg-zinc-900 dark:bg-white text-white dark:text-zinc-900 px-6 py-3 rounded-xl font-black text-xs uppercase tracking-widest shadow-sm hover:bg-zinc-800 dark:hover:bg-zinc-100 transition-all active:scale-95 whitespace-nowrap min-h-[44px]"
-          >
-            Lägg till
-          </button>
-        </form>
-
-        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-          {Array.from(new Map(guestPlayers.map(p => [p.id, p])).values()).map(guest => {
-            const isPresent = attendance.includes(guest.id);
-            return (
-              <div
-                key={guest.id}
-                className={`flex items-center justify-between gap-2 p-3 rounded-2xl border transition-all group relative ${
-                  isPresent 
-                    ? 'bg-amber-50/80 dark:bg-amber-900/20 border-amber-200 dark:border-amber-800 shadow-sm' 
-                    : 'bg-white dark:bg-zinc-900 border-zinc-100 dark:border-zinc-800'
-                }`}
-              >
-                <div className="flex items-center gap-3 min-w-0 flex-1">
-                  <button
-                    type="button"
-                    onClick={() => handleTogglePlayer(guest.id)}
-                    className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 transition-colors ${
-                      isPresent ? 'bg-amber-500 text-white' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-400 group-hover:text-zinc-600'
-                    }`}
-                  >
-                    <span className="text-[10px] font-black uppercase text-white">{guest.name.substring(0, 1)}</span>
-                  </button>
-                  <div className="min-w-0 flex-1">
-                    <button
-                      type="button"
-                      onClick={() => handleTogglePlayer(guest.id)}
-                      className="text-xs font-black truncate uppercase text-left w-full block hover:underline text-zinc-900 dark:text-zinc-100"
-                    >
-                      {guest.name}
-                    </button>
-                    <div className="flex items-center">
-                      <select
-                        value={guest.position || ""}
-                        onChange={(e) => updateGuestPosition(guest.id, e.target.value)}
-                        className="text-[9px] font-bold text-amber-600 dark:text-amber-400 bg-transparent border-none focus:ring-0 cursor-pointer outline-none uppercase p-0 m-0"
-                      >
-                        <option value="" className="bg-white dark:bg-zinc-900 text-zinc-700 dark:text-zinc-300">Provspelare</option>
-                        <option value="MV" className="bg-white dark:bg-zinc-900 text-zinc-700 dark:text-zinc-300">Mv (Målvakt)</option>
-                        <option value="MB" className="bg-white dark:bg-zinc-900 text-zinc-700 dark:text-zinc-300">Mb (Mittback)</option>
-                        <option value="YB" className="bg-white dark:bg-zinc-900 text-zinc-700 dark:text-zinc-300">Yb (Ytterback)</option>
-                        <option value="MF" className="bg-white dark:bg-zinc-900 text-zinc-700 dark:text-zinc-300">Mf (Mittfält)</option>
-                        <option value="YMF" className="bg-white dark:bg-zinc-900 text-zinc-700 dark:text-zinc-300">Ymf (Ytter-mf)</option>
-                        <option value="FW" className="bg-white dark:bg-zinc-900 text-zinc-700 dark:text-zinc-300">Fw (Forward)</option>
-                      </select>
-                    </div>
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => removeGuest(guest.id)}
-                  className="p-1.5 text-zinc-300 hover:text-red-500 dark:hover:text-red-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-lg transition-colors shrink-0"
-                >
-                  <X size={14} />
-                </button>
-              </div>
-            );
-          })}
-        </div>
-      </div>
-
-      {/* Manual names from past logic that are NOT in current guests or squad */}
-      {attendance.some(id => !squad.find(p => p.id === id) && !guestPlayers.find(p => p.id === id)) && (
-        <div className="pt-6 border-t border-zinc-100 dark:border-zinc-800">
-          <h4 className="text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-4">Manuellt inlagda (historiskt)</h4>
-          <div className="flex flex-wrap gap-2">
-            {Array.from(new Set(attendance.filter(id => !squad.find(p => p.id === id) && !guestPlayers.find(p => p.id === id)))).map(idOrName => (
-              <div key={idOrName} className="flex items-center gap-2 bg-zinc-100 dark:bg-zinc-800 px-3 py-1.5 rounded-xl border border-zinc-200 dark:border-zinc-700">
-                <span className="text-xs font-bold text-zinc-600 dark:text-zinc-400 uppercase">
-                  {idOrName.startsWith('guest_') ? 'Okänd provspelare' : idOrName}
-                </span>
-                <button 
-                  onClick={() => onUpdate({ ...session, attendance: attendance.filter(id => id !== idOrName), updatedAt: Date.now() })}
-                  className="text-zinc-400 hover:text-red-500"
-                >
-                  <X size={12} />
-                </button>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Paste Modal */}
-      <AnimatePresence>
-        {pasteMode && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-black/40 backdrop-blur-sm z-[110] flex items-center justify-center p-4 text-left"
-            onClick={() => setPasteMode(false)}
-          >
-            <motion.div
-              initial={{ scale: 0.9, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.9, opacity: 0 }}
-              className="bg-white dark:bg-zinc-900 rounded-3xl p-8 max-w-lg w-full shadow-2xl border border-zinc-100 dark:border-zinc-800"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <div className="flex items-center gap-3 mb-6">
-                <div className="w-10 h-10 rounded-2xl bg-indigo-100 dark:bg-indigo-900/30 flex items-center justify-center text-indigo-600 dark:text-indigo-400">
-                  <ClipboardList size={24} />
+            <div className="flex items-center justify-between pb-2 border-b border-zinc-100 dark:border-zinc-800">
+              <div className="flex items-center gap-2">
+                <div className={`p-2 rounded-xl ${session.hideContentForPlayers ? 'bg-amber-100 dark:bg-amber-900/40 text-amber-600 dark:text-amber-400' : 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-600 dark:text-emerald-400'}`}>
+                  {session.hideContentForPlayers ? <EyeOff size={20} /> : <Eye size={20} />}
                 </div>
                 <div>
-                  <h3 className="text-xl font-black text-zinc-900 dark:text-white uppercase tracking-tight">Klistra in deltagare</h3>
-                  <p className="text-xs text-zinc-500 font-medium">Klistra in namn från t.ex. Svenska Lag, SportAdmin eller liknande</p>
+                  <h3 className="font-black text-sm text-zinc-900 dark:text-white uppercase tracking-tight">Innehållssekretess</h3>
+                  <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">Passets synlighet</p>
                 </div>
               </div>
+              <button
+                type="button"
+                onClick={() => setShowVisibilityInfoModal(false)}
+                className="p-1.5 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors cursor-pointer"
+              >
+                <X size={18} />
+              </button>
+            </div>
 
-              <textarea
-                value={pasteValue}
-                onChange={(e) => setPasteValue(e.target.value)}
-                placeholder="Klistra in lista på namn här (separera med radbyte eller kommatecken)..."
-                className="w-full h-48 bg-zinc-50 dark:bg-zinc-800 border-2 border-zinc-100 dark:border-zinc-800 rounded-2xl p-4 text-base font-medium outline-none focus:ring-2 focus:ring-indigo-500 resize-none mb-6"
-              />
+            <div className={`p-3.5 rounded-2xl border ${
+              session.hideContentForPlayers
+                ? 'bg-amber-50 dark:bg-amber-950/30 border-amber-200 dark:border-amber-800/60 text-amber-900 dark:text-amber-200'
+                : 'bg-emerald-50 dark:bg-emerald-950/30 border-emerald-200 dark:border-emerald-800/60 text-emerald-900 dark:text-emerald-200'
+            }`}>
+              <p className="text-xs font-black uppercase tracking-wider mb-1 flex items-center gap-1.5">
+                {session.hideContentForPlayers ? <EyeOff size={14} /> : <Eye size={14} />}
+                <span>{session.hideContentForPlayers ? 'Innehållet är DOLT för spelare' : 'Innehållet är SYNLIGT för spelare'}</span>
+              </p>
+              <p className="text-xs font-medium leading-relaxed opacity-90">
+                {session.hideContentForPlayers
+                  ? 'Spelarna kan för närvarande inte se övningar och moment. De ser endast passets tid, plats och anmälan.'
+                  : 'Alla spelare kan se passets schema, övningar och detaljer i appen.'}
+              </p>
+            </div>
 
-              <div className="flex gap-3">
-                <button
-                  onClick={() => setPasteMode(false)}
-                  className="flex-1 py-4 px-6 rounded-2xl font-bold text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors uppercase text-xs"
-                >
-                  Avbryt
-                </button>
-                <button
-                  onClick={handlePaste}
-                  className="flex-[2] py-4 px-6 rounded-2xl font-black bg-indigo-600 text-white shadow-lg shadow-indigo-200 dark:shadow-none hover:bg-indigo-700 transition-all uppercase text-xs"
-                >
-                  Lägg till deltagare
-                </button>
-              </div>
-            </motion.div>
+            <div className="pt-2 space-y-2">
+              <button
+                type="button"
+                onClick={() => {
+                  onUpdate({ ...session, hideContentForPlayers: !session.hideContentForPlayers, updatedAt: Date.now() });
+                  setShowVisibilityInfoModal(false);
+                }}
+                className={`w-full py-3 px-4 rounded-xl font-black text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition-all shadow-md cursor-pointer ${
+                  session.hideContentForPlayers
+                    ? 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-emerald-200 dark:shadow-none'
+                    : 'bg-amber-600 hover:bg-amber-700 text-white shadow-amber-200 dark:shadow-none'
+                }`}
+              >
+                {session.hideContentForPlayers ? (
+                  <>
+                    <Eye size={16} />
+                    <span>Gör synligt för spelare</span>
+                  </>
+                ) : (
+                  <>
+                    <EyeOff size={16} />
+                    <span>Dölj innehåll för spelare</span>
+                  </>
+                )}
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setShowVisibilityInfoModal(false)}
+                className="w-full py-2.5 px-4 bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-zinc-700 dark:text-zinc-300 rounded-xl font-black text-xs uppercase tracking-wider transition-colors cursor-pointer"
+              >
+                Stäng
+              </button>
+            </div>
           </motion.div>
-        )}
-      </AnimatePresence>
+        </motion.div>
+      )}
+
+      {/* Modal: Klarmarkering (Completion Info) */}
+      {showCompletionInfoModal && (
+        <motion.div
+          key="completion-info-modal"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs"
+        >
+          <motion.div 
+            initial={{ scale: 0.95, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            exit={{ scale: 0.95, opacity: 0 }}
+            className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-3xl p-6 max-w-sm w-full space-y-4 shadow-2xl"
+          >
+            <div className="flex items-center justify-between pb-2 border-b border-zinc-100 dark:border-zinc-800">
+              <div className="flex items-center gap-2">
+                <div className={`p-2 rounded-xl ${session.isCompleted ? 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-600 dark:text-emerald-400' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-500'}`}>
+                  <Check size={20} strokeWidth={3} />
+                </div>
+                <div>
+                  <h3 className="font-black text-sm text-zinc-900 dark:text-white uppercase tracking-tight">Passstatus</h3>
+                  <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">Genomförande</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowCompletionInfoModal(false)}
+                className="p-1.5 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors cursor-pointer"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className={`p-3.5 rounded-2xl border ${
+              session.isCompleted
+                ? 'bg-emerald-50 dark:bg-emerald-950/30 border-emerald-200 dark:border-emerald-800/60 text-emerald-900 dark:text-emerald-200'
+                : 'bg-zinc-50 dark:bg-zinc-950/30 border-zinc-200 dark:border-zinc-800 text-zinc-800 dark:text-zinc-200'
+            }`}>
+              <p className="text-xs font-black uppercase tracking-wider mb-1 flex items-center gap-1.5">
+                <Check size={14} strokeWidth={3} />
+                <span>{session.isCompleted ? 'Passet är KLARMARKERAT' : 'Passet är EJ klarmarkerat'}</span>
+              </p>
+              <p className="text-xs font-medium leading-relaxed opacity-90">
+                {session.isCompleted
+                  ? 'Detta träningspass har genomförts och är markerat som klart i kalendern och statistiken.'
+                  : 'Klarmarkera passet när det är slutfört för att uppdatera träningsstatistiken för träningsgruppen.'}
+              </p>
+            </div>
+
+            <div className="pt-2 space-y-2">
+              <button
+                type="button"
+                onClick={() => {
+                  onUpdate({ ...session, isCompleted: !session.isCompleted, updatedAt: Date.now() });
+                  setShowCompletionInfoModal(false);
+                }}
+                className={`w-full py-3 px-4 rounded-xl font-black text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition-all shadow-md cursor-pointer ${
+                  session.isCompleted
+                    ? 'bg-zinc-200 hover:bg-zinc-300 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-zinc-800 dark:text-zinc-200'
+                    : 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-emerald-200 dark:shadow-none'
+                }`}
+              >
+                {session.isCompleted ? (
+                  <>
+                    <Clock size={16} />
+                    <span>Markera som ej genomfört</span>
+                  </>
+                ) : (
+                  <>
+                    <Check size={16} strokeWidth={3} />
+                    <span>Klarmarkera passet</span>
+                  </>
+                )}
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setShowCompletionInfoModal(false)}
+                className="w-full py-2.5 px-4 bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-zinc-700 dark:text-zinc-300 rounded-xl font-black text-xs uppercase tracking-wider transition-colors cursor-pointer"
+              >
+                Stäng
+              </button>
+            </div>
+          </motion.div>
+        </motion.div>
+      )}
     </div>
   );
 }
+

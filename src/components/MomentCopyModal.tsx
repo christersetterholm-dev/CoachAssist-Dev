@@ -393,7 +393,7 @@ export default function MomentCopyModal({
                       onClick={() => { setImportSource('sessions'); setSuccessMessage(null); }}
                       className={`flex-1 py-2 px-4 rounded-xl text-xs font-black uppercase tracking-wider transition-all ${
                         importSource === 'sessions'
-                          ? 'bg-white dark:bg-zinc-750 text-indigo-600 dark:text-indigo-400 shadow-sm'
+                          ? 'bg-white dark:bg-zinc-800 text-indigo-600 dark:text-indigo-400 shadow-sm'
                           : 'text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-300'
                       }`}
                     >
@@ -404,7 +404,7 @@ export default function MomentCopyModal({
                       onClick={() => { setImportSource('bank'); setSuccessMessage(null); }}
                       className={`flex-1 py-2 px-4 rounded-xl text-xs font-black uppercase tracking-wider transition-all ${
                         importSource === 'bank'
-                          ? 'bg-white dark:bg-zinc-750 text-indigo-600 dark:text-indigo-400 shadow-sm'
+                          ? 'bg-white dark:bg-zinc-800 text-indigo-600 dark:text-indigo-400 shadow-sm'
                           : 'text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-300'
                       }`}
                     >
@@ -434,7 +434,7 @@ export default function MomentCopyModal({
                               placeholder="Sök i övningsbanken..."
                               value={searchQuery}
                               onChange={(e) => setSearchQuery(e.target.value)}
-                              className="w-full pl-10 pr-4 py-2.5 bg-zinc-50 dark:bg-zinc-805 focus:bg-white dark:focus:bg-zinc-800 border-2 border-zinc-150 dark:border-zinc-850 focus:border-indigo-505 rounded-xl text-xs font-medium outline-none transition-all placeholder:text-zinc-405"
+                              className="w-full pl-10 pr-4 py-2.5 bg-zinc-50 dark:bg-zinc-800 focus:bg-white dark:focus:bg-zinc-800 border-2 border-zinc-150 dark:border-zinc-800 focus:border-indigo-500 rounded-xl text-xs font-medium outline-none transition-all placeholder:text-zinc-400"
                             />
                           </div>
                           
@@ -447,7 +447,7 @@ export default function MomentCopyModal({
                                 className={`px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all ${
                                   bankCategoryFilter === cat
                                     ? 'bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 shadow-sm'
-                                    : 'bg-zinc-50 dark:bg-zinc-850 text-zinc-500 dark:text-zinc-400/80 border border-zinc-200 dark:border-zinc-700'
+                                    : 'bg-zinc-50 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400/80 border border-zinc-200 dark:border-zinc-700'
                                 }`}
                               >
                                 {cat}
@@ -472,7 +472,7 @@ export default function MomentCopyModal({
                                   className={`w-full text-left p-3.5 flex items-center justify-between transition-colors cursor-pointer ${
                                     isPreviewed
                                       ? 'bg-indigo-500/5 dark:bg-indigo-500/10'
-                                      : 'hover:bg-zinc-100 dark:hover:bg-zinc-850'
+                                      : 'hover:bg-zinc-100 dark:hover:bg-zinc-800'
                                   }`}
                                   onClick={() => {
                                     setPreviewBankExerciseId(ex.id);
@@ -638,7 +638,7 @@ export default function MomentCopyModal({
                               placeholder="Sök pass (datum, titel, plats)..."
                               value={searchQuery}
                               onChange={(e) => setSearchQuery(e.target.value)}
-                              className="w-full pl-10 pr-4 py-3 bg-zinc-50 dark:bg-zinc-800 hover:bg-zinc-100 dark:hover:bg-zinc-750 focus:bg-white dark:focus:bg-zinc-800 border-2 border-zinc-150 dark:border-zinc-850 focus:border-indigo-500 rounded-xl text-sm font-medium outline-none transition-all"
+                              className="w-full pl-10 pr-4 py-3 bg-zinc-50 dark:bg-zinc-800 hover:bg-zinc-100 dark:hover:bg-zinc-700 focus:bg-white dark:focus:bg-zinc-800 border-2 border-zinc-150 dark:border-zinc-800 focus:border-indigo-500 rounded-xl text-sm font-medium outline-none transition-all"
                             />
                           </div>
 
@@ -851,7 +851,7 @@ export default function MomentCopyModal({
                                 <div
                                   key={moment.id}
                                   onClick={() => toggleExportMoment(moment.id)}
-                                  className="flex items-start gap-3 p-3.5 hover:bg-zinc-100 dark:hover:bg-zinc-850 cursor-pointer select-none transition-colors"
+                                  className="flex items-start gap-3 p-3.5 hover:bg-zinc-100 dark:hover:bg-zinc-800 cursor-pointer select-none transition-colors"
                                 >
                                   <div className="pt-0.5">
                                     <div className={`w-5 h-5 rounded-lg border-2 flex items-center justify-center transition-all ${
@@ -894,14 +894,14 @@ export default function MomentCopyModal({
                           <div className="md:hidden">
                             <button
                               onClick={() => setMobileStep(1)}
-                              className="mb-2 py-2 px-4 rounded-xl bg-zinc-100 dark:bg-zinc-805 text-zinc-700 dark:text-zinc-300 font-bold text-xs flex items-center gap-1.5 transition-colors"
+                              className="mb-2 py-2 px-4 rounded-xl bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 font-bold text-xs flex items-center gap-1.5 transition-colors"
                             >
                               ← Ändra valda övningar
                             </button>
                           </div>
 
                           <div className="flex items-center justify-between">
-                            <label className="text-xs font-bold text-zinc-500 dark:text-zinc-455 uppercase tracking-wider">
+                            <label className="text-xs font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">
                               2. Välj vilka pass som ska få dessa övningar
                             </label>
                             <span className="text-xs font-bold text-indigo-600 dark:text-indigo-400">
@@ -917,7 +917,7 @@ export default function MomentCopyModal({
                               placeholder="Sök pass (datum, titel)..."
                               value={exportSearchQuery}
                               onChange={(e) => setExportSearchQuery(e.target.value)}
-                              className="w-full pl-10 pr-4 py-3 bg-zinc-50 dark:bg-zinc-800 hover:bg-zinc-100 dark:hover:bg-zinc-750 focus:bg-white dark:focus:bg-zinc-800 border-2 border-zinc-150 dark:border-zinc-850 focus:border-indigo-500 rounded-xl text-sm font-medium outline-none transition-all"
+                              className="w-full pl-10 pr-4 py-3 bg-zinc-50 dark:bg-zinc-800 hover:bg-zinc-100 dark:hover:bg-zinc-700 focus:bg-white dark:focus:bg-zinc-800 border-2 border-zinc-150 dark:border-zinc-800 focus:border-indigo-500 rounded-xl text-sm font-medium outline-none transition-all"
                             />
                           </div>
 
@@ -983,7 +983,7 @@ export default function MomentCopyModal({
             <div className="p-4 sm:p-6 bg-zinc-50 dark:bg-zinc-950/20 border-t border-zinc-100 dark:border-zinc-800 flex flex-col-reverse sm:flex-row sm:justify-between items-center gap-3">
               <button
                 onClick={handleClose}
-                className="w-full sm:w-auto px-6 py-3 bg-zinc-200 dark:bg-zinc-800 hover:bg-zinc-300 dark:hover:bg-zinc-700 text-zinc-700 dark:text-zinc-350 rounded-2xl font-black uppercase tracking-wider text-xs transition-colors text-center"
+                className="w-full sm:w-auto px-6 py-3 bg-zinc-200 dark:bg-zinc-800 hover:bg-zinc-300 dark:hover:bg-zinc-700 text-zinc-700 dark:text-zinc-300 rounded-2xl font-black uppercase tracking-wider text-xs transition-colors text-center"
               >
                 Stäng
               </button>
@@ -998,7 +998,7 @@ export default function MomentCopyModal({
                     className={`w-full sm:w-auto px-6 py-3 rounded-2xl font-black uppercase text-xs tracking-wider transition-all flex items-center justify-center gap-2 ${
                       importSelectedBankIds.size > 0
                         ? 'bg-indigo-600 hover:bg-indigo-700 text-white shadow-lg shadow-indigo-100 dark:shadow-none cursor-pointer'
-                        : 'bg-zinc-100 dark:bg-zinc-850 text-zinc-400 dark:text-zinc-650 cursor-not-allowed'
+                        : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-400 dark:text-zinc-500 cursor-not-allowed'
                     }`}
                   >
                     <Download size={14} />
@@ -1017,7 +1017,7 @@ export default function MomentCopyModal({
                     } ${
                       importSelectedMomentIds.size > 0
                         ? 'bg-indigo-600 hover:bg-indigo-700 text-white shadow-lg shadow-indigo-100 dark:shadow-none cursor-pointer'
-                        : 'bg-zinc-100 dark:bg-zinc-850 text-zinc-400 dark:text-zinc-650 cursor-not-allowed'
+                        : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-400 dark:text-zinc-500 cursor-not-allowed'
                     }`}
                   >
                     <Download size={14} />
@@ -1038,7 +1038,7 @@ export default function MomentCopyModal({
                       } ${
                         exportSelectedMomentIds.size > 0 && exportTargetSessionIds.size > 0
                           ? 'bg-indigo-600 hover:bg-indigo-700 text-white shadow-lg shadow-indigo-100 dark:shadow-none'
-                          : 'bg-zinc-100 dark:bg-zinc-850 text-zinc-400 dark:text-zinc-650 cursor-not-allowed'
+                          : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-400 dark:text-zinc-500 cursor-not-allowed'
                       }`}
                     >
                       <Upload size={14} />
@@ -1055,7 +1055,7 @@ export default function MomentCopyModal({
                       } ${
                         exportSelectedMomentIds.size > 0
                           ? 'bg-indigo-600 hover:bg-indigo-700 text-white shadow-lg shadow-indigo-100 dark:shadow-none'
-                          : 'bg-zinc-100 dark:bg-zinc-850 text-zinc-400 dark:text-zinc-650 cursor-not-allowed'
+                          : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-400 dark:text-zinc-500 cursor-not-allowed'
                       }`}
                     >
                       Gå vidare till mottagare →

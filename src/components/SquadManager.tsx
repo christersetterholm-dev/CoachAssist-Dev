@@ -1,9 +1,8 @@
 import React, { useState, useRef, useMemo } from 'react';
 import { UserPlus, Trash2, Edit2, X, Users, Upload, FileSpreadsheet, FileText, ClipboardList, Camera, Loader2, ArrowUpDown, Check, Search, AlertTriangle } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { storage, db } from '../lib/firebase';
+import { storage, db, ref, uploadBytes, getDownloadURL, getApiUrl } from '../lib/firebase';
 import { doc, getDoc } from 'firebase/firestore';
-import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { SquadPlayer, ClubMember, ClubTeam } from '../types';
 import { deduplicateSquad } from '../lib/clubUtils';
 import * as XLSX from 'xlsx';
@@ -140,15 +139,6 @@ export default function SquadManager({ squad, onUpdateSquad, activeClubId, activ
     try {
       let clubIdToUse = activeClubId;
       let teamIdToUse = activeTeamId;
-
-      if (!clubIdToUse) {
-        const storedClubId = localStorage.getItem('last_active_club_id');
-        if (storedClubId) clubIdToUse = storedClubId;
-      }
-      if (!teamIdToUse) {
-        const storedTeamId = localStorage.getItem('last_active_team_id');
-        if (storedTeamId) teamIdToUse = storedTeamId;
-      }
 
       if (!clubIdToUse) {
         setIsFetchingMembers(false);
@@ -401,8 +391,31 @@ export default function SquadManager({ squad, onUpdateSquad, activeClubId, activ
     setImageToCrop(null);
     setIsUploading(true);
 
+    // 1. First try server persistent upload
     try {
-      // Use Firebase Storage for squad photos to keep Firestore small
+      const extension = croppedBlob.type === 'image/png' ? 'png' : 'jpg';
+      const formData = new FormData();
+      formData.append('file', croppedBlob, `photo_${Date.now()}.${extension}`);
+
+      const res = await fetch(getApiUrl('/api/upload'), {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        if (data.url) {
+          setNewPhotoUrl(data.url);
+          setIsUploading(false);
+          return;
+        }
+      }
+    } catch (serverErr) {
+      console.warn('Server upload fallback:', serverErr);
+    }
+
+    // 2. Try Firebase / Local Storage abstraction
+    try {
       const extension = croppedBlob.type === 'image/png' ? 'png' : 'jpg';
       const fileName = `photo_${Date.now()}.${extension}`;
       const playerPath = editingPlayer ? `squad/${editingPlayer.id}/${fileName}` : `squad/temp/${fileName}`;
@@ -411,11 +424,17 @@ export default function SquadManager({ squad, onUpdateSquad, activeClubId, activ
       const uploadResult = await uploadBytes(storageRef, croppedBlob);
       const downloadURL = await getDownloadURL(uploadResult.ref);
 
-      // Always update the local state so the preview works in both Add and Edit modes
       setNewPhotoUrl(downloadURL);
     } catch (error) {
-      console.error("Upload error", error);
-      alert("Kunde inte ladda upp bilden till molnet. Kontrollera behörigheterna i Firebase.");
+      console.warn("Storage upload fallback to Data URL:", error);
+      // 3. Fallback: convert cropped blob to Data URL so photo upload never fails
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        if (typeof reader.result === 'string') {
+          setNewPhotoUrl(reader.result);
+        }
+      };
+      reader.readAsDataURL(croppedBlob);
     } finally {
       setIsUploading(false);
     }

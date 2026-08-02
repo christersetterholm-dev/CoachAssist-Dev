@@ -1,9 +1,8 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { Landmark, Trash2, Edit3, Users, Shield, Check, PlusCircle, Search, Mail, Phone, Fingerprint, Settings, ArrowRight, UserPlus, Save, Smartphone, X, Database, Server, HardDrive, Cloud, RefreshCw, Download, Upload, Globe, Cpu, CheckCircle2, AlertTriangle, Calendar, Link, Copy, ExternalLink, FileSpreadsheet, FileText, Camera, Loader2 } from 'lucide-react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
+import { Landmark, Trash2, Edit3, Users, Shield, Check, PlusCircle, Search, Mail, Phone, Fingerprint, Settings, ArrowRight, UserPlus, Save, Smartphone, X, Database, Server, HardDrive, Cloud, RefreshCw, Download, Upload, Globe, Cpu, CheckCircle2, AlertTriangle, AlertCircle, Calendar, Link, Copy, ExternalLink, FileSpreadsheet, FileText, Camera, Loader2, Key, UserCheck, Sparkles, Filter, ArrowUpDown, RotateCcw } from 'lucide-react';
 import { Club, ClubMetadata, ClubTeam, ClubMember, SquadPlayer, TrainingSettings, TrainingSession } from '../types';
-import { db, storage, getApiUrl } from '../lib/firebase';
+import { db, storage, getApiUrl, ref, uploadBytes, getDownloadURL } from '../lib/firebase';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
-import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import PwaIconGenerator from './PwaIconGenerator';
 import ImageCropper from './ImageCropper';
 import { CachedImage } from './CachedImage';
@@ -56,13 +55,46 @@ export default function ClubAdminDashboard({
   onUpdateSessions,
 }: ClubAdminDashboardProps) {
   // Navigation tabs within admin
-  const [activeTab, setActiveTab] = useState<'clubs' | 'teams' | 'members' | 'calendar_sync' | 'pwa_icons' | 'database_env' | 'root_admins'>('clubs');
+  const [activeTab, setActiveTab] = useState<'clubs' | 'teams' | 'members' | 'user_accounts' | 'calendar_sync' | 'pwa_icons' | 'database_env' | 'root_admins'>('clubs');
 
   // Master lists
   const [clubs, setClubs] = useState<Club[]>([]);
   const [selectedClub, setSelectedClub] = useState<Club | null>(null);
   const [clubMetadata, setClubMetadata] = useState<ClubMetadata | null>(null);
   const [members, setMembers] = useState<ClubMember[]>([]);
+
+  // User Accounts & Password Management State
+  const [userAccounts, setUserAccounts] = useState<Array<{
+    id: string;
+    email: string;
+    username: string | null;
+    hasLoggedIn: boolean;
+    tempPassword?: string | null;
+    createdAt?: number;
+  }>>([]);
+  const [loadingUserAccounts, setLoadingUserAccounts] = useState(false);
+  const [userSearchQuery, setUserSearchQuery] = useState('');
+  const [userTeamFilter, setUserTeamFilter] = useState('all');
+
+  // Single User Edit Modal State
+  const [editingUserAccount, setEditingUserAccount] = useState<{
+    id: string;
+    name: string;
+    email: string;
+    username: string | null;
+    hasLoggedIn: boolean;
+    tempPassword?: string | null;
+  } | null>(null);
+  const [accountEmailInput, setAccountEmailInput] = useState('');
+  const [accountUsernameInput, setAccountUsernameInput] = useState('');
+  const [accountPasswordInput, setAccountPasswordInput] = useState('');
+  const [isSavingUserAccount, setIsSavingUserAccount] = useState(false);
+  const [userAccountError, setUserAccountError] = useState('');
+
+  // Bulk Generation State
+  const [isBulkGenerating, setIsBulkGenerating] = useState(false);
+  const [bulkGenSuccessMsg, setBulkGenSuccessMsg] = useState('');
+  const [copiedUserKey, setCopiedUserKey] = useState<string | null>(null);
 
   // Root Admins list state
   const [rootAdminsList, setRootAdminsList] = useState<{ email: string; assignedAt: number; role?: string; uid?: string }[]>([]);
@@ -218,6 +250,30 @@ export default function ClubAdminDashboard({
     setIsUploadingPhoto(true);
 
     try {
+      // 1. First try persistent local/SQLite server upload endpoint
+      const extension = croppedBlob.type === 'image/png' ? 'png' : 'jpg';
+      const formData = new FormData();
+      formData.append('file', croppedBlob, `member_${Date.now()}.${extension}`);
+
+      const res = await fetch(getApiUrl('/api/upload'), {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        if (data.url) {
+          setMemberPhotoUrl(data.url);
+          setIsUploadingPhoto(false);
+          return;
+        }
+      }
+    } catch (serverErr) {
+      console.warn('Server upload fallback:', serverErr);
+    }
+
+    try {
+      // 2. Try Firebase Storage
       const extension = croppedBlob.type === 'image/png' ? 'png' : 'jpg';
       const fileName = `member_${Date.now()}.${extension}`;
       const memberPath = editingMember ? `members/${editingMember.userId}/${fileName}` : `members/temp/${fileName}`;
@@ -228,7 +284,8 @@ export default function ClubAdminDashboard({
 
       setMemberPhotoUrl(downloadURL);
     } catch (err) {
-      console.error('Failed to upload member photo to storage:', err);
+      console.error('Failed to upload member photo to storage, falling back to data URL:', err);
+      // 3. Fallback to Data URL
       const reader = new FileReader();
       reader.onloadend = () => {
         setMemberPhotoUrl(reader.result as string);
@@ -241,6 +298,322 @@ export default function ClubAdminDashboard({
   const [memberRoles, setMemberRoles] = useState<('admin' | 'coach' | 'player' | 'parent')[]>([]);
   const [memberTeams, setMemberTeams] = useState<string[]>([]);
   const [memberSearchQuery, setMemberSearchQuery] = useState('');
+  const [memberRoleFilter, setMemberRoleFilter] = useState<'all' | 'admin' | 'coach' | 'player' | 'parent'>('all');
+  const [memberTeamFilter, setMemberTeamFilter] = useState<string>('all');
+  const [memberSortBy, setMemberSortBy] = useState<'name-asc' | 'name-desc' | 'role' | 'number' | 'team'>('name-asc');
+
+  const getAuthHeaders = () => {
+    const token = localStorage.getItem('token') || localStorage.getItem('coachassist_jwt_token') || localStorage.getItem('jwt_token') || '';
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      'x-user-id': userId || '',
+      'x-user-email': userEmail || ''
+    };
+    if (token && token !== 'null' && token !== 'undefined') {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
+    return headers;
+  };
+
+  // Fetch user accounts for club/members
+  const fetchUserAccounts = async () => {
+    setLoadingUserAccounts(true);
+    try {
+      const res = await fetch(getApiUrl('/api/admin/users'), {
+        headers: getAuthHeaders()
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setUserAccounts(data.users || []);
+      }
+    } catch (err) {
+      console.error('Failed to fetch user accounts:', err);
+    } finally {
+      setLoadingUserAccounts(false);
+    }
+  };
+
+  useEffect(() => {
+    if (activeTab === 'user_accounts') {
+      fetchUserAccounts();
+    }
+  }, [activeTab]);
+
+  const allMemberAccounts = React.useMemo(() => {
+    const result: Array<{
+      id: string;
+      memberId: string;
+      name: string;
+      role: string;
+      email: string;
+      username: string | null;
+      hasLoggedIn: boolean;
+      tempPassword?: string | null;
+      teamName?: string;
+      phone?: string;
+    }> = [];
+    const processedUserIds = new Set<string>();
+
+    for (const m of members) {
+      const userMatch = userAccounts.find(u =>
+        (u.id && (u.id === m.userId || u.id === m.id)) ||
+        (u.email && m.email && u.email.trim().toLowerCase() === m.email.trim().toLowerCase())
+      );
+
+      const teamNames = (m.teams || []).map(tId => {
+        const t = clubMetadata?.teams?.find(team => team.id === tId);
+        return t ? t.name : tId;
+      }).join(', ');
+
+      const userId = userMatch?.id || m.userId || m.id || crypto.randomUUID();
+      processedUserIds.add(userId);
+      if (userMatch?.id) processedUserIds.add(userMatch.id);
+
+      const roleLabel = m.roles?.includes('admin') ? 'Admin' :
+                        m.roles?.includes('coach') ? 'Tränare' :
+                        m.roles?.includes('parent') ? 'Förälder' : 'Spelare';
+
+      result.push({
+        id: userId,
+        memberId: m.userId || m.id || userId,
+        name: m.fullName || m.name || m.email.split('@')[0],
+        role: roleLabel,
+        email: m.email,
+        username: userMatch?.username || null,
+        hasLoggedIn: userMatch?.hasLoggedIn || false,
+        tempPassword: userMatch?.tempPassword || null,
+        teamName: teamNames || 'Alla lag',
+        phone: m.phone
+      });
+    }
+
+    for (const u of userAccounts) {
+      if (!processedUserIds.has(u.id)) {
+        result.push({
+          id: u.id,
+          memberId: u.id,
+          name: u.username || u.email.split('@')[0],
+          role: 'Användare',
+          email: u.email,
+          username: u.username || null,
+          hasLoggedIn: u.hasLoggedIn,
+          tempPassword: u.tempPassword || null,
+          teamName: 'Förening'
+        });
+      }
+    }
+
+    return result;
+  }, [members, userAccounts, clubMetadata]);
+
+  const filteredMemberAccounts = React.useMemo(() => {
+    return allMemberAccounts.filter(acc => {
+      const q = userSearchQuery.trim().toLowerCase();
+      const matchesSearch = !q ||
+        acc.name.toLowerCase().includes(q) ||
+        acc.email.toLowerCase().includes(q) ||
+        (acc.username && acc.username.toLowerCase().includes(q)) ||
+        (acc.id && acc.id.toLowerCase().includes(q));
+
+      const matchesTeam = userTeamFilter === 'all' ||
+        (acc.teamName && acc.teamName.toLowerCase().includes(userTeamFilter.toLowerCase()));
+
+      return matchesSearch && matchesTeam;
+    });
+  }, [allMemberAccounts, userSearchQuery, userTeamFilter]);
+
+  const handleBulkGenerateCredentials = async (targetTeamId?: string) => {
+    setIsBulkGenerating(true);
+    setBulkGenSuccessMsg('');
+    try {
+      let targetMembers = members;
+      if (targetTeamId && targetTeamId !== 'all') {
+        targetMembers = members.filter(m => {
+          if (!m.teams || m.teams.length === 0) return false;
+          return m.teams.some(tId => {
+            if (tId === targetTeamId) return true;
+            const foundTeam = clubMetadata?.teams?.find(ct => ct.id === tId || ct.name === tId);
+            return foundTeam?.name === targetTeamId || foundTeam?.id === targetTeamId;
+          });
+        });
+      }
+      if (targetMembers.length === 0) {
+        targetMembers = members;
+      }
+
+      const payload = targetMembers.map(m => ({
+        id: m.userId || m.id || crypto.randomUUID(),
+        name: m.fullName || m.name,
+        email: m.email,
+        role: m.roles?.includes('admin') ? 'Admin' : m.roles?.includes('coach') ? 'Tränare' : 'Spelare'
+      }));
+
+      const res = await fetch(getApiUrl('/api/admin/users/bulk-generate'), {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ members: payload })
+      });
+
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || 'Generering misslyckades');
+      }
+
+      const data = await res.json();
+      setBulkGenSuccessMsg(`Genererade / uppdaterade konton för ${data.accounts?.length || 0} medlemmar!`);
+      await fetchUserAccounts();
+    } catch (err: any) {
+      alert(err.message || 'Ett fel uppstod vid generering av konton');
+    } finally {
+      setIsBulkGenerating(false);
+    }
+  };
+
+  const handleSaveUserAccount = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingUserAccount) return;
+
+    setIsSavingUserAccount(true);
+    setUserAccountError('');
+
+    try {
+      const res = await fetch(getApiUrl('/api/admin/users/update'), {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({
+          userId: editingUserAccount.id,
+          newEmail: accountEmailInput,
+          newUsername: accountUsernameInput,
+          newPassword: accountPasswordInput ? accountPasswordInput : undefined,
+        })
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || 'Kunde inte spara användarkontot.');
+      }
+
+      setEditingUserAccount(null);
+      setAccountPasswordInput('');
+      await fetchUserAccounts();
+    } catch (err: any) {
+      setUserAccountError(err.message || 'Fel vid sparande av konto');
+    } finally {
+      setIsSavingUserAccount(false);
+    }
+  };
+
+  const handleQuickResetPassword = async (acc: typeof allMemberAccounts[0]) => {
+    const words = ['Snabb', 'Stark', 'Fokus', 'Smidig', 'Taktik', 'Kämpe', 'Laganda', 'Spelare', 'Ledare'];
+    const word = words[Math.floor(Math.random() * words.length)];
+    const num = Math.floor(1000 + Math.random() * 9000);
+    const newPass = `${word}-${num}`;
+
+    try {
+      const res = await fetch(getApiUrl('/api/admin/users/update'), {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({
+          userId: acc.id,
+          newEmail: acc.email,
+          newUsername: acc.username,
+          newPassword: newPass
+        })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Kunde inte slumpa lösenord.');
+      setBulkGenSuccessMsg(`Nytt tillfälligt lösenord skapat för ${acc.name}: ${newPass}`);
+      setTimeout(() => setBulkGenSuccessMsg(''), 6000);
+      await fetchUserAccounts();
+    } catch (err: any) {
+      alert(err.message || 'Ett fel uppstod vid skapande av lösenord.');
+    }
+  };
+
+  const handleQuickGenerateUsername = async (acc: typeof allMemberAccounts[0]) => {
+    try {
+      const res = await fetch(getApiUrl('/api/admin/users/bulk-generate'), {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({
+          members: [{
+            id: acc.id,
+            name: acc.name,
+            email: acc.email,
+            role: acc.role
+          }]
+        })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Kunde inte generera användarnamn.');
+      setBulkGenSuccessMsg(`Användarnamn genererat för ${acc.name}!`);
+      setTimeout(() => setBulkGenSuccessMsg(''), 4000);
+      await fetchUserAccounts();
+    } catch (err: any) {
+      alert(err.message || 'Kunde inte generera användarnamn.');
+    }
+  };
+
+  const exportAccountsToExcel = (accountsToExport: typeof allMemberAccounts) => {
+    const exportRows = accountsToExport.map(m => ({
+      'Namn': m.name || '-',
+      'Roll': m.role || 'Medlem',
+      'Lag': m.teamName || 'Alla lag',
+      'E-post': m.email || '-',
+      'Användarnamn': m.username || 'Ej valt',
+      'Lösenord': m.hasLoggedIn ? '••••••••' : (m.tempPassword || 'Ej genererat'),
+      'Inloggningsstatus': m.hasLoggedIn ? 'Inloggad första gången (Lösenord dolt)' : 'Ej inloggad (Tillfälligt lösenord)',
+      'UUID (Användar-ID)': m.id
+    }));
+
+    const worksheet = XLSX.utils.json_to_sheet(exportRows);
+    worksheet['!cols'] = [
+      { wch: 24 },
+      { wch: 16 },
+      { wch: 18 },
+      { wch: 28 },
+      { wch: 20 },
+      { wch: 20 },
+      { wch: 34 },
+      { wch: 38 }
+    ];
+
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'Medlemskonton');
+
+    const clubNameStr = selectedClub?.name?.replace(/[^a-zA-Z0-9åäöÅÄÖ_-]/g, '_') || 'Klubb';
+    const fileName = `Medlemskonton_${clubNameStr}_${new Date().toISOString().split('T')[0]}.xlsx`;
+    XLSX.writeFile(workbook, fileName);
+  };
+
+  const exportAccountsToCSV = (accountsToExport: typeof allMemberAccounts) => {
+    const exportRows = accountsToExport.map(m => ({
+      'Namn': m.name || '-',
+      'Roll': m.role || 'Medlem',
+      'Lag': m.teamName || 'Alla lag',
+      'E-post': m.email || '-',
+      'Användarnamn': m.username || 'Ej valt',
+      'Lösenord': m.hasLoggedIn ? '••••••••' : (m.tempPassword || 'Ej genererat'),
+      'Inloggningsstatus': m.hasLoggedIn ? 'Inloggad första gången (Lösenord dolt)' : 'Ej inloggad (Tillfälligt lösenord)',
+      'UUID (Användar-ID)': m.id
+    }));
+
+    const csv = Papa.unparse(exportRows, { delimiter: ';' });
+    const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    const clubNameStr = selectedClub?.name?.replace(/[^a-zA-Z0-9åäöÅÄÖ_-]/g, '_') || 'Klubb';
+    link.download = `Medlemskonton_${clubNameStr}_${new Date().toISOString().split('T')[0]}.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const copyToClipboard = (text: string, key: string) => {
+    navigator.clipboard.writeText(text);
+    setCopiedUserKey(key);
+    setTimeout(() => setCopiedUserKey(null), 2000);
+  };
 
   // Load root admins
   const loadRootAdmins = async () => {
@@ -447,7 +820,8 @@ export default function ClubAdminDashboard({
         const list: Club[] = snap.data().clubs || [];
         setClubs(list);
         if (list.length > 0 && (selectFirst || !selectedClub)) {
-          setSelectedClub(list[0]);
+          const currentActive = list.find(c => c.id === activeClubId);
+          setSelectedClub(currentActive || list[0]);
         }
       } else {
         setClubs([]);
@@ -954,6 +1328,26 @@ export default function ClubAdminDashboard({
         status: 'success',
         message: `Importering klar! ${countNew} nya och ${countUpdated} uppdaterade medlemmar sparades och synkades till dina valda lag.`
       });
+
+      // Auto-generate accounts & usernames for all imported members
+      try {
+        if (currentMembers.length > 0) {
+          const payload = currentMembers.map(m => ({
+            id: m.userId,
+            name: m.fullName,
+            email: m.email,
+            role: m.roles?.includes('admin') ? 'Admin' : m.roles?.includes('coach') ? 'Tränare' : 'Spelare'
+          }));
+          fetch(getApiUrl('/api/admin/users/bulk-generate'), {
+            method: 'POST',
+            headers: getAuthHeaders(),
+            body: JSON.stringify({ members: payload })
+          }).then(() => fetchUserAccounts()).catch(err => console.error(err));
+        }
+      } catch (e) {
+        console.error('Import account auto gen error:', e);
+      }
+
       setTimeout(() => setActionStatus({ type: 'save', status: 'idle' }), 4000);
     } catch (err) {
       console.error('Failed to execute import:', err);
@@ -998,16 +1392,18 @@ export default function ClubAdminDashboard({
 
   // Open member dialog for creating or editing
   const openMemberForm = (member: ClubMember | null = null) => {
+    setActionStatus({ type: 'save', status: 'idle' });
     if (member) {
       setEditingMember(member);
-      setMemberEmail(member.email);
-      setMemberName(member.fullName);
+      const emailVal = member.email && !member.email.includes('@noemail.local') ? member.email : '';
+      setMemberEmail(emailVal);
+      setMemberName(member.fullName || '');
       setMemberPhone(member.phone || '');
       setMemberPersonnummer(member.personnummer || '');
       setMemberPosition(member.position || '');
       setMemberNumber(member.number || '');
       setMemberPhotoUrl(member.photoUrl || '');
-      setMemberRoles(member.roles || []);
+      setMemberRoles(member.roles && member.roles.length > 0 ? member.roles : ['player']);
       setMemberTeams(member.teams || []);
     } else {
       setEditingMember(null);
@@ -1027,98 +1423,173 @@ export default function ClubAdminDashboard({
   // Save member
   const handleSaveMember = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedClub || !memberEmail.trim() || !memberName.trim()) return;
+    if (!selectedClub) {
+      setActionStatus({ type: 'save', status: 'error', message: 'Ingen förening är vald.' });
+      return;
+    }
+
+    const cleanName = memberName.trim();
+    if (!cleanName) {
+      setActionStatus({ type: 'save', status: 'error', message: 'Vänligen ange medlemmens fullständiga namn.' });
+      return;
+    }
+
+    let cleanEmail = memberEmail.trim().toLowerCase();
+    if (cleanEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
+      setActionStatus({ type: 'save', status: 'error', message: 'Ange en giltig e-postadress (t.ex. namn@exempel.se) eller lämna fältet tomt.' });
+      return;
+    }
 
     setActionStatus({ type: 'save', status: 'loading' });
     try {
-      const cleanEmail = memberEmail.trim().toLowerCase();
       let updatedMembers = [...members];
+      const targetUserId = editingMember?.userId || 'user_' + Math.random().toString(36).substring(2, 11);
+
+      if (!cleanEmail) {
+        cleanEmail = `${targetUserId}@noemail.local`;
+      }
+
+      const displayEmail = cleanEmail.includes('@noemail.local') ? '' : cleanEmail;
 
       const newOrUpdatedMember: ClubMember = {
-        userId: editingMember ? editingMember.userId : 'user_temp_' + Math.random().toString(36).substring(2, 11),
-        email: cleanEmail,
-        fullName: memberName.trim(),
+        userId: targetUserId,
+        email: displayEmail || cleanEmail,
+        fullName: cleanName,
         phone: memberPhone.trim() || undefined,
         personnummer: memberPersonnummer.trim() || undefined,
         position: memberPosition.trim() || undefined,
         number: memberNumber.trim() || undefined,
         photoUrl: memberPhotoUrl.trim() || undefined,
-        roles: memberRoles,
+        roles: memberRoles && memberRoles.length > 0 ? memberRoles : ['player'],
         teams: memberTeams
       };
 
       if (editingMember) {
-        // Update
-        const idx = updatedMembers.findIndex(m => m.email === editingMember.email);
-        if (idx !== -1) {
-          updatedMembers[idx] = newOrUpdatedMember;
-        }
+        const origUserId = editingMember.userId;
+        const origEmail = editingMember.email ? editingMember.email.trim().toLowerCase() : '';
+        const origName = editingMember.fullName ? editingMember.fullName.trim().toLowerCase() : '';
+
+        // Filter out ALL existing duplicate entries for this person so no stale duplicate corrupts the save
+        updatedMembers = updatedMembers.filter(m => {
+          const mUserId = m.userId;
+          const mEmail = m.email ? m.email.trim().toLowerCase() : '';
+          const mName = m.fullName ? m.fullName.trim().toLowerCase() : '';
+
+          if (origUserId && mUserId === origUserId) return false;
+          if (origEmail && !origEmail.includes('@noemail.local') && mEmail === origEmail) return false;
+          if (origName && mName === origName.toLowerCase()) return false;
+          if (displayEmail && mEmail === displayEmail.toLowerCase()) return false;
+          if (cleanName && mName === cleanName.toLowerCase()) return false;
+          return true;
+        });
+
+        updatedMembers.push(newOrUpdatedMember);
       } else {
-        // Add new (verify email unique first)
-        if (updatedMembers.some(m => m.email === cleanEmail)) {
+        // Adding new
+        if (displayEmail && updatedMembers.some(m => m.email && m.email.trim().toLowerCase() === displayEmail.toLowerCase())) {
           setActionStatus({ type: 'save', status: 'error', message: 'En medlem med denna e-postadress finns redan i föreningen!' });
           return;
         }
         updatedMembers.push(newOrUpdatedMember);
       }
 
-      await setDoc(doc(db, 'clubs', selectedClub.id, 'teams', 'club_global', 'data', 'members'), { members: updatedMembers });
+      // Deduplicate members list to ensure no duplicate entries exist
+      updatedMembers = deduplicateClubMembers(updatedMembers);
+
+      await setDoc(doc(db, 'clubs', selectedClub.id, 'teams', 'club_global', 'data', 'members'), { 
+        members: updatedMembers,
+        updatedAt: Date.now()
+      });
       
-      // Also sync member into each selected team's squad
-      for (const teamId of memberTeams) {
-        try {
-          const squadRef = doc(db, 'clubs', selectedClub.id, 'teams', teamId, 'data', 'squad');
-          const squadSnap = await getDoc(squadRef);
-          let teamSquad: SquadPlayer[] = squadSnap.exists() ? (squadSnap.data().squad || []) : [];
+      // Also sync member into each team's squad
+      if (clubMetadata?.teams) {
+        for (const team of clubMetadata.teams) {
+          const teamId = team.id;
+          const isAssigned = memberTeams.includes(teamId);
 
-          const isLeader = newOrUpdatedMember.roles.includes('coach') || newOrUpdatedMember.roles.includes('admin');
-          const role: 'leader' | 'player' = isLeader ? 'leader' : 'player';
+          try {
+            const squadRef = doc(db, 'clubs', selectedClub.id, 'teams', teamId, 'data', 'squad');
+            const squadSnap = await getDoc(squadRef);
+            let teamSquad: SquadPlayer[] = squadSnap.exists() ? (squadSnap.data().squad || []) : [];
 
-          const existingIdx = teamSquad.findIndex(sp => 
-            (newOrUpdatedMember.userId && sp.id === newOrUpdatedMember.userId) ||
-            (cleanEmail && sp.email && sp.email.trim().toLowerCase() === cleanEmail) ||
-            (sp.name.trim().toLowerCase() === newOrUpdatedMember.fullName.trim().toLowerCase())
-          );
+            const isLeader = newOrUpdatedMember.roles.includes('coach') || newOrUpdatedMember.roles.includes('admin');
+            const role: 'leader' | 'player' = isLeader ? 'leader' : 'player';
 
-          if (existingIdx !== -1) {
-            teamSquad[existingIdx] = {
-              ...teamSquad[existingIdx],
-              name: newOrUpdatedMember.fullName,
-              email: newOrUpdatedMember.email,
-              phone: newOrUpdatedMember.phone || teamSquad[existingIdx].phone,
-              personnummer: newOrUpdatedMember.personnummer || teamSquad[existingIdx].personnummer,
-              position: newOrUpdatedMember.position || teamSquad[existingIdx].position,
-              number: newOrUpdatedMember.number || teamSquad[existingIdx].number,
-              photoUrl: newOrUpdatedMember.photoUrl || teamSquad[existingIdx].photoUrl,
-              role
-            };
-          } else {
-            teamSquad.push({
-              id: newOrUpdatedMember.userId || crypto.randomUUID(),
-              name: newOrUpdatedMember.fullName,
-              email: newOrUpdatedMember.email,
-              phone: newOrUpdatedMember.phone,
-              personnummer: newOrUpdatedMember.personnummer,
-              position: newOrUpdatedMember.position,
-              number: newOrUpdatedMember.number,
-              photoUrl: newOrUpdatedMember.photoUrl,
-              role
+            // Filter out any stale duplicate entries for this player in team squad
+            teamSquad = teamSquad.filter(sp => {
+              const spEmail = (sp.email || '').trim().toLowerCase();
+              const spName = (sp.name || '').trim().toLowerCase();
+
+              if (newOrUpdatedMember.userId && sp.id === newOrUpdatedMember.userId) return false;
+              if (displayEmail && spEmail === displayEmail.toLowerCase()) return false;
+              if (cleanName && spName === cleanName.toLowerCase()) return false;
+              return true;
             });
-          }
 
-          await setDoc(squadRef, { squad: teamSquad, updatedAt: Date.now() });
-        } catch (err) {
-          console.error(`Error syncing member to team squad for ${teamId}:`, err);
+            if (isAssigned) {
+              teamSquad.push({
+                id: newOrUpdatedMember.userId,
+                name: newOrUpdatedMember.fullName,
+                email: displayEmail || undefined,
+                phone: newOrUpdatedMember.phone,
+                personnummer: newOrUpdatedMember.personnummer,
+                position: newOrUpdatedMember.position,
+                number: newOrUpdatedMember.number,
+                photoUrl: newOrUpdatedMember.photoUrl,
+                role
+              });
+            }
+
+            teamSquad = deduplicateSquad(teamSquad);
+            await setDoc(squadRef, { squad: teamSquad, updatedAt: Date.now() });
+
+            if (activeTeamId === teamId && onUpdateSquad) {
+              onUpdateSquad(teamSquad);
+            }
+          } catch (err) {
+            console.error(`Error syncing member to team squad for ${teamId}:`, err);
+          }
         }
       }
 
       setMembers(updatedMembers);
-      setShowMemberForm(false);
-      setActionStatus({ type: 'save', status: 'success', message: editingMember ? 'Medlemsuppgifter uppdaterade!' : 'Medlem tillagd i föreningen och laget!' });
-      setTimeout(() => setActionStatus({ type: 'save', status: 'idle' }), 3000);
-    } catch (err) {
+      setActionStatus({ 
+        type: 'save', 
+        status: 'success', 
+        message: editingMember ? 'Medlemsuppgifter och roller uppdaterade!' : 'Medlem tillagd i föreningen och laget!' 
+      });
+
+      // Auto-generate/sync user account in backend
+      try {
+        const syncEmail = displayEmail || `${targetUserId}@member.coachassist.app`;
+        fetch(getApiUrl('/api/admin/users/bulk-generate'), {
+          method: 'POST',
+          headers: getAuthHeaders(),
+          body: JSON.stringify({
+            members: [{
+              id: newOrUpdatedMember.userId,
+              name: newOrUpdatedMember.fullName,
+              email: syncEmail,
+              role: newOrUpdatedMember.roles?.includes('admin') ? 'Admin' : newOrUpdatedMember.roles?.includes('coach') ? 'Tränare' : 'Spelare'
+            }]
+          })
+        }).then(() => fetchUserAccounts()).catch(err => console.error(err));
+      } catch (e) {
+        console.error('Account auto sync error:', e);
+      }
+
+      // Close modal after brief success confirmation so user sees feedback
+      setTimeout(() => {
+        setShowMemberForm(false);
+        setActionStatus({ type: 'save', status: 'idle' });
+      }, 1200);
+    } catch (err: any) {
       console.error('Failed to save member:', err);
-      setActionStatus({ type: 'save', status: 'error', message: 'Kunde inte spara medlemmen.' });
+      setActionStatus({ 
+        type: 'save', 
+        status: 'error', 
+        message: 'Kunde inte spara medlemmen. ' + (err?.message || 'Kontrollera anslutningen och försök igen.') 
+      });
     }
   };
 
@@ -1163,16 +1634,88 @@ export default function ClubAdminDashboard({
     }
   };
 
-  // Filter members based on search
-  const filteredMembers = members.filter(m => {
-    const query = memberSearchQuery.toLowerCase();
-    return (
-      m.fullName.toLowerCase().includes(query) ||
-      m.email.toLowerCase().includes(query) ||
-      (m.phone && m.phone.includes(query)) ||
-      (m.personnummer && m.personnummer.includes(query))
-    );
-  });
+  // Member role counts for quick filtering pills
+  const roleCounts = useMemo(() => {
+    const counts = {
+      all: members.length,
+      admin: 0,
+      coach: 0,
+      player: 0,
+      parent: 0,
+      unassigned: 0
+    };
+    members.forEach(m => {
+      if (m.roles?.includes('admin')) counts.admin++;
+      if (m.roles?.includes('coach')) counts.coach++;
+      if (m.roles?.includes('player')) counts.player++;
+      if (m.roles?.includes('parent')) counts.parent++;
+      if (!m.teams || m.teams.length === 0) counts.unassigned++;
+    });
+    return counts;
+  }, [members]);
+
+  // Filter and sort members
+  const filteredMembers = useMemo(() => {
+    return members
+      .filter(m => {
+        // 1. Text Search Query
+        const query = memberSearchQuery.toLowerCase().trim();
+        if (query) {
+          const matchName = m.fullName ? m.fullName.toLowerCase().includes(query) : false;
+          const matchEmail = m.email && !m.email.includes('@noemail.local') && m.email.toLowerCase().includes(query);
+          const matchPhone = m.phone && m.phone.includes(query);
+          const matchPnr = m.personnummer && m.personnummer.includes(query);
+          const matchNumber = m.number && m.number.toString().includes(query);
+          const matchPosition = m.position && m.position.toLowerCase().includes(query);
+          if (!matchName && !matchEmail && !matchPhone && !matchPnr && !matchNumber && !matchPosition) {
+            return false;
+          }
+        }
+
+        // 2. Role Filter
+        if (memberRoleFilter !== 'all') {
+          if (!m.roles || !m.roles.includes(memberRoleFilter)) {
+            return false;
+          }
+        }
+
+        // 3. Team Filter
+        if (memberTeamFilter === 'unassigned') {
+          if (m.teams && m.teams.length > 0) return false;
+        } else if (memberTeamFilter !== 'all') {
+          if (!m.teams || !m.teams.includes(memberTeamFilter)) return false;
+        }
+
+        return true;
+      })
+      .sort((a, b) => {
+        if (memberSortBy === 'name-asc') {
+          return (a.fullName || '').localeCompare(b.fullName || '', 'sv');
+        }
+        if (memberSortBy === 'name-desc') {
+          return (b.fullName || '').localeCompare(a.fullName || '', 'sv');
+        }
+        if (memberSortBy === 'number') {
+          const numA = typeof a.number === 'number' ? a.number : parseInt(a.number || '999', 10);
+          const numB = typeof b.number === 'number' ? b.number : parseInt(b.number || '999', 10);
+          return numA - numB;
+        }
+        if (memberSortBy === 'role') {
+          const roleOrder: Record<string, number> = { admin: 1, coach: 2, player: 3, parent: 4 };
+          const getMinRole = (roles?: string[]) => {
+            if (!roles || roles.length === 0) return 99;
+            return Math.min(...roles.map(r => roleOrder[r] || 50));
+          };
+          return getMinRole(a.roles) - getMinRole(b.roles);
+        }
+        if (memberSortBy === 'team') {
+          const teamA = a.teams && a.teams.length > 0 ? a.teams[0] : 'zzz';
+          const teamB = b.teams && b.teams.length > 0 ? b.teams[0] : 'zzz';
+          return teamA.localeCompare(teamB, 'sv');
+        }
+        return 0;
+      });
+  }, [members, memberSearchQuery, memberRoleFilter, memberTeamFilter, memberSortBy]);
 
   return (
     <div className="w-full max-w-6xl mx-auto p-1.5 sm:p-6 min-w-0 overflow-x-hidden" id="club-admin-dashboard">
@@ -1265,6 +1808,19 @@ export default function ClubAdminDashboard({
           </button>
 
           <button
+            disabled={!selectedClub}
+            onClick={() => setActiveTab('user_accounts')}
+            className={`flex items-center gap-2 px-4 sm:px-5 py-2.5 sm:py-3 rounded-xl font-extrabold text-xs sm:text-sm transition-all disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer shrink-0 ${
+              activeTab === 'user_accounts'
+                ? 'bg-indigo-600 text-white shadow-md shadow-indigo-100 dark:shadow-none'
+                : 'bg-zinc-50 hover:bg-zinc-100 dark:bg-zinc-950 dark:hover:bg-zinc-800 text-zinc-600 dark:text-zinc-400'
+            }`}
+          >
+            <Key size={16} />
+            <span>Konto & Lösenord ({allMemberAccounts.length})</span>
+          </button>
+
+          <button
             onClick={() => setActiveTab('calendar_sync')}
             className={`flex items-center gap-2 px-4 sm:px-5 py-2.5 sm:py-3 rounded-xl font-extrabold text-xs sm:text-sm transition-all cursor-pointer shrink-0 ${
               activeTab === 'calendar_sync'
@@ -1318,8 +1874,14 @@ export default function ClubAdminDashboard({
 
       {/* ACTION ALERTS */}
       {actionStatus.status === 'success' && actionStatus.message && (
-        <div className="p-4 mb-6 rounded-2xl bg-green-55/10 border border-green-250 text-green-700 font-bold text-sm flex items-center gap-2">
-          <Check size={18} />
+        <div className="p-4 mb-6 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-700 dark:text-emerald-300 font-bold text-sm flex items-center gap-2">
+          <Check size={18} className="shrink-0" />
+          <span>{actionStatus.message}</span>
+        </div>
+      )}
+      {actionStatus.status === 'error' && actionStatus.message && (
+        <div className="p-4 mb-6 rounded-2xl bg-red-500/10 border border-red-500/20 text-red-700 dark:text-red-300 font-bold text-sm flex items-center gap-2">
+          <AlertCircle size={18} className="shrink-0" />
           <span>{actionStatus.message}</span>
         </div>
       )}
@@ -1486,8 +2048,9 @@ export default function ClubAdminDashboard({
       {/* MEMBERS TAB */}
       {activeTab === 'members' && selectedClub && (
         <div className="space-y-6">
-          {/* Members search & Add button */}
-          <div className="bg-white dark:bg-zinc-900 rounded-2xl sm:rounded-3xl border border-zinc-150 dark:border-zinc-800 shadow-xl p-3.5 sm:p-6 w-full min-w-0">
+          {/* Members search, filter & sort controls */}
+          <div className="bg-white dark:bg-zinc-900 rounded-2xl sm:rounded-3xl border border-zinc-150 dark:border-zinc-800 shadow-xl p-3.5 sm:p-6 w-full min-w-0 space-y-4">
+            {/* Search input & Main Action Buttons */}
             <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 sm:gap-4 w-full min-w-0">
               <div className="relative flex-1 w-full min-w-0">
                 <span className="absolute left-3.5 top-3 text-zinc-400">
@@ -1495,11 +2058,20 @@ export default function ClubAdminDashboard({
                 </span>
                 <input
                   type="text"
-                  placeholder="Sök bland medlemmar på namn, e-post eller telefon..."
+                  placeholder="Sök på namn, e-post, telefon, tröjnummer, position..."
                   value={memberSearchQuery}
                   onChange={(e) => setMemberSearchQuery(e.target.value)}
-                  className="w-full pl-10 pr-4 py-2.5 sm:py-3 bg-zinc-50 hover:bg-zinc-100/50 dark:bg-zinc-950 dark:hover:bg-zinc-950/50 rounded-xl sm:rounded-2xl border border-zinc-200 dark:border-zinc-800 focus:outline-none focus:border-indigo-500 font-semibold text-xs sm:text-sm min-w-0"
+                  className="w-full pl-10 pr-9 py-2.5 sm:py-3 bg-zinc-50 hover:bg-zinc-100/50 dark:bg-zinc-950 dark:hover:bg-zinc-950/50 rounded-xl sm:rounded-2xl border border-zinc-200 dark:border-zinc-800 focus:outline-none focus:border-indigo-500 font-semibold text-xs sm:text-sm min-w-0"
                 />
+                {memberSearchQuery && (
+                  <button
+                    onClick={() => setMemberSearchQuery('')}
+                    className="absolute right-3 top-3 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200"
+                    title="Rensa sökning"
+                  >
+                    <X size={16} />
+                  </button>
+                )}
               </div>
 
               <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 w-full lg:w-auto shrink-0">
@@ -1523,6 +2095,152 @@ export default function ClubAdminDashboard({
                   <span>Lägg till medlem</span>
                 </button>
               </div>
+            </div>
+
+            {/* Filter Dropdowns & Sorting */}
+            <div className="pt-3 border-t border-zinc-100 dark:border-zinc-800/80 flex flex-col md:flex-row items-stretch md:items-end justify-between gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 flex-1">
+                {/* Role Filter */}
+                <div>
+                  <label className="block text-[10px] font-black uppercase tracking-wider text-zinc-400 mb-1 flex items-center gap-1">
+                    <Filter size={11} className="text-indigo-500" />
+                    <span>Roll</span>
+                  </label>
+                  <select
+                    value={memberRoleFilter}
+                    onChange={(e) => setMemberRoleFilter(e.target.value as any)}
+                    className="w-full px-3 py-2 bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-white border border-zinc-200 dark:border-zinc-800 rounded-xl font-bold text-xs focus:outline-none focus:border-indigo-500 cursor-pointer"
+                  >
+                    <option value="all">Alla roller ({roleCounts.all})</option>
+                    <option value="player">Spelare ({roleCounts.player})</option>
+                    <option value="coach">Tränare / Ledare ({roleCounts.coach})</option>
+                    <option value="admin">Föreningsadmin ({roleCounts.admin})</option>
+                    <option value="parent">Förälder ({roleCounts.parent})</option>
+                  </select>
+                </div>
+
+                {/* Team Filter */}
+                <div>
+                  <label className="block text-[10px] font-black uppercase tracking-wider text-zinc-400 mb-1 flex items-center gap-1">
+                    <Shield size={11} className="text-indigo-500" />
+                    <span>Lagtillhörighet</span>
+                  </label>
+                  <select
+                    value={memberTeamFilter}
+                    onChange={(e) => setMemberTeamFilter(e.target.value)}
+                    className="w-full px-3 py-2 bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-white border border-zinc-200 dark:border-zinc-800 rounded-xl font-bold text-xs focus:outline-none focus:border-indigo-500 cursor-pointer"
+                  >
+                    <option value="all">Alla lag</option>
+                    <option value="unassigned">Ej i något lag ({roleCounts.unassigned})</option>
+                    {clubMetadata?.teams?.map(t => (
+                      <option key={t.id} value={t.id}>{t.name}</option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Sort By */}
+                <div>
+                  <label className="block text-[10px] font-black uppercase tracking-wider text-zinc-400 mb-1 flex items-center gap-1">
+                    <ArrowUpDown size={11} className="text-indigo-500" />
+                    <span>Sortera efter</span>
+                  </label>
+                  <select
+                    value={memberSortBy}
+                    onChange={(e) => setMemberSortBy(e.target.value as any)}
+                    className="w-full px-3 py-2 bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-white border border-zinc-200 dark:border-zinc-800 rounded-xl font-bold text-xs focus:outline-none focus:border-indigo-500 cursor-pointer"
+                  >
+                    <option value="name-asc">Namn (A–Ö)</option>
+                    <option value="name-desc">Namn (Ö–A)</option>
+                    <option value="role">Roll (Admin → Tränare → Spelare)</option>
+                    <option value="number">Tröjnummer (1..99)</option>
+                    <option value="team">Första lag</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Reset button if filters active */}
+              {(memberSearchQuery || memberRoleFilter !== 'all' || memberTeamFilter !== 'all' || memberSortBy !== 'name-asc') && (
+                <button
+                  onClick={() => {
+                    setMemberSearchQuery('');
+                    setMemberRoleFilter('all');
+                    setMemberTeamFilter('all');
+                    setMemberSortBy('name-asc');
+                  }}
+                  className="px-3.5 py-2 rounded-xl bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-zinc-700 dark:text-zinc-300 font-bold text-xs flex items-center gap-1.5 transition-all cursor-pointer shrink-0 justify-center"
+                  title="Återställ alla filtreringar"
+                >
+                  <RotateCcw size={13} />
+                  <span>Rensa filter</span>
+                </button>
+              )}
+            </div>
+
+            {/* Quick Filter Pills */}
+            <div className="flex flex-wrap items-center gap-1.5 pt-1">
+              <button
+                type="button"
+                onClick={() => {
+                  setMemberRoleFilter('all');
+                  setMemberTeamFilter('all');
+                }}
+                className={`px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                  memberRoleFilter === 'all' && memberTeamFilter === 'all'
+                    ? 'bg-zinc-900 text-white dark:bg-white dark:text-zinc-900 shadow-sm'
+                    : 'bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800/60 dark:hover:bg-zinc-800 text-zinc-600 dark:text-zinc-400'
+                }`}
+              >
+                Alla ({roleCounts.all})
+              </button>
+              <button
+                type="button"
+                onClick={() => setMemberRoleFilter('player')}
+                className={`px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                  memberRoleFilter === 'player'
+                    ? 'bg-sky-600 text-white shadow-sm'
+                    : 'bg-sky-50 dark:bg-sky-950/40 hover:bg-sky-100 dark:hover:bg-sky-900/50 text-sky-700 dark:text-sky-300'
+                }`}
+              >
+                Spelare ({roleCounts.player})
+              </button>
+              <button
+                type="button"
+                onClick={() => setMemberRoleFilter('coach')}
+                className={`px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                  memberRoleFilter === 'coach'
+                    ? 'bg-emerald-600 text-white shadow-sm'
+                    : 'bg-emerald-50 dark:bg-emerald-950/40 hover:bg-emerald-100 dark:hover:bg-emerald-900/50 text-emerald-700 dark:text-emerald-300'
+                }`}
+              >
+                Tränare ({roleCounts.coach})
+              </button>
+              <button
+                type="button"
+                onClick={() => setMemberRoleFilter('admin')}
+                className={`px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                  memberRoleFilter === 'admin'
+                    ? 'bg-purple-600 text-white shadow-sm'
+                    : 'bg-purple-50 dark:bg-purple-950/40 hover:bg-purple-100 dark:hover:bg-purple-900/50 text-purple-700 dark:text-purple-300'
+                }`}
+              >
+                Admins ({roleCounts.admin})
+              </button>
+              {roleCounts.unassigned > 0 && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMemberRoleFilter('all');
+                    setMemberTeamFilter('unassigned');
+                  }}
+                  className={`px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                    memberTeamFilter === 'unassigned'
+                      ? 'bg-amber-600 text-white shadow-sm'
+                      : 'bg-amber-50 dark:bg-amber-950/40 hover:bg-amber-100 dark:hover:bg-amber-900/50 text-amber-700 dark:text-amber-300'
+                  }`}
+                >
+                  Ej i något lag ({roleCounts.unassigned})
+                </button>
+              )}
             </div>
           </div>
 
@@ -1550,6 +2268,20 @@ export default function ClubAdminDashboard({
                 </div>
 
                 <form onSubmit={handleSaveMember} className="space-y-5">
+                  {actionStatus.status === 'error' && actionStatus.message && (
+                    <div className="p-3.5 rounded-xl bg-red-500/10 border border-red-500/30 text-red-600 dark:text-red-400 font-bold text-xs flex items-center gap-2">
+                      <AlertCircle size={16} className="shrink-0" />
+                      <span>{actionStatus.message}</span>
+                    </div>
+                  )}
+
+                  {actionStatus.status === 'success' && actionStatus.message && (
+                    <div className="p-3.5 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-600 dark:text-emerald-400 font-bold text-xs flex items-center gap-2">
+                      <Check size={16} className="shrink-0" />
+                      <span>{actionStatus.message}</span>
+                    </div>
+                  )}
+
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>
                       <label className="block text-xs font-black text-zinc-650 dark:text-zinc-400 uppercase tracking-wider mb-2">Medlemmens fullständiga namn</label>
@@ -1564,19 +2296,17 @@ export default function ClubAdminDashboard({
                     </div>
 
                     <div>
-                      <label className="block text-xs font-black text-zinc-650 dark:text-zinc-400 uppercase tracking-wider mb-2">Inloggnings-e-post (Måste matcha deras konto)</label>
+                      <label className="block text-xs font-black text-zinc-650 dark:text-zinc-400 uppercase tracking-wider mb-2">E-postadress (Valfritt om inloggning ej används ännu)</label>
                       <div className="relative">
                         <span className="absolute left-3.5 top-3 text-zinc-400">
                           <Mail size={16} />
                         </span>
                         <input
-                          type="email"
-                          required
-                          disabled={!!editingMember}
-                          placeholder="kalle@exempel.se"
+                          type="text"
+                          placeholder="kalle@exempel.se (valfritt)"
                           value={memberEmail}
                           onChange={(e) => setMemberEmail(e.target.value)}
-                          className={`w-full pl-10 pr-4 py-2.5 bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-white border border-zinc-200 dark:border-zinc-800 rounded-xl focus:outline-none focus:border-indigo-500 font-semibold text-sm ${editingMember ? 'opacity-60 cursor-not-allowed' : ''}`}
+                          className="w-full pl-10 pr-4 py-2.5 bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-white border border-zinc-200 dark:border-zinc-800 rounded-xl focus:outline-none focus:border-indigo-500 font-semibold text-sm"
                         />
                       </div>
                     </div>
@@ -1670,7 +2400,7 @@ export default function ClubAdminDashboard({
                           )}
                         </div>
                         <input
-                          type="url"
+                          type="text"
                           placeholder="Eller klistra in bild-URL (https://...)"
                           value={memberPhotoUrl}
                           onChange={(e) => setMemberPhotoUrl(e.target.value)}
@@ -1682,7 +2412,8 @@ export default function ClubAdminDashboard({
 
                   {/* Role Toggles */}
                   <div className="border-t border-zinc-100 dark:border-zinc-800 pt-4">
-                    <label className="block text-xs font-black text-zinc-650 dark:text-zinc-400 uppercase tracking-wider mb-3">Roll(er) i föreningen</label>
+                    <label className="block text-xs font-black text-zinc-650 dark:text-zinc-400 uppercase tracking-wider mb-1">Roll(er) i föreningen</label>
+                    <p className="text-[11px] text-zinc-500 dark:text-zinc-400 mb-3 font-medium">Bocka i alla roller som gäller för personen (t.ex. både Spelare och Tränare, eller Tränare och Admin).</p>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                       {[
                         { id: 'admin', label: 'Föreningsadmin', desc: 'Hantera lag, föreningar och roller.', color: 'purple' },
@@ -1698,16 +2429,22 @@ export default function ClubAdminDashboard({
                             onClick={() => toggleRole(r.id as any)}
                             className={`text-left p-3.5 rounded-2xl border transition-all cursor-pointer ${
                               active
-                                ? r.color === 'purple' ? 'border-purple-500 bg-purple-50/40 dark:bg-purple-950/20' :
-                                  r.color === 'emerald' ? 'border-emerald-500 bg-emerald-50/40 dark:bg-emerald-950/20' :
-                                  r.color === 'sky' ? 'border-sky-500 bg-sky-50/40 dark:bg-sky-950/20' :
-                                  'border-amber-500 bg-amber-50/40 dark:bg-amber-950/20'
+                                ? r.color === 'purple' ? 'border-purple-500 bg-purple-50/50 dark:bg-purple-950/30' :
+                                  r.color === 'emerald' ? 'border-emerald-500 bg-emerald-50/50 dark:bg-emerald-950/30' :
+                                  r.color === 'sky' ? 'border-sky-500 bg-sky-50/50 dark:bg-sky-950/30' :
+                                  'border-amber-500 bg-amber-50/50 dark:bg-amber-950/30'
                                 : 'bg-zinc-50 hover:bg-zinc-100/50 border-zinc-200 dark:bg-zinc-950 dark:hover:bg-zinc-900/60 dark:border-zinc-800'
                             }`}
                           >
                             <div className="flex items-center justify-between mb-1">
-                              <span className="font-extrabold text-xs sm:text-sm text-zinc-900 dark:text-white">{r.label}</span>
-                              {active && <span className="w-4 h-4 rounded-full bg-indigo-600 flex items-center justify-center text-white text-[10px] shrink-0"><Check size={10} /></span>}
+                              <span className="font-extrabold text-xs sm:text-sm text-zinc-900 dark:text-white flex items-center gap-1.5">
+                                <span>{r.label}</span>
+                              </span>
+                              <div className={`w-5 h-5 rounded-md border flex items-center justify-center transition-all ${
+                                active ? 'bg-indigo-600 border-indigo-600 text-white' : 'border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900'
+                              }`}>
+                                {active && <Check size={12} strokeWidth={3} />}
+                              </div>
                             </div>
                             <p className="text-[10px] text-zinc-500 dark:text-zinc-400 font-medium leading-tight">{r.desc}</p>
                           </button>
@@ -1752,10 +2489,20 @@ export default function ClubAdminDashboard({
                     </button>
                     <button
                       type="submit"
-                      className="w-full sm:w-auto px-6 py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-extrabold text-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-md shadow-indigo-100 dark:shadow-none"
+                      disabled={actionStatus.status === 'loading'}
+                      className="w-full sm:w-auto px-6 py-3 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white rounded-xl font-extrabold text-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-md shadow-indigo-100 dark:shadow-none"
                     >
-                      <Save size={14} />
-                      <span>Spara medlemsuppgifter</span>
+                      {actionStatus.status === 'loading' ? (
+                        <>
+                          <Loader2 size={14} className="animate-spin" />
+                          <span>Sparar uppgifter...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Save size={14} />
+                          <span>Spara medlemsuppgifter</span>
+                        </>
+                      )}
                     </button>
                   </div>
                 </form>
@@ -1765,17 +2512,26 @@ export default function ClubAdminDashboard({
 
           {/* Members Table / List */}
           <div className="bg-white dark:bg-zinc-900 rounded-3xl border border-zinc-150 dark:border-zinc-800 shadow-xl overflow-hidden">
-            <div className="p-6 border-b border-zinc-100 dark:border-zinc-800">
-              <h2 className="text-lg font-black text-zinc-900 dark:text-white tracking-tight">Medlemslista ({filteredMembers.length})</h2>
+            <div className="p-4 sm:p-6 border-b border-zinc-100 dark:border-zinc-800 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div>
+                <h2 className="text-base sm:text-lg font-black text-zinc-900 dark:text-white tracking-tight">
+                  Medlemslista ({filteredMembers.length} av {members.length})
+                </h2>
+                <p className="text-[11px] text-zinc-500 font-medium">
+                  {filteredMembers.length === members.length
+                    ? 'Visar alla registrerade medlemmar i föreningen'
+                    : `Visar ${filteredMembers.length} medlemmar baserat på valda filter`}
+                </p>
+              </div>
             </div>
 
             {isLoading ? (
               <div className="p-12 text-center text-sm text-zinc-500 font-medium">Laddar medlemmar...</div>
             ) : filteredMembers.length > 0 ? (
               <div className="divide-y divide-zinc-100 dark:divide-zinc-800/80">
-                {filteredMembers.map(member => (
+                {filteredMembers.map((member, idx) => (
                   <div
-                    key={member.email}
+                    key={member.userId || member.email || `mem-${idx}`}
                     className="p-3.5 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4 hover:bg-zinc-50/50 dark:hover:bg-zinc-950/40 transition-all w-full min-w-0"
                   >
                     <div className="flex items-start gap-3 sm:gap-3.5 min-w-0 flex-1">
@@ -1877,9 +2633,26 @@ export default function ClubAdminDashboard({
                 ))}
               </div>
             ) : (
-              <div className="text-center py-16 text-zinc-400 dark:text-zinc-500">
-                <Users size={40} className="mx-auto mb-3" />
-                <p className="text-xs font-bold">Hittade inga medlemmar som matchar sökningen.</p>
+              <div className="text-center py-16 px-4 text-zinc-400 dark:text-zinc-500">
+                <Users size={40} className="mx-auto mb-3 opacity-60" />
+                <p className="text-sm font-extrabold text-zinc-700 dark:text-zinc-300">Inga medlemmar hittades</p>
+                <p className="text-xs font-medium text-zinc-500 dark:text-zinc-400 mt-1 max-w-sm mx-auto">
+                  Det finns inga medlemmar som matchar din valda sökning eller filtrering.
+                </p>
+                {(memberSearchQuery || memberRoleFilter !== 'all' || memberTeamFilter !== 'all' || memberSortBy !== 'name-asc') && (
+                  <button
+                    onClick={() => {
+                      setMemberSearchQuery('');
+                      setMemberRoleFilter('all');
+                      setMemberTeamFilter('all');
+                      setMemberSortBy('name-asc');
+                    }}
+                    className="mt-4 inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-indigo-50 dark:bg-indigo-950/40 text-indigo-600 dark:text-indigo-400 font-extrabold text-xs hover:bg-indigo-100 dark:hover:bg-indigo-900/50 transition-all cursor-pointer"
+                  >
+                    <RotateCcw size={13} />
+                    <span>Rensa filter och visa alla</span>
+                  </button>
+                )}
               </div>
             )}
           </div>
@@ -2146,6 +2919,429 @@ export default function ClubAdminDashboard({
               </div>
             </div>
           )}
+        </div>
+      )}
+
+      {/* USER ACCOUNTS & PASSWORDS TAB */}
+      {activeTab === 'user_accounts' && selectedClub && (
+        <div className="space-y-6">
+          {/* Header Card */}
+          <div className="bg-white dark:bg-zinc-900 rounded-3xl border border-zinc-150 dark:border-zinc-800 shadow-xl p-5 sm:p-6">
+            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+              <div>
+                <h2 className="text-xl font-black text-zinc-900 dark:text-white tracking-tight flex items-center gap-2.5">
+                  <Key size={22} className="text-indigo-600 dark:text-indigo-400" />
+                  <span>Konto- & Lösenordshantering</span>
+                </h2>
+                <p className="text-xs text-zinc-500 dark:text-zinc-400 font-medium mt-1 max-w-2xl">
+                  Här har du full översikt över alla medlemmars inloggningskonton. Du kan redigera användarnamn, byta lösenord eller slumpa nya tillfälliga lösenord för medlemmar. Aktiva användares lösenord visas säkert dolda (••••••••).
+                </p>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  disabled={isBulkGenerating}
+                  onClick={() => handleBulkGenerateCredentials(userTeamFilter)}
+                  className="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white font-extrabold text-xs rounded-xl flex items-center gap-2 transition-all cursor-pointer shadow-md shadow-indigo-100 dark:shadow-none"
+                >
+                  {isBulkGenerating ? <Loader2 size={15} className="animate-spin" /> : <Sparkles size={15} />}
+                  <span>Generera användarnamn & lösenord för alla</span>
+                </button>
+                <button
+                  onClick={() => exportAccountsToExcel(filteredMemberAccounts)}
+                  className="px-3.5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs rounded-xl flex items-center gap-2 transition-all cursor-pointer shadow-md shadow-emerald-100 dark:shadow-none"
+                >
+                  <FileSpreadsheet size={15} />
+                  <span>Excel (.xlsx)</span>
+                </button>
+                <button
+                  onClick={() => exportAccountsToCSV(filteredMemberAccounts)}
+                  className="px-3.5 py-2.5 bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-zinc-700 dark:text-zinc-200 font-bold text-xs rounded-xl flex items-center gap-2 transition-all cursor-pointer border border-zinc-200 dark:border-zinc-700"
+                >
+                  <Download size={15} />
+                  <span>CSV</span>
+                </button>
+              </div>
+            </div>
+
+            {bulkGenSuccessMsg && (
+              <div className="mt-4 p-3.5 rounded-2xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800/60 text-emerald-800 dark:text-emerald-300 font-bold text-xs flex items-center gap-2 animate-in fade-in">
+                <CheckCircle2 size={16} />
+                <span>{bulkGenSuccessMsg}</span>
+              </div>
+            )}
+          </div>
+
+          {/* Quick Stats Grid */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4">
+            <div className="bg-white dark:bg-zinc-900 p-4 sm:p-5 rounded-2xl border border-zinc-150 dark:border-zinc-800 shadow-sm">
+              <span className="text-[10px] font-black uppercase tracking-wider text-zinc-400 block mb-1">Totalt Medlemmar</span>
+              <div className="flex items-baseline justify-between">
+                <span className="text-2xl font-black text-zinc-900 dark:text-white">{allMemberAccounts.length}</span>
+                <Users size={18} className="text-zinc-400" />
+              </div>
+            </div>
+
+            <div className="bg-white dark:bg-zinc-900 p-4 sm:p-5 rounded-2xl border border-zinc-150 dark:border-zinc-800 shadow-sm">
+              <span className="text-[10px] font-black uppercase tracking-wider text-indigo-600 dark:text-indigo-400 block mb-1">Med Användarnamn</span>
+              <div className="flex items-baseline justify-between">
+                <span className="text-2xl font-black text-indigo-600 dark:text-indigo-400">
+                  {allMemberAccounts.filter(a => !!a.username).length}
+                </span>
+                <Fingerprint size={18} className="text-indigo-400" />
+              </div>
+            </div>
+
+            <div className="bg-white dark:bg-zinc-900 p-4 sm:p-5 rounded-2xl border border-zinc-150 dark:border-zinc-800 shadow-sm">
+              <span className="text-[10px] font-black uppercase tracking-wider text-green-600 dark:text-green-400 block mb-1">Inloggade Konton</span>
+              <div className="flex items-baseline justify-between">
+                <span className="text-2xl font-black text-green-600 dark:text-green-400">
+                  {allMemberAccounts.filter(a => a.hasLoggedIn).length}
+                </span>
+                <UserCheck size={18} className="text-green-500" />
+              </div>
+            </div>
+
+            <div className="bg-white dark:bg-zinc-900 p-4 sm:p-5 rounded-2xl border border-zinc-150 dark:border-zinc-800 shadow-sm">
+              <span className="text-[10px] font-black uppercase tracking-wider text-amber-600 dark:text-amber-400 block mb-1">Tillfälliga Lösenord</span>
+              <div className="flex items-baseline justify-between">
+                <span className="text-2xl font-black text-amber-600 dark:text-amber-400">
+                  {allMemberAccounts.filter(a => !a.hasLoggedIn).length}
+                </span>
+                <Key size={18} className="text-amber-500" />
+              </div>
+            </div>
+          </div>
+
+          {/* Controls Bar */}
+          <div className="bg-white dark:bg-zinc-900 rounded-3xl border border-zinc-150 dark:border-zinc-800 shadow-xl p-4 sm:p-5">
+            <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
+              <div className="flex flex-col sm:flex-row items-center gap-3 w-full sm:w-auto flex-1">
+                {/* Search */}
+                <div className="relative w-full sm:w-72">
+                  <Search size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-zinc-400" />
+                  <input
+                    type="text"
+                    placeholder="Sök på namn, användarnamn, e-post, UUID..."
+                    value={userSearchQuery}
+                    onChange={(e) => setUserSearchQuery(e.target.value)}
+                    className="w-full pl-9 pr-3 py-2 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 text-zinc-900 dark:text-white rounded-xl text-xs font-bold focus:outline-none focus:border-indigo-500"
+                  />
+                  {userSearchQuery && (
+                    <button onClick={() => setUserSearchQuery('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-zinc-600">
+                      <X size={13} />
+                    </button>
+                  )}
+                </div>
+
+                {/* Team Filter */}
+                {clubMetadata?.teams && clubMetadata.teams.length > 0 && (
+                  <select
+                    value={userTeamFilter}
+                    onChange={(e) => setUserTeamFilter(e.target.value)}
+                    className="w-full sm:w-auto px-3.5 py-2 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 text-zinc-800 dark:text-zinc-200 rounded-xl text-xs font-bold focus:outline-none cursor-pointer"
+                  >
+                    <option value="all">Alla lag i föreningen</option>
+                    {clubMetadata.teams.map(t => (
+                      <option key={t.id} value={t.name}>{t.name}</option>
+                    ))}
+                  </select>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* Accounts List (Responsive Cards) */}
+          <div className="bg-white dark:bg-zinc-900 rounded-3xl border border-zinc-150 dark:border-zinc-800 shadow-xl overflow-hidden">
+            <div className="p-4 sm:p-5 border-b border-zinc-100 dark:border-zinc-800 flex items-center justify-between">
+              <h3 className="font-black text-base text-zinc-900 dark:text-white flex items-center gap-2">
+                <Users size={18} className="text-zinc-500" />
+                <span>Kontoöversikt ({filteredMemberAccounts.length})</span>
+              </h3>
+              {loadingUserAccounts && (
+                <span className="text-xs text-indigo-600 dark:text-indigo-400 font-bold flex items-center gap-1.5">
+                  <Loader2 size={14} className="animate-spin" /> Uppdaterar konton...
+                </span>
+              )}
+            </div>
+
+            {filteredMemberAccounts.length > 0 ? (
+              <div className="divide-y divide-zinc-100 dark:divide-zinc-800/80">
+                {filteredMemberAccounts.map(acc => (
+                  <div
+                    key={acc.id}
+                    className="p-4 sm:p-5 hover:bg-zinc-50/50 dark:hover:bg-zinc-950/40 transition-all space-y-3.5"
+                  >
+                    {/* Upper row: Member basic info & status badges */}
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-2xl bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 font-black text-sm flex items-center justify-center shrink-0 border border-indigo-100 dark:border-indigo-900/40">
+                          {acc.name.charAt(0).toUpperCase()}
+                        </div>
+                        <div>
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <h4 className="font-extrabold text-sm sm:text-base text-zinc-900 dark:text-white">{acc.name}</h4>
+                            <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-md bg-indigo-50 dark:bg-indigo-950/80 text-indigo-600 dark:text-indigo-400 border border-indigo-100 dark:border-indigo-900/40">
+                              {acc.role}
+                            </span>
+                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400">
+                              {acc.teamName}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-3 mt-1 flex-wrap">
+                            <span className="text-xs font-semibold text-zinc-600 dark:text-zinc-400 flex items-center gap-1">
+                              <Mail size={12} className="text-zinc-400" />
+                              {acc.email}
+                            </span>
+                            <div className="flex items-center gap-1 text-[10px] font-mono text-zinc-400">
+                              <span className="font-sans font-bold">UUID:</span>
+                              <button
+                                onClick={() => copyToClipboard(acc.id, `uuid-${acc.id}`)}
+                                className="hover:text-indigo-600 transition-colors cursor-pointer text-[10px] underline decoration-dotted"
+                                title="Klicka för att kopiera UUID"
+                              >
+                                {acc.id.substring(0, 16)}...
+                              </button>
+                              {copiedUserKey === `uuid-${acc.id}` && (
+                                <span className="text-[9px] text-emerald-600 font-bold">Kopierat!</span>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Login status badge */}
+                      <div className="shrink-0">
+                        {acc.hasLoggedIn ? (
+                          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-200 dark:border-emerald-800/60 text-emerald-700 dark:text-emerald-300 font-black text-xs">
+                            <CheckCircle2 size={13} />
+                            <span>Inloggad konto</span>
+                          </span>
+                        ) : acc.tempPassword ? (
+                          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-50 dark:bg-amber-950/50 border border-amber-200 dark:border-amber-800/60 text-amber-700 dark:text-amber-300 font-black text-xs">
+                            <Key size={13} />
+                            <span>Ej inloggad ännu</span>
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-zinc-100 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 text-zinc-500 font-bold text-xs">
+                            <span>Konto saknas</span>
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Middle row: Credentials details */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 p-3 bg-zinc-50 dark:bg-zinc-950/60 rounded-2xl border border-zinc-150 dark:border-zinc-800/80">
+                      {/* Username */}
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-xs font-bold text-zinc-500 dark:text-zinc-400">Användarnamn:</span>
+                        {acc.username ? (
+                          <span className="text-xs font-mono font-black text-indigo-700 dark:text-indigo-300 bg-indigo-50 dark:bg-indigo-950/80 px-2.5 py-1 rounded-lg border border-indigo-100 dark:border-indigo-900/40">
+                            @{acc.username}
+                          </span>
+                        ) : (
+                          <button
+                            onClick={() => handleQuickGenerateUsername(acc)}
+                            className="text-xs font-bold text-indigo-600 dark:text-indigo-400 hover:underline flex items-center gap-1 cursor-pointer"
+                          >
+                            <Sparkles size={12} />
+                            <span>Generera användarnamn</span>
+                          </button>
+                        )}
+                      </div>
+
+                      {/* Password / Temp password */}
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-xs font-bold text-zinc-500 dark:text-zinc-400">Lösenord:</span>
+                        {acc.hasLoggedIn ? (
+                          <span className="text-xs font-mono font-bold text-zinc-400 bg-zinc-200 dark:bg-zinc-800 px-2.5 py-1 rounded-lg tracking-widest">
+                            ••••••••
+                          </span>
+                        ) : acc.tempPassword ? (
+                          <div className="flex items-center gap-1.5 bg-amber-100 dark:bg-amber-950/80 border border-amber-200 dark:border-amber-800/60 px-2.5 py-1 rounded-lg">
+                            <span className="text-xs font-mono font-black text-amber-900 dark:text-amber-200">
+                              {acc.tempPassword}
+                            </span>
+                            <button
+                              onClick={() => copyToClipboard(acc.tempPassword!, `pwd-${acc.id}`)}
+                              className="text-amber-700 hover:text-amber-900 dark:text-amber-300 p-0.5 cursor-pointer"
+                              title="Kopiera lösenord"
+                            >
+                              {copiedUserKey === `pwd-${acc.id}` ? <Check size={12} className="text-emerald-600" /> : <Copy size={12} />}
+                            </button>
+                          </div>
+                        ) : (
+                          <span className="text-xs text-zinc-400 italic">Ej valt</span>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Bottom row: Direct Action Buttons */}
+                    <div className="flex items-center justify-end gap-2 pt-1">
+                      <button
+                        onClick={() => handleQuickResetPassword(acc)}
+                        className="px-3 py-2 bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/40 dark:hover:bg-amber-900/60 text-amber-800 dark:text-amber-200 font-extrabold text-xs rounded-xl flex items-center gap-1.5 transition-all cursor-pointer border border-amber-200 dark:border-amber-800/50"
+                        title="Skapa ett nytt tillfälligt lösenord för användaren"
+                      >
+                        <Sparkles size={13} />
+                        <span>Slumpa nytt lösenord</span>
+                      </button>
+
+                      <button
+                        onClick={() => {
+                          setEditingUserAccount(acc);
+                          setAccountEmailInput(acc.email);
+                          setAccountUsernameInput(acc.username || '');
+                          setAccountPasswordInput('');
+                          setUserAccountError('');
+                        }}
+                        className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold text-xs rounded-xl flex items-center gap-1.5 transition-all cursor-pointer shadow-sm shadow-indigo-100 dark:shadow-none"
+                      >
+                        <Edit3 size={13} />
+                        <span>Ändra konto</span>
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="text-center py-16 text-zinc-400 dark:text-zinc-500">
+                <Key size={36} className="mx-auto mb-2 opacity-60" />
+                <p className="text-xs font-bold">Inga medlemskonton hittades.</p>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* EDIT SINGLE USER ACCOUNT MODAL */}
+      {editingUserAccount && (
+        <div
+          className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm"
+          onClick={() => setEditingUserAccount(null)}
+        >
+          <div
+            className="bg-white dark:bg-zinc-900 rounded-3xl border border-zinc-200 dark:border-zinc-800 shadow-2xl p-6 sm:p-8 w-full max-w-lg my-auto animate-in fade-in zoom-in-95 duration-200"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between mb-6 border-b border-zinc-100 dark:border-zinc-800 pb-4">
+              <div>
+                <h3 className="text-lg font-black text-zinc-900 dark:text-white flex items-center gap-2">
+                  <Key size={20} className="text-indigo-600 dark:text-indigo-400" />
+                  <span>Hantera Inloggningsuppgifter</span>
+                </h3>
+                <p className="text-xs text-zinc-500 font-medium mt-0.5">
+                  För {editingUserAccount.name} ({editingUserAccount.email})
+                </p>
+              </div>
+              <button
+                onClick={() => setEditingUserAccount(null)}
+                className="text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 p-2 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-xl transition-all cursor-pointer"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveUserAccount} className="space-y-4">
+              {userAccountError && (
+                <div className="p-3 rounded-xl bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-900/40 text-red-700 dark:text-red-300 text-xs font-bold">
+                  {userAccountError}
+                </div>
+              )}
+
+              {/* UUID */}
+              <div>
+                <label className="block text-xs font-black text-zinc-600 dark:text-zinc-400 uppercase tracking-wider mb-1">
+                  UUID (Användar-ID)
+                </label>
+                <input
+                  type="text"
+                  readOnly
+                  value={editingUserAccount.id}
+                  className="w-full px-3.5 py-2.5 bg-zinc-100 dark:bg-zinc-950 text-zinc-500 font-mono text-xs border border-zinc-200 dark:border-zinc-800 rounded-xl cursor-not-allowed"
+                />
+              </div>
+
+              {/* Email */}
+              <div>
+                <label className="block text-xs font-black text-zinc-600 dark:text-zinc-400 uppercase tracking-wider mb-1">
+                  E-postadress *
+                </label>
+                <input
+                  type="email"
+                  required
+                  value={accountEmailInput}
+                  onChange={(e) => setAccountEmailInput(e.target.value)}
+                  className="w-full px-3.5 py-2.5 bg-white dark:bg-zinc-900 text-zinc-900 dark:text-white border border-zinc-200 dark:border-zinc-800 rounded-xl focus:outline-none focus:border-indigo-500 font-bold text-xs"
+                />
+              </div>
+
+              {/* Username */}
+              <div>
+                <label className="block text-xs font-black text-zinc-600 dark:text-zinc-400 uppercase tracking-wider mb-1">
+                  Användarnamn
+                </label>
+                <input
+                  type="text"
+                  placeholder="t.ex. johan_s (3-20 tecken)"
+                  value={accountUsernameInput}
+                  onChange={(e) => setAccountUsernameInput(e.target.value)}
+                  className="w-full px-3.5 py-2.5 bg-white dark:bg-zinc-900 text-zinc-900 dark:text-white border border-zinc-200 dark:border-zinc-800 rounded-xl focus:outline-none focus:border-indigo-500 font-bold text-xs"
+                />
+              </div>
+
+              {/* Password */}
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-xs font-black text-zinc-600 dark:text-zinc-400 uppercase tracking-wider">
+                    Nytt Lösenord / Byte
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const words = ['Snabb', 'Stark', 'Fokus', 'Smidig', 'Taktik', 'Kämpe', 'Laganda', 'Spelare', 'Ledare'];
+                      const word = words[Math.floor(Math.random() * words.length)];
+                      const num = Math.floor(1000 + Math.random() * 9000);
+                      setAccountPasswordInput(`${word}-${num}`);
+                    }}
+                    className="text-[11px] font-bold text-indigo-600 dark:text-indigo-400 hover:underline cursor-pointer flex items-center gap-1"
+                  >
+                    <Sparkles size={11} />
+                    <span>Slumpa lösenord</span>
+                  </button>
+                </div>
+                <input
+                  type="text"
+                  placeholder={editingUserAccount.hasLoggedIn ? "Lämna tomt för att behålla nuvarande lösenord" : "Ange nytt eller slumpa lösenord"}
+                  value={accountPasswordInput}
+                  onChange={(e) => setAccountPasswordInput(e.target.value)}
+                  className="w-full px-3.5 py-2.5 bg-white dark:bg-zinc-900 text-zinc-900 dark:text-white border border-zinc-200 dark:border-zinc-800 rounded-xl focus:outline-none focus:border-indigo-500 font-mono text-xs font-bold"
+                />
+                <p className="text-[10px] text-zinc-400 font-medium mt-1">
+                  Om du byter lösenord kommer det tillfälliga lösenordet att visas i listan tills medlemmen loggat in på nytt.
+                </p>
+              </div>
+
+              {/* Actions */}
+              <div className="pt-4 border-t border-zinc-100 dark:border-zinc-800 flex justify-end gap-3">
+                <button
+                  type="button"
+                  onClick={() => setEditingUserAccount(null)}
+                  className="px-5 py-2.5 rounded-xl border border-zinc-200 dark:border-zinc-800 text-zinc-700 dark:text-zinc-300 font-extrabold text-xs hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-all cursor-pointer"
+                >
+                  Avbryt
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSavingUserAccount}
+                  className="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold text-xs rounded-xl flex items-center gap-2 transition-all cursor-pointer shadow-md shadow-indigo-100 dark:shadow-none disabled:opacity-50"
+                >
+                  {isSavingUserAccount ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
+                  <span>Spara ändringar</span>
+                </button>
+              </div>
+            </form>
+          </div>
         </div>
       )}
 
@@ -2604,7 +3800,7 @@ export default function ClubAdminDashboard({
                   <div className="relative flex-1">
                     <Link size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-zinc-400" />
                     <input
-                      type="url"
+                      type="text"
                       value={tempIcsUrl}
                       onChange={(e) => setTempIcsUrl(e.target.value)}
                       placeholder="webcal://www.svenskalag.se/ical/eller_https://..."
@@ -2688,7 +3884,7 @@ export default function ClubAdminDashboard({
                   <div className="relative flex-1">
                     <Globe size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-zinc-400" />
                     <input
-                      type="url"
+                      type="text"
                       value={tempTeamUrl}
                       onChange={(e) => setTempTeamUrl(e.target.value)}
                       placeholder="https://www.svenskalag.se/ditt-lag"
@@ -2717,7 +3913,7 @@ export default function ClubAdminDashboard({
                   <div className="relative flex-1">
                     <Settings size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-zinc-400" />
                     <input
-                      type="url"
+                      type="text"
                       value={tempAdminUrl}
                       onChange={(e) => setTempAdminUrl(e.target.value)}
                       placeholder="https://www.svenskalag.se/admin"
@@ -2746,7 +3942,7 @@ export default function ClubAdminDashboard({
                   <div className="relative flex-1">
                     <Link size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-zinc-400" />
                     <input
-                      type="url"
+                      type="text"
                       value={tempSeriesUrl}
                       onChange={(e) => setTempSeriesUrl(e.target.value)}
                       placeholder="https://minfotboll.svenskfotboll.se/lag/..."

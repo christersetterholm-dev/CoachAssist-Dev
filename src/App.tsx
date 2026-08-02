@@ -578,6 +578,9 @@ export default function App() {
       const profileSnap = await getDoc(doc(db, 'users', uid, 'data', 'profile'));
       if (profileSnap.exists()) {
         const p = profileSnap.data() as UserProfile;
+        if (!p.username && auth.currentUser?.username) {
+          p.username = auth.currentUser.username;
+        }
         setUserProfile(p);
         
         // Load roles for active club
@@ -647,6 +650,31 @@ export default function App() {
   }, [userProfile.activeClubId, userRoles, isRootAdmin, user]);
 
   const handleProfileUpdated = (updatedProfile: UserProfile) => {
+    const clubOrTeamChanged = 
+      updatedProfile.activeClubId !== userProfile.activeClubId ||
+      updatedProfile.activeTeamId !== userProfile.activeTeamId;
+
+    if (clubOrTeamChanged) {
+      console.log("App: Active club or team changed. Flushing pending edits if any, and resetting data context.");
+      if (sessionActionCount > 0 && userProfile.activeClubId && userProfile.activeTeamId) {
+        try {
+          const oldRefs = getDocRefs(user, userProfile);
+          setDoc(oldRefs.docSquadRef, { squad: data.squad, updatedAt: Date.now(), lastUpdatedBy: sessionIdRef.current }).catch(() => {});
+          setDoc(oldRefs.docSessionsRef, { sessions: data.sessions, deletedSessions: data.deletedSessions, updatedAt: Date.now(), lastUpdatedBy: sessionIdRef.current }).catch(() => {});
+          setDoc(oldRefs.docLineupsRef, { lineups: data.lineups, activeLineupId: data.activeLineupId, updatedAt: Date.now(), lastUpdatedBy: sessionIdRef.current }).catch(() => {});
+          setDoc(oldRefs.docSettingsRef, { teamUrl, adminUrl, seriesUrl, customFormations, pinnedFormationIds, trainingSettings, activeExerciseId, updatedAt: Date.now(), lastUpdatedBy: sessionIdRef.current }).catch(() => {});
+        } catch (e) {
+          console.warn("Could not flush old team pending edits:", e);
+        }
+      }
+
+      setSessionActionCount(0);
+      setHasPulledFromCloud(false);
+      setIsInitialSyncDone(false);
+      lastCloudDataRef.current = null;
+      setData(INITIAL_DATA);
+    }
+
     setUserProfile(updatedProfile);
     
     // Reload user roles for the new active club
@@ -667,19 +695,6 @@ export default function App() {
         }).catch(err => console.error('Failed to load roles on profile update:', err));
       } else {
         setUserRoles([]);
-      }
-
-      if (updatedProfile.activeClubId && updatedProfile.activeTeamId) {
-        getMergedSquadAndClubMembers(data.squad, updatedProfile.activeClubId, updatedProfile.activeTeamId)
-          .then(({ mergedSquad, hasChanges }) => {
-            if (hasChanges) {
-              setData(prev => ({ ...prev, squad: mergedSquad }));
-              setSessionActionCount(prev => prev + 1);
-            }
-            syncSquadToClubMembers(mergedSquad, updatedProfile.activeClubId!, updatedProfile.activeTeamId!)
-              .catch(err => console.error('Failed to sync squad on profile update:', err));
-          })
-          .catch(err => console.error('Failed to merge squad on profile update:', err));
       }
     }
   };
@@ -861,6 +876,12 @@ export default function App() {
     let unsubscribeLineups: (() => void) | null = null;
 
     const initializeAndLoad = async () => {
+      // Step 0: Ensure flags and state are clean before reading
+      setHasPulledFromCloud(false);
+      setIsInitialSyncDone(false);
+      setSessionActionCount(0);
+      lastCloudDataRef.current = null;
+
       try {
         const { docSquadRef, docSessionsRef, docExercisesRef, docLineupsRef, docPeriodsRef, docSettingsRef } = getDocRefs(user, userProfile);
         const docOldStateRef = doc(db, 'users', user.uid, 'config', 'state');
@@ -879,168 +900,172 @@ export default function App() {
 
         let loadedState: CoachData;
 
-        // Load local cache as fallback for missing segments or offline recovery
-        const savedSquad = localStorage.getItem('football_squad');
-        const savedSessions = localStorage.getItem('football_sessions');
-        const savedDeletedSessions = localStorage.getItem('football_deleted_sessions');
-        const savedExercises = localStorage.getItem('football_exercises');
-        const savedSettings = localStorage.getItem('training_settings');
-        const savedLineups = localStorage.getItem('football_lineups');
-        const savedActiveLineupId = localStorage.getItem('active_lineup_id');
-        const savedPeriods = localStorage.getItem('football_periods');
-        const savedCurrentPeriodId = localStorage.getItem('current_period_id');
-        const savedActiveExerciseId = localStorage.getItem('active_exercise_id');
-        const savedTeamUrl = localStorage.getItem('team_url');
-        const savedAdminUrl = localStorage.getItem('admin_url');
-        const savedSeriesUrl = localStorage.getItem('series_url');
-        const savedExerciseBank = localStorage.getItem('football_exercise_bank');
-        const savedExerciseBankCategories = localStorage.getItem('football_exercise_bank_categories');
-
-        const cachedSquad = savedSquad ? (Array.from(new Map(JSON.parse(savedSquad).map((p: any) => [p.id, p])).values()) as SquadPlayer[]) : [];
-        const cachedSessions = savedSessions ? deduplicateById<TrainingSession>(JSON.parse(savedSessions)) : [];
-        const cachedDeletedSessions = savedDeletedSessions ? deduplicateById<TrainingSession>(JSON.parse(savedDeletedSessions)) : [];
-        const cachedExercises = savedExercises ? deduplicateById<Exercise>(JSON.parse(savedExercises)) : [];
-        const cachedExerciseBank = savedExerciseBank ? deduplicateById<BankExercise>(JSON.parse(savedExerciseBank)) : [];
-        const cachedExerciseBankCategories = savedExerciseBankCategories ? JSON.parse(savedExerciseBankCategories) : [];
-        const cachedLineups = savedLineups ? deduplicateById<Lineup>(JSON.parse(savedLineups)) : [];
-        const cachedPeriods = savedPeriods ? deduplicateById<Period>(JSON.parse(savedPeriods)) : [];
-        const cachedCustomFormations = localStorage.getItem('custom_formations') ? deduplicateById<any>(JSON.parse(localStorage.getItem('custom_formations')!)) : [];
-        const cachedPinnedFormations = localStorage.getItem('pinned_formations') ? JSON.parse(localStorage.getItem('pinned_formations')!) : ['4-2-3-1', '4-4-2', '4-3-3'];
-        const cachedSettings = savedSettings ? JSON.parse(savedSettings) : INITIAL_DATA.trainingSettings;
-
-        if (!docsExist) {
-          // Step 2: Segmented docs do not exist. Check for migration of old unified config/state doc
-          console.log("App: Segmented data docs not found, checking for old state migration...");
-          const oldStateSnap = await getDoc(docOldStateRef);
-
-          if (oldStateSnap.exists()) {
-            const oldData = oldStateSnap.data();
-            console.log("App: Old unified state found. Migrating to segmented docs...");
-
-            const squadData = { squad: oldData.squad || [] };
-            const sessionsData = { sessions: oldData.sessions || [], deletedSessions: oldData.deletedSessions || [] };
-            const exercisesData = { exercises: oldData.exercises || [], exerciseBank: oldData.exerciseBank || [], exerciseBankCategories: oldData.exerciseBankCategories || [] };
-            const lineupsData = { lineups: oldData.lineups || [], activeLineupId: oldData.activeLineupId || null };
-            const periodsData = { periods: oldData.periods || [], currentPeriodId: oldData.currentPeriodId || null };
-            const settingsData = {
-              teamUrl: oldData.teamUrl || '',
-              adminUrl: oldData.adminUrl || '',
-              seriesUrl: oldData.seriesUrl || '',
-              customFormations: oldData.customFormations || [],
-              pinnedFormationIds: oldData.pinnedFormationIds || ['4-2-3-1', '4-4-2', '4-3-3'],
-              trainingSettings: oldData.trainingSettings || INITIAL_DATA.trainingSettings,
-              activeExerciseId: oldData.activeExerciseId || null,
-            };
-
-            const now = Date.now();
-            await Promise.all([
-              setDoc(docSquadRef, { ...squadData, updatedAt: now, lastUpdatedBy: 'migration' }),
-              setDoc(docSessionsRef, { ...sessionsData, updatedAt: now, lastUpdatedBy: 'migration' }),
-              setDoc(docExercisesRef, { ...exercisesData, updatedAt: now, lastUpdatedBy: 'migration' }),
-              setDoc(docLineupsRef, { ...lineupsData, updatedAt: now, lastUpdatedBy: 'migration' }),
-              setDoc(docPeriodsRef, { ...periodsData, updatedAt: now, lastUpdatedBy: 'migration' }),
-              setDoc(docSettingsRef, { ...settingsData, updatedAt: now, lastUpdatedBy: 'migration' }),
-            ]);
-
+        if (userProfile.activeClubId && userProfile.activeTeamId) {
+          // STRICT CLUB & TEAM ISOLATION
+          if (!docsExist) {
+            console.log(`App: Clean initial state for new club team [club: ${userProfile.activeClubId}, team: ${userProfile.activeTeamId}]`);
             loadedState = {
-              squad: squadData.squad,
-              sessions: sessionsData.sessions,
-              deletedSessions: sessionsData.deletedSessions,
-              exercises: exercisesData.exercises,
-              exerciseBank: exercisesData.exerciseBank,
-              exerciseBankCategories: exercisesData.exerciseBankCategories,
-              lineups: lineupsData.lineups,
-              activeLineupId: lineupsData.activeLineupId,
-              periods: periodsData.periods,
-              currentPeriodId: periodsData.currentPeriodId,
-              teamUrl: settingsData.teamUrl,
-              adminUrl: settingsData.adminUrl,
-              seriesUrl: settingsData.seriesUrl,
-              customFormations: settingsData.customFormations,
-              pinnedFormationIds: settingsData.pinnedFormationIds,
-              trainingSettings: settingsData.trainingSettings,
-              activeExerciseId: settingsData.activeExerciseId,
+              ...INITIAL_DATA,
+              squad: [],
+              sessions: [],
+              deletedSessions: [],
+              exercises: [],
+              lineups: [],
+              activeLineupId: null,
+              periods: [],
+              currentPeriodId: null,
+              activeExerciseId: null,
+              teamUrl: '',
+              adminUrl: '',
+              seriesUrl: '',
+              customFormations: [],
+              pinnedFormationIds: ['4-2-3-1', '4-4-2', '4-3-3'],
+              trainingSettings: INITIAL_DATA.trainingSettings,
+              exerciseBank: [],
+              exerciseBankCategories: []
             };
-            console.log("App: Migration completed successfully!");
           } else {
-            // No old state either, check local storage recovery as a fallback
-            console.log("App: No cloud state found. Attempting local storage recovery...");
-            const hasSquad = cachedSquad.length > 0;
-            const hasSessions = cachedSessions.length > 0;
-            const hasExercises = cachedExercises.length > 0;
-            const hasSettings = savedSettings && JSON.parse(savedSettings).icsUrl;
-
-            if (hasSquad || hasSessions || hasExercises || hasSettings) {
-              loadedState = {
-                squad: cachedSquad,
-                exercises: cachedExercises,
-                sessions: cachedSessions,
-                deletedSessions: cachedDeletedSessions,
-                lineups: cachedLineups,
-                activeLineupId: savedActiveLineupId || null,
-                periods: cachedPeriods,
-                currentPeriodId: savedCurrentPeriodId || null,
-                activeExerciseId: savedActiveExerciseId || null,
-                teamUrl: savedTeamUrl || '',
-                adminUrl: savedAdminUrl || '',
-                seriesUrl: savedSeriesUrl || '',
-                customFormations: cachedCustomFormations,
-                pinnedFormationIds: cachedPinnedFormations,
-                trainingSettings: cachedSettings,
-                exerciseBank: cachedExerciseBank,
-                exerciseBankCategories: cachedExerciseBankCategories
-              };
-              setSessionActionCount(1); // Force save of local data to new cloud segments
-            } else {
-              loadedState = INITIAL_DATA;
-            }
+            loadedState = {
+              squad: squadSnap.exists() ? deduplicateById(squadSnap.data().squad || []) : [],
+              sessions: sessionsSnap.exists() ? deduplicateById(sessionsSnap.data().sessions || []) : [],
+              deletedSessions: sessionsSnap.exists() ? deduplicateById(sessionsSnap.data().deletedSessions || []) : [],
+              exercises: exercisesSnap.exists() ? deduplicateById(exercisesSnap.data().exercises || []) : [],
+              exerciseBank: exercisesSnap.exists() ? deduplicateById(exercisesSnap.data().exerciseBank || []) : [],
+              exerciseBankCategories: exercisesSnap.exists() ? (exercisesSnap.data().exerciseBankCategories || []) : [],
+              lineups: lineupsSnap.exists() ? deduplicateById(lineupsSnap.data().lineups || []) : [],
+              activeLineupId: lineupsSnap.exists() ? (lineupsSnap.data().activeLineupId || null) : null,
+              periods: periodsSnap.exists() ? deduplicateById(periodsSnap.data().periods || []) : [],
+              currentPeriodId: periodsSnap.exists() ? (periodsSnap.data().currentPeriodId || null) : null,
+              teamUrl: settingsSnap.exists() ? (settingsSnap.data().teamUrl || '') : '',
+              adminUrl: settingsSnap.exists() ? (settingsSnap.data().adminUrl || '') : '',
+              seriesUrl: settingsSnap.exists() ? (settingsSnap.data().seriesUrl || '') : '',
+              customFormations: settingsSnap.exists() ? deduplicateById(settingsSnap.data().customFormations || []) : [],
+              pinnedFormationIds: settingsSnap.exists() ? (settingsSnap.data().pinnedFormationIds || ['4-2-3-1', '4-4-2', '4-3-3']) : ['4-2-3-1', '4-4-2', '4-3-3'],
+              trainingSettings: settingsSnap.exists() ? (settingsSnap.data().trainingSettings || INITIAL_DATA.trainingSettings) : INITIAL_DATA.trainingSettings,
+              activeExerciseId: settingsSnap.exists() ? (settingsSnap.data().activeExerciseId || null) : null,
+            };
           }
-        } else {
-          // Segments exist. Check offline recovery vs segment update times.
-          const localSyncAtStr = localStorage.getItem('last_local_sync_at');
-          const localSyncAt = localSyncAtStr ? parseInt(localSyncAtStr, 10) : 0;
-          const localUserId = localStorage.getItem('last_local_user_id');
 
-          const cloudSyncAt = Math.max(
-            squadSnap.exists() ? (squadSnap.data().updatedAt || 0) : 0,
-            sessionsSnap.exists() ? (sessionsSnap.data().updatedAt || 0) : 0,
-            exercisesSnap.exists() ? (exercisesSnap.data().updatedAt || 0) : 0,
-            lineupsSnap.exists() ? (lineupsSnap.data().updatedAt || 0) : 0,
-            periodsSnap.exists() ? (periodsSnap.data().updatedAt || 0) : 0,
-            settingsSnap.exists() ? (settingsSnap.data().updatedAt || 0) : 0
+          // Merge squad with club members assigned to this team
+          const { mergedSquad } = await getMergedSquadAndClubMembers(
+            loadedState.squad,
+            userProfile.activeClubId,
+            userProfile.activeTeamId
           );
+          loadedState.squad = mergedSquad;
+        } else {
+          // Private mode (single user with no active club/team selected)
+          // Load local cache as fallback for missing segments or offline recovery
+          const savedSquad = localStorage.getItem('football_squad');
+          const savedSessions = localStorage.getItem('football_sessions');
+          const savedDeletedSessions = localStorage.getItem('football_deleted_sessions');
+          const savedExercises = localStorage.getItem('football_exercises');
+          const savedSettings = localStorage.getItem('training_settings');
+          const savedLineups = localStorage.getItem('football_lineups');
+          const savedActiveLineupId = localStorage.getItem('active_lineup_id');
+          const savedPeriods = localStorage.getItem('football_periods');
+          const savedCurrentPeriodId = localStorage.getItem('current_period_id');
+          const savedActiveExerciseId = localStorage.getItem('active_exercise_id');
+          const savedTeamUrl = localStorage.getItem('team_url');
+          const savedAdminUrl = localStorage.getItem('admin_url');
+          const savedSeriesUrl = localStorage.getItem('series_url');
+          const savedExerciseBank = localStorage.getItem('football_exercise_bank');
+          const savedExerciseBankCategories = localStorage.getItem('football_exercise_bank_categories');
 
-          const isOfflineDataNewer = localUserId === user.uid && localSyncAt > (cloudSyncAt + 2000);
+          const cachedSquad = savedSquad ? (Array.from(new Map(JSON.parse(savedSquad).map((p: any) => [p.id, p])).values()) as SquadPlayer[]) : [];
+          const cachedSessions = savedSessions ? deduplicateById<TrainingSession>(JSON.parse(savedSessions)) : [];
+          const cachedDeletedSessions = savedDeletedSessions ? deduplicateById<TrainingSession>(JSON.parse(savedDeletedSessions)) : [];
+          const cachedExercises = savedExercises ? deduplicateById<Exercise>(JSON.parse(savedExercises)) : [];
+          const cachedExerciseBank = savedExerciseBank ? deduplicateById<BankExercise>(JSON.parse(savedExerciseBank)) : [];
+          const cachedExerciseBankCategories = savedExerciseBankCategories ? JSON.parse(savedExerciseBankCategories) : [];
+          const cachedLineups = savedLineups ? deduplicateById<Lineup>(JSON.parse(savedLineups)) : [];
+          const cachedPeriods = savedPeriods ? deduplicateById<Period>(JSON.parse(savedPeriods)) : [];
+          const cachedCustomFormations = localStorage.getItem('custom_formations') ? deduplicateById<any>(JSON.parse(localStorage.getItem('custom_formations')!)) : [];
+          const cachedPinnedFormations = localStorage.getItem('pinned_formations') ? JSON.parse(localStorage.getItem('pinned_formations')!) : ['4-2-3-1', '4-4-2', '4-3-3'];
+          const cachedSettings = savedSettings ? JSON.parse(savedSettings) : INITIAL_DATA.trainingSettings;
 
-          if (isOfflineDataNewer && (cachedSquad.length > 0 || cachedSessions.length > 0 || cachedExercises.length > 0)) {
-            console.log("App: Offline recovery triggered. Local storage is newer.");
-            loadedState = {
-              squad: cachedSquad,
-              exercises: cachedExercises,
-              sessions: cachedSessions,
-              deletedSessions: cachedDeletedSessions,
-              lineups: cachedLineups,
-              activeLineupId: savedActiveLineupId || null,
-              periods: cachedPeriods,
-              currentPeriodId: savedCurrentPeriodId || null,
-              activeExerciseId: savedActiveExerciseId || null,
-              teamUrl: savedTeamUrl || '',
-              adminUrl: savedAdminUrl || '',
-              seriesUrl: savedSeriesUrl || '',
-              customFormations: cachedCustomFormations,
-              pinnedFormationIds: cachedPinnedFormations,
-              trainingSettings: cachedSettings,
-              exerciseBank: cachedExerciseBank,
-              exerciseBankCategories: cachedExerciseBankCategories
-            };
-            setSessionActionCount(1);
+          if (!docsExist) {
+            console.log("App: Private mode - segmented data docs not found, checking for old state migration...");
+            const oldStateSnap = await getDoc(docOldStateRef);
+
+            if (oldStateSnap.exists()) {
+              const oldData = oldStateSnap.data();
+              const squadData = { squad: oldData.squad || [] };
+              const sessionsData = { sessions: oldData.sessions || [], deletedSessions: oldData.deletedSessions || [] };
+              const exercisesData = { exercises: oldData.exercises || [], exerciseBank: oldData.exerciseBank || [], exerciseBankCategories: oldData.exerciseBankCategories || [] };
+              const lineupsData = { lineups: oldData.lineups || [], activeLineupId: oldData.activeLineupId || null };
+              const periodsData = { periods: oldData.periods || [], currentPeriodId: oldData.currentPeriodId || null };
+              const settingsData = {
+                teamUrl: oldData.teamUrl || '',
+                adminUrl: oldData.adminUrl || '',
+                seriesUrl: oldData.seriesUrl || '',
+                customFormations: oldData.customFormations || [],
+                pinnedFormationIds: oldData.pinnedFormationIds || ['4-2-3-1', '4-4-2', '4-3-3'],
+                trainingSettings: oldData.trainingSettings || INITIAL_DATA.trainingSettings,
+                activeExerciseId: oldData.activeExerciseId || null,
+              };
+
+              const now = Date.now();
+              await Promise.all([
+                setDoc(docSquadRef, { ...squadData, updatedAt: now, lastUpdatedBy: 'migration' }),
+                setDoc(docSessionsRef, { ...sessionsData, updatedAt: now, lastUpdatedBy: 'migration' }),
+                setDoc(docExercisesRef, { ...exercisesData, updatedAt: now, lastUpdatedBy: 'migration' }),
+                setDoc(docLineupsRef, { ...lineupsData, updatedAt: now, lastUpdatedBy: 'migration' }),
+                setDoc(docPeriodsRef, { ...periodsData, updatedAt: now, lastUpdatedBy: 'migration' }),
+                setDoc(docSettingsRef, { ...settingsData, updatedAt: now, lastUpdatedBy: 'migration' }),
+              ]);
+
+              loadedState = {
+                squad: squadData.squad,
+                sessions: sessionsData.sessions,
+                deletedSessions: sessionsData.deletedSessions,
+                exercises: exercisesData.exercises,
+                exerciseBank: exercisesData.exerciseBank,
+                exerciseBankCategories: exercisesData.exerciseBankCategories,
+                lineups: lineupsData.lineups,
+                activeLineupId: lineupsData.activeLineupId,
+                periods: periodsData.periods,
+                currentPeriodId: periodsData.currentPeriodId,
+                teamUrl: settingsData.teamUrl,
+                adminUrl: settingsData.adminUrl,
+                seriesUrl: settingsData.seriesUrl,
+                customFormations: settingsData.customFormations,
+                pinnedFormationIds: settingsData.pinnedFormationIds,
+                trainingSettings: settingsData.trainingSettings,
+                activeExerciseId: settingsData.activeExerciseId,
+              };
+            } else {
+              const hasSquad = cachedSquad.length > 0;
+              const hasSessions = cachedSessions.length > 0;
+              const hasExercises = cachedExercises.length > 0;
+              const hasSettings = savedSettings && JSON.parse(savedSettings).icsUrl;
+
+              if (hasSquad || hasSessions || hasExercises || hasSettings) {
+                loadedState = {
+                  squad: cachedSquad,
+                  exercises: cachedExercises,
+                  sessions: cachedSessions,
+                  deletedSessions: cachedDeletedSessions,
+                  lineups: cachedLineups,
+                  activeLineupId: savedActiveLineupId || null,
+                  periods: cachedPeriods,
+                  currentPeriodId: savedCurrentPeriodId || null,
+                  activeExerciseId: savedActiveExerciseId || null,
+                  teamUrl: savedTeamUrl || '',
+                  adminUrl: savedAdminUrl || '',
+                  seriesUrl: savedSeriesUrl || '',
+                  customFormations: cachedCustomFormations,
+                  pinnedFormationIds: cachedPinnedFormations,
+                  trainingSettings: cachedSettings,
+                  exerciseBank: cachedExerciseBank,
+                  exerciseBankCategories: cachedExerciseBankCategories
+                };
+                setSessionActionCount(1);
+              } else {
+                loadedState = INITIAL_DATA;
+              }
+            }
           } else {
-            // Use segment data from cloud, but fallback to local cache for any segment missing in cloud
-            let missingSegmentCount = 0;
-            if (!squadSnap.exists() && cachedSquad.length > 0) missingSegmentCount++;
-            if (!sessionsSnap.exists() && cachedSessions.length > 0) missingSegmentCount++;
-            if (!exercisesSnap.exists() && cachedExercises.length > 0) missingSegmentCount++;
-
             loadedState = {
               squad: squadSnap.exists() ? deduplicateById(squadSnap.data().squad || []) : cachedSquad,
               sessions: sessionsSnap.exists() ? deduplicateById(sessionsSnap.data().sessions || []) : cachedSessions,
@@ -1060,11 +1085,6 @@ export default function App() {
               trainingSettings: settingsSnap.exists() ? (settingsSnap.data().trainingSettings || INITIAL_DATA.trainingSettings) : cachedSettings,
               activeExerciseId: settingsSnap.exists() ? (settingsSnap.data().activeExerciseId || null) : (savedActiveExerciseId || null),
             };
-
-            if (missingSegmentCount > 0) {
-              console.log(`App: Preserved ${missingSegmentCount} local segments for missing cloud docs. Flagging sync.`);
-              setSessionActionCount(1);
-            }
           }
         }
 
@@ -1677,6 +1697,7 @@ export default function App() {
       date: Date.now(),
       startTime: trainingSettings?.defaultStartTime || '18:00',
       endTime: endTime,
+      hideContentForPlayers: trainingSettings?.defaultHideContentForPlayers || false,
       moments: [],
       createdAt: Date.now(),
       updatedAt: Date.now()
@@ -2855,7 +2876,7 @@ export default function App() {
               </motion.div>
             ) : (
               <SquadManager
-                key="squad"
+                key={`squad-${userProfile.activeClubId || 'none'}-${userProfile.activeTeamId || 'none'}`}
                 squad={squad}
                 onUpdateSquad={handleUpdateSquad}
                 activeClubId={userProfile.activeClubId}

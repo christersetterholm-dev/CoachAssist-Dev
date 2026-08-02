@@ -13,23 +13,29 @@ interface CachedImageProps extends React.ImgHTMLAttributes<HTMLImageElement> {
 
 export const CachedImage: React.FC<CachedImageProps> = ({ src, className, alt, crossOrigin = 'anonymous', ...props }) => {
   // Initialize from memory cache synchronously if possible
-  const [displaySrc, setDisplaySrc] = useState<string | null>(memoryCache[src] || null);
+  const validSrc = typeof src === 'string' && src.trim() ? src : '';
+  const [displaySrc, setDisplaySrc] = useState<string | null>(validSrc ? (memoryCache[validSrc] || null) : null);
   const [useCors, setUseCors] = useState(crossOrigin === 'anonymous');
 
   useEffect(() => {
     let isMounted = true;
 
+    if (!validSrc) {
+      setDisplaySrc(null);
+      return;
+    }
+
     const loadImage = async () => {
       // Don't try to cache data URLs or already blob URLs
-      if (src.startsWith('data:') || src.startsWith('blob:')) {
-        setDisplaySrc(src);
+      if (validSrc.startsWith('data:') || validSrc.startsWith('blob:')) {
+        setDisplaySrc(validSrc);
         return;
       }
 
       // 1. Check Memory Cache First (Fastest)
-      if (memoryCache[src]) {
+      if (memoryCache[validSrc]) {
         if (isMounted) {
-          setDisplaySrc(memoryCache[src]);
+          setDisplaySrc(memoryCache[validSrc]);
           setUseCors(true);
         }
         return;
@@ -37,17 +43,17 @@ export const CachedImage: React.FC<CachedImageProps> = ({ src, className, alt, c
 
       // 2. Check IndexedDB Cache
       try {
-        const cachedBlob = await getCachedImage(src);
+        const cachedBlob = await getCachedImage(validSrc);
         if (cachedBlob && isMounted) {
           const reader = new FileReader();
           reader.onloadend = () => {
             if (isMounted && typeof reader.result === 'string') {
               if (reader.result.length > 500) {
-                memoryCache[src] = reader.result;
+                memoryCache[validSrc] = reader.result;
                 setDisplaySrc(reader.result);
                 setUseCors(true);
               } else {
-                setDisplaySrc(src);
+                setDisplaySrc(validSrc);
                 setUseCors(false);
               }
             }
@@ -64,7 +70,7 @@ export const CachedImage: React.FC<CachedImageProps> = ({ src, className, alt, c
         let response: Response | null = null;
         
         try {
-          response = await fetch(getApiUrl(src), { 
+          response = await fetch(getApiUrl(validSrc), { 
             cache: 'default',
             mode: 'cors',
             credentials: 'omit',
@@ -76,7 +82,7 @@ export const CachedImage: React.FC<CachedImageProps> = ({ src, className, alt, c
         
         if (!response || !response.ok) {
           try {
-            response = await fetch(getApiUrl(`/api/proxy?url=${encodeURIComponent(src)}`), { 
+            response = await fetch(getApiUrl(`/api/proxy?url=${encodeURIComponent(validSrc)}`), { 
               cache: 'default'
             });
           } catch (proxyErr) {
@@ -93,12 +99,12 @@ export const CachedImage: React.FC<CachedImageProps> = ({ src, className, alt, c
           reader.onloadend = () => {
             if (isMounted && typeof reader.result === 'string') {
               if (reader.result.length > 500) {
-                memoryCache[src] = reader.result;
+                memoryCache[validSrc] = reader.result;
                 setDisplaySrc(reader.result);
                 setUseCors(true);
-                cacheImage(src, blob).catch(() => {});
+                cacheImage(validSrc, blob).catch(() => {});
               } else {
-                setDisplaySrc(src);
+                setDisplaySrc(validSrc);
                 setUseCors(false);
               }
             }
@@ -106,9 +112,9 @@ export const CachedImage: React.FC<CachedImageProps> = ({ src, className, alt, c
           reader.readAsDataURL(blob);
         }
       } catch (err) {
-        console.error(`[CachedImage] All load methods failed for ${src}:`, err);
+        console.error(`[CachedImage] All load methods failed for ${validSrc}:`, err);
         if (isMounted) {
-          setDisplaySrc(src);
+          setDisplaySrc(validSrc);
           setUseCors(false);
         }
       }
@@ -119,7 +125,7 @@ export const CachedImage: React.FC<CachedImageProps> = ({ src, className, alt, c
     return () => {
       isMounted = false;
     };
-  }, [src, crossOrigin]);
+  }, [validSrc, crossOrigin]);
 
   const [loadError, setLoadError] = useState(false);
   const { crossOrigin: _excluded, ...cleanProps } = props;

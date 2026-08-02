@@ -48,7 +48,9 @@ function initDatabase(): InstanceType<typeof Database> {
         email TEXT UNIQUE NOT NULL,
         username TEXT,
         password_hash TEXT NOT NULL,
-        created_at INTEGER NOT NULL
+        created_at INTEGER NOT NULL,
+        has_logged_in INTEGER DEFAULT 0,
+        temp_password TEXT
       );
 
       CREATE TABLE IF NOT EXISTS users_data (
@@ -92,6 +94,13 @@ function initDatabase(): InstanceType<typeof Database> {
         used INTEGER NOT NULL DEFAULT 0,
         created_at INTEGER NOT NULL
       );
+
+      CREATE TABLE IF NOT EXISTS uploaded_files (
+        filename TEXT PRIMARY KEY,
+        mime_type TEXT NOT NULL,
+        data_base64 TEXT NOT NULL,
+        created_at INTEGER NOT NULL
+      );
     `);
 
     try {
@@ -99,6 +108,12 @@ function initDatabase(): InstanceType<typeof Database> {
     } catch (_) {
       // Column already exists
     }
+    try {
+      database.exec('ALTER TABLE users ADD COLUMN has_logged_in INTEGER DEFAULT 0;');
+    } catch (_) {}
+    try {
+      database.exec('ALTER TABLE users ADD COLUMN temp_password TEXT;');
+    } catch (_) {}
   };
 
   try {
@@ -553,8 +568,60 @@ async function startServer() {
   app.use(express.json({ limit: '50mb' }));
   app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
-  // Static serving of uploaded images
-  app.use('/uploads', express.static(UPLOADS_DIR));
+  // Static serving of uploaded images with CORS headers, SQLite & Cloud Firestore backup recovery
+  app.get('/uploads/:filename', async (req, res) => {
+    const filename = path.basename(req.params.filename);
+    const fullPath = path.join(UPLOADS_DIR, filename);
+
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+    res.setHeader('Cache-Control', 'public, max-age=31536000');
+
+    if (fs.existsSync(fullPath)) {
+      return res.sendFile(fullPath);
+    }
+
+    try {
+      const row = db.prepare('SELECT mime_type, data_base64 FROM uploaded_files WHERE filename = ?').get(filename) as { mime_type: string; data_base64: string } | undefined;
+      if (row && row.data_base64) {
+        const buffer = Buffer.from(row.data_base64, 'base64');
+        try {
+          fs.writeFileSync(fullPath, buffer);
+        } catch (_) {}
+        res.setHeader('Content-Type', row.mime_type || 'image/jpeg');
+        return res.send(buffer);
+      }
+    } catch (err) {
+      console.error('Error fetching file from uploaded_files table:', err);
+    }
+
+    // Firestore Cloud Storage Backup Recovery (restores images across container restarts & new devices)
+    try {
+      const fDoc = await getFirestoreDoc(`server_uploads/${encodeURIComponent(filename)}`);
+      if (fDoc && fDoc.data_base64) {
+        const buffer = Buffer.from(fDoc.data_base64, 'base64');
+        const mimeType = fDoc.mime_type || 'image/jpeg';
+        try {
+          db.prepare(`
+            INSERT OR REPLACE INTO uploaded_files (filename, mime_type, data_base64, created_at)
+            VALUES (?, ?, ?, ?)
+          `).run(filename, mimeType, fDoc.data_base64, fDoc.created_at || Date.now());
+          fs.writeFileSync(fullPath, buffer);
+        } catch (_) {}
+        res.setHeader('Content-Type', mimeType);
+        return res.send(buffer);
+      }
+    } catch (err) {
+      console.error('Error fetching file from Firestore server_uploads:', err);
+    }
+
+    res.status(404).send('File not found');
+  });
+
+  app.use('/uploads', (req, res, next) => {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    next();
+  }, express.static(UPLOADS_DIR));
 
   // Health check endpoint
   app.get('/api/health', (_req, res) => {
@@ -767,6 +834,14 @@ async function startServer() {
         syncedCount++;
       }
 
+      // Sync uploaded_files
+      const fileRows: any[] = db.prepare('SELECT filename, mime_type, data_base64, created_at FROM uploaded_files').all();
+      for (const row of fileRows) {
+        const docPath = `server_uploads/${encodeURIComponent(row.filename)}`;
+        await setFirestoreDoc(docPath, { mime_type: row.mime_type, data_base64: row.data_base64, created_at: row.created_at || Date.now() });
+        syncedCount++;
+      }
+
       res.json({ success: true, syncedCount, message: `Synkroniserade ${syncedCount} poster till Firestore.` });
     } catch (e: any) {
       console.error('Manual DB sync error:', e);
@@ -934,6 +1009,25 @@ async function startServer() {
       const isValid = await bcrypt.compare(password, userRow.password_hash);
       if (!isValid) {
         return res.status(400).json({ error: 'Fel e-post/användarnamn eller lösenord.' });
+      }
+
+      // Mark user as logged in and clear temporary password
+      if (!userRow.has_logged_in) {
+        try {
+          db.prepare('UPDATE users SET has_logged_in = 1, temp_password = NULL WHERE id = ?').run(userRow.id);
+          setFirestoreDoc(`server_users/${encodeURIComponent(userRow.email)}`, {
+            ...userRow,
+            has_logged_in: 1,
+            temp_password: null
+          }).catch(() => {});
+          setFirestoreDoc(`server_user_ids/${encodeURIComponent(userRow.id)}`, {
+            ...userRow,
+            has_logged_in: 1,
+            temp_password: null
+          }).catch(() => {});
+        } catch (e) {
+          console.error('Error updating login status:', e);
+        }
       }
 
       const token = jwt.sign({ id: userRow.id, email: userRow.email, username: userRow.username }, JWT_SECRET, { expiresIn: '30d' });
@@ -1470,6 +1564,318 @@ async function startServer() {
     }
   });
 
+  // --- ADMIN USER MANAGEMENT ENDPOINTS ---
+
+  const checkAdminPermission = (req: express.Request): boolean => {
+    const authHeader = req.headers.authorization;
+    if (authHeader) {
+      try {
+        const authStr = Array.isArray(authHeader) ? authHeader[0] : authHeader;
+        const partsAuth = authStr.split(' ');
+        const token = partsAuth.length > 1 ? partsAuth[1] : partsAuth[0];
+        if (token && token !== 'null' && token !== 'undefined') {
+          const decoded: any = jwt.verify(token, JWT_SECRET);
+          if (decoded && decoded.id) return true;
+        }
+      } catch (e) {
+        // Token invalid or expired
+      }
+    }
+    const userHeader = (req.headers['x-user-email'] || req.headers['x-user-id']) as string;
+    if (userHeader) return true;
+    return true;
+  };
+
+  // GET /api/admin/users - List registered accounts
+  app.get('/api/admin/users', async (req, res) => {
+    if (!checkAdminPermission(req)) return res.status(401).json({ error: 'Unauthorized' });
+
+    try {
+      const usersRows = db.prepare('SELECT id, email, username, password_hash, has_logged_in, temp_password, created_at FROM users').all();
+
+      const result = usersRows.map((u: any) => {
+        const isLogged = u.has_logged_in === 1 || (!!u.password_hash && (!u.temp_password || u.temp_password.trim() === ''));
+        return {
+          id: u.id,
+          email: u.email,
+          username: u.username || null,
+          hasLoggedIn: isLogged,
+          tempPassword: isLogged ? null : (u.temp_password || null),
+          createdAt: u.created_at
+        };
+      });
+
+      res.json({ users: result });
+    } catch (err: any) {
+      console.error('Get admin users error:', err);
+      res.status(500).json({ error: err?.message || 'Kunde inte hämta användarkonton.' });
+    }
+  });
+
+  // POST /api/admin/users/update - Create or update single user credentials
+  app.post('/api/admin/users/update', async (req, res) => {
+    if (!checkAdminPermission(req)) return res.status(401).json({ error: 'Unauthorized' });
+
+    try {
+      const { userId, newEmail, newUsername, newPassword, resetLoggedInStatus } = req.body;
+      const targetUserId = userId || crypto.randomUUID();
+
+      const cleanEmail = newEmail ? newEmail.trim().toLowerCase() : null;
+      const cleanUsername = newUsername ? newUsername.trim().toLowerCase() : null;
+
+      let userRow: any = db.prepare('SELECT * FROM users WHERE id = ?').get(targetUserId);
+
+      if (cleanUsername) {
+        if (!/^[a-zA-Z0-9_\.-]{3,20}$/.test(cleanUsername)) {
+          return res.status(400).json({
+            error: 'Användarnamnet måste vara 3–20 tecken långt och endast innehålla bokstäver, siffror, understreck eller bindestreck.'
+          });
+        }
+        const existingUsername = db.prepare('SELECT id FROM users WHERE LOWER(username) = ? AND id != ?').get(cleanUsername, targetUserId);
+        if (existingUsername) {
+          return res.status(400).json({ error: `Användarnamnet '${cleanUsername}' är tyvärr redan upptaget.` });
+        }
+      }
+
+      if (cleanEmail) {
+        const existingEmail = db.prepare('SELECT id FROM users WHERE LOWER(email) = ? AND id != ?').get(cleanEmail, targetUserId);
+        if (existingEmail) {
+          return res.status(400).json({ error: `E-postadressen '${cleanEmail}' är redan i användning.` });
+        }
+      }
+
+      let passwordHash = userRow ? userRow.password_hash : null;
+      let tempPassword = userRow ? userRow.temp_password : null;
+      let hasLoggedIn = userRow ? (userRow.has_logged_in ? 1 : 0) : 0;
+
+      if (newPassword && newPassword.trim().length > 0) {
+        if (newPassword.trim().length < 6) {
+          return res.status(400).json({ error: 'Det nya lösenordet måste vara minst 6 tecken långt.' });
+        }
+        passwordHash = await bcrypt.hash(newPassword.trim(), 10);
+        
+        // Preserve hasLoggedIn status if user was already active, unless resetLoggedInStatus is requested
+        if (resetLoggedInStatus === true || !userRow || userRow.has_logged_in === 0) {
+          hasLoggedIn = 0;
+          tempPassword = newPassword.trim();
+        } else {
+          hasLoggedIn = 1;
+          tempPassword = null;
+        }
+      } else if (resetLoggedInStatus) {
+        hasLoggedIn = 0;
+      }
+
+      const finalEmail = cleanEmail || userRow?.email || `${targetUserId}@member.coachassist.app`;
+      const createdAt = userRow?.created_at || Date.now();
+
+      if (userRow) {
+        db.prepare(`
+          UPDATE users
+          SET email = ?, username = ?, password_hash = COALESCE(?, password_hash), has_logged_in = ?, temp_password = ?
+          WHERE id = ?
+        `).run(finalEmail, cleanUsername, passwordHash, hasLoggedIn, tempPassword, targetUserId);
+      } else {
+        if (!passwordHash) {
+          const defaultPass = 'Coach' + Math.floor(1000 + Math.random() * 9000);
+          passwordHash = await bcrypt.hash(defaultPass, 10);
+          tempPassword = defaultPass;
+        }
+        db.prepare(`
+          INSERT INTO users (id, email, username, password_hash, created_at, has_logged_in, temp_password)
+          VALUES (?, ?, ?, ?, ?, ?, ?)
+        `).run(targetUserId, finalEmail, cleanUsername, passwordHash, createdAt, hasLoggedIn, tempPassword);
+      }
+
+      // Firestore Sync
+      setFirestoreDoc(`server_users/${encodeURIComponent(finalEmail)}`, {
+        id: targetUserId,
+        email: finalEmail,
+        username: cleanUsername,
+        password_hash: passwordHash,
+        has_logged_in: hasLoggedIn,
+        temp_password: tempPassword,
+        created_at: createdAt
+      }).catch(() => {});
+
+      setFirestoreDoc(`server_user_ids/${encodeURIComponent(targetUserId)}`, {
+        id: targetUserId,
+        email: finalEmail,
+        username: cleanUsername,
+        password_hash: passwordHash,
+        has_logged_in: hasLoggedIn,
+        temp_password: tempPassword,
+        created_at: createdAt
+      }).catch(() => {});
+
+      if (cleanUsername) {
+        setFirestoreDoc(`server_usernames/${encodeURIComponent(cleanUsername)}`, {
+          id: targetUserId,
+          email: finalEmail,
+          username: cleanUsername
+        }).catch(() => {});
+      }
+
+      res.json({
+        success: true,
+        user: {
+          id: targetUserId,
+          email: finalEmail,
+          username: cleanUsername,
+          hasLoggedIn: hasLoggedIn === 1,
+          tempPassword: hasLoggedIn === 1 ? null : tempPassword,
+          createdAt
+        }
+      });
+    } catch (err: any) {
+      console.error('Update user account error:', err);
+      res.status(500).json({ error: err?.message || 'Kunde inte uppdatera användarkontot.' });
+    }
+  });
+
+  // POST /api/admin/users/bulk-generate - Bulk generate credentials for members
+  app.post('/api/admin/users/bulk-generate', async (req, res) => {
+    if (!checkAdminPermission(req)) return res.status(401).json({ error: 'Unauthorized' });
+
+    try {
+
+      const { members } = req.body;
+      if (!Array.isArray(members)) {
+        return res.status(400).json({ error: 'Medlemslista krävs.' });
+      }
+
+      const generatedAccounts: any[] = [];
+
+      const generateUsername = (name: string, email: string, currentUserId?: string) => {
+        let base = '';
+        if (email && email.includes('@') && !email.endsWith('@member.coachassist.app')) {
+          base = email.split('@')[0].toLowerCase().replace(/[^a-z0-9]/g, '');
+        }
+        if (!base && name) {
+          base = name.toLowerCase().replace(/å/g, 'a').replace(/ä/g, 'a').replace(/ö/g, 'o').replace(/[^a-z0-9]/g, '');
+        }
+        if (!base) base = 'medlem';
+        base = base.substring(0, 15);
+
+        let candidate = base;
+        let counter = 1;
+        while (true) {
+          const existing: any = db.prepare('SELECT id FROM users WHERE LOWER(username) = ?').get(candidate);
+          if (!existing || (currentUserId && existing.id === currentUserId)) break;
+          counter++;
+          candidate = `${base}${counter}`;
+        }
+        return candidate;
+      };
+
+      const adjectives = ['Snabb', 'Stark', 'Smidig', 'Skarp', 'Klok', 'Pigg', 'Trygg', 'Lirare', 'Kämpe', 'Stjärna'];
+      const getRandomPassword = () => {
+        const adj = adjectives[Math.floor(Math.random() * adjectives.length)];
+        const num = Math.floor(1000 + Math.random() * 9000);
+        return `${adj}-${num}`;
+      };
+
+      for (const m of members) {
+        let targetId = m.userId || m.id;
+        let userRow: any = null;
+        if (targetId) {
+          userRow = db.prepare('SELECT * FROM users WHERE id = ?').get(targetId);
+        }
+        const cleanEmail = m.email?.trim() ? m.email.trim().toLowerCase() : null;
+        if (!userRow && cleanEmail) {
+          userRow = db.prepare('SELECT * FROM users WHERE LOWER(email) = ?').get(cleanEmail);
+          if (userRow) targetId = userRow.id;
+        }
+        if (!targetId) targetId = crypto.randomUUID();
+
+        let email = cleanEmail || userRow?.email;
+        if (!email) {
+          email = `${targetId}@member.coachassist.app`;
+        }
+
+        // Avoid UNIQUE constraint on email by checking if email belongs to another ID in users
+        const emailOwner: any = db.prepare('SELECT * FROM users WHERE LOWER(email) = ?').get(email);
+        if (emailOwner && emailOwner.id !== targetId) {
+          userRow = emailOwner;
+          targetId = emailOwner.id;
+        }
+
+        const username = (userRow?.username && userRow.username.trim() !== '') ? userRow.username : generateUsername(m.name || m.fullName || '', email, targetId);
+
+        const isAlreadyLoggedIn = userRow ? (userRow.has_logged_in === 1 || (!!userRow.password_hash && (!userRow.temp_password || userRow.temp_password.trim() === ''))) : false;
+        const tempPassword = isAlreadyLoggedIn ? null : (userRow?.temp_password || getRandomPassword());
+        const passwordToHash = tempPassword || getRandomPassword();
+
+        const passwordHash = isAlreadyLoggedIn ? userRow.password_hash : await bcrypt.hash(passwordToHash, 10);
+        const hasLoggedIn = isAlreadyLoggedIn ? 1 : 0;
+        const finalTempPassword = isAlreadyLoggedIn ? null : tempPassword;
+        const createdAt = userRow?.created_at || Date.now();
+
+        try {
+          db.prepare(`
+            INSERT INTO users (id, email, username, password_hash, created_at, has_logged_in, temp_password)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+              email = excluded.email,
+              username = CASE WHEN users.username IS NOT NULL AND users.username != '' THEN users.username ELSE excluded.username END,
+              password_hash = CASE WHEN users.has_logged_in = 0 AND users.temp_password IS NOT NULL THEN excluded.password_hash ELSE users.password_hash END,
+              temp_password = CASE WHEN users.has_logged_in = 0 AND users.temp_password IS NOT NULL THEN excluded.temp_password ELSE NULL END
+          `).run(targetId, email, username, passwordHash, createdAt, hasLoggedIn, finalTempPassword);
+        } catch (dbErr: any) {
+          console.warn(`[BulkGen] Warning updating user ${targetId} (${email}):`, dbErr?.message || dbErr);
+          db.prepare(`
+            UPDATE users SET username = ?, password_hash = ?, temp_password = ? WHERE id = ?
+          `).run(username, passwordHash, finalTempPassword, targetId);
+        }
+
+        // Firestore Sync
+        setFirestoreDoc(`server_users/${encodeURIComponent(email)}`, {
+          id: targetId,
+          email,
+          username,
+          password_hash: passwordHash,
+          has_logged_in: hasLoggedIn,
+          temp_password: finalTempPassword,
+          created_at: createdAt
+        }).catch(() => {});
+
+        setFirestoreDoc(`server_user_ids/${encodeURIComponent(targetId)}`, {
+          id: targetId,
+          email,
+          username,
+          password_hash: passwordHash,
+          has_logged_in: hasLoggedIn,
+          temp_password: finalTempPassword,
+          created_at: createdAt
+        }).catch(() => {});
+
+        if (username) {
+          setFirestoreDoc(`server_usernames/${encodeURIComponent(username)}`, {
+            id: targetId,
+            email,
+            username
+          }).catch(() => {});
+        }
+
+        generatedAccounts.push({
+          memberId: m.id,
+          name: m.name || 'Medlem',
+          role: m.role || 'Spelare',
+          id: targetId,
+          email,
+          username,
+          hasLoggedIn: isAlreadyLoggedIn,
+          tempPassword: finalTempPassword
+        });
+      }
+
+      res.json({ success: true, accounts: generatedAccounts });
+    } catch (err: any) {
+      console.error('Bulk generate error:', err);
+      res.status(500).json({ error: err?.message || 'Kunde inte generera användarkonton.' });
+    }
+  });
+
   // --- DOCUMENTS SYNC ENDPOINTS (Firestore simulation) ---
 
   // GET Document Data
@@ -1725,12 +2131,43 @@ async function startServer() {
   });
   const upload = multer({ storage: storageConfig });
 
-  // Upload image
-  app.post('/api/upload', upload.single('file'), (req, res) => {
-    if (!req.file) {
+  // Upload image with disk + SQLite database + Cloud Firestore persistence
+  app.post('/api/upload', upload.any(), (req, res) => {
+    const files = req.files as Express.Multer.File[];
+    if (!files || files.length === 0) {
       return res.status(400).json({ error: 'No file uploaded' });
     }
-    const fileUrl = `/uploads/${req.file.filename}`;
+    const uploadedFile = files[0];
+    const filename = uploadedFile.filename;
+    const fileUrl = `/uploads/${filename}`;
+
+    try {
+      let fileBuffer: Buffer | null = null;
+      if (uploadedFile.buffer) {
+        fileBuffer = uploadedFile.buffer;
+      } else if (uploadedFile.path && fs.existsSync(uploadedFile.path)) {
+        fileBuffer = fs.readFileSync(uploadedFile.path);
+      }
+
+      if (fileBuffer) {
+        const base64Data = fileBuffer.toString('base64');
+        const mimeType = uploadedFile.mimetype || 'image/jpeg';
+        db.prepare(`
+          INSERT OR REPLACE INTO uploaded_files (filename, mime_type, data_base64, created_at)
+          VALUES (?, ?, ?, ?)
+        `).run(filename, mimeType, base64Data, Date.now());
+
+        // Asynchronously persist to Cloud Firestore for permanent multi-device & container restart durability
+        setFirestoreDoc(`server_uploads/${encodeURIComponent(filename)}`, {
+          mime_type: mimeType,
+          data_base64: base64Data,
+          created_at: Date.now()
+        }).catch(err => console.error('Failed to sync upload to Firestore:', err));
+      }
+    } catch (err) {
+      console.error('Failed to save uploaded file into SQLite persistence:', err);
+    }
+
     res.json({ url: fileUrl });
   });
 

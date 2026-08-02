@@ -615,6 +615,7 @@ export default function TrainingManager({
         date: sessionDate,
         startTime,
         endTime,
+        hideContentForPlayers: settings?.defaultHideContentForPlayers || false,
         moments: [],
         createdAt: Date.now(),
         updatedAt: Date.now()
@@ -662,6 +663,8 @@ export default function TrainingManager({
   const [localStartTime, setLocalStartTime] = useState(settings?.defaultStartTime || '18:00');
   const [localDuration, setLocalDuration] = useState(settings?.defaultDuration || 90);
   const [localEndTime, setLocalEndTime] = useState(settings?.defaultEndTime || '19:30');
+  const [localDefaultHideContentForPlayers, setLocalDefaultHideContentForPlayers] = useState(settings?.defaultHideContentForPlayers || false);
+  const [batchHideMessage, setBatchHideMessage] = useState<string | null>(null);
   
   const [localIcsUrl, setLocalIcsUrl] = useState(settings?.icsUrl || '');
   const [forceOverwrite, setForceOverwrite] = useState(false);
@@ -705,6 +708,7 @@ export default function TrainingManager({
       setLocalStartTime(settings.defaultStartTime || '18:00');
       setLocalDuration(settings.defaultDuration || 90);
       setLocalEndTime(settings.defaultEndTime || calculateEndTime(settings.defaultStartTime || '18:00', settings.defaultDuration || 90));
+      setLocalDefaultHideContentForPlayers(settings.defaultHideContentForPlayers || false);
       setLocalIcsUrl(settings.icsUrl || '');
     }
     prevShowSettingsRef.current = showSettings;
@@ -1184,6 +1188,77 @@ export default function TrainingManager({
                   />
                 </div>
 
+                <div className="pt-4 border-t border-zinc-100 dark:border-zinc-800/60 space-y-3">
+                  <h4 className="text-xs font-black text-zinc-900 dark:text-white uppercase tracking-wider flex items-center gap-1.5">
+                    <EyeOff size={15} className="text-amber-500" />
+                    <span>Innehållssekretess för spelare</span>
+                  </h4>
+                  
+                  <div className="p-3 bg-zinc-50 dark:bg-zinc-950/40 rounded-xl border border-zinc-200 dark:border-zinc-800 space-y-2">
+                    <label className="flex items-start gap-2.5 cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        checked={localDefaultHideContentForPlayers}
+                        onChange={(e) => setLocalDefaultHideContentForPlayers(e.target.checked)}
+                        className="mt-0.5 rounded border-zinc-300 dark:border-zinc-700 text-amber-600 focus:ring-amber-500 cursor-pointer w-4 h-4"
+                      />
+                      <div>
+                        <span className="text-xs font-bold text-zinc-800 dark:text-zinc-200 block leading-tight">
+                          Dölj passinnehåll för spelare som standard på nya träningspass
+                        </span>
+                        <span className="text-[10px] text-zinc-400 font-medium block mt-1 leading-normal">
+                          När detta är aktiverat skapas nya pass med innehållet dolt för spelare tills tränaren ställer in att visa det.
+                        </span>
+                      </div>
+                    </label>
+                  </div>
+
+                  <div className="space-y-1.5 pt-1">
+                    <span className="text-[10px] font-black text-zinc-400 uppercase tracking-wider block">Massändra befintliga träningspass ({sessions.length} st)</span>
+                    <div className="grid grid-cols-2 gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          sessions.forEach(s => {
+                            if (!s.hideContentForPlayers) {
+                              onUpdateSession({ ...s, hideContentForPlayers: true, updatedAt: Date.now() });
+                            }
+                          });
+                          setBatchHideMessage(`Döljde innehåll för alla ${sessions.length} pass.`);
+                          setTimeout(() => setBatchHideMessage(null), 3000);
+                        }}
+                        className="py-2.5 px-3 bg-amber-50 dark:bg-amber-950/30 hover:bg-amber-100 dark:hover:bg-amber-900/40 text-amber-800 dark:text-amber-300 border border-amber-200 dark:border-amber-800/50 rounded-xl text-[10px] font-black uppercase tracking-tight transition-all flex items-center justify-center gap-1 cursor-pointer"
+                      >
+                        <EyeOff size={12} />
+                        <span>Dölj på alla pass</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          sessions.forEach(s => {
+                            if (s.hideContentForPlayers) {
+                              onUpdateSession({ ...s, hideContentForPlayers: false, updatedAt: Date.now() });
+                            }
+                          });
+                          setBatchHideMessage(`Gjorde innehåll synligt på alla ${sessions.length} pass.`);
+                          setTimeout(() => setBatchHideMessage(null), 3000);
+                        }}
+                        className="py-2.5 px-3 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-700 dark:text-zinc-300 border border-zinc-200 dark:border-zinc-700 rounded-xl text-[10px] font-black uppercase tracking-tight transition-all flex items-center justify-center gap-1 cursor-pointer"
+                      >
+                        <Eye size={12} />
+                        <span>Visa på alla pass</span>
+                      </button>
+                    </div>
+
+                    {batchHideMessage && (
+                      <p className="text-[10px] font-extrabold text-emerald-600 dark:text-emerald-400 mt-1 animate-fadeIn">
+                        ✓ {batchHideMessage}
+                      </p>
+                    )}
+                  </div>
+                </div>
+
                 <div className="pt-4 border-t border-zinc-100 dark:border-zinc-800/60">
                   <h4 className="text-xs font-black text-zinc-900 dark:text-white uppercase tracking-wider mb-2">Kalenderintegration</h4>
                   <div className="p-2.5 mb-3 bg-indigo-50/60 dark:bg-indigo-950/40 rounded-xl border border-indigo-100 dark:border-indigo-900/40 text-[11px] text-indigo-700 dark:text-indigo-300 font-medium leading-relaxed">
@@ -1208,11 +1283,11 @@ export default function TrainingManager({
                         id="forceOverwrite"
                         checked={forceOverwrite}
                         onChange={(e) => setForceOverwrite(e.target.checked)}
-                        className="mt-0.5 rounded border-zinc-300 dark:border-zinc-700 text-indigo-650 focus:ring-indigo-500 cursor-pointer w-4 h-4"
+                        className="mt-0.5 rounded border-zinc-300 dark:border-zinc-700 text-indigo-600 focus:ring-indigo-500 cursor-pointer w-4 h-4"
                       />
-                      <label htmlFor="forceOverwrite" className="text-xs font-bold text-zinc-750 dark:text-zinc-250 leading-tight cursor-pointer select-none">
+                      <label htmlFor="forceOverwrite" className="text-xs font-bold text-zinc-700 dark:text-zinc-200 leading-tight cursor-pointer select-none">
                         Tvinga överskrivning av befintliga pass
-                        <span className="block text-[10px] font-normal text-zinc-450 dark:text-zinc-500 mt-1 leading-normal">
+                        <span className="block text-[10px] font-normal text-zinc-500 dark:text-zinc-400 mt-1 leading-normal">
                           Aktivera om du vill läsa in samlingstider och ny beskrivnings-info för matcher som redan har synkats in tidigare.
                         </span>
                       </label>
@@ -1404,6 +1479,7 @@ export default function TrainingManager({
                       defaultStartTime: localStartTime,
                       defaultEndTime: localEndTime,
                       defaultDuration: localDuration,
+                      defaultHideContentForPlayers: localDefaultHideContentForPlayers,
                       icsUrl: localIcsUrl.trim()
                     });
                     setShowSettings(false);
@@ -1580,7 +1656,7 @@ export default function TrainingManager({
                     }}
                     className={`w-full py-3 text-sm font-bold rounded-xl transition-colors ${
                       sessionToDeleteData?.externalId 
-                        ? 'bg-zinc-50 dark:bg-zinc-800 text-red-650 hover:bg-zinc-100 dark:hover:bg-zinc-850 text-red-600 dark:text-red-400 border border-zinc-200 dark:border-zinc-800' 
+                        ? 'bg-zinc-50 dark:bg-zinc-800 text-red-600 hover:bg-zinc-100 dark:hover:bg-zinc-700 dark:text-red-400 border border-zinc-200 dark:border-zinc-800' 
                         : 'bg-red-600 text-white hover:bg-red-700'
                     }`}
                   >

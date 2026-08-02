@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
-import { Calendar, Clock, MapPin, Search, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, ExternalLink, RefreshCw, Trophy, HelpCircle, FileText, CheckCircle, ArrowRight, Plus, Trash2, Eye, EyeOff } from 'lucide-react';
+import { Calendar, Clock, MapPin, Search, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, ExternalLink, RefreshCw, Trophy, HelpCircle, FileText, CheckCircle, ArrowRight, Plus, Trash2, EyeOff } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { TrainingSession, SquadPlayer } from '../types';
 
@@ -89,13 +89,9 @@ export default function MobileCalendarView({
   onOpenSeriesCreator,
   deletedSessionsCount = 0,
   onDeleteSession,
-  user,
-  userRoles
+  user: _user,
+  userRoles: _userRoles
 }: MobileCalendarViewProps) {
-  const isCoachOrAdmin = useMemo(() => {
-    if (!user) return true;
-    return userRoles?.includes('admin') || userRoles?.includes('coach') || false;
-  }, [user, userRoles]);
   const [searchQuery, setSearchQuery] = useState('');
   const [activeFilter, setActiveFilter] = useState<'all' | 'match' | 'training' | 'other'>('all');
   const [showPast, setShowPast] = useState(false);
@@ -685,11 +681,13 @@ export default function MobileCalendarView({
                   const isExpanded = expandedEventId === session.id;
                   const showDayDetails = idx === 0;
 
-                  const attendingLeaderIds = squad.filter(p => p.role === 'leader').map(p => p.id);
-                  const registeredLeadersCount = (session.attendance || []).filter(id => attendingLeaderIds.includes(id)).length;
-                  const registeredPlayersCount = (session.attendance || []).length - registeredLeadersCount;
-                  const totalPlayersSquad = squad.filter(p => p.role !== 'leader').length + (session.guestPlayers?.length || 0);
-                  const totalLeadersSquad = squad.filter(p => p.role === 'leader').length;
+                  const safeSquad = Array.isArray(squad) ? squad.filter(p => p && typeof p === 'object') : [];
+                  const safeAttendance = Array.isArray(session.attendance) ? session.attendance.map(item => typeof item === 'string' ? item : String(item?.id || item?.name || item || '')).filter(Boolean) : [];
+                  const attendingLeaderIds = safeSquad.filter(p => p.role === 'leader').map(p => p.id);
+                  const registeredLeadersCount = safeAttendance.filter(id => attendingLeaderIds.includes(id)).length;
+                  const registeredPlayersCount = safeAttendance.length - registeredLeadersCount;
+                  const totalPlayersSquad = safeSquad.filter(p => p.role !== 'leader').length + (session.guestPlayers?.length || 0);
+                  const totalLeadersSquad = safeSquad.filter(p => p.role === 'leader').length;
                   const mapsUrl = session.location ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(session.location)}` : null;
 
                   const totalMinutes = session.moments?.reduce((acc, m) => acc + m.duration, 0) || 0;
@@ -763,12 +761,6 @@ export default function MobileCalendarView({
                                 return rawTitle;
                               })()}
                             </span>
-                            {session.hideContentForPlayers && (
-                              <span className="inline-flex items-center gap-1 text-[9px] sm:text-[10px] font-extrabold text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/40 border border-amber-200/50 dark:border-amber-800/50 px-1.5 sm:px-2 py-0.5 rounded-full shrink-0">
-                                <EyeOff size={10} />
-                                <span className="hidden sm:inline">Dolt för spelare</span>
-                              </span>
-                            )}
                           </div>
                         </div>
 
@@ -796,17 +788,26 @@ export default function MobileCalendarView({
                           >
                             <div className="p-4 text-xs font-medium space-y-4 text-left">
                               {/* Action buttons (Öppna Planering & Ta bort) */}
-                              <div className="flex items-center justify-between pb-1">
-                                <button
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    onSelectSession(session.id);
-                                  }}
-                                  className="flex items-center gap-1.5 px-3.5 py-2.5 bg-indigo-600 text-white rounded-xl font-black hover:bg-indigo-700 text-[10px] uppercase shadow-md shadow-indigo-100 dark:shadow-none transition-all active:scale-95 cursor-pointer inline-flex"
-                                >
-                                  <span>Öppna Planering</span>
-                                  <ArrowRight size={11} strokeWidth={2.5} />
-                                </button>
+                              <div className="flex items-center justify-between pb-1 gap-2 flex-wrap">
+                                <div className="flex items-center gap-2">
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      onSelectSession(session.id);
+                                    }}
+                                    className="flex items-center gap-1.5 px-3.5 py-2.5 bg-indigo-600 text-white rounded-xl font-black hover:bg-indigo-700 text-[10px] uppercase shadow-md shadow-indigo-100 dark:shadow-none transition-all active:scale-95 cursor-pointer inline-flex"
+                                  >
+                                    <span>Öppna Planering</span>
+                                    <ArrowRight size={11} strokeWidth={2.5} />
+                                  </button>
+
+                                  {session.hideContentForPlayers && (
+                                    <span className="inline-flex items-center gap-1 text-[10px] font-extrabold text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800/60 px-2.5 py-1.5 rounded-xl">
+                                      <EyeOff size={12} />
+                                      <span>Dolt för spelare</span>
+                                    </span>
+                                  )}
+                                </div>
 
                                 {onDeleteSession && (
                                   <button
@@ -1002,12 +1003,14 @@ export default function MobileCalendarView({
                   }[category];
 
                   // Attendance calculation
-                  const attendingLeaderIds = squad.filter(p => p.role === 'leader').map(p => p.id);
-                  const registeredLeadersCount = (session.attendance || []).filter(id => attendingLeaderIds.includes(id)).length;
-                  const registeredPlayersCount = (session.attendance || []).length - registeredLeadersCount;
+                  const safeSquadMonth = Array.isArray(squad) ? squad.filter(p => p && typeof p === 'object') : [];
+                  const safeAttendanceMonth = Array.isArray(session.attendance) ? session.attendance.map(item => typeof item === 'string' ? item : String(item?.id || item?.name || item || '')).filter(Boolean) : [];
+                  const attendingLeaderIds = safeSquadMonth.filter(p => p.role === 'leader').map(p => p.id);
+                  const registeredLeadersCount = safeAttendanceMonth.filter(id => attendingLeaderIds.includes(id)).length;
+                  const registeredPlayersCount = safeAttendanceMonth.length - registeredLeadersCount;
 
-                  const totalPlayersSquad = squad.filter(p => p.role !== 'leader').length + (session.guestPlayers?.length || 0);
-                  const totalLeadersSquad = squad.filter(p => p.role === 'leader').length;
+                  const totalPlayersSquad = safeSquadMonth.filter(p => p.role !== 'leader').length + (session.guestPlayers?.length || 0);
+                  const totalLeadersSquad = safeSquadMonth.filter(p => p.role === 'leader').length;
 
                   // Maps URL
                   const mapsUrl = session.location

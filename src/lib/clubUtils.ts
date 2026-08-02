@@ -42,15 +42,21 @@ export function deduplicateSquad(squad: SquadPlayer[]): SquadPlayer[] {
       const targetRole: 'leader' | 'player' =
         (existing.role === 'leader' || player.role === 'leader') ? 'leader' : 'player';
 
+      const pickVal = (newVal?: string, oldVal?: string) => {
+        if (newVal !== undefined && newVal !== null && newVal.trim() !== '') return newVal.trim();
+        if (oldVal !== undefined && oldVal !== null && oldVal.trim() !== '') return oldVal.trim();
+        return undefined;
+      };
+
       result[idx] = {
-        ...existing,
-        name: existing.name || cleanName,
-        email: existing.email || player.email || undefined,
-        phone: existing.phone || player.phone || undefined,
-        personnummer: existing.personnummer || player.personnummer || undefined,
-        position: existing.position || player.position || undefined,
-        number: existing.number || player.number || undefined,
-        photoUrl: existing.photoUrl || player.photoUrl || undefined,
+        id: player.id || existing.id,
+        name: player.name?.trim() || existing.name?.trim() || cleanName,
+        email: pickVal(player.email, existing.email),
+        phone: pickVal(player.phone, existing.phone),
+        personnummer: pickVal(player.personnummer, existing.personnummer),
+        position: pickVal(player.position, existing.position),
+        number: pickVal(player.number, existing.number),
+        photoUrl: pickVal(player.photoUrl, existing.photoUrl),
         role: targetRole
       };
     } else {
@@ -108,19 +114,39 @@ export function deduplicateClubMembers(members: ClubMember[]): ClubMember[] {
 
     if (idx !== -1) {
       const existing = result[idx];
+
+      const pickEmail = () => {
+        const memEmail = (member.email || '').trim();
+        const exEmail = (existing.email || '').trim();
+        if (memEmail && !memEmail.includes('@noemail.local')) return memEmail;
+        if (exEmail && !exEmail.includes('@noemail.local')) return exEmail;
+        return memEmail || exEmail || '';
+      };
+
+      const pickVal = (newVal?: string, oldVal?: string) => {
+        if (newVal !== undefined && newVal !== null && newVal.trim() !== '') return newVal.trim();
+        if (oldVal !== undefined && oldVal !== null && oldVal.trim() !== '') return oldVal.trim();
+        return undefined;
+      };
+
+      let bestUserId = member.userId || existing.userId;
+      if (existing.userId && !existing.userId.startsWith('player_') && member.userId && member.userId.startsWith('player_')) {
+        bestUserId = existing.userId;
+      }
+
       const mergedRoles = Array.from(new Set([...(existing.roles || []), ...(member.roles || [])]));
       const mergedTeams = Array.from(new Set([...(existing.teams || []), ...(member.teams || [])]));
 
       result[idx] = {
-        ...existing,
-        fullName: existing.fullName || cleanName,
-        email: existing.email || member.email || '',
-        phone: existing.phone || member.phone,
-        personnummer: existing.personnummer || member.personnummer,
-        position: existing.position || member.position,
-        number: existing.number || member.number,
-        photoUrl: existing.photoUrl || member.photoUrl,
-        roles: mergedRoles,
+        userId: bestUserId,
+        fullName: member.fullName?.trim() || existing.fullName?.trim() || cleanName,
+        email: pickEmail(),
+        phone: pickVal(member.phone, existing.phone),
+        personnummer: pickVal(member.personnummer, existing.personnummer),
+        position: pickVal(member.position, existing.position),
+        number: pickVal(member.number, existing.number),
+        photoUrl: pickVal(member.photoUrl, existing.photoUrl),
+        roles: mergedRoles.length > 0 ? mergedRoles : ['player'],
         teams: mergedTeams
       };
     } else {

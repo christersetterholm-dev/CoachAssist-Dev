@@ -36,5 +36,7 @@
     "noUnusedLocals": true,
     "noUnusedParameters": true,
     "noEmit": true
-  }
+  },
+  "include": ["src"],
+  "exclude": ["dist", "public", "assets", "node_modules"]
 }

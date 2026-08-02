@@ -837,14 +837,14 @@ export default function TacticalBoardModal({
         <div className="flex items-center gap-3">
           <button
             onClick={() => setIsSidebarOpen(!isSidebarOpen)}
-            className="p-2 bg-zinc-800/50 hover:bg-zinc-800 border border-zinc-750 hover:border-zinc-700 text-zinc-400 hover:text-white rounded-xl transition-all flex items-center justify-center mr-1"
+            className="p-2 bg-zinc-800/50 hover:bg-zinc-800 border border-zinc-700 hover:border-zinc-600 text-zinc-400 hover:text-white rounded-xl transition-all flex items-center justify-center mr-1"
             title={isSidebarOpen ? "Dölj sidopanel" : "Visa sidopanel"}
           >
             <Layout size={18} className={isSidebarOpen ? "text-indigo-400" : ""} />
           </button>
           <button
             onClick={() => setIsToolboxVisible(!isToolboxVisible)}
-            className="p-2 bg-zinc-800/50 hover:bg-zinc-800 border border-zinc-750 hover:border-zinc-700 text-zinc-400 hover:text-white rounded-xl transition-all flex items-center justify-center mr-1"
+            className="p-2 bg-zinc-800/50 hover:bg-zinc-800 border border-zinc-700 hover:border-zinc-600 text-zinc-400 hover:text-white rounded-xl transition-all flex items-center justify-center mr-1"
             title={isToolboxVisible ? "Dölj ritverktyg" : "Visa ritverktyg"}
           >
             {isToolboxVisible ? <EyeOff size={18} className="text-indigo-400" /> : <Eye size={18} />}
@@ -940,7 +940,7 @@ export default function TacticalBoardModal({
                               if (e.key === 'Enter') handleSaveRename(board.id);
                               if (e.key === 'Escape') setRenamingBoardId(null);
                             }}
-                            className="bg-zinc-950 border border-zinc-750 rounded-xl px-2.5 py-1.5 text-xs font-bold text-white focus:ring-2 focus:ring-indigo-500 focus:outline-none flex-1 min-w-0"
+                            className="bg-zinc-950 border border-zinc-700 rounded-xl px-2.5 py-1.5 text-xs font-bold text-white focus:ring-2 focus:ring-indigo-500 focus:outline-none flex-1 min-w-0"
                             autoFocus
                           />
                           <button
@@ -1509,7 +1509,7 @@ export default function TacticalBoardModal({
                           {/* Name indicator below player node */}
                           {!(el.playerId?.startsWith('home-') || el.playerId?.startsWith('away-')) && (
                             <div 
-                              className="bg-zinc-900/90 text-white rounded border border-zinc-750/50 mt-1 truncate font-bold uppercase tracking-tight shadow-md text-center"
+                              className="bg-zinc-900/90 text-white rounded border border-zinc-700/50 mt-1 truncate font-bold uppercase tracking-tight shadow-md text-center"
                               style={{
                                 fontSize: '1.5cqmin',
                                 maxWidth: '12cqmin',
@@ -1902,7 +1902,7 @@ export default function TacticalBoardModal({
                       className="flex items-center gap-4 shrink-0 w-full"
                     >
                       {/* Standard Objects: Blue & Yellow Players */}
-                      <div className="flex items-center gap-2 pr-3 border-r border-zinc-850 shrink-0">
+                      <div className="flex items-center gap-2 pr-3 border-r border-zinc-800 shrink-0">
                         <span className="text-[8px] font-black text-zinc-500 uppercase tracking-widest leading-none block mr-1">Spelare</span>
                         <button
                           onClick={() => addElementToPitch('generic-home')}
@@ -1923,7 +1923,7 @@ export default function TacticalBoardModal({
                       </div>
 
                       {/* Equipment: Cones, Goals, Ladders */}
-                      <div className="flex items-center gap-2 pr-3 border-r border-zinc-850 shrink-0">
+                      <div className="flex items-center gap-2 pr-3 border-r border-zinc-800 shrink-0">
                         <span className="text-[8px] font-black text-zinc-500 uppercase tracking-widest leading-none block mr-1">Material</span>
                         <button
                           onClick={() => addElementToPitch('cone-orange')}

@@ -36,17 +36,36 @@ export default function ProfileAndSettings({
 
   // Sync state when props change
   useEffect(() => {
+    const fetchedUsername = currentProfile.username || auth.currentUser?.username || '';
     setProfile({
       fullName: currentProfile.fullName || '',
       phone: currentProfile.phone || '',
       personnummer: currentProfile.personnummer || '',
       email: currentProfile.email || userEmail || '',
-      username: currentProfile.username || (auth.currentUser?.username || ''),
+      username: fetchedUsername,
       activeClubId: currentProfile.activeClubId || null,
       activeTeamId: currentProfile.activeTeamId || null,
     });
     setEmailInput(currentProfile.email || userEmail || '');
-    setUsernameInput(currentProfile.username || (auth.currentUser?.username || ''));
+    setUsernameInput(fetchedUsername);
+
+    if (!fetchedUsername) {
+      const token = localStorage.getItem('token');
+      if (token) {
+        fetch(getApiUrl('/api/auth/me'), {
+          headers: { 'Authorization': `Bearer ${token}` }
+        })
+          .then(res => res.ok ? res.json() : null)
+          .then(data => {
+            if (data?.username) {
+              if (auth.currentUser) auth.currentUser.username = data.username;
+              setUsernameInput(data.username);
+              setProfile(prev => ({ ...prev, username: data.username }));
+            }
+          })
+          .catch(() => {});
+      }
+    }
   }, [currentProfile, userEmail]);
 
   // Password change state

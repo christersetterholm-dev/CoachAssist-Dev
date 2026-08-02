@@ -137,6 +137,7 @@ export interface TrainingSettings {
   defaultStartTime: string;
   defaultEndTime?: string;
   defaultDuration?: number;
+  defaultHideContentForPlayers?: boolean;
   icsUrl?: string;
   lastSyncedAt?: number;
   lastSyncCount?: number;

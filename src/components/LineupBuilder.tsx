@@ -11,8 +11,7 @@ import { Reorder } from 'motion/react';
 import ColorPicker from './ColorPicker';
 import ImageCropper from './ImageCropper';
 
-import { ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
-import { storage } from '../lib/firebase';
+import { storage, ref, uploadBytes, getDownloadURL, deleteObject } from '../lib/firebase';
 
 interface LineupBuilderProps {
   squad: SquadPlayer[];
@@ -3976,7 +3975,7 @@ export default function LineupBuilder({
                         >
                           <div className="relative shrink-0">
                             <div 
-                              className="rounded-full border border-zinc-200 dark:border-zinc-850 bg-white dark:bg-zinc-900 flex items-center justify-center overflow-hidden shadow-sm"
+                              className="rounded-full border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 flex items-center justify-center overflow-hidden shadow-sm"
                               style={{
                                 width: '2.5rem',
                                 height: '2.5rem',

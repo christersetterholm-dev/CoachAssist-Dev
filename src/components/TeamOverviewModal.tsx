@@ -403,7 +403,7 @@ export default function TeamOverviewModal({
                   <div className={`grid grid-cols-1 ${absentSquadPlayers.length > 0 ? 'sm:grid-cols-2' : ''} gap-3`}>
                     <button
                       onClick={() => setShowGuestInput(true)}
-                      className="w-full flex items-center gap-3 px-4 py-3 bg-white dark:bg-zinc-900 text-zinc-650 dark:text-zinc-350 rounded-2xl font-black text-[10px] uppercase tracking-widest border border-zinc-100 dark:border-zinc-850 hover:border-indigo-200 dark:hover:border-indigo-900 transition-all shadow-sm cursor-pointer text-left"
+                      className="w-full flex items-center gap-3 px-4 py-3 bg-white dark:bg-zinc-900 text-zinc-700 dark:text-zinc-300 rounded-2xl font-black text-[10px] uppercase tracking-widest border border-zinc-100 dark:border-zinc-800 hover:border-indigo-200 dark:hover:border-indigo-900 transition-all shadow-sm cursor-pointer text-left"
                     >
                       <UserPlus size={16} className="text-zinc-400 dark:text-zinc-500 shrink-0" />
                       <span>Skapa gästspelare</span>
@@ -422,7 +422,7 @@ export default function TeamOverviewModal({
                               onAddSquadPlayerToAttendance(val);
                             }
                           }}
-                          className="w-full bg-white dark:bg-zinc-900 text-zinc-650 dark:text-zinc-350 rounded-2xl font-black text-[10px] uppercase tracking-widest border border-zinc-100 dark:border-zinc-850 hover:border-indigo-200 dark:hover:border-indigo-900 transition-all shadow-sm outline-none pl-11 pr-10 py-3 cursor-pointer appearance-none text-left"
+                          className="w-full bg-white dark:bg-zinc-900 text-zinc-700 dark:text-zinc-300 rounded-2xl font-black text-[10px] uppercase tracking-widest border border-zinc-100 dark:border-zinc-800 hover:border-indigo-200 dark:hover:border-indigo-900 transition-all shadow-sm outline-none pl-11 pr-10 py-3 cursor-pointer appearance-none text-left"
                         >
                           <option value="">Hämta från truppen...</option>
                           {absentSquadPlayers.map(p => (
@@ -496,7 +496,7 @@ export default function TeamOverviewModal({
                     </form>
 
                     {absentSquadPlayers.length > 0 && (
-                      <div className="pt-2 border-t border-zinc-100 dark:border-zinc-850">
+                      <div className="pt-2 border-t border-zinc-100 dark:border-zinc-800">
                         <div className="relative w-full">
                           <div className="absolute left-4 top-1/2 -translate-y-1/2 flex items-center pointer-events-none">
                             <Users size={16} className="text-zinc-400 dark:text-zinc-500 shrink-0" />
@@ -509,7 +509,7 @@ export default function TeamOverviewModal({
                                 onAddSquadPlayerToAttendance(val);
                               }
                             }}
-                            className="w-full bg-white dark:bg-zinc-900 text-zinc-650 dark:text-zinc-350 rounded-2xl font-black text-[10px] uppercase tracking-widest border border-zinc-100 dark:border-zinc-850 hover:border-indigo-200 dark:hover:border-indigo-900 transition-all shadow-sm outline-none pl-11 pr-10 py-3 cursor-pointer appearance-none text-left"
+                            className="w-full bg-white dark:bg-zinc-900 text-zinc-700 dark:text-zinc-300 rounded-2xl font-black text-[10px] uppercase tracking-widest border border-zinc-100 dark:border-zinc-800 hover:border-indigo-200 dark:hover:border-indigo-900 transition-all shadow-sm outline-none pl-11 pr-10 py-3 cursor-pointer appearance-none text-left"
                           >
                             <option value="">Hämta från truppen...</option>
                             {absentSquadPlayers.map(p => (
