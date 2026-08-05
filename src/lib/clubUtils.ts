@@ -417,7 +417,7 @@ export async function getMergedSquadAndClubMembers(
 
     let members: ClubMember[] = membersSnap.data().members || [];
     members = deduplicateClubMembers(members);
-    const teamMembers = members.filter(m => m.teams && m.teams.includes(teamId));
+    const teamMembers = members.filter(m => !m.teams || m.teams.length === 0 || m.teams.includes(teamId) || (m.roles && (m.roles.includes('admin') || m.roles.includes('coach'))));
 
     let updatedSquad = [...cleanInputSquad];
 

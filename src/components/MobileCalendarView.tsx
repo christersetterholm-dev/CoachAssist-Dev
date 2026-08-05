@@ -98,6 +98,11 @@ export default function MobileCalendarView({
   const [expandedSessionId, setExpandedSessionId] = useState<string | null>(null);
   const [isSearchOpen, setIsSearchOpen] = useState(false);
 
+  const isCoachOrAdmin = useMemo(() => {
+    if (!_user) return true;
+    return _userRoles?.includes('admin') || _userRoles?.includes('coach') || _userRoles?.includes('root_admin') || false;
+  }, [_user, _userRoles]);
+
   // States for month view
   const [viewMode, setViewMode] = useState<'list' | 'month'>(() => {
     try {
@@ -400,7 +405,7 @@ export default function MobileCalendarView({
           {/* Right section: Elegant and Compact Action Buttons Bar */}
           <div className="flex items-center gap-1.5 shrink-0">
             {/* Primary Action Button: Consolidated "+" Planning with dropdown */}
-            {(onNewSession || onOpenSeriesCreator) && (
+            {(onNewSession || onOpenSeriesCreator) && isCoachOrAdmin && (
               <div className="relative" ref={planMenuRef}>
                 <button
                   type="button"
@@ -809,7 +814,7 @@ export default function MobileCalendarView({
                                   )}
                                 </div>
 
-                                {onDeleteSession && (
+                                {onDeleteSession && isCoachOrAdmin && (
                                   <button
                                     type="button"
                                     onClick={(e) => {
@@ -1146,7 +1151,7 @@ export default function MobileCalendarView({
                                   <ArrowRight size={11} strokeWidth={2.5} />
                                 </button>
 
-                                {onDeleteSession && (
+                                {onDeleteSession && isCoachOrAdmin && (
                                   <button
                                     type="button"
                                     onClick={(e) => {

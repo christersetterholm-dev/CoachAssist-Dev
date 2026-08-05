@@ -85,7 +85,7 @@ export const SessionRsvpView: React.FC<SessionRsvpViewProps> = ({
   squad = [],
   onUpdateSession,
   user,
-  userRoles = ['admin', 'coach'],
+  userRoles = [],
   adminUrl
 }) => {
   const [filter, setFilter] = useState<'all' | 'present' | 'attending' | 'partial' | 'declined' | 'unanswered' | 'guests'>('all');

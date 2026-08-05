@@ -278,8 +278,8 @@ export const signInWithGoogle = async (_forceSelect = false): Promise<User> => {
         passwordInput.required = true;
         codeInput.required = false;
         submitBtn.querySelector('span')!.innerText = 'Logga in';
-        switchText.innerText = 'Har du inget konto?';
-        switchBtn.innerText = 'Skapa konto';
+        switchText.innerText = 'Saknar du inloggningsuppgifter? Kontakta din föreningsadministratör.';
+        switchBtn.classList.add('hidden');
       }
     };
 

@@ -91,10 +91,11 @@ interface SquadManagerProps {
   onUpdateSquad: (squad: SquadPlayer[]) => void;
   activeClubId?: string | null;
   activeTeamId?: string | null;
+  isCoachOrAdmin?: boolean;
   key?: React.Key;
 }
 
-export default function SquadManager({ squad, onUpdateSquad, activeClubId, activeTeamId }: SquadManagerProps) {
+export default function SquadManager({ squad, onUpdateSquad, activeClubId, activeTeamId, isCoachOrAdmin = true }: SquadManagerProps) {
   const [isAdding, setIsAdding] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
   const [newName, setNewName] = useState('');
@@ -167,7 +168,7 @@ export default function SquadManager({ squad, onUpdateSquad, activeClubId, activ
         setFetchedMembers(members);
 
         const relevantMembers = teamIdToUse 
-          ? members.filter(m => m.teams && m.teams.includes(teamIdToUse))
+          ? members.filter(m => m.teams && (m.teams.includes(teamIdToUse) || m.teams.length === 0 || (m.roles && (m.roles.includes('admin') || m.roles.includes('coach')))))
           : members;
 
         const autoSelected = relevantMembers
@@ -680,46 +681,48 @@ export default function SquadManager({ squad, onUpdateSquad, activeClubId, activ
         </div>
       )}
 
-      <div className="flex flex-wrap items-center justify-end gap-2 mb-8">
-        <button
-          onClick={handleOpenFetchMembersModal}
-          className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2.5 rounded-xl font-black text-xs sm:text-sm transition-all shadow-md shadow-emerald-100 dark:shadow-none cursor-pointer"
-          title="Hämta personer från medlemsregistret/laget"
-        >
-          <Users size={18} />
-          <span>Hämta medlemmar från laget</span>
-        </button>
-
-        <button
-          onClick={() => {
-            setNewName('');
-            setNewPosition('');
-            setNewNumber('');
-            setNewPhotoUrl('');
-            setIsAdding(true);
-          }}
-          className="p-2.5 bg-indigo-600 text-white rounded-xl font-bold hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-200 dark:shadow-none cursor-pointer"
-          title="Lägg till i truppen"
-        >
-          <UserPlus size={18} />
-        </button>
-        <button
-          onClick={() => setIsImporting(true)}
-          className="flex items-center gap-2 bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300 px-4 py-2.5 rounded-xl font-bold text-xs sm:text-sm hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-all border border-zinc-200 dark:border-zinc-700 cursor-pointer"
-        >
-          <Upload size={18} />
-          <span>Importera fil</span>
-        </button>
-        {squad.length > 0 && (
+      {isCoachOrAdmin && (
+        <div className="flex flex-wrap items-center justify-end gap-2 mb-8">
           <button
-            onClick={() => setShowClearConfirm(true)}
-            className="flex items-center gap-2 bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 px-4 py-2.5 rounded-xl font-bold text-xs sm:text-sm hover:bg-red-100 dark:hover:bg-red-900/40 transition-all border border-red-100 dark:border-red-900/30 cursor-pointer"
+            onClick={handleOpenFetchMembersModal}
+            className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2.5 rounded-xl font-black text-xs sm:text-sm transition-all shadow-md shadow-emerald-100 dark:shadow-none cursor-pointer"
+            title="Hämta personer från medlemsregistret/laget"
           >
-            <Trash2 size={18} />
-            <span>Rensa</span>
+            <Users size={18} />
+            <span>Hämta medlemmar från laget</span>
           </button>
-        )}
-      </div>
+
+          <button
+            onClick={() => {
+              setNewName('');
+              setNewPosition('');
+              setNewNumber('');
+              setNewPhotoUrl('');
+              setIsAdding(true);
+            }}
+            className="p-2.5 bg-indigo-600 text-white rounded-xl font-bold hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-200 dark:shadow-none cursor-pointer"
+            title="Lägg till i truppen"
+          >
+            <UserPlus size={18} />
+          </button>
+          <button
+            onClick={() => setIsImporting(true)}
+            className="flex items-center gap-2 bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300 px-4 py-2.5 rounded-xl font-bold text-xs sm:text-sm hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-all border border-zinc-200 dark:border-zinc-700 cursor-pointer"
+          >
+            <Upload size={18} />
+            <span>Importera fil</span>
+          </button>
+          {squad.length > 0 && (
+            <button
+              onClick={() => setShowClearConfirm(true)}
+              className="flex items-center gap-2 bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 px-4 py-2.5 rounded-xl font-bold text-xs sm:text-sm hover:bg-red-100 dark:hover:bg-red-900/40 transition-all border border-red-100 dark:border-red-900/30 cursor-pointer"
+            >
+              <Trash2 size={18} />
+              <span>Rensa</span>
+            </button>
+          )}
+        </div>
+      )}
 
       {squad.length > 0 && (
         <div className="w-full min-w-0 flex flex-col md:flex-row md:items-center justify-between gap-4 bg-zinc-50 dark:bg-zinc-950/45 p-4 rounded-3xl border border-zinc-150/80 dark:border-zinc-800/80 mb-8 shadow-sm overflow-hidden">
@@ -1135,22 +1138,24 @@ Kalle Karlsson	Mittback	4	https://image.url"
                         )}
                       </div>
                     </div>
-                    <div className="flex items-center gap-1.5 shrink-0">
-                      <button
-                        onClick={() => startEdit(player)}
-                        className="p-2 bg-zinc-100 dark:bg-zinc-800 text-indigo-600 dark:text-indigo-400 rounded-xl hover:bg-indigo-100 dark:hover:bg-indigo-950/50 transition-all active:scale-95 shadow-sm"
-                        title="Redigera"
-                      >
-                        <Edit2 size={18} />
-                      </button>
-                      <button
-                        onClick={() => handleRemove(player)}
-                        className="p-2 bg-zinc-100 dark:bg-zinc-800 text-red-600 dark:text-red-400 rounded-xl hover:bg-red-100 dark:hover:bg-red-950/50 transition-all active:scale-95 shadow-sm"
-                        title="Ta bort"
-                      >
-                        <Trash2 size={18} />
-                      </button>
-                    </div>
+                    {isCoachOrAdmin && (
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        <button
+                          onClick={() => startEdit(player)}
+                          className="p-2 bg-zinc-100 dark:bg-zinc-800 text-indigo-600 dark:text-indigo-400 rounded-xl hover:bg-indigo-100 dark:hover:bg-indigo-950/50 transition-all active:scale-95 shadow-sm"
+                          title="Redigera"
+                        >
+                          <Edit2 size={18} />
+                        </button>
+                        <button
+                          onClick={() => handleRemove(player)}
+                          className="p-2 bg-zinc-100 dark:bg-zinc-800 text-red-600 dark:text-red-400 rounded-xl hover:bg-red-100 dark:hover:bg-red-950/50 transition-all active:scale-95 shadow-sm"
+                          title="Ta bort"
+                        >
+                          <Trash2 size={18} />
+                        </button>
+                      </div>
+                    )}
                   </motion.div>
                 ))}
               </AnimatePresence>
@@ -1206,22 +1211,24 @@ Kalle Karlsson	Mittback	4	https://image.url"
                         </span>
                       </div>
                     </div>
-                    <div className="flex items-center gap-1.5 shrink-0">
-                      <button
-                        onClick={() => startEdit(player)}
-                        className="p-2 bg-zinc-100 dark:bg-zinc-800 text-indigo-600 dark:text-indigo-400 rounded-xl hover:bg-indigo-100 dark:hover:bg-indigo-950/50 transition-all active:scale-95 shadow-sm"
-                        title="Redigera"
-                      >
-                        <Edit2 size={18} />
-                      </button>
-                      <button
-                        onClick={() => handleRemove(player)}
-                        className="p-2 bg-zinc-100 dark:bg-zinc-800 text-red-600 dark:text-red-400 rounded-xl hover:bg-red-100 dark:hover:bg-red-950/50 transition-all active:scale-95 shadow-sm"
-                        title="Ta bort"
-                      >
-                        <Trash2 size={18} />
-                      </button>
-                    </div>
+                    {isCoachOrAdmin && (
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        <button
+                          onClick={() => startEdit(player)}
+                          className="p-2 bg-zinc-100 dark:bg-zinc-800 text-indigo-600 dark:text-indigo-400 rounded-xl hover:bg-indigo-100 dark:hover:bg-indigo-950/50 transition-all active:scale-95 shadow-sm"
+                          title="Redigera"
+                        >
+                          <Edit2 size={18} />
+                        </button>
+                        <button
+                          onClick={() => handleRemove(player)}
+                          className="p-2 bg-zinc-100 dark:bg-zinc-800 text-red-600 dark:text-red-400 rounded-xl hover:bg-red-100 dark:hover:bg-red-950/50 transition-all active:scale-95 shadow-sm"
+                          title="Ta bort"
+                        >
+                          <Trash2 size={18} />
+                        </button>
+                      </div>
+                    )}
                   </motion.div>
                 ))}
               </AnimatePresence>
@@ -1477,29 +1484,33 @@ Kalle Karlsson	Mittback	4	https://image.url"
           </div>
           <h3 className="text-xl font-bold text-zinc-900 dark:text-white mb-2">Truppen är tom</h3>
           <p className="text-zinc-500 dark:text-zinc-400 mb-8 max-w-md mx-auto">
-            Börja med att hämta in registrerade medlemmar från laget, eller lägg till/importera medlemmar direkt.
+            {isCoachOrAdmin 
+              ? 'Börja med att hämta in registrerade medlemmar från laget, eller lägg till/importera medlemmar direkt.'
+              : 'Inga spelare eller ledare har lagts till i truppen ännu.'}
           </p>
-          <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
-            <button
-              onClick={handleOpenFetchMembersModal}
-              className="w-full sm:w-auto bg-emerald-600 hover:bg-emerald-700 text-white px-6 py-3 rounded-2xl font-bold transition-all shadow-md shadow-emerald-100 dark:shadow-none flex items-center justify-center gap-2 cursor-pointer"
-            >
-              <Users size={18} />
-              <span>Hämta medlemmar från laget</span>
-            </button>
-            <button
-              onClick={() => setIsAdding(true)}
-              className="w-full sm:w-auto bg-indigo-600 text-white px-6 py-3 rounded-2xl font-bold hover:bg-indigo-700 transition-all cursor-pointer"
-            >
-              Lägg till i truppen
-            </button>
-            <button
-              onClick={() => setIsImporting(true)}
-              className="w-full sm:w-auto bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300 px-6 py-3 rounded-2xl font-bold hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-all cursor-pointer"
-            >
-              Importera fil
-            </button>
-          </div>
+          {isCoachOrAdmin && (
+            <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
+              <button
+                onClick={handleOpenFetchMembersModal}
+                className="w-full sm:w-auto bg-emerald-600 hover:bg-emerald-700 text-white px-6 py-3 rounded-2xl font-bold transition-all shadow-md shadow-emerald-100 dark:shadow-none flex items-center justify-center gap-2 cursor-pointer"
+              >
+                <Users size={18} />
+                <span>Hämta medlemmar från laget</span>
+              </button>
+              <button
+                onClick={() => setIsAdding(true)}
+                className="w-full sm:w-auto bg-indigo-600 text-white px-6 py-3 rounded-2xl font-bold hover:bg-indigo-700 transition-all cursor-pointer"
+              >
+                Lägg till i truppen
+              </button>
+              <button
+                onClick={() => setIsImporting(true)}
+                className="w-full sm:w-auto bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300 px-6 py-3 rounded-2xl font-bold hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-all cursor-pointer"
+              >
+                Importera fil
+              </button>
+            </div>
+          )}
         </div>
       )}
 

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { RotateCcw, Trophy, ArrowLeft, Check, Sun, Moon, Timer as TimerIcon, Edit2, Zap, Rocket, Users, LayoutDashboard, Unlock, LogIn, LogOut, User as UserIcon, ShieldCheck, Cloud, Layout, Globe, AlertTriangle, Calendar, Settings, RefreshCw, Bell } from 'lucide-react';
+import { RotateCcw, Trophy, ArrowLeft, Check, Sun, Moon, Timer as TimerIcon, Edit2, Zap, Rocket, Users, LayoutDashboard, Unlock, LogIn, LogOut, User as UserIcon, ShieldCheck, Cloud, Layout, Globe, AlertTriangle, Calendar, Settings, RefreshCw, Bell, Building2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { SquadPlayer, Exercise, Team, PointsConfig, Period, PeriodStandings, Lineup, TrainingSession, TrainingSettings, CoachData, BankExercise, SessionMoment, UserProfile, ClubMember } from './types';
+import { SquadPlayer, Exercise, Team, PointsConfig, Period, PeriodStandings, Lineup, TrainingSession, TrainingSettings, CoachData, BankExercise, SessionMoment, UserProfile, ClubMember, ClubTeam, Club } from './types';
 import { auth, signInWithGoogle, db, handleFirestoreError, OperationType, getApiUrl, doc, onSnapshot, setDoc, getDoc, collection, getDocs } from './lib/firebase';
 import { onAuthStateChanged, signOut, User } from 'firebase/auth';
 import { calculateLeaderboard } from './lib/leaderboardUtils';
@@ -112,7 +112,26 @@ export default function App() {
     activeClubId: null,
     activeTeamId: null,
   });
+  const [activeClubInfo, setActiveClubInfo] = useState<{ clubName: string; teamName: string } | null>(null);
   const [userRoles, setUserRoles] = useState<string[]>([]);
+
+  useEffect(() => {
+    if (!userProfile.activeClubId) {
+      setActiveClubInfo(null);
+      return;
+    }
+    let isMounted = true;
+    getDoc(doc(db, 'clubs', userProfile.activeClubId, 'teams', 'club_global', 'data', 'metadata')).then(snap => {
+      if (isMounted && snap.exists()) {
+        const data = snap.data();
+        const clubName = data.clubName || data.name || 'Förening';
+        const teamObj = Array.isArray(data.teams) ? data.teams.find((t: any) => t.id === userProfile.activeTeamId) : null;
+        const teamName = teamObj?.name || (userProfile.activeTeamId === 'club_global' ? 'Hela Föreningen' : 'Lag');
+        setActiveClubInfo({ clubName, teamName });
+      }
+    }).catch(() => {});
+    return () => { isMounted = false; };
+  }, [userProfile.activeClubId, userProfile.activeTeamId]);
   const [isRootAdmin, setIsRootAdmin] = useState(false);
   const [pendingRequestsCount, setPendingRequestsCount] = useState<number>(0);
   const [isPendingRequestsModalOpen, setIsPendingRequestsModalOpen] = useState<boolean>(false);
@@ -328,7 +347,14 @@ export default function App() {
   });
 
   const setView = (newView: View | ((prev: View) => View)) => {
-    _setView(newView);
+    _setView(prev => {
+      const nextView = typeof newView === 'function' ? newView(prev) : newView;
+      if (nextView === 'clubadmin' && user && !isRootAdmin && !userRoles.includes('admin') && !userRoles.includes('coach')) {
+        console.warn('Unauthorized view transition to clubadmin blocked');
+        return 'training';
+      }
+      return nextView;
+    });
   };
   const [trainingTab, setTrainingTab] = useState<'completed' | 'exercises' | 'calendar_view'>('calendar_view');
   const [openTrainingSettings, setOpenTrainingSettings] = useState(false);
@@ -576,11 +602,121 @@ export default function App() {
     try {
       setIsProfileLoaded(false);
       const profileSnap = await getDoc(doc(db, 'users', uid, 'data', 'profile'));
-      if (profileSnap.exists()) {
-        const p = profileSnap.data() as UserProfile;
-        if (!p.username && auth.currentUser?.username) {
-          p.username = auth.currentUser.username;
+      let p: UserProfile | null = profileSnap.exists() ? (profileSnap.data() as UserProfile) : null;
+
+      if (p && !p.username && auth.currentUser?.username) {
+        p.username = auth.currentUser.username;
+      }
+
+      const cleanUserEmail = (email || p?.email || '').trim().toLowerCase();
+
+      // If user profile is missing or lacks an activeClubId or is pending, check if user belongs to any existing club
+      if (!p || !p.activeClubId || p.status === 'pending') {
+        try {
+          // Fetch clubs list
+          let clubsList: Club[] = [];
+          const allClubsSnap = await getDoc(doc(db, 'shared_leaderboards', 'all_clubs'));
+          if (allClubsSnap.exists()) {
+            clubsList = allClubsSnap.data().clubs || [];
+          }
+
+          let foundClubId: string | null = null;
+          let foundTeamId: string | null = null;
+          let foundRoles: string[] = ['player'];
+          let foundFullName: string | null = null;
+          let foundPhone: string | null = null;
+          let foundPnr: string | null = null;
+
+          for (const c of clubsList) {
+            const membersSnap = await getDoc(doc(db, 'clubs', c.id, 'teams', 'club_global', 'data', 'members'));
+            if (membersSnap.exists()) {
+              const members: ClubMember[] = membersSnap.data().members || [];
+              let isMemberUpdated = false;
+
+              const matchedMember = members.find(m => {
+                const sameUid = m.userId === uid;
+                const sameEmail = m.email && cleanUserEmail && m.email.trim().toLowerCase() === cleanUserEmail;
+                return sameUid || sameEmail;
+              });
+
+              if (matchedMember) {
+                foundClubId = c.id;
+                foundRoles = matchedMember.roles && matchedMember.roles.length > 0 ? matchedMember.roles : ['player'];
+                foundFullName = matchedMember.fullName || (matchedMember as any).name || null;
+                foundPhone = matchedMember.phone || null;
+                foundPnr = matchedMember.personnummer || null;
+
+                // Bind userId if missing
+                if (!matchedMember.userId || matchedMember.userId !== uid) {
+                  matchedMember.userId = uid;
+                  isMemberUpdated = true;
+                }
+
+                if (isMemberUpdated) {
+                  setDoc(doc(db, 'clubs', c.id, 'teams', 'club_global', 'data', 'members'), { members }).catch(() => {});
+                }
+
+                // Determine activeTeamId
+                if (matchedMember.teams && matchedMember.teams.length > 0) {
+                  foundTeamId = matchedMember.teams[0];
+                } else {
+                  const metaSnap = await getDoc(doc(db, 'clubs', c.id, 'teams', 'club_global', 'data', 'metadata'));
+                  if (metaSnap.exists()) {
+                    const teams: ClubTeam[] = metaSnap.data().teams || [];
+                    foundTeamId = teams.length > 0 ? teams[0].id : 'club_global';
+                  } else {
+                    foundTeamId = 'club_global';
+                  }
+                }
+                break;
+              }
+            }
+          }
+
+          if (foundClubId) {
+            const resolvedProfile: UserProfile = {
+              fullName: foundFullName || p?.fullName || (cleanUserEmail ? cleanUserEmail.split('@')[0] : 'Bruker'),
+              email: cleanUserEmail,
+              phone: foundPhone || p?.phone || '',
+              personnummer: foundPnr || p?.personnummer || '',
+              activeClubId: foundClubId,
+              activeTeamId: foundTeamId,
+              status: 'approved',
+              onboardingCompleted: p?.onboardingCompleted ?? false,
+              username: p?.username || auth.currentUser?.username
+            };
+            await setDoc(doc(db, 'users', uid, 'data', 'profile'), resolvedProfile, { merge: true });
+            setUserProfile(resolvedProfile);
+            setUserRoles(foundRoles);
+            setIsProfileLoaded(true);
+            return;
+          }
+        } catch (clubSearchErr) {
+          console.error("Error searching user club membership:", clubSearchErr);
         }
+      }
+
+      if (p) {
+        // Auto-resolve active team if set to 'club_global' or invalid when club has teams
+        if (p.activeClubId) {
+          try {
+            const metaSnap = await getDoc(doc(db, 'clubs', p.activeClubId, 'teams', 'club_global', 'data', 'metadata'));
+            if (metaSnap.exists()) {
+              const teams: ClubTeam[] = metaSnap.data().teams || [];
+              if (teams.length > 0) {
+                const teamExists = teams.some(t => t.id === p.activeTeamId);
+                if (!p.activeTeamId || p.activeTeamId === 'club_global' || !teamExists) {
+                  p.activeTeamId = teams[0].id;
+                  setDoc(doc(db, 'users', uid, 'data', 'profile'), { activeTeamId: teams[0].id }, { merge: true })
+                    .catch(err => console.error("Auto-resolved activeTeamId update failed:", err));
+                }
+              }
+            }
+          } catch (metaErr) {
+            console.error("Failed to load metadata during profile resolution:", metaErr);
+          }
+        }
+
         setUserProfile(p);
         
         // Load roles for active club
@@ -588,7 +724,7 @@ export default function App() {
           const membersSnap = await getDoc(doc(db, 'clubs', p.activeClubId, 'teams', 'club_global', 'data', 'members'));
           if (membersSnap.exists()) {
             const members: ClubMember[] = membersSnap.data().members || [];
-            const myRecord = members.find(m => m.userId === uid || (m.email && m.email.trim().toLowerCase() === email.trim().toLowerCase()));
+            const myRecord = members.find(m => m.userId === uid || (m.email && m.email.trim().toLowerCase() === cleanUserEmail));
             if (myRecord) {
               setUserRoles(myRecord.roles || []);
             } else {
@@ -602,8 +738,8 @@ export default function App() {
         }
       } else {
         const defaultProfile: UserProfile = {
-          fullName: email.split('@')[0],
-          email: email.trim().toLowerCase(),
+          fullName: cleanUserEmail ? cleanUserEmail.split('@')[0] : 'Användare',
+          email: cleanUserEmail,
           activeClubId: null,
           activeTeamId: null,
           status: 'pending',
@@ -1801,6 +1937,8 @@ export default function App() {
   };
 
   const onDeleteSession = (id: string) => {
+    const isCoachOrAdmin = user ? (isRootAdmin || userRoles.includes('admin') || userRoles.includes('coach')) : true;
+    if (!isCoachOrAdmin) return;
     setData(prev => {
       const sessionToDelete = prev.sessions.find(s => s.id === id);
       const updatedSessions = prev.sessions.filter(s => s.id !== id);
@@ -1835,6 +1973,8 @@ export default function App() {
   };
 
   const onDeleteSessionPermanent = (ids: string | string[]) => {
+    const isCoachOrAdmin = user ? (isRootAdmin || userRoles.includes('admin') || userRoles.includes('coach')) : true;
+    if (!isCoachOrAdmin) return;
     const idArray = Array.isArray(ids) ? ids : [ids];
     setData(prev => ({
       ...prev,
@@ -2344,7 +2484,17 @@ export default function App() {
     setSessionActionCount(prev => prev + 1);
   };
 
+  const isCoachOrAdmin = user ? (isRootAdmin || userRoles.includes('admin') || userRoles.includes('coach')) : true;
   const activeLineup = lineups.find(l => l.id === activeLineupId) || null;
+  const publishedLineups = lineups.filter(l => l.isPublishedToPlayers && !l.isArchived);
+  const effectiveActiveLineup = isCoachOrAdmin ? activeLineup : (publishedLineups.find(l => l.id === activeLineupId) || publishedLineups[0] || null);
+  const canViewLineup = isCoachOrAdmin || !!trainingSettings?.showLineupsToPlayers;
+
+  useEffect(() => {
+    if (!isCoachOrAdmin && view === 'clubadmin') {
+      setView('training');
+    }
+  }, [isCoachOrAdmin, view]);
 
   if (isAuthReady && user && !isInitialSyncDone) {
     return (
@@ -2409,6 +2559,7 @@ export default function App() {
                     return 'Kalender';
                   })()}
                 </span>
+
                 {(view === 'squad' || view === 'leaderboard' || view === 'teampage' || view === 'training' || view === 'clubadmin') && (
                   <span className="hidden sm:block text-[10px] font-black text-zinc-400 uppercase tracking-widest mt-[-2px]">
                     {view === 'squad' ? 'Hantera spelare & ledare' : view === 'leaderboard' ? 'Statistik & poäng' : view === 'training' ? 'Översikt & Planering' : view === 'clubadmin' ? 'Föreningar, lag, databas & kalender' : 'Webb & Kalender'}
@@ -2481,7 +2632,7 @@ export default function App() {
                   )}
 
                   {/* Kalenderinställningar Cogwheel in top-right Nav */}
-                  {view === 'training' && (
+                  {view === 'training' && isCoachOrAdmin && (
                     <button
                       type="button"
                       onClick={() => setOpenTrainingSettings(true)}
@@ -2493,7 +2644,7 @@ export default function App() {
                   )}
 
                   {/* Admin Icon Button */}
-                  {isAuthReady && view !== 'exercise' && user && (
+                  {isAuthReady && view !== 'exercise' && user && isCoachOrAdmin && (
                     <button
                       type="button"
                       onClick={() => setView('clubadmin')}
@@ -2544,46 +2695,50 @@ export default function App() {
                   >
                     <TimerIcon size={20} />
                   </button>
-                  <button
-                    onClick={() => {
-                      setPreviousActiveExerciseId(activeExerciseId);
-                      setEditReturnView('exercise');
-                      setIsEditingActiveExercise(true);
-                      setView('setup');
-                    }}
-                    className="p-2 text-zinc-500 dark:text-zinc-400 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-lg transition-all"
-                    title="Redigera tävlingsmoment"
-                  >
-                    <Edit2 size={20} />
-                  </button>
-                  <button
-                    onClick={() => setShowResetConfirm(true)}
-                    className="p-2 text-zinc-500 dark:text-zinc-400 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-lg transition-all"
-                    title="Nollställ poäng"
-                    disabled={activeExercise.isFinished}
-                  >
-                    <RotateCcw size={20} />
-                  </button>
-                  {!activeExercise.isFinished && (
-                    <button
-                      onClick={() => {
-                        setFinishTargetPeriodId(activeExercise.periodId || currentPeriodId);
-                        setShowFinishConfirm(true);
-                      }}
-                      className="ml-2 bg-green-600 text-white px-4 py-2 rounded-xl font-bold hover:bg-green-700 transition-all shadow-lg shadow-green-200 dark:shadow-none flex items-center gap-2"
-                    >
-                      <Check size={18} strokeWidth={3} />
-                      <span className="hidden sm:inline">Avsluta</span>
-                    </button>
-                  )}
-                  {activeExercise.isFinished && (
-                    <button
-                      onClick={unlockExercise}
-                      className="p-2 text-zinc-500 dark:text-zinc-400 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-lg transition-all"
-                      title="Lås upp för redigering"
-                    >
-                      <Unlock size={20} />
-                    </button>
+                  {isCoachOrAdmin && (
+                    <>
+                      <button
+                        onClick={() => {
+                          setPreviousActiveExerciseId(activeExerciseId);
+                          setEditReturnView('exercise');
+                          setIsEditingActiveExercise(true);
+                          setView('setup');
+                        }}
+                        className="p-2 text-zinc-500 dark:text-zinc-400 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-lg transition-all cursor-pointer"
+                        title="Redigera tävlingsmoment"
+                      >
+                        <Edit2 size={20} />
+                      </button>
+                      <button
+                        onClick={() => setShowResetConfirm(true)}
+                        className="p-2 text-zinc-500 dark:text-zinc-400 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-lg transition-all cursor-pointer"
+                        title="Nollställ poäng"
+                        disabled={activeExercise.isFinished}
+                      >
+                        <RotateCcw size={20} />
+                      </button>
+                      {!activeExercise.isFinished && (
+                        <button
+                          onClick={() => {
+                            setFinishTargetPeriodId(activeExercise.periodId || currentPeriodId);
+                            setShowFinishConfirm(true);
+                          }}
+                          className="ml-2 bg-green-600 text-white px-4 py-2 rounded-xl font-bold hover:bg-green-700 transition-all shadow-lg shadow-green-200 dark:shadow-none flex items-center gap-2 cursor-pointer"
+                        >
+                          <Check size={18} strokeWidth={3} />
+                          <span className="hidden sm:inline">Avsluta</span>
+                        </button>
+                      )}
+                      {activeExercise.isFinished && (
+                        <button
+                          onClick={unlockExercise}
+                          className="p-2 text-zinc-500 dark:text-zinc-400 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-lg transition-all cursor-pointer"
+                          title="Lås upp för redigering"
+                        >
+                          <Unlock size={20} />
+                        </button>
+                      )}
+                    </>
                   )}
                 </>
               )}
@@ -2666,6 +2821,9 @@ export default function App() {
                   sessions={sessions}
                   deletedSessions={deletedSessions}
                   squad={squad}
+                  activeClubId={userProfile.activeClubId}
+                  activeTeamId={userProfile.activeTeamId}
+                  activeClubInfo={activeClubInfo}
                   isCloudDataLoaded={hasPulledFromCloud}
                   activeTab={trainingTab}
                   onTabChange={setTrainingTab}
@@ -2881,6 +3039,7 @@ export default function App() {
                 onUpdateSquad={handleUpdateSquad}
                 activeClubId={userProfile.activeClubId}
                 activeTeamId={userProfile.activeTeamId}
+                isCoachOrAdmin={isCoachOrAdmin}
               />
             )
           )}
@@ -2922,6 +3081,7 @@ export default function App() {
                   <ProfileAndSettings
                     userId={user.uid}
                     userEmail={user.email || ''}
+                    isRootAdmin={isRootAdmin}
                     onProfileUpdated={handleProfileUpdated}
                     currentProfile={userProfile}
                   />
@@ -2998,7 +3158,7 @@ export default function App() {
             </motion.div>
           )}
 
-          {view === 'clubadmin' && user && (
+          {view === 'clubadmin' && user && isCoachOrAdmin && (
             <motion.div
               key="clubadmin"
               initial={{ opacity: 0, y: 20 }}
@@ -3010,6 +3170,8 @@ export default function App() {
                 userId={user.uid}
                 userEmail={user.email || ''}
                 isRootAdmin={isRootAdmin}
+                isCoachOrAdmin={isCoachOrAdmin}
+                userRoles={userRoles}
                 onBack={() => setView('training')}
                 teamUrl={teamUrl}
                 onUpdateTeamUrl={handleUpdateTeamUrl}
@@ -3080,10 +3242,10 @@ export default function App() {
             </motion.div>
           )}
 
-          {view === 'lineup' && (
+          {view === 'lineup' && canViewLineup && (
             <LineupBuilder 
               squad={squad} 
-              lineup={activeLineup} 
+              lineup={effectiveActiveLineup} 
               lineups={lineups}
               onUpdateLineup={updateLineup}
               onSaveLineup={handleSaveLineup}
@@ -3127,6 +3289,7 @@ export default function App() {
               sessionActionCount={sessionActionCount}
               isQuotaExceeded={isQuotaExceeded}
               syncError={syncError}
+              isCoachOrAdmin={isCoachOrAdmin}
             />
           )}
 
@@ -3153,6 +3316,7 @@ export default function App() {
                           defaultMinutes={activeExercise.defaultTimerMinutes} 
                           defaultSeconds={activeExercise.defaultTimerSeconds} 
                           onSaveDefault={updateActiveExerciseDefaultTimer}
+                          isCoachOrAdmin={isCoachOrAdmin}
                         />
                       </div>
                     )}
@@ -3178,10 +3342,11 @@ export default function App() {
                           return (
                             <motion.span
                               key={id}
-                              drag
+                              drag={isCoachOrAdmin}
                               dragSnapToOrigin
-                              onDragStart={() => setDraggedPlayerId(id)}
+                              onDragStart={() => { if (isCoachOrAdmin) setDraggedPlayerId(id); }}
                               onDragEnd={(e: any, info) => {
+                                if (!isCoachOrAdmin) return;
                                 setDraggedPlayerId(null);
                                 const point = (e.nativeEvent || e).clientX !== undefined ? (e.nativeEvent || e) : info.point;
                                 const x = point.clientX || point.x;
@@ -3198,13 +3363,13 @@ export default function App() {
                                   }
                                 }
                               }}
-                              whileTap={{ scale: 0.95 }}
-                              whileDrag={{
+                              whileTap={isCoachOrAdmin ? { scale: 0.95 } : undefined}
+                              whileDrag={isCoachOrAdmin ? {
                                 zIndex: 9999,
                                 scale: 1.1,
                                 pointerEvents: 'none'
-                              }}
-                              className="text-[10px] font-black text-zinc-700 dark:text-zinc-200 bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 px-2 py-0.5 rounded-md cursor-grab active:cursor-grabbing touch-none z-50 shadow-sm select-none"
+                              } : undefined}
+                              className={`text-[10px] font-black text-zinc-700 dark:text-zinc-200 bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 px-2 py-0.5 rounded-md ${isCoachOrAdmin ? 'cursor-grab active:cursor-grabbing' : 'cursor-default'} touch-none z-50 shadow-sm select-none`}
                             >
                               {player.name}
                             </motion.span>
@@ -3212,7 +3377,7 @@ export default function App() {
                         })}
                         {jokers.length === 0 && (
                           <span className="text-[9px] text-indigo-400/80 dark:text-indigo-500/80 font-semibold uppercase tracking-wider pointer-events-none px-1">
-                            Släpp spelare här för Joker
+                            {isCoachOrAdmin ? 'Släpp spelare här för Joker' : 'Inga jokrar'}
                           </span>
                         )}
                       </div>
@@ -3246,12 +3411,12 @@ export default function App() {
                           onUpdateScore={updateScore}
                           onUpdateColor={updateTeamColor}
                           onRankClick={handleRankClick}
-                          disabled={activeExercise.isFinished}
+                          disabled={activeExercise.isFinished || !isCoachOrAdmin}
                           exerciseId={activeExercise.id}
                           onMovePlayer={movePlayer}
-                          draggedPlayerId={draggedPlayerId}
-                          isAnyPlayerDragging={!!draggedPlayerId}
-                          onDragStart={(pid) => setDraggedPlayerId(pid)}
+                          draggedPlayerId={isCoachOrAdmin ? draggedPlayerId : null}
+                          isAnyPlayerDragging={isCoachOrAdmin && !!draggedPlayerId}
+                          onDragStart={(pid) => { if (isCoachOrAdmin) setDraggedPlayerId(pid); }}
                           onDragEnd={() => setDraggedPlayerId(null)}
                         />
                       </motion.div>
@@ -3281,7 +3446,33 @@ export default function App() {
         </AnimatePresence>
 
         {view !== 'exercise' && (
-          <VersionFooter className="mt-4 mb-2" />
+          <div className="mt-8 mb-2 flex flex-col items-center justify-center gap-2">
+            {activeClubInfo && (
+              isCoachOrAdmin ? (
+                <button
+                  type="button"
+                  onClick={() => setView('clubadmin')}
+                  className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/60 dark:hover:bg-indigo-900/60 border border-indigo-200/60 dark:border-indigo-800/60 text-indigo-700 dark:text-indigo-300 transition-all text-xs font-extrabold cursor-pointer active:scale-95 shadow-2xs"
+                  title="Klicka för att hantera eller byta Förening & Lag"
+                >
+                  <Building2 size={13} className="text-indigo-600 dark:text-indigo-400 shrink-0" />
+                  <span>{activeClubInfo.clubName}</span>
+                  <span className="text-indigo-300 dark:text-indigo-600">•</span>
+                  <Users size={13} className="text-indigo-600 dark:text-indigo-400 shrink-0" />
+                  <span>{activeClubInfo.teamName}</span>
+                </button>
+              ) : (
+                <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-zinc-100 dark:bg-zinc-800/60 border border-zinc-200 dark:border-zinc-700 text-zinc-600 dark:text-zinc-400 text-xs font-bold shadow-2xs">
+                  <Building2 size={13} className="text-zinc-500 shrink-0" />
+                  <span>{activeClubInfo.clubName}</span>
+                  <span className="text-zinc-400">•</span>
+                  <Users size={13} className="text-zinc-500 shrink-0" />
+                  <span>{activeClubInfo.teamName}</span>
+                </div>
+              )
+            )}
+            <VersionFooter />
+          </div>
         )}
       </main>
 
@@ -3310,13 +3501,15 @@ export default function App() {
               <Users size={24} />
               <span className="text-[10px] font-bold uppercase tracking-wider text-center">Truppen</span>
             </button>
-            <button
-              onClick={() => setView('lineup')}
-              className={`flex-1 flex flex-col items-center gap-1 transition-colors ${view === 'lineup' ? 'text-indigo-600 dark:text-indigo-400' : 'text-zinc-400 hover:text-zinc-600'}`}
-            >
-              <Layout size={24} />
-              <span className="text-[10px] font-bold uppercase tracking-wider text-center">Laguppst.</span>
-            </button>
+            {canViewLineup && (
+              <button
+                onClick={() => setView('lineup')}
+                className={`flex-1 flex flex-col items-center gap-1 transition-colors ${view === 'lineup' ? 'text-indigo-600 dark:text-indigo-400' : 'text-zinc-400 hover:text-zinc-600'}`}
+              >
+                <Layout size={24} />
+                <span className="text-[10px] font-bold uppercase tracking-wider text-center">Laguppst.</span>
+              </button>
+            )}
             <button
               onClick={() => setView('teampage')}
               className={`flex-1 flex flex-col items-center gap-1 transition-colors ${view === 'teampage' ? 'text-indigo-600 dark:text-indigo-400' : 'text-zinc-400 hover:text-zinc-600'}`}

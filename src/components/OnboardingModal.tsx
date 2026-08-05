@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { motion } from 'motion/react';
-import { UserProfile, Club, ClubTeam, PendingUserRequest } from '../types';
+import { UserProfile, Club, ClubTeam } from '../types';
 import { db, doc, getDoc, setDoc, User } from '../lib/firebase';
 import { ShieldAlert, Clock, LogOut, Send, User as UserIcon, Phone, FileText, Building2, Users, Edit3, Loader2 } from 'lucide-react';
 
@@ -115,60 +115,71 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
 
     setIsSubmitting(true);
     try {
-      const selectedClub = clubs.find(c => c.id === selectedClubId);
-      const selectedTeam = teams.find(t => t.id === selectedTeamId);
-
       const cleanEmail = email.trim().toLowerCase();
       const cleanPhone = phone.trim();
       const cleanPnr = personnummer.trim();
       const cleanName = fullName.trim();
 
-      const pendingReq: PendingUserRequest = {
-        id: user.uid,
-        uid: user.uid,
-        email: cleanEmail,
-        fullName: cleanName,
-        phone: cleanPhone,
-        personnummer: cleanPnr,
-        requestedRole,
-        requestedClubId: selectedClubId,
-        requestedTeamId: selectedTeamId,
-        requestedClubName: selectedClub ? selectedClub.name : '',
-        requestedTeamName: selectedTeam ? selectedTeam.name : '',
-        createdAt: Date.now(),
-        status: 'pending'
-      };
+      // Update club members list to reflect completed profile info & bind userId
+      try {
+        const membersSnap = await getDoc(doc(db, 'clubs', selectedClubId, 'teams', 'club_global', 'data', 'members'));
+        if (membersSnap.exists()) {
+          const membersList = membersSnap.data().members || [];
+          let foundMember = membersList.find((m: any) => 
+            m.userId === user.uid || (m.email && m.email.trim().toLowerCase() === cleanEmail)
+          );
 
-      // 1. Save global pending request
-      await setDoc(doc(db, 'pending_user_requests', user.uid), pendingReq);
+          if (foundMember) {
+            foundMember.userId = user.uid;
+            foundMember.fullName = cleanName;
+            foundMember.name = cleanName;
+            foundMember.email = cleanEmail;
+            foundMember.phone = cleanPhone;
+            foundMember.personnummer = cleanPnr;
+          } else {
+            membersList.push({
+              id: user.uid,
+              userId: user.uid,
+              fullName: cleanName,
+              name: cleanName,
+              email: cleanEmail,
+              phone: cleanPhone,
+              personnummer: cleanPnr,
+              roles: requestedRole === 'leader' ? ['coach'] : ['player'],
+              teams: [selectedTeamId]
+            });
+          }
 
-      // 2. Save club-level pending request
-      await setDoc(doc(db, 'clubs', selectedClubId, 'pending_requests', user.uid), pendingReq);
+          await setDoc(doc(db, 'clubs', selectedClubId, 'teams', 'club_global', 'data', 'members'), { members: membersList }, { merge: true });
+        }
+      } catch (memErr) {
+        console.error('Failed updating club member record during onboarding:', memErr);
+      }
 
-      // 3. Save user profile
+      // Save user profile with onboarding completed and approved status
       const updatedProfile: UserProfile = {
         ...userProfile,
         fullName: cleanName,
         email: cleanEmail,
         phone: cleanPhone,
         personnummer: cleanPnr,
+        activeClubId: selectedClubId,
+        activeTeamId: selectedTeamId,
         requestedRole,
-        requestedClubId: selectedClubId,
-        requestedTeamId: selectedTeamId,
-        status: 'pending',
+        status: 'approved',
         onboardingCompleted: true
       };
 
       await setDoc(doc(db, 'users', user.uid, 'data', 'profile'), {
         ...updatedProfile,
         updatedAt: Date.now()
-      });
+      }, { merge: true });
 
       onProfileUpdated(updatedProfile);
       setIsEditing(false);
-    } catch (err) {
-      console.error('Failed to submit onboarding request:', err);
-      setErrorMsg('Ett fel uppstod när ansökan skickades. Vänligen försök igen.');
+    } catch (err: any) {
+      console.error('Failed to save profile during onboarding:', err);
+      setErrorMsg(err?.message || 'Ett fel uppstod när profilen sparades. Vänligen försök igen.');
     } finally {
       setIsSubmitting(false);
     }
@@ -208,10 +219,10 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
             </button>
           </div>
           <h2 className="text-2xl sm:text-3xl font-black tracking-tight">
-            Välkommen till appen!
+            Komplettera din profil
           </h2>
           <p className="text-indigo-100 text-xs sm:text-sm mt-1">
-            För att få tillgång till ditt lag behöver en administratör eller tränare godkänna din ansökan.
+            Fyll i dina kontaktuppgifter för att slutföra din profil och komma igång.
           </p>
         </div>
 
@@ -440,12 +451,12 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
                 {isSubmitting ? (
                   <>
                     <Loader2 size={18} className="animate-spin" />
-                    <span>Skickar ansökan...</span>
+                    <span>Sparar profil...</span>
                   </>
                 ) : (
                   <>
                     <Send size={18} />
-                    <span>Skicka medlemsansökan</span>
+                    <span>Spara profil & Fortsätt</span>
                   </>
                 )}
               </button>

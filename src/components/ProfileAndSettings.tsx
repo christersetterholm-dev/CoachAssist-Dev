@@ -9,6 +9,7 @@ interface ProfileAndSettingsProps {
   userEmail: string;
   onProfileUpdated: (profile: UserProfile) => void;
   currentProfile: UserProfile;
+  isRootAdmin?: boolean;
 }
 
 export default function ProfileAndSettings({
@@ -16,6 +17,7 @@ export default function ProfileAndSettings({
   userEmail,
   onProfileUpdated,
   currentProfile,
+  isRootAdmin = false,
 }: ProfileAndSettingsProps) {
   const [profile, setProfile] = useState<UserProfile>({
     fullName: currentProfile.fullName || '',
@@ -107,6 +109,14 @@ export default function ProfileAndSettings({
                 teams: myMemberRecord.teams || [],
                 availableTeams: metadata?.teams || []
               });
+            } else if (isRootAdmin || club.id === currentProfile.activeClubId) {
+              // Root admin can see all clubs in system; active club is also always kept accessible
+              userMemberships.push({
+                club,
+                roles: isRootAdmin ? ['root_admin', 'admin'] : (myMemberRecord?.roles || ['player']),
+                teams: (metadata?.teams || []).map(t => t.id),
+                availableTeams: metadata?.teams || []
+              });
             }
           } catch (err) {
             console.error(`Failed to load details for club ${club.name}:`, err);
@@ -122,7 +132,7 @@ export default function ProfileAndSettings({
     }
 
     loadClubData();
-  }, [userId, userEmail]);
+  }, [userId, userEmail, isRootAdmin, currentProfile.activeClubId]);
 
   const handleSaveProfile = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -629,7 +639,9 @@ export default function ProfileAndSettings({
 
                   {memberships.map(({ club, roles, teams, availableTeams }) => {
                     const isActive = profile.activeClubId === club.id;
-                    const myClubTeams = availableTeams.filter(t => teams.includes(t.id));
+                    const myClubTeams = (roles.includes('admin') || roles.includes('coach') || teams.length === 0)
+                      ? availableTeams
+                      : availableTeams.filter(t => teams.includes(t.id));
                     
                     return (
                       <div
@@ -643,8 +655,8 @@ export default function ProfileAndSettings({
                         <div className="flex items-center justify-between mb-3">
                           <button
                             onClick={() => {
-                              // Auto-select first team they are member of, or null if none
-                              const firstTeamId = teams[0] || null;
+                              // Auto-select first team they are member of or available team
+                              const firstTeamId = teams[0] || (availableTeams.length > 0 ? availableTeams[0].id : 'club_global');
                               handleSelectClubAndTeam(club.id, firstTeamId);
                             }}
                             className="flex items-center gap-3 text-left focus:outline-none flex-1 cursor-pointer"

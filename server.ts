@@ -2326,6 +2326,143 @@ async function startServer() {
     }
   });
 
+  // Calendar ICS Feed endpoint for subscribing to a specific team's calendar
+  const handleIcsFeed = async (req: express.Request, res: express.Response) => {
+    try {
+      const clubId = (req.params.clubId || req.query.clubId || '').toString().trim();
+      const teamId = (req.params.teamId || req.query.teamId || 'club_global').toString().trim();
+
+      if (!clubId) {
+        return res.status(400).send('Missing clubId query or path parameter');
+      }
+
+      // Fetch sessions for this club and team
+      let sessionsData: any[] = [];
+      let clubName = 'CoachAssist';
+      let teamName = 'Lagets Kalender';
+
+      // 1. Try fetching metadata for club/team name
+      try {
+        const metaRow: any = db.prepare('SELECT data FROM clubs_data WHERE clubId = ? AND teamId = ? AND segment = ?').get(clubId, 'club_global', 'metadata');
+        if (metaRow) {
+          const meta = typeof metaRow.data === 'string' ? JSON.parse(metaRow.data) : metaRow.data;
+          if (meta.clubName) clubName = meta.clubName;
+          if (meta.teams && Array.isArray(meta.teams)) {
+            const t = meta.teams.find((tm: any) => tm.id === teamId);
+            if (t && t.name) teamName = t.name;
+          }
+        }
+      } catch (e) {}
+
+      // 2. Fetch sessions
+      let row: any = db.prepare('SELECT data FROM clubs_data WHERE clubId = ? AND teamId = ? AND segment = ?').get(clubId, teamId, 'sessions');
+      if (row) {
+        sessionsData = typeof row.data === 'string' ? JSON.parse(row.data) : row.data;
+      } else {
+        // Fallback to Firestore doc
+        const fDoc = await getFirestoreDoc(`app_docs/clubs_${clubId}_${teamId}_sessions`);
+        if (fDoc && fDoc.data) {
+          sessionsData = typeof fDoc.data === 'string' ? JSON.parse(fDoc.data) : fDoc.data;
+        }
+      }
+
+      if (!Array.isArray(sessionsData)) {
+        sessionsData = [];
+      }
+
+      // Filter active sessions (not ignored or deleted)
+      const validSessions = sessionsData.filter((s: any) => s && s.title && !s.isIgnored);
+
+      // Helper to escape text for iCal
+      const escapeIcal = (str: string) => {
+        if (!str) return '';
+        return str
+          .replace(/\\/g, '\\\\')
+          .replace(/;/g, '\\;')
+          .replace(/,/g, '\\,')
+          .replace(/\n/g, '\\n')
+          .replace(/\r/g, '');
+      };
+
+      // Helper to format date to iCal UTC format YYYYMMDDTHHMMSSZ
+      const formatIcsTime = (timestampMs: number, timeStr?: string) => {
+        const d = new Date(timestampMs);
+        if (timeStr && typeof timeStr === 'string' && timeStr.includes(':')) {
+          const [hh, mm] = timeStr.split(':').map(Number);
+          d.setHours(isNaN(hh) ? 0 : hh, isNaN(mm) ? 0 : mm, 0, 0);
+        }
+        const year = d.getUTCFullYear();
+        const month = String(d.getUTCMonth() + 1).padStart(2, '0');
+        const day = String(d.getUTCDate()).padStart(2, '0');
+        const hours = String(d.getUTCHours()).padStart(2, '0');
+        const mins = String(d.getUTCMinutes()).padStart(2, '0');
+        const secs = String(d.getUTCSeconds()).padStart(2, '0');
+        return `${year}${month}${day}T${hours}${mins}${secs}Z`;
+      };
+
+      const calendarName = `${clubName} - ${teamName}`;
+
+      let icsLines = [
+        'BEGIN:VCALENDAR',
+        'VERSION:2.0',
+        'PRODID:-//CoachAssist//NONSGML Team Calendar//SE',
+        'CALSCALE:GREGORIAN',
+        'METHOD:PUBLISH',
+        `X-WR-CALNAME:${escapeIcal(calendarName)}`,
+        'X-WR-TIMEZONE:Europe/Stockholm',
+        'REFRESH-INTERVAL;VALUE=DURATION:PT1H',
+        'X-PUBLISHED-TTL:PT1H'
+      ];
+
+      for (const s of validSessions) {
+        const dtStart = formatIcsTime(s.date, s.startTime || '18:00');
+        const dtEnd = s.endTime 
+          ? formatIcsTime(s.date, s.endTime) 
+          : formatIcsTime(s.date + (90 * 60 * 1000), s.startTime || '18:00');
+
+        const uid = `session-${s.id || Math.random().toString(36).substring(7)}-${clubId}-${teamId}@coachassist`;
+        const dtStamp = formatIcsTime(s.updatedAt || s.createdAt || Date.now());
+
+        icsLines.push('BEGIN:VEVENT');
+        icsLines.push(`UID:${uid}`);
+        icsLines.push(`DTSTAMP:${dtStamp}`);
+        icsLines.push(`DTSTART:${dtStart}`);
+        icsLines.push(`DTEND:${dtEnd}`);
+        icsLines.push(`SUMMARY:${escapeIcal(s.title)}`);
+        if (s.location) {
+          icsLines.push(`LOCATION:${escapeIcal(s.location)}`);
+        }
+        const descParts = [];
+        if (s.notes) descParts.push(s.notes);
+        if (s.description) descParts.push(s.description);
+        if (s.moments && Array.isArray(s.moments) && s.moments.length > 0) {
+          descParts.push('Moment: ' + s.moments.map((m: any) => m.name || m.title).filter(Boolean).join(', '));
+        }
+        if (descParts.length > 0) {
+          icsLines.push(`DESCRIPTION:${escapeIcal(descParts.join('\n'))}`);
+        }
+        icsLines.push('END:VEVENT');
+      }
+
+      icsLines.push('END:VCALENDAR');
+
+      const icsString = icsLines.join('\r\n');
+
+      res.setHeader('Content-Type', 'text/calendar; charset=utf-8');
+      res.setHeader('Content-Disposition', `inline; filename="${clubId}-${teamId}-events.ics"`);
+      res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      res.status(200).send(icsString);
+    } catch (error: any) {
+      console.error('[Calendar ICS Feed] Error generating feed:', error);
+      res.status(500).send('Error generating calendar feed');
+    }
+  };
+
+  app.get('/api/calendar/events.ics', handleIcsFeed);
+  app.get('/api/calendar/:clubId/:teamId/events.ics', handleIcsFeed);
+  app.get('/api/calendar/:clubId/events.ics', handleIcsFeed);
+
   // --- VITE AND SPA SERVING ---
 
   if (!isProduction) {

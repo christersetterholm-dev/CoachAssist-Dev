@@ -34,6 +34,7 @@ interface LineupBuilderProps {
   sessionActionCount?: number;
   isQuotaExceeded?: boolean;
   syncError?: string | null;
+  isCoachOrAdmin?: boolean;
 }
 
 interface DelaunayPoint {
@@ -218,6 +219,8 @@ interface LineupReorderItemProps {
   onCopyLineup: (id: string) => void;
   onDeleteLineup: (id: string) => void;
   onEditTitle: (id: string, title: string, team: string) => void;
+  onTogglePublish?: (id: string) => void;
+  isCoachOrAdmin?: boolean;
 }
 
 function LineupReorderItem({ 
@@ -227,7 +230,9 @@ function LineupReorderItem({
   toggleArchive, 
   onCopyLineup, 
   onDeleteLineup,
-  onEditTitle
+  onEditTitle,
+  onTogglePublish,
+  isCoachOrAdmin = true
 }: LineupReorderItemProps) {
   const controls = useDragControls();
 
@@ -244,19 +249,32 @@ function LineupReorderItem({
       }`}
     >
       <div className="flex items-center gap-3 flex-1 min-w-0 overflow-hidden">
-        <div 
-          className="cursor-grab active:cursor-grabbing text-zinc-300 dark:text-zinc-700 hover:text-zinc-400 transition-colors shrink-0 p-2 -m-2 touch-none"
-          onPointerDown={(e) => controls.start(e)}
-        >
-          <GripVertical size={18} />
-        </div>
+        {isCoachOrAdmin && (
+          <div 
+            className="cursor-grab active:cursor-grabbing text-zinc-300 dark:text-zinc-700 hover:text-zinc-400 transition-colors shrink-0 p-2 -m-2 touch-none"
+            onPointerDown={(e) => controls.start(e)}
+          >
+            <GripVertical size={18} />
+          </div>
+        )}
         <div 
           className="flex-1 cursor-pointer min-w-0 overflow-hidden pr-2" 
           onClick={() => onSelectLineup(l.id)}
         >
-          <h4 className="font-black text-zinc-900 dark:text-white tracking-tight leading-tight truncate text-sm sm:text-base">
-            {l.matchTitle || 'Namnlös Match'}
-          </h4>
+          <div className="flex items-center gap-2 flex-wrap mb-1">
+            <h4 className="font-black text-zinc-900 dark:text-white tracking-tight leading-tight truncate text-sm sm:text-base">
+              {l.matchTitle || 'Namnlös Match'}
+            </h4>
+            {l.isPublishedToPlayers ? (
+              <span className="inline-flex items-center gap-1 text-[9px] font-black uppercase tracking-wider text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800/60 px-1.5 py-0.5 rounded-md shrink-0">
+                <Eye size={10} /> Publicerad
+              </span>
+            ) : isCoachOrAdmin ? (
+              <span className="inline-flex items-center gap-1 text-[9px] font-bold uppercase tracking-wider text-zinc-500 dark:text-zinc-400 bg-zinc-100 dark:bg-zinc-800 px-1.5 py-0.5 rounded-md shrink-0">
+                <EyeOff size={10} /> Utkast
+              </span>
+            ) : null}
+          </div>
           <span className="text-[9px] sm:text-[10px] font-bold text-zinc-400 uppercase tracking-widest leading-loose truncate block">
             {new Date(l.date).toLocaleDateString('sv-SE', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
           </span>
@@ -264,34 +282,51 @@ function LineupReorderItem({
       </div>
 
       <div className="flex items-center gap-1 shrink-0 ml-2">
-        <button
-          onClick={() => onEditTitle(l.id, l.matchTitle || '', l.teamName || '')}
-          className="p-2.5 text-zinc-400 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-zinc-50 dark:hover:bg-zinc-800 rounded-xl transition-all"
-          title="Redigera rubriker"
-        >
-          <Pencil size={16} />
-        </button>
-        <button
-          onClick={(e) => toggleArchive(e, l.id)}
-          className="p-2.5 text-zinc-400 hover:text-amber-600 dark:hover:text-amber-400 hover:bg-zinc-50 dark:hover:bg-zinc-800 rounded-xl transition-all"
-          title="Arkivera"
-        >
-          <Archive size={16} />
-        </button>
-        <button
-          onClick={() => onCopyLineup(l.id)}
-          className="p-2.5 text-zinc-400 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-zinc-50 dark:hover:bg-zinc-800 rounded-xl transition-all"
-          title="Kopiera"
-        >
-          <Copy size={16} />
-        </button>
-        <button
-          onClick={() => onDeleteLineup(l.id)}
-          className="p-2.5 text-zinc-400 hover:text-red-600 dark:hover:text-red-400 hover:bg-zinc-50 dark:hover:bg-zinc-800 rounded-xl transition-all"
-          title="Radera"
-        >
-          <Trash2 size={16} />
-        </button>
+        {isCoachOrAdmin && onTogglePublish && (
+          <button
+            onClick={() => onTogglePublish(l.id)}
+            className={`p-2.5 rounded-xl transition-all cursor-pointer ${
+              l.isPublishedToPlayers
+                ? 'text-emerald-600 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/40'
+                : 'text-zinc-400 hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-zinc-100 dark:hover:bg-zinc-800'
+            }`}
+            title={l.isPublishedToPlayers ? "Publicerad för spelare (Klicka för att dölja)" : "Klicka för att publicera för spelare"}
+          >
+            {l.isPublishedToPlayers ? <Eye size={16} /> : <EyeOff size={16} />}
+          </button>
+        )}
+        {isCoachOrAdmin && (
+          <>
+            <button
+              onClick={() => onEditTitle(l.id, l.matchTitle || '', l.teamName || '')}
+              className="p-2.5 text-zinc-400 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-zinc-50 dark:hover:bg-zinc-800 rounded-xl transition-all"
+              title="Redigera rubriker"
+            >
+              <Pencil size={16} />
+            </button>
+            <button
+              onClick={(e) => toggleArchive(e, l.id)}
+              className="p-2.5 text-zinc-400 hover:text-amber-600 dark:hover:text-amber-400 hover:bg-zinc-50 dark:hover:bg-zinc-800 rounded-xl transition-all"
+              title="Arkivera"
+            >
+              <Archive size={16} />
+            </button>
+            <button
+              onClick={() => onCopyLineup(l.id)}
+              className="p-2.5 text-zinc-400 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-zinc-50 dark:hover:bg-zinc-800 rounded-xl transition-all"
+              title="Kopiera"
+            >
+              <Copy size={16} />
+            </button>
+            <button
+              onClick={() => onDeleteLineup(l.id)}
+              className="p-2.5 text-zinc-400 hover:text-red-600 dark:hover:text-red-400 hover:bg-zinc-50 dark:hover:bg-zinc-800 rounded-xl transition-all"
+              title="Radera"
+            >
+              <Trash2 size={16} />
+            </button>
+          </>
+        )}
       </div>
     </Reorder.Item>
   );
@@ -317,7 +352,8 @@ export default function LineupBuilder({
   isSyncing = false,
   sessionActionCount = 0,
   isQuotaExceeded = false,
-  syncError = null
+  syncError = null,
+  isCoachOrAdmin = true
 }: LineupBuilderProps) {
   const SoccerBallIcon = ({ size = 20, className = "" }: { size?: number, className?: string }) => (
     <svg 
@@ -3607,6 +3643,22 @@ export default function LineupBuilder({
               >
                 <FolderOpen size={16} />
               </button>
+              {isCoachOrAdmin && lineup && (
+                <button
+                  onClick={() => {
+                    onSaveLineup({ ...lineup, isPublishedToPlayers: !lineup.isPublishedToPlayers });
+                  }}
+                  className={`px-2.5 h-8 rounded-lg flex items-center gap-1.5 shadow-xl border text-[11px] font-bold transition-all shrink-0 pointer-events-auto cursor-pointer ${
+                    lineup.isPublishedToPlayers
+                      ? 'bg-emerald-600 text-white border-emerald-500 hover:bg-emerald-700'
+                      : 'bg-amber-600/10 text-amber-650 hover:bg-amber-600/20 border-amber-500/35'
+                  }`}
+                  title={lineup.isPublishedToPlayers ? "Publicerad för spelare (Klicka för att dölja)" : "Publicera för spelare"}
+                >
+                  {lineup.isPublishedToPlayers ? <Eye size={15} /> : <EyeOff size={15} />}
+                  <span className="hidden sm:inline">{lineup.isPublishedToPlayers ? 'Publicerad' : 'Publicera'}</span>
+                </button>
+              )}
               <button
                 onClick={() => {
                   const nextVal = !showBenchMaximized;
@@ -3687,35 +3739,66 @@ export default function LineupBuilder({
                   </button>
                 </div>
                 <div className="flex flex-col gap-1.5 overflow-y-auto max-h-[45vh] pr-0.5">
-                  {lineups.filter(l => !l.isArchived).length === 0 ? (
-                    <p className="text-[10px] text-zinc-400 dark:text-zinc-650 italic p-2 text-center">Inga sparade laguppställningar än...</p>
-                  ) : (
-                    Array.from(new Map(lineups.filter(l => !l.isArchived).map(l => [l.id, l])).values()).map(l => {
+                  {(() => {
+                    const filtered = isCoachOrAdmin 
+                      ? lineups.filter(l => !l.isArchived)
+                      : lineups.filter(l => l.isPublishedToPlayers && !l.isArchived);
+                    
+                    if (filtered.length === 0) {
+                      return (
+                        <p className="text-[10px] text-zinc-400 dark:text-zinc-500 italic p-2 text-center font-medium">
+                          {isCoachOrAdmin ? 'Inga sparade laguppställningar än...' : 'Inga publicerade laguppställningar än...'}
+                        </p>
+                      );
+                    }
+
+                    return Array.from(new Map(filtered.map(l => [l.id, l])).values()).map(l => {
                       const isSelected = l.id === lineup?.id;
                       return (
-                        <button
+                        <div
                           key={l.id}
-                          onClick={() => {
-                            handleSelectLineupWithHistory(l.id);
-                          }}
-                          className={`p-2.5 rounded-xl border text-left transition-all flex items-center justify-between text-xs font-bold ${
+                          className={`p-2 rounded-xl border transition-all flex items-center justify-between text-xs font-bold ${
                             isSelected
                               ? 'bg-indigo-600 border-indigo-500 text-white shadow-md'
                               : 'bg-zinc-50 dark:bg-zinc-950/40 hover:bg-zinc-100 dark:hover:bg-zinc-800/80 text-zinc-700 dark:text-zinc-300 border-zinc-200/50 dark:border-zinc-800/80 hover:border-zinc-300 dark:hover:border-zinc-700'
                           }`}
                         >
-                          <span className="truncate pr-2">{l.matchTitle || l.teamName || 'Namnlös Match'}</span>
-                          <span className={`text-[8px] font-black uppercase px-2 py-0.5 rounded shrink-0 ${
-                            isSelected 
-                              ? 'bg-white/20 text-white' 
-                              : 'bg-zinc-200 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400'
-                          }`}>
-                            {l.formation || 'Ingen'}
-                          </span>
-                        </button>
-                      )
-                    })
-                  )}
+                          <button
+                            onClick={() => handleSelectLineupWithHistory(l.id)}
+                            className="flex-1 text-left min-w-0 pr-2 truncate cursor-pointer"
+                          >
+                            <span className="truncate block">{l.matchTitle || l.teamName || 'Namnlös Match'}</span>
+                          </button>
+                          
+                          <div className="flex items-center gap-1 shrink-0">
+                            {isCoachOrAdmin && (
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  onSaveLineup({ ...l, isPublishedToPlayers: !l.isPublishedToPlayers });
+                                }}
+                                className={`p-1 rounded transition-colors cursor-pointer ${
+                                  isSelected
+                                    ? (l.isPublishedToPlayers ? 'text-emerald-200 hover:text-white' : 'text-white/50 hover:text-white')
+                                    : (l.isPublishedToPlayers ? 'text-emerald-600 dark:text-emerald-400' : 'text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200')
+                                }`}
+                                title={l.isPublishedToPlayers ? "Publicerad för spelare" : "Klicka för att publicera"}
+                              >
+                                {l.isPublishedToPlayers ? <Eye size={14} /> : <EyeOff size={14} />}
+                              </button>
+                            )}
+                            <span className={`text-[8px] font-black uppercase px-2 py-0.5 rounded ${
+                              isSelected 
+                                ? 'bg-white/20 text-white' 
+                                : 'bg-zinc-200 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400'
+                            }`}>
+                              {l.formation || 'Ingen'}
+                            </span>
+                          </div>
+                        </div>
+                      );
+                    });
+                  })()}
                 </div>
               </motion.div>
             )}
@@ -5062,30 +5145,43 @@ export default function LineupBuilder({
             <div className="flex flex-col gap-6 bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-200 dark:border-zinc-800 shadow-sm p-5 overflow-hidden animate-in fade-in slide-in-from-bottom-2 duration-300">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 px-1">
                 <h3 className="text-xs font-black text-zinc-650 dark:text-zinc-400 uppercase tracking-widest leading-none">Sparade Laguppställningar</h3>
-                <button
-                  onClick={handleCreateNew}
-                  className="flex items-center justify-center gap-2 px-3.5 py-1.5 bg-indigo-600 text-white rounded-xl font-bold text-[10px] uppercase tracking-wider hover:bg-indigo-700 transition-all shadow-md active:scale-95 w-full sm:w-auto shrink-0"
-                >
-                  <Plus size={14} />
-                  <span>Skapa Ny</span>
-                </button>
+                {isCoachOrAdmin && (
+                  <button
+                    onClick={handleCreateNew}
+                    className="flex items-center justify-center gap-2 px-3.5 py-1.5 bg-indigo-600 text-white rounded-xl font-bold text-[10px] uppercase tracking-wider hover:bg-indigo-700 transition-all shadow-md active:scale-95 w-full sm:w-auto shrink-0"
+                  >
+                    <Plus size={14} />
+                    <span>Skapa Ny</span>
+                  </button>
+                )}
               </div>
 
               <Reorder.Group 
                 axis="y" 
-                values={Array.from(new Map(lineups.filter(l => !l.isArchived).map(l => [l.id, l])).values())} 
+                values={Array.from(new Map((isCoachOrAdmin ? lineups.filter(l => !l.isArchived) : lineups.filter(l => l.isPublishedToPlayers && !l.isArchived)).map(l => [l.id, l])).values())} 
                 onReorder={(reordered) => {
+                  if (!isCoachOrAdmin) return;
                   const archived = lineups.filter(l => l.isArchived);
                   onReorderLineups([...reordered, ...archived]);
                 }}
                 className="flex flex-col gap-3 w-full"
               >
-                {lineups.filter(l => !l.isArchived).length === 0 ? (
-                  <div className="p-8 text-center bg-zinc-50 dark:bg-zinc-950 rounded-2xl border-2 border-dashed border-zinc-150 dark:border-zinc-800/60">
-                    <p className="text-zinc-400 font-medium italic text-xs">Inga sparade laguppställningar än...</p>
-                  </div>
-                ) : (
-                  Array.from(new Map(lineups.filter(l => !l.isArchived).map(l => [l.id, l])).values()).map(l => (
+                {(() => {
+                  const visible = isCoachOrAdmin 
+                    ? lineups.filter(l => !l.isArchived)
+                    : lineups.filter(l => l.isPublishedToPlayers && !l.isArchived);
+
+                  if (visible.length === 0) {
+                    return (
+                      <div className="p-8 text-center bg-zinc-50 dark:bg-zinc-950 rounded-2xl border-2 border-dashed border-zinc-150 dark:border-zinc-800/60">
+                        <p className="text-zinc-400 font-medium italic text-xs">
+                          {isCoachOrAdmin ? 'Inga sparade laguppställningar än...' : 'Inga publicerade laguppställningar än...'}
+                        </p>
+                      </div>
+                    );
+                  }
+
+                  return Array.from(new Map(visible.map(l => [l.id, l])).values()).map(l => (
                     <LineupReorderItem
                       key={l.id}
                       l={l}
@@ -5095,13 +5191,20 @@ export default function LineupBuilder({
                       onCopyLineup={onCopyLineup}
                       onDeleteLineup={onDeleteLineup}
                       onEditTitle={openTitleEditForLineup}
+                      onTogglePublish={(id) => {
+                        const target = lineups.find(x => x.id === id);
+                        if (target) {
+                          onSaveLineup({ ...target, isPublishedToPlayers: !target.isPublishedToPlayers });
+                        }
+                      }}
+                      isCoachOrAdmin={isCoachOrAdmin}
                     />
-                  ))
-                )}
+                  ));
+                })()}
               </Reorder.Group>
 
               {/* Archived Lineups Section */}
-              {lineups.some(l => l.isArchived) && (
+              {isCoachOrAdmin && lineups.some(l => l.isArchived) && (
                 <div className="pt-4 mt-6 border-t border-zinc-100 dark:border-zinc-800">
                   <button 
                     onClick={() => setIsArchiveExpanded(!isArchiveExpanded)}

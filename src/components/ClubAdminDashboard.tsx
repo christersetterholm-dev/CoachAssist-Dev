@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { Landmark, Trash2, Edit3, Users, Shield, Check, PlusCircle, Search, Mail, Phone, Fingerprint, Settings, ArrowRight, UserPlus, Save, Smartphone, X, Database, Server, HardDrive, Cloud, RefreshCw, Download, Upload, Globe, Cpu, CheckCircle2, AlertTriangle, AlertCircle, Calendar, Link, Copy, ExternalLink, FileSpreadsheet, FileText, Camera, Loader2, Key, UserCheck, Sparkles, Filter, ArrowUpDown, RotateCcw } from 'lucide-react';
+import { Landmark, Trash2, Edit3, Users, Shield, ShieldAlert, Check, PlusCircle, Search, Mail, Phone, Fingerprint, Settings, ArrowRight, UserPlus, Save, Smartphone, X, Database, Server, HardDrive, Cloud, RefreshCw, Download, Upload, Globe, Cpu, CheckCircle2, AlertTriangle, AlertCircle, Calendar, Link, Copy, ExternalLink, FileSpreadsheet, FileText, Camera, Loader2, Key, UserCheck, Sparkles, Filter, ArrowUpDown, RotateCcw } from 'lucide-react';
 import { Club, ClubMetadata, ClubTeam, ClubMember, SquadPlayer, TrainingSettings, TrainingSession } from '../types';
 import { db, storage, getApiUrl, ref, uploadBytes, getDownloadURL } from '../lib/firebase';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
@@ -15,6 +15,8 @@ interface ClubAdminDashboardProps {
   userId: string;
   userEmail: string;
   isRootAdmin?: boolean;
+  isCoachOrAdmin?: boolean;
+  userRoles?: string[];
   onBack?: () => void;
   teamUrl?: string;
   onUpdateTeamUrl?: (url: string) => void;
@@ -37,6 +39,8 @@ export default function ClubAdminDashboard({
   userId,
   userEmail,
   isRootAdmin = false,
+  isCoachOrAdmin = false,
+  userRoles = [],
   onBack,
   teamUrl = 'https://www.svenskalag.se/',
   onUpdateTeamUrl,
@@ -54,14 +58,39 @@ export default function ClubAdminDashboard({
   sessions,
   onUpdateSessions,
 }: ClubAdminDashboardProps) {
+  const isAuthorized = isRootAdmin || isCoachOrAdmin || userRoles.includes('admin') || userRoles.includes('coach');
+
+  if (!isAuthorized) {
+    return (
+      <div className="p-8 max-w-xl mx-auto my-12 text-center space-y-4 bg-white dark:bg-zinc-900 rounded-3xl border border-red-200 dark:border-red-900/40 shadow-xl">
+        <div className="w-16 h-16 rounded-2xl bg-red-100 dark:bg-red-950/60 text-red-600 dark:text-red-400 flex items-center justify-center mx-auto shadow-inner">
+          <ShieldAlert size={32} />
+        </div>
+        <h2 className="text-xl font-black text-zinc-900 dark:text-white tracking-tight">Åtkomst nekad</h2>
+        <p className="text-sm text-zinc-600 dark:text-zinc-400 font-medium leading-relaxed">
+          Du har inte behörighet att se eller ändra förenings- och laginställningar. Denna vy är endast tillgänglig för godkända tränare och administratörer.
+        </p>
+        {onBack && (
+          <button
+            type="button"
+            onClick={onBack}
+            className="px-6 py-2.5 bg-indigo-600 text-white rounded-xl font-bold hover:bg-indigo-700 transition-all cursor-pointer shadow-md active:scale-95 text-xs"
+          >
+            Gå tillbaka till träningar
+          </button>
+        )}
+      </div>
+    );
+  }
   // Navigation tabs within admin
-  const [activeTab, setActiveTab] = useState<'clubs' | 'teams' | 'members' | 'user_accounts' | 'calendar_sync' | 'pwa_icons' | 'database_env' | 'root_admins'>('clubs');
+  const [activeTab, setActiveTab] = useState<'clubs' | 'teams' | 'members' | 'user_accounts' | 'calendar_sync' | 'pwa_icons' | 'database_env' | 'root_admins'>(() => isRootAdmin ? 'clubs' : 'teams');
 
   // Master lists
   const [clubs, setClubs] = useState<Club[]>([]);
   const [selectedClub, setSelectedClub] = useState<Club | null>(null);
   const [clubMetadata, setClubMetadata] = useState<ClubMetadata | null>(null);
   const [members, setMembers] = useState<ClubMember[]>([]);
+  const selectedClubIdRef = useRef<string | null>(null);
 
   // User Accounts & Password Management State
   const [userAccounts, setUserAccounts] = useState<Array<{
@@ -460,6 +489,37 @@ export default function ClubAdminDashboard({
       }
 
       const data = await res.json();
+
+      // Sync initial active club profile docs for created accounts
+      const targetClubId = selectedClub?.id || activeClubId;
+      if (data.accounts && Array.isArray(data.accounts) && targetClubId) {
+        for (const acc of data.accounts) {
+          try {
+            const profileRef = doc(db, 'users', acc.id, 'data', 'profile');
+            const pSnap = await getDoc(profileRef);
+            if (!pSnap.exists()) {
+              await setDoc(profileRef, {
+                fullName: acc.name || acc.email?.split('@')[0],
+                email: acc.email?.trim().toLowerCase(),
+                username: acc.username || null,
+                activeClubId: targetClubId,
+                activeTeamId: activeTeamId || 'club_global',
+                status: 'approved',
+                onboardingCompleted: false,
+                createdAt: Date.now()
+              }, { merge: true });
+            } else {
+              await setDoc(profileRef, {
+                activeClubId: targetClubId,
+                status: 'approved'
+              }, { merge: true });
+            }
+          } catch (pErr) {
+            console.error('Failed setting initial profile for generated user account:', pErr);
+          }
+        }
+      }
+
       setBulkGenSuccessMsg(`Genererade / uppdaterade konton för ${data.accounts?.length || 0} medlemmar!`);
       await fetchUserAccounts();
     } catch (err: any) {
@@ -810,7 +870,7 @@ export default function ClubAdminDashboard({
     }
   };
 
-  // Load all clubs on mount
+  // Load all clubs on mount (Root admin sees all clubs; regular users only see their own assigned/member clubs)
   const loadClubs = async (selectFirst = false) => {
     setIsLoading(true);
     try {
@@ -818,10 +878,34 @@ export default function ClubAdminDashboard({
       const snap = await getDoc(docRef);
       if (snap.exists()) {
         const list: Club[] = snap.data().clubs || [];
-        setClubs(list);
-        if (list.length > 0 && (selectFirst || !selectedClub)) {
-          const currentActive = list.find(c => c.id === activeClubId);
-          setSelectedClub(currentActive || list[0]);
+        let availableClubs: Club[] = [];
+
+        if (isRootAdmin) {
+          availableClubs = list;
+        } else {
+          // Filter list for non-root admins to only show their assigned/member clubs
+          const filtered: Club[] = [];
+          for (const c of list) {
+            if (activeClubId && c.id === activeClubId) {
+              filtered.push(c);
+              continue;
+            }
+            try {
+              const membersSnap = await getDoc(doc(db, 'clubs', c.id, 'teams', 'club_global', 'data', 'members'));
+              if (membersSnap.exists()) {
+                const membersList: ClubMember[] = membersSnap.data().members || [];
+                const isMem = membersList.some(m => m.userId === userId || (m.email && userEmail && m.email.trim().toLowerCase() === userEmail.trim().toLowerCase()));
+                if (isMem) filtered.push(c);
+              }
+            } catch (e) {}
+          }
+          availableClubs = filtered;
+        }
+
+        setClubs(availableClubs);
+        if (availableClubs.length > 0 && (selectFirst || !selectedClub)) {
+          const currentActive = availableClubs.find(c => c.id === activeClubId);
+          setSelectedClub(currentActive || availableClubs[0]);
         }
       } else {
         setClubs([]);
@@ -838,6 +922,26 @@ export default function ClubAdminDashboard({
   }, []);
 
   // Load selected club details (metadata & members) when selectedClub changes
+  const handleSelectClub = async (club: Club) => {
+    selectedClubIdRef.current = club.id;
+    setSelectedClub(club);
+    setClubMetadata(null);
+    setMembers([]);
+
+    if (onSelectActiveTeam) {
+      try {
+        const metadataRef = doc(db, 'clubs', club.id, 'teams', 'club_global', 'data', 'metadata');
+        const metaSnap = await getDoc(metadataRef);
+        const teams = metaSnap.exists() ? (metaSnap.data().teams || []) : [];
+        const defaultTeamId = teams.length > 0 ? teams[0].id : 'club_global';
+        onSelectActiveTeam(club.id, defaultTeamId);
+      } catch (err) {
+        console.error("Failed to load metadata for active team switch:", err);
+        onSelectActiveTeam(club.id, 'club_global');
+      }
+    }
+  };
+
   useEffect(() => {
     if (!selectedClub) {
       setClubMetadata(null);
@@ -845,30 +949,36 @@ export default function ClubAdminDashboard({
       return;
     }
 
+    selectedClubIdRef.current = selectedClub.id;
+    const targetClubId = selectedClub.id;
+
     async function loadClubDetails() {
       try {
-        const metadataRef = doc(db, 'clubs', selectedClub!.id, 'teams', 'club_global', 'data', 'metadata');
-        const membersRef = doc(db, 'clubs', selectedClub!.id, 'teams', 'club_global', 'data', 'members');
+        const metadataRef = doc(db, 'clubs', targetClubId, 'teams', 'club_global', 'data', 'metadata');
+        const membersRef = doc(db, 'clubs', targetClubId, 'teams', 'club_global', 'data', 'members');
 
         const [metaSnap, memSnap] = await Promise.all([
           getDoc(metadataRef),
           getDoc(membersRef)
         ]);
 
+        if (selectedClubIdRef.current !== targetClubId) return;
+
+        let metaData: ClubMetadata;
         if (metaSnap.exists()) {
-          setClubMetadata(metaSnap.data() as ClubMetadata);
+          metaData = metaSnap.data() as ClubMetadata;
         } else {
           // Initialize metadata if missing
-          const defaultMeta: ClubMetadata = { id: selectedClub!.id, name: selectedClub!.name, teams: [] };
-          await setDoc(metadataRef, defaultMeta);
-          setClubMetadata(defaultMeta);
+          metaData = { id: targetClubId, name: selectedClub!.name, teams: [] };
+          await setDoc(metadataRef, metaData);
         }
 
+        let membersData: ClubMember[];
         if (memSnap.exists()) {
-          setMembers(memSnap.data().members || []);
+          membersData = memSnap.data().members || [];
         } else {
           // Initialize members with creator as admin
-          const defaultMembers: ClubMember[] = [
+          membersData = [
             {
               userId: userId,
               email: userEmail,
@@ -877,15 +987,19 @@ export default function ClubAdminDashboard({
               teams: []
             }
           ];
-          await setDoc(membersRef, { members: defaultMembers });
-          setMembers(defaultMembers);
+          await setDoc(membersRef, { members: membersData });
         }
 
+        if (selectedClubIdRef.current !== targetClubId) return;
+
+        setClubMetadata(metaData);
+        setMembers(membersData);
+
         // Auto-sync squad photos & player info from all team squads in this club
-        const teamIds = (metaSnap.exists() ? (metaSnap.data() as ClubMetadata).teams : []).map(t => t.id);
+        const teamIds = (metaData.teams || []).map(t => t.id);
         if (teamIds.length > 0) {
-          const syncedMembers = await syncAllTeamSquadsToClubMembers(selectedClub!.id, teamIds);
-          if (syncedMembers && syncedMembers.length > 0) {
+          const syncedMembers = await syncAllTeamSquadsToClubMembers(targetClubId, teamIds);
+          if (syncedMembers && syncedMembers.length > 0 && selectedClubIdRef.current === targetClubId) {
             setMembers(syncedMembers);
           }
         }
@@ -918,23 +1032,32 @@ export default function ClubAdminDashboard({
       const metadataRef = doc(db, 'clubs', clubId, 'teams', 'club_global', 'data', 'metadata');
       const membersRef = doc(db, 'clubs', clubId, 'teams', 'club_global', 'data', 'members');
 
+      const initialMeta: ClubMetadata = { id: clubId, name: newClub.name, teams: [] };
+      const initialMembers: ClubMember[] = [
+        {
+          userId: userId,
+          email: userEmail,
+          fullName: userEmail.split('@')[0],
+          roles: ['admin', 'coach'],
+          teams: []
+        }
+      ];
+
       await Promise.all([
-        setDoc(metadataRef, { id: clubId, name: newClub.name, teams: [] }),
-        setDoc(membersRef, {
-          members: [
-            {
-              userId: userId,
-              email: userEmail,
-              fullName: userEmail.split('@')[0],
-              roles: ['admin', 'coach'],
-              teams: []
-            }
-          ]
-        })
+        setDoc(metadataRef, initialMeta),
+        setDoc(membersRef, { members: initialMembers })
       ]);
 
       setClubs(updatedClubs);
+      setClubMetadata(initialMeta);
+      setMembers(initialMembers);
+      selectedClubIdRef.current = clubId;
       setSelectedClub(newClub);
+
+      if (onSelectActiveTeam) {
+        onSelectActiveTeam(newClub.id, 'club_global');
+      }
+
       setNewClubName('');
       setActionStatus({ type: 'create', status: 'success', message: `Föreningen "${newClub.name}" skapades framgångsrikt!` });
       setTimeout(() => setActionStatus({ type: 'create', status: 'idle' }), 3000);
@@ -947,7 +1070,7 @@ export default function ClubAdminDashboard({
   // Add new team to selected club
   const handleAddTeam = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedClub || !newTeamName.trim() || !clubMetadata) return;
+    if (!selectedClub || !newTeamName.trim()) return;
 
     setActionStatus({ type: 'save', status: 'loading' });
     try {
@@ -957,16 +1080,49 @@ export default function ClubAdminDashboard({
         name: newTeamName.trim()
       };
 
-      const updatedTeams = [...(clubMetadata.teams || []), newTeam];
-      const updatedMeta = { ...clubMetadata, teams: updatedTeams };
+      const baseMeta: ClubMetadata = (clubMetadata && clubMetadata.id === selectedClub.id)
+        ? clubMetadata
+        : { id: selectedClub.id, name: selectedClub.name, teams: [] };
 
-      await setDoc(doc(db, 'clubs', selectedClub.id, 'teams', 'club_global', 'data', 'metadata'), updatedMeta);
+      const updatedTeams = [...(baseMeta.teams || []), newTeam];
+      const updatedMeta: ClubMetadata = { ...baseMeta, teams: updatedTeams };
+
+      // Ensure active user member record has teamId included in their teams array
+      let updatedMembers = [...members];
+      if (updatedMembers.length === 0) {
+        updatedMembers = [{
+          userId: userId,
+          email: userEmail,
+          fullName: userEmail.split('@')[0],
+          roles: ['admin', 'coach'],
+          teams: [teamId]
+        }];
+      } else {
+        updatedMembers = updatedMembers.map(m => {
+          if (m.userId === userId || (m.email && m.email.trim().toLowerCase() === userEmail.trim().toLowerCase())) {
+            const currentTeams = m.teams || [];
+            if (!currentTeams.includes(teamId)) {
+              return { ...m, teams: [...currentTeams, teamId] };
+            }
+          }
+          return m;
+        });
+      }
+
+      const metadataRef = doc(db, 'clubs', selectedClub.id, 'teams', 'club_global', 'data', 'metadata');
+      const membersRef = doc(db, 'clubs', selectedClub.id, 'teams', 'club_global', 'data', 'members');
+
+      await Promise.all([
+        setDoc(metadataRef, updatedMeta),
+        setDoc(membersRef, { members: updatedMembers })
+      ]);
       
       setClubMetadata(updatedMeta);
+      setMembers(updatedMembers);
       setNewTeamName('');
 
-      // Auto set active team if user has none set
-      if ((!activeClubId || !activeTeamId) && onSelectActiveTeam) {
+      // Always set newly created team as active team
+      if (onSelectActiveTeam) {
         onSelectActiveTeam(selectedClub.id, newTeam.id);
       }
 
@@ -1751,35 +1907,56 @@ export default function ClubAdminDashboard({
           {/* Club Dropdown */}
           <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3 w-full sm:w-auto min-w-0">
             <label className="text-[11px] sm:text-xs font-black uppercase text-zinc-400 shrink-0">Välj förening:</label>
-            <select
-              value={selectedClub?.id || ''}
-              onChange={(e) => {
-                const found = clubs.find(c => c.id === e.target.value);
-                if (found) setSelectedClub(found);
-              }}
-              className="w-full sm:w-auto px-3.5 py-2 sm:py-2.5 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 text-zinc-800 dark:text-zinc-200 rounded-xl font-bold text-xs sm:text-sm focus:outline-none focus:border-indigo-500 cursor-pointer min-w-0 truncate"
-            >
-              {clubs.map(c => (
-                <option key={c.id} value={c.id}>{c.name}</option>
-              ))}
-              {clubs.length === 0 && <option value="">Inga föreningar skapade</option>}
-            </select>
+            <div className="flex items-center gap-2 w-full sm:w-auto min-w-0">
+              <select
+                value={selectedClub?.id || ''}
+                onChange={(e) => {
+                  const found = clubs.find(c => c.id === e.target.value);
+                  if (found) handleSelectClub(found);
+                }}
+                className="w-full sm:w-auto px-3.5 py-2 sm:py-2.5 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 text-zinc-800 dark:text-zinc-200 rounded-xl font-bold text-xs sm:text-sm focus:outline-none focus:border-indigo-500 cursor-pointer min-w-0 truncate"
+              >
+                {clubs.map(c => (
+                  <option key={c.id} value={c.id}>{c.name}</option>
+                ))}
+                {clubs.length === 0 && <option value="">Inga föreningar skapade</option>}
+              </select>
+
+              {selectedClub && (
+                selectedClub.id === activeClubId ? (
+                  <span className="px-2.5 py-1.5 text-[11px] sm:text-xs font-extrabold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 rounded-xl flex items-center gap-1.5 shrink-0">
+                    <Check size={14} />
+                    <span className="hidden sm:inline">Aktiv förening</span>
+                  </span>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => handleSelectClub(selectedClub)}
+                    className="px-3 py-1.5 text-[11px] sm:text-xs font-black bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl shadow-sm cursor-pointer shrink-0 transition-all flex items-center gap-1"
+                  >
+                    <span>Välj som aktiv</span>
+                  </button>
+                )
+              )}
+            </div>
           </div>
         </div>
 
         {/* Tab Selection */}
         <div className="flex items-center gap-1.5 sm:gap-2 mt-3.5 sm:mt-5 overflow-x-auto pb-2 no-scrollbar w-full min-w-0 snap-x">
-          <button
-            onClick={() => setActiveTab('clubs')}
-            className={`flex items-center gap-2 px-4 sm:px-5 py-2.5 sm:py-3 rounded-xl font-extrabold text-xs sm:text-sm transition-all cursor-pointer shrink-0 ${
-              activeTab === 'clubs'
-                ? 'bg-indigo-600 text-white shadow-md shadow-indigo-100 dark:shadow-none'
-                : 'bg-zinc-50 hover:bg-zinc-100 dark:bg-zinc-950 dark:hover:bg-zinc-800 text-zinc-600 dark:text-zinc-400'
-            }`}
-          >
-            <Landmark size={16} />
-            <span>Skapa Förening</span>
-          </button>
+          {isRootAdmin && (
+            <button
+              onClick={() => setActiveTab('clubs')}
+              className={`flex items-center gap-2 px-4 sm:px-5 py-2.5 sm:py-3 rounded-xl font-extrabold text-xs sm:text-sm transition-all cursor-pointer shrink-0 ${
+                activeTab === 'clubs'
+                  ? 'bg-indigo-600 text-white shadow-md shadow-indigo-100 dark:shadow-none'
+                  : 'bg-zinc-50 hover:bg-zinc-100 dark:bg-zinc-950 dark:hover:bg-zinc-800 text-zinc-600 dark:text-zinc-400'
+              }`}
+            >
+              <Landmark size={16} />
+              <span>Skapa Förening</span>
+            </button>
+          )}
           
           <button
             disabled={!selectedClub}
@@ -1921,33 +2098,50 @@ export default function ClubAdminDashboard({
             <h2 className="text-lg font-black text-zinc-900 dark:text-white tracking-tight mb-5">Registrerade Föreningar</h2>
             {clubs.length > 0 ? (
               <div className="space-y-3">
-                {clubs.map(c => (
-                  <div
-                    key={c.id}
-                    onClick={() => setSelectedClub(c)}
-                    className={`flex items-center justify-between p-4 rounded-2xl border transition-all cursor-pointer ${
-                      selectedClub?.id === c.id
-                        ? 'bg-indigo-50/30 border-indigo-500 dark:bg-indigo-950/10 dark:border-indigo-500/50 shadow-sm'
-                        : 'bg-zinc-50 hover:bg-zinc-100/60 dark:bg-zinc-950 dark:hover:bg-zinc-950/60 border-zinc-150 dark:border-zinc-800/80'
-                    }`}
-                  >
-                    <div className="flex items-center gap-3.5">
-                      <div className="w-10 h-10 rounded-xl bg-indigo-55/10 dark:bg-indigo-950/20 text-indigo-600 dark:text-indigo-400 flex items-center justify-center">
-                        <Landmark size={20} />
+                {clubs.map(c => {
+                  const isActive = c.id === activeClubId;
+                  const isSelected = selectedClub?.id === c.id;
+                  return (
+                    <div
+                      key={c.id}
+                      onClick={() => handleSelectClub(c)}
+                      className={`flex items-center justify-between p-4 rounded-2xl border transition-all cursor-pointer ${
+                        isSelected
+                          ? 'bg-indigo-50/30 border-indigo-500 dark:bg-indigo-950/10 dark:border-indigo-500/50 shadow-sm'
+                          : 'bg-zinc-50 hover:bg-zinc-100/60 dark:bg-zinc-950 dark:hover:bg-zinc-950/60 border-zinc-150 dark:border-zinc-800/80'
+                      }`}
+                    >
+                      <div className="flex items-center gap-3.5">
+                        <div className="w-10 h-10 rounded-xl bg-indigo-55/10 dark:bg-indigo-950/20 text-indigo-600 dark:text-indigo-400 flex items-center justify-center">
+                          <Landmark size={20} />
+                        </div>
+                        <div>
+                          <h3 className="font-extrabold text-sm text-zinc-900 dark:text-white">{c.name}</h3>
+                          <p className="text-[10px] text-zinc-400 font-bold uppercase tracking-wider mt-0.5">ID: {c.id}</p>
+                        </div>
                       </div>
-                      <div>
-                        <h3 className="font-extrabold text-sm text-zinc-900 dark:text-white">{c.name}</h3>
-                        <p className="text-[10px] text-zinc-400 font-bold uppercase tracking-wider mt-0.5">ID: {c.id}</p>
+                      <div className="flex items-center gap-2">
+                        {isActive ? (
+                          <span className="text-emerald-600 dark:text-emerald-400 font-extrabold text-xs flex items-center gap-1.5 bg-emerald-50 dark:bg-emerald-950/40 px-3 py-1 rounded-full border border-emerald-100 dark:border-emerald-950/40">
+                            <Check size={12} />
+                            <span>Aktiv förening</span>
+                          </span>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleSelectClub(c);
+                            }}
+                            className="text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 font-bold text-xs bg-indigo-50 dark:bg-indigo-950/40 px-3 py-1 rounded-full border border-indigo-100 dark:border-indigo-950/40 transition-all cursor-pointer"
+                          >
+                            Välj som aktiv
+                          </button>
+                        )}
                       </div>
                     </div>
-                    {selectedClub?.id === c.id && (
-                      <span className="text-indigo-600 dark:text-indigo-400 font-extrabold text-xs flex items-center gap-1.5 bg-indigo-50 dark:bg-indigo-950/40 px-3 py-1 rounded-full border border-indigo-100 dark:border-indigo-950/40">
-                        <Check size={12} />
-                        <span>Vald</span>
-                      </span>
-                    )}
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             ) : (
               <div className="text-center py-12 text-zinc-400 dark:text-zinc-500">
@@ -3839,6 +4033,30 @@ export default function ClubAdminDashboard({
                 </label>
               </div>
 
+              <div className="flex items-center gap-3 pt-2 border-t border-zinc-100 dark:border-zinc-800/80">
+                <input
+                  type="checkbox"
+                  id="showLineupsToPlayersToggle"
+                  checked={!!trainingSettings?.showLineupsToPlayers}
+                  onChange={(e) => {
+                    const updated = {
+                      ...(trainingSettings || { defaultStartTime: '18:00' }),
+                      showLineupsToPlayers: e.target.checked
+                    };
+                    if (onUpdateSettings) onUpdateSettings(updated);
+                  }}
+                  className="w-4 h-4 rounded border-zinc-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+                />
+                <div>
+                  <label htmlFor="showLineupsToPlayersToggle" className="text-xs text-zinc-800 dark:text-zinc-200 font-bold cursor-pointer block">
+                    Visa laguppställningar för spelare
+                  </label>
+                  <p className="text-[11px] text-zinc-500 font-medium">
+                    Som standard är laguppställningar endast synliga för tränare och admin.
+                  </p>
+                </div>
+              </div>
+
               <div className="pt-2 flex flex-col sm:flex-row items-center justify-between gap-3 border-t border-zinc-100 dark:border-zinc-800 mt-4">
                 <p className="text-[11px] text-zinc-500 font-medium">
                   Hämtar och importerar alla matcher och träningar från kalenderlänken till laget.
@@ -3992,28 +4210,47 @@ export default function ClubAdminDashboard({
               Prenumerera på lagets träningar och matcher direkt i din mobil, Google Kalender, Outlook eller Apple Kalender.
             </p>
 
-            <div className="p-4 bg-indigo-50/50 dark:bg-indigo-950/20 rounded-2xl border border-indigo-100 dark:border-indigo-900/30 mb-6">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                <div>
-                  <span className="text-[10px] font-black uppercase text-indigo-500 tracking-wider">iCal Prenumerationslänk</span>
-                  <div className="text-xs font-mono font-bold text-zinc-800 dark:text-zinc-200 mt-1 break-all">
-                    {window.location.origin}/api/calendar/events.ics
+            {(() => {
+              const calFeedClubId = selectedClub?.id || activeClubId;
+              const calFeedTeamId = activeTeamId || 'club_global';
+              const calFeedUrl = calFeedClubId
+                ? `${window.location.origin}/api/calendar/${calFeedClubId}/${calFeedTeamId}/events.ics`
+                : `${window.location.origin}/api/calendar/events.ics`;
+
+              return (
+                <div className="p-4 bg-indigo-50/50 dark:bg-indigo-950/20 rounded-2xl border border-indigo-100 dark:border-indigo-900/30 mb-6">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-[10px] font-black uppercase text-indigo-500 tracking-wider">
+                          Unik iCal Prenumerationslänk
+                        </span>
+                        {selectedClub && (
+                          <span className="px-2 py-0.5 rounded-md bg-indigo-100 dark:bg-indigo-900/50 text-indigo-700 dark:text-indigo-300 text-[10px] font-extrabold">
+                            {selectedClub.name}
+                          </span>
+                        )}
+                      </div>
+                      <div className="text-xs font-mono font-bold text-zinc-800 dark:text-zinc-200 mt-1 break-all select-all">
+                        {calFeedUrl}
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        navigator.clipboard.writeText(calFeedUrl);
+                        setCopiedCalFeed(true);
+                        setTimeout(() => setCopiedCalFeed(false), 2500);
+                      }}
+                      className="inline-flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold px-4 py-2.5 rounded-xl text-xs transition-all shrink-0 cursor-pointer active:scale-95 shadow-sm"
+                    >
+                      {copiedCalFeed ? <Check size={14} /> : <Copy size={14} />}
+                      <span>{copiedCalFeed ? 'Kopierad!' : 'Kopiera Länk'}</span>
+                    </button>
                   </div>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => {
-                    navigator.clipboard.writeText(`${window.location.origin}/api/calendar/events.ics`);
-                    setCopiedCalFeed(true);
-                    setTimeout(() => setCopiedCalFeed(false), 2500);
-                  }}
-                  className="inline-flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold px-4 py-2.5 rounded-xl text-xs transition-all shrink-0 cursor-pointer"
-                >
-                  {copiedCalFeed ? <Check size={14} /> : <Copy size={14} />}
-                  <span>{copiedCalFeed ? 'Kopierad!' : 'Kopiera Länk'}</span>
-                </button>
-              </div>
-            </div>
+              );
+            })()}
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <div className="p-4 bg-zinc-50 dark:bg-zinc-950 rounded-2xl border border-zinc-100 dark:border-zinc-800">

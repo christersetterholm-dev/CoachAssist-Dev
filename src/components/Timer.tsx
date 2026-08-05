@@ -6,9 +6,10 @@ interface TimerProps {
   defaultMinutes?: number;
   defaultSeconds?: number;
   onSaveDefault?: (minutes: number, seconds: number) => void;
+  isCoachOrAdmin?: boolean;
 }
 
-export default function Timer({ defaultMinutes = 4, defaultSeconds = 0, onSaveDefault }: TimerProps) {
+export default function Timer({ defaultMinutes = 4, defaultSeconds = 0, onSaveDefault, isCoachOrAdmin = true }: TimerProps) {
   const [minutes, setMinutes] = useState(defaultMinutes);
   const [seconds, setSeconds] = useState(defaultSeconds);
   const [presetMinutes, setPresetMinutes] = useState(defaultMinutes);
@@ -424,7 +425,7 @@ export default function Timer({ defaultMinutes = 4, defaultSeconds = 0, onSaveDe
               {isMuted ? <BellOff size={18} /> : <Bell size={18} />}
             </button>
             
-            {isStarted && (
+            {isStarted && isCoachOrAdmin && (
               <div className="flex items-center gap-1.5">
                 <button
                   onClick={toggleTimer}
@@ -446,7 +447,7 @@ export default function Timer({ defaultMinutes = 4, defaultSeconds = 0, onSaveDe
               </div>
             )}
 
-            {!isStarted && !isFinished && (
+            {!isStarted && !isFinished && isCoachOrAdmin && (
               <div className="flex items-center gap-1.5">
                 <button
                   onClick={handleSave}
@@ -491,7 +492,7 @@ export default function Timer({ defaultMinutes = 4, defaultSeconds = 0, onSaveDe
           </div>
         </div>
 
-        {!isStarted && !isFinished && (
+        {!isStarted && !isFinished && isCoachOrAdmin && (
           <div className="text-[10px] font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-wider -mt-1">
             Standard: {formatTime(defaultMinutes, defaultSeconds)} • Spara för att ändra
           </div>
@@ -500,18 +501,24 @@ export default function Timer({ defaultMinutes = 4, defaultSeconds = 0, onSaveDe
         {/* Setup Controls Area */}
         <AnimatePresence mode="wait">
           {isFinished ? (
-            <motion.button
-              key="finished"
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }}
-              onClick={stopAlarm}
-              className="w-full py-4 bg-red-500 text-white rounded-2xl font-black text-xl flex items-center justify-center gap-3 shadow-lg shadow-red-200 dark:shadow-none active:scale-95 transition-all"
-            >
-              <Check size={24} strokeWidth={3} />
-              KLAR! ÅTERSTÄLL
-            </motion.button>
-          ) : !isStarted && (
+            isCoachOrAdmin ? (
+              <motion.button
+                key="finished"
+                initial={{ opacity: 0, scale: 0.95 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.95 }}
+                onClick={stopAlarm}
+                className="w-full py-4 bg-red-500 text-white rounded-2xl font-black text-xl flex items-center justify-center gap-3 shadow-lg shadow-red-200 dark:shadow-none active:scale-95 transition-all cursor-pointer"
+              >
+                <Check size={24} strokeWidth={3} />
+                KLAR! ÅTERSTÄLL
+              </motion.button>
+            ) : (
+              <div className="w-full py-3 bg-red-500 text-white rounded-2xl font-black text-center text-sm">
+                Tiden är ute!
+              </div>
+            )
+          ) : !isStarted && isCoachOrAdmin && (
             <motion.div
               key="setup"
               initial={{ opacity: 0, height: 0 }}

@@ -57,12 +57,13 @@ interface MomentItemProps {
   onSaveToBank?: (moment: SessionMoment) => any;
   onUpdateBankExercise?: (id: string, updates: Partial<any>) => void;
   onOpenTacticalBoard?: (moment: SessionMoment) => void;
+  isCoachOrAdmin?: boolean;
 }
 
 function MomentItem({ 
   moment, 
   details, 
-  mode, 
+  mode: originalMode, 
   exercises, 
   sessionDate,
   sessionTitle,
@@ -80,8 +81,10 @@ function MomentItem({
   exerciseBank = [],
   onSaveToBank,
   onUpdateBankExercise,
-  onOpenTacticalBoard
+  onOpenTacticalBoard,
+  isCoachOrAdmin = true
 }: MomentItemProps & { onAddAfter?: () => void }) {
+  const mode = isCoachOrAdmin ? originalMode : (originalMode === 'live' ? 'live' : 'view');
   const dragControls = useDragControls();
   const [showMediaInputs, setShowMediaInputs] = useState(false);
   const [uploadProgress, setUploadProgress] = useState<number | null>(null);
@@ -235,12 +238,14 @@ function MomentItem({
         {/* Time/Reorder indicator */}
         <div className="flex flex-col items-center gap-2 pt-1 select-none">
           {/* Enhanced Drag Handle for better touch response */}
-          <div 
-            onPointerDown={(e) => dragControls.start(e)}
-            className="p-3 -m-3 cursor-grab active:cursor-grabbing touch-none text-zinc-300 dark:text-zinc-700 hover:text-indigo-500 transition-colors"
-          >
-            <GripVertical size={24} />
-          </div>
+          {isCoachOrAdmin && mode === 'plan' && (
+            <div 
+              onPointerDown={(e) => dragControls.start(e)}
+              className="p-3 -m-3 cursor-grab active:cursor-grabbing touch-none text-zinc-300 dark:text-zinc-700 hover:text-indigo-500 transition-colors"
+            >
+              <GripVertical size={24} />
+            </div>
+          )}
           
           <div className={`font-black flex flex-col items-center pointer-events-none ${mode === 'live' ? 'mt-1 gap-1' : 'mt-2 text-[10px]'}`}>
             <span className={`${mode === 'live' ? 'bg-indigo-600 text-white px-2.5 py-1 text-sm sm:text-base rounded-xl font-black shadow-md' : 'bg-indigo-600 text-white px-1.5 py-0.5 rounded-md mb-0.5'} whitespace-nowrap shadow-sm`}>{details.startTimeStr}</span>
@@ -1491,7 +1496,7 @@ export default function SessionEditor({
                       <ListTodo size={16} />
                       Schema ({totalPlannedMinutes} minuter)
                     </h3>
-                    {mode === 'live' && !session.isStarted && (
+                    {mode === 'live' && !session.isStarted && isCoachOrAdmin && (
                       <button
                         onClick={() => {
                           if ('Notification' in window && Notification.permission === 'default') {
@@ -1509,15 +1514,17 @@ export default function SessionEditor({
                        <div className="flex items-center gap-2 px-3 py-1.5 bg-indigo-50 dark:bg-indigo-900/20 border border-indigo-100 dark:border-indigo-900/30 rounded-xl">
                          <div className="w-2 h-2 rounded-full bg-indigo-500 animate-pulse" />
                          <span className="text-[10px] font-black text-indigo-600 dark:text-indigo-400 uppercase tracking-widest">Passet är igång</span>
-                         <button
-                            onClick={() => onUpdate({ ...session, isStarted: false, updatedAt: Date.now() })}
-                            className="ml-2 text-[8px] font-bold text-zinc-400 hover:text-red-500 uppercase"
-                         >
-                            Nollställ
-                         </button>
+                         {isCoachOrAdmin && (
+                           <button
+                              onClick={() => onUpdate({ ...session, isStarted: false, updatedAt: Date.now() })}
+                              className="ml-2 text-[8px] font-bold text-zinc-400 hover:text-red-500 uppercase cursor-pointer"
+                           >
+                             Avsluta
+                           </button>
+                         )}
                        </div>
                     )}
-                    {mode === 'plan' && (
+                    {mode === 'plan' && isCoachOrAdmin && (
                       <div className="flex flex-wrap items-center gap-2">
                         <motion.button
                           whileTap={{ scale: 0.95 }}
@@ -1566,11 +1573,12 @@ export default function SessionEditor({
                         onSaveToBank={onSaveToBank}
                         onUpdateBankExercise={onUpdateBankExercise}
                         onOpenTacticalBoard={(m) => setTacticalBoardMoment(m)}
+                        isCoachOrAdmin={isCoachOrAdmin}
                       />
                     ))}
                   </Reorder.Group>
 
-                  {session.moments.length > 0 && mode === 'plan' && (
+                  {session.moments.length > 0 && mode === 'plan' && isCoachOrAdmin && (
                     <div className="pt-4 pb-4 flex justify-center">
                       <motion.button
                         whileTap={{ scale: 0.95 }}
@@ -1586,7 +1594,7 @@ export default function SessionEditor({
               )}
 
               {/* Completion button at bottom - very prominent */}
-              {!session.isCompleted && (
+              {!session.isCompleted && isCoachOrAdmin && (
                 <div className="pt-6 pb-8 flex flex-col items-center justify-center">
                   <button
                     onClick={() => onUpdate({ ...session, isCompleted: true })}
@@ -1604,22 +1612,24 @@ export default function SessionEditor({
               {session.moments.length === 0 && (
                 <div className="text-center py-12 border-2 border-dashed border-zinc-200 dark:border-zinc-800 rounded-3xl flex flex-col items-center justify-center gap-3">
                   <p className="text-zinc-400 text-sm font-medium">Inga moment tillagda än</p>
-                  <div className="flex flex-wrap items-center justify-center gap-2">
-                    <button
-                      onClick={() => addMoment()}
-                      className="bg-indigo-600 text-white px-4 py-2 rounded-xl font-bold text-sm hover:bg-indigo-700 transition-colors shadow-sm"
-                    >
-                      Lägg till första momentet
-                    </button>
-                    {allSessions && onUpdateSession && (
+                  {isCoachOrAdmin && (
+                    <div className="flex flex-wrap items-center justify-center gap-2">
                       <button
-                        onClick={() => setShowCopyModal(true)}
-                        className="bg-zinc-105 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 px-4 py-2 rounded-xl font-bold text-sm hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-colors"
+                        onClick={() => addMoment()}
+                        className="bg-indigo-600 text-white px-4 py-2 rounded-xl font-bold text-sm hover:bg-indigo-700 transition-colors shadow-sm"
                       >
-                        Hämta från annat pass
+                        Lägg till första momentet
                       </button>
-                    )}
-                  </div>
+                      {allSessions && onUpdateSession && (
+                        <button
+                          onClick={() => setShowCopyModal(true)}
+                          className="bg-zinc-105 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 px-4 py-2 rounded-xl font-bold text-sm hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-colors"
+                        >
+                          Hämta från annat pass
+                        </button>
+                      )}
+                    </div>
+                  )}
                 </div>
               )}
             </>
@@ -1896,40 +1906,55 @@ export default function SessionEditor({
               </p>
             </div>
 
-            <div className="pt-2 space-y-2">
-              <button
-                type="button"
-                onClick={() => {
-                  onUpdate({ ...session, isCompleted: !session.isCompleted, updatedAt: Date.now() });
-                  setShowCompletionInfoModal(false);
-                }}
-                className={`w-full py-3 px-4 rounded-xl font-black text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition-all shadow-md cursor-pointer ${
-                  session.isCompleted
-                    ? 'bg-zinc-200 hover:bg-zinc-300 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-zinc-800 dark:text-zinc-200'
-                    : 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-emerald-200 dark:shadow-none'
-                }`}
-              >
-                {session.isCompleted ? (
-                  <>
-                    <Clock size={16} />
-                    <span>Markera som ej genomfört</span>
-                  </>
-                ) : (
-                  <>
-                    <Check size={16} strokeWidth={3} />
-                    <span>Klarmarkera passet</span>
-                  </>
-                )}
-              </button>
+            {isCoachOrAdmin ? (
+              <div className="pt-2 space-y-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    onUpdate({ ...session, isCompleted: !session.isCompleted, updatedAt: Date.now() });
+                    setShowCompletionInfoModal(false);
+                  }}
+                  className={`w-full py-3 px-4 rounded-xl font-black text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition-all shadow-md cursor-pointer ${
+                    session.isCompleted
+                      ? 'bg-zinc-200 hover:bg-zinc-300 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-zinc-800 dark:text-zinc-200'
+                      : 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-emerald-200 dark:shadow-none'
+                  }`}
+                >
+                  {session.isCompleted ? (
+                    <>
+                      <Clock size={16} />
+                      <span>Markera som ej genomfört</span>
+                    </>
+                  ) : (
+                    <>
+                      <Check size={16} strokeWidth={3} />
+                      <span>Klarmarkera passet</span>
+                    </>
+                  )}
+                </button>
 
-              <button
-                type="button"
-                onClick={() => setShowCompletionInfoModal(false)}
-                className="w-full py-2.5 px-4 bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-zinc-700 dark:text-zinc-300 rounded-xl font-black text-xs uppercase tracking-wider transition-colors cursor-pointer"
-              >
-                Stäng
-              </button>
-            </div>
+                <button
+                  type="button"
+                  onClick={() => setShowCompletionInfoModal(false)}
+                  className="w-full py-2.5 px-4 bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-zinc-700 dark:text-zinc-300 rounded-xl font-black text-xs uppercase tracking-wider transition-colors cursor-pointer"
+                >
+                  Stäng
+                </button>
+              </div>
+            ) : (
+              <div className="pt-2 space-y-2">
+                <p className="text-xs text-zinc-500 font-medium text-center py-1">
+                  Endast tränare och administratörer kan ändra klarmarkering.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => setShowCompletionInfoModal(false)}
+                  className="w-full py-2.5 px-4 bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-zinc-700 dark:text-zinc-300 rounded-xl font-black text-xs uppercase tracking-wider transition-colors cursor-pointer"
+                >
+                  Stäng
+                </button>
+              </div>
+            )}
           </motion.div>
         </motion.div>
       )}

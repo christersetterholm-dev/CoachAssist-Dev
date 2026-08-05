@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { Calendar, Trophy, Clock, Trash2, Copy, History, ListTodo, FileText, X, ArrowUpDown, ChevronLeft, ChevronRight, RefreshCw, EyeOff, Eye, CalendarDays, MapPin, CheckCircle, HelpCircle, ChevronDown, ChevronUp, ArrowRight, Edit, Library } from 'lucide-react';
+import React, { useState, useMemo } from 'react';
+import { Calendar, Trophy, Clock, Trash2, Copy, History, ListTodo, FileText, X, ArrowUpDown, ChevronLeft, ChevronRight, RefreshCw, EyeOff, Eye, CalendarDays, MapPin, CheckCircle, HelpCircle, ChevronDown, ChevronUp, ArrowRight, Edit, Library, Check } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Exercise, TrainingSession, TrainingSettings, BankExercise } from '../types';
 import { syncTeamCalendar } from '../utils/calendarSync';
@@ -13,6 +13,9 @@ interface TrainingManagerProps {
   sessions: TrainingSession[];
   deletedSessions?: TrainingSession[];
   squad: any[];
+  activeClubId?: string | null;
+  activeTeamId?: string | null;
+  activeClubInfo?: { clubName: string; teamName: string } | null;
   onSelectExercise: (id: string) => void;
   onDeleteExercise: (id: string) => void;
   onCopyExercise: (id: string) => void;
@@ -164,7 +167,8 @@ function SessionItem({
   setSessionToDelete,
   onCopySession,
   onUpdateSession,
-  squad
+  squad,
+  isCoachOrAdmin = true
 }: { 
   session: TrainingSession, 
   date: string, 
@@ -174,6 +178,7 @@ function SessionItem({
   onCopySession: (id: string) => void,
   onUpdateSession: (updated: TrainingSession) => void,
   squad: any[],
+  isCoachOrAdmin?: boolean,
   key?: string
 }) {
   const [isExpanded, setIsExpanded] = useState(false);
@@ -266,31 +271,40 @@ function SessionItem({
               </span>
               
               {isSessionCompletedOrPassed(session) ? (
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onUpdateSession({ ...session, isCompleted: false });
-                  }}
-                  className="inline-flex items-center gap-0.5 px-1.5 py-0.5 bg-green-600 dark:bg-green-700 text-white text-[9px] font-black rounded-lg uppercase tracking-wider border border-green-700 hover:bg-green-700 dark:hover:bg-green-600 cursor-pointer active:scale-95 transition-all"
-                  title="Markera som ej klarmarkerad"
-                >
-                  <CheckCircle size={9} />
-                  <span>Klar</span>
-                </button>
+                isCoachOrAdmin ? (
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onUpdateSession({ ...session, isCompleted: false });
+                    }}
+                    className="inline-flex items-center gap-0.5 px-1.5 py-0.5 bg-green-600 dark:bg-green-700 text-white text-[9px] font-black rounded-lg uppercase tracking-wider border border-green-700 hover:bg-green-700 dark:hover:bg-green-600 cursor-pointer active:scale-95 transition-all"
+                    title="Markera som ej klarmarkerad"
+                  >
+                    <CheckCircle size={9} />
+                    <span>Klar</span>
+                  </button>
+                ) : (
+                  <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 bg-green-600/80 text-white text-[9px] font-black rounded-lg uppercase tracking-wider">
+                    <CheckCircle size={9} />
+                    <span>Klar</span>
+                  </span>
+                )
               ) : (
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onUpdateSession({ ...session, isCompleted: true });
-                  }}
-                  className="inline-flex items-center gap-0.5 px-1.5 py-0.5 bg-green-50 hover:bg-green-100 dark:bg-green-955/30 text-green-600 dark:text-green-400 text-[9px] font-black rounded-lg uppercase tracking-wider border border-green-150/40 cursor-pointer active:scale-95 transition-all"
-                  title="Klicka för att klarmarkera"
-                >
-                  <CheckCircle size={9} />
-                  <span>Klar?</span>
-                </button>
+                isCoachOrAdmin && (
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onUpdateSession({ ...session, isCompleted: true });
+                    }}
+                    className="inline-flex items-center gap-0.5 px-1.5 py-0.5 bg-green-50 hover:bg-green-100 dark:bg-green-955/30 text-green-600 dark:text-green-400 text-[9px] font-black rounded-lg uppercase tracking-wider border border-green-150/40 cursor-pointer active:scale-95 transition-all"
+                    title="Klicka för att klarmarkera"
+                  >
+                    <CheckCircle size={9} />
+                    <span>Klar?</span>
+                  </button>
+                )
               )}
 
               <button
@@ -344,47 +358,49 @@ function SessionItem({
             
             <div className="mx-2 h-px flex-1 bg-zinc-100 dark:bg-zinc-800" />
             
-            <div className="flex items-center gap-2 shrink-0 select-none">
-              <div className="flex items-center gap-1 flex-wrap">
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onCopySession(session.id);
-                  }}
-                  className="p-1.5 text-zinc-400 hover:text-indigo-500 transition-colors bg-zinc-50 dark:bg-zinc-800 border border-zinc-100 dark:border-zinc-700 rounded-lg cursor-pointer"
-                  title="Kopiera träningspass"
-                >
-                  <Copy size={13} />
-                </button>
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onUpdateSession({ ...session, isIgnored: !session.isIgnored });
-                  }}
-                  className={`p-1.5 transition-colors border rounded-lg cursor-pointer ${
-                    session.isIgnored
-                      ? "text-indigo-650 bg-indigo-50 dark:bg-indigo-950 hover:bg-indigo-100 dark:hover:bg-indigo-900 border-indigo-200 dark:border-indigo-850"
-                      : "text-zinc-400 hover:text-amber-500 bg-zinc-50 dark:bg-zinc-800 border border-zinc-100 dark:border-zinc-700"
-                  }`}
-                  title={session.isIgnored ? "Återställ pass (visa i listan)" : "Ignorera och dölj pass"}
-                >
-                  {session.isIgnored ? <Eye size={13} /> : <EyeOff size={13} />}
-                </button>
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setSessionToDelete(session.id);
-                  }}
-                  className="p-1.5 text-zinc-400 hover:text-red-500 transition-colors bg-zinc-50 dark:bg-zinc-800 border border-zinc-100 dark:border-zinc-700 rounded-lg cursor-pointer"
-                  title="Radera träningspass"
-                >
-                  <Trash2 size={13} />
-                </button>
+            {isCoachOrAdmin && (
+              <div className="flex items-center gap-2 shrink-0 select-none">
+                <div className="flex items-center gap-1 flex-wrap">
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onCopySession(session.id);
+                    }}
+                    className="p-1.5 text-zinc-400 hover:text-indigo-500 transition-colors bg-zinc-50 dark:bg-zinc-800 border border-zinc-100 dark:border-zinc-700 rounded-lg cursor-pointer"
+                    title="Kopiera träningspass"
+                  >
+                    <Copy size={13} />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onUpdateSession({ ...session, isIgnored: !session.isIgnored });
+                    }}
+                    className={`p-1.5 transition-colors border rounded-lg cursor-pointer ${
+                      session.isIgnored
+                        ? "text-indigo-650 bg-indigo-50 dark:bg-indigo-950 hover:bg-indigo-100 dark:hover:bg-indigo-900 border-indigo-200 dark:border-indigo-850"
+                        : "text-zinc-400 hover:text-amber-500 bg-zinc-50 dark:bg-zinc-800 border border-zinc-100 dark:border-zinc-700"
+                    }`}
+                    title={session.isIgnored ? "Återställ pass (visa i listan)" : "Ignorera och dölj pass"}
+                  >
+                    {session.isIgnored ? <Eye size={13} /> : <EyeOff size={13} />}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setSessionToDelete(session.id);
+                    }}
+                    className="p-1.5 text-zinc-400 hover:text-red-500 transition-colors bg-zinc-50 dark:bg-zinc-800 border border-zinc-100 dark:border-zinc-700 rounded-lg cursor-pointer"
+                    title="Radera träningspass"
+                  >
+                    <Trash2 size={13} />
+                  </button>
+                </div>
               </div>
-            </div>
+            )}
           </div>
 
           {/* Progress preview */}
@@ -545,9 +561,13 @@ export default function TrainingManager({
   onUpdateBankExercise,
   onRemoveBankExercise,
   user,
-  userRoles
+  userRoles,
+  activeClubId,
+  activeTeamId,
+  activeClubInfo
 }: TrainingManagerProps) {
   const [sessionToDelete, setSessionToDelete] = useState<string | null>(null);
+  const [copiedOutboundCalFeed, setCopiedOutboundCalFeed] = useState(false);
   const [sessionToPermanentDelete, setSessionToPermanentDelete] = useState<string | null>(null);
   const [showClearTrashConfirm, setShowClearTrashConfirm] = useState(false);
   const [selectedExerciseForTeams, setSelectedExerciseForTeams] = useState<string | null>(null);
@@ -576,6 +596,11 @@ export default function TrainingManager({
   // Sorting states
   const [completedSortAsc, setCompletedSortAsc] = useState(false); // Default to false (newest/latest first)
   const [showIgnoredInCompleted, setShowIgnoredInCompleted] = useState(false);
+
+  const isCoachOrAdmin = useMemo(() => {
+    if (!user) return true;
+    return userRoles?.includes('admin') || userRoles?.includes('coach') || userRoles?.includes('root_admin') || false;
+  }, [user, userRoles]);
 
   // Series creation helpers
   const getDaysInMonth = (date: Date) => {
@@ -664,6 +689,7 @@ export default function TrainingManager({
   const [localDuration, setLocalDuration] = useState(settings?.defaultDuration || 90);
   const [localEndTime, setLocalEndTime] = useState(settings?.defaultEndTime || '19:30');
   const [localDefaultHideContentForPlayers, setLocalDefaultHideContentForPlayers] = useState(settings?.defaultHideContentForPlayers || false);
+  const [localShowLineupsToPlayers, setLocalShowLineupsToPlayers] = useState(settings?.showLineupsToPlayers || false);
   const [batchHideMessage, setBatchHideMessage] = useState<string | null>(null);
   
   const [localIcsUrl, setLocalIcsUrl] = useState(settings?.icsUrl || '');
@@ -709,6 +735,7 @@ export default function TrainingManager({
       setLocalDuration(settings.defaultDuration || 90);
       setLocalEndTime(settings.defaultEndTime || calculateEndTime(settings.defaultStartTime || '18:00', settings.defaultDuration || 90));
       setLocalDefaultHideContentForPlayers(settings.defaultHideContentForPlayers || false);
+      setLocalShowLineupsToPlayers(settings.showLineupsToPlayers || false);
       setLocalIcsUrl(settings.icsUrl || '');
     }
     prevShowSettingsRef.current = showSettings;
@@ -992,22 +1019,24 @@ export default function TrainingManager({
                   {completedSortAsc ? "Äldsta först" : "Senaste först"}
                 </span>
               </button>
-              <button
-                onClick={() => setShowTrashModal(true)}
-                className={`p-2 transition-all bg-white dark:bg-zinc-905 border rounded-xl shadow-sm flex items-center gap-1.5 cursor-pointer ${
-                  deletedSessions && deletedSessions.length > 0
-                    ? "border-rose-200 dark:border-rose-900/40 text-rose-500 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/20"
-                    : "border-zinc-150 dark:border-zinc-800 text-zinc-450 hover:text-zinc-650"
-                }`}
-                title="Papperskorg"
-              >
-                <Trash2 size={20} />
-                {deletedSessions && deletedSessions.length > 0 && (
-                  <span className="text-[10px] font-black px-1.5 py-0.5 bg-rose-100 dark:bg-rose-950/60 rounded-full text-rose-600 dark:text-rose-405">
-                    {deletedSessions.length}
-                  </span>
-                )}
-              </button>
+              {isCoachOrAdmin && (
+                <button
+                  onClick={() => setShowTrashModal(true)}
+                  className={`p-2 transition-all bg-white dark:bg-zinc-905 border rounded-xl shadow-sm flex items-center gap-1.5 cursor-pointer ${
+                    deletedSessions && deletedSessions.length > 0
+                      ? "border-rose-200 dark:border-rose-900/40 text-rose-500 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/20"
+                      : "border-zinc-150 dark:border-zinc-800 text-zinc-450 hover:text-zinc-650"
+                  }`}
+                  title="Papperskorg"
+                >
+                  <Trash2 size={20} />
+                  {deletedSessions && deletedSessions.length > 0 && (
+                    <span className="text-[10px] font-black px-1.5 py-0.5 bg-rose-100 dark:bg-rose-950/60 rounded-full text-rose-600 dark:text-rose-405">
+                      {deletedSessions.length}
+                    </span>
+                  )}
+                </button>
+              )}
               <button
                 onClick={() => setShowIgnoredInCompleted(prev => !prev)}
                 className={`flex items-center justify-center gap-2 border px-3 sm:px-4 py-2 rounded-xl font-bold transition-all text-sm shadow-sm cursor-pointer ${
@@ -1112,6 +1141,7 @@ export default function TrainingManager({
                       onCopySession={onCopySession}
                       onUpdateSession={onUpdateSession}
                       squad={squad}
+                      isCoachOrAdmin={isCoachOrAdmin}
                     />
                   );
                 })}
@@ -1194,7 +1224,7 @@ export default function TrainingManager({
                     <span>Innehållssekretess för spelare</span>
                   </h4>
                   
-                  <div className="p-3 bg-zinc-50 dark:bg-zinc-950/40 rounded-xl border border-zinc-200 dark:border-zinc-800 space-y-2">
+                  <div className="p-3 bg-zinc-50 dark:bg-zinc-950/40 rounded-xl border border-zinc-200 dark:border-zinc-800 space-y-3">
                     <label className="flex items-start gap-2.5 cursor-pointer select-none">
                       <input
                         type="checkbox"
@@ -1211,6 +1241,25 @@ export default function TrainingManager({
                         </span>
                       </div>
                     </label>
+
+                    <div className="border-t border-zinc-200/60 dark:border-zinc-800 pt-3">
+                      <label className="flex items-start gap-2.5 cursor-pointer select-none">
+                        <input
+                          type="checkbox"
+                          checked={localShowLineupsToPlayers}
+                          onChange={(e) => setLocalShowLineupsToPlayers(e.target.checked)}
+                          className="mt-0.5 rounded border-zinc-300 dark:border-zinc-700 text-indigo-600 focus:ring-indigo-500 cursor-pointer w-4 h-4"
+                        />
+                        <div>
+                          <span className="text-xs font-bold text-zinc-800 dark:text-zinc-200 block leading-tight">
+                            Visa laguppställningar för spelare
+                          </span>
+                          <span className="text-[10px] text-zinc-400 font-medium block mt-1 leading-normal">
+                            Som standard ser endast tränare och administratörer laguppställningar. Aktivera för att tillåta spelare att se dom.
+                          </span>
+                        </div>
+                      </label>
+                    </div>
                   </div>
 
                   <div className="space-y-1.5 pt-1">
@@ -1260,11 +1309,59 @@ export default function TrainingManager({
                 </div>
 
                 <div className="pt-4 border-t border-zinc-100 dark:border-zinc-800/60">
-                  <h4 className="text-xs font-black text-zinc-900 dark:text-white uppercase tracking-wider mb-2">Kalenderintegration</h4>
-                  <div className="p-2.5 mb-3 bg-indigo-50/60 dark:bg-indigo-950/40 rounded-xl border border-indigo-100 dark:border-indigo-900/40 text-[11px] text-indigo-700 dark:text-indigo-300 font-medium leading-relaxed">
-                    💡 <strong>Tips:</strong> Kalendersynkronisering sparas och ställs in centralt för laget under <strong className="font-bold">Admingränssnittet &gt; Kalendersynkronisering</strong>, så alla inloggade ledare och spelare får samma kalender.
+                  <h4 className="text-xs font-black text-zinc-900 dark:text-white uppercase tracking-wider mb-2">Kalenderintegration & Synk</h4>
+                  
+                  {/* Lagets unika iCal prenumerationslänk för spelare och ledare */}
+                  {(() => {
+                    const cId = activeClubId;
+                    const tId = activeTeamId || 'club_global';
+                    const outboundUrl = cId 
+                      ? `${window.location.origin}/api/calendar/${cId}/${tId}/events.ics`
+                      : `${window.location.origin}/api/calendar/events.ics`;
+
+                    return (
+                      <div className="p-3 bg-indigo-50/70 dark:bg-indigo-950/30 rounded-xl border border-indigo-100 dark:border-indigo-900/40 mb-4">
+                        <div className="flex items-center justify-between gap-2 mb-1">
+                          <div className="flex items-center gap-1.5">
+                            <Calendar size={13} className="text-indigo-600 dark:text-indigo-400" />
+                            <span className="text-[10px] font-black uppercase text-indigo-700 dark:text-indigo-300 tracking-wider">
+                              Lagets Prenumerationslänk (iCal)
+                            </span>
+                          </div>
+                          {activeClubInfo && (
+                            <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-md bg-indigo-100 dark:bg-indigo-900/50 text-indigo-800 dark:text-indigo-200">
+                              {activeClubInfo.clubName} • {activeClubInfo.teamName}
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-[10px] text-zinc-500 dark:text-zinc-400 mb-2">
+                          Spelare och ledare kan klistra in denna i sin mobil/Google/Apple Kalender för att få alla lagets träningar och matcher automatiskt.
+                        </p>
+                        <div className="flex items-center justify-between gap-2 bg-white dark:bg-zinc-900 px-2.5 py-1.5 rounded-lg border border-indigo-100 dark:border-indigo-900/30">
+                          <span className="text-[11px] font-mono font-bold text-zinc-800 dark:text-zinc-200 truncate select-all">
+                            {outboundUrl}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              navigator.clipboard.writeText(outboundUrl);
+                              setCopiedOutboundCalFeed(true);
+                              setTimeout(() => setCopiedOutboundCalFeed(false), 2000);
+                            }}
+                            className="px-2 py-1 bg-indigo-600 hover:bg-indigo-700 text-white rounded-md text-[10px] font-bold transition-all shrink-0 cursor-pointer flex items-center gap-1"
+                          >
+                            {copiedOutboundCalFeed ? <Check size={12} /> : <Copy size={12} />}
+                            <span>{copiedOutboundCalFeed ? 'Kopierad' : 'Kopiera'}</span>
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })()}
+
+                  <div className="p-2.5 mb-3 bg-zinc-50 dark:bg-zinc-900 rounded-xl border border-zinc-200/80 dark:border-zinc-800 text-[11px] text-zinc-600 dark:text-zinc-400 font-medium leading-relaxed">
+                    💡 <strong>Importera matcher/pass:</strong> Kalendersynkronisering från externa tjänster (Laget.se / SportAdmin / Svenskalag) sparas centralt för laget under <strong className="font-bold">Admingränssnittet &gt; Kalendersynkronisering</strong>.
                   </div>
-                  <label className="block text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-1.5">Webcal / ICS-länk</label>
+                  <label className="block text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-1.5">Webcal / ICS-länk från extern sida</label>
                   <input
                     type="text"
                     value={localIcsUrl}
@@ -1480,6 +1577,7 @@ export default function TrainingManager({
                       defaultEndTime: localEndTime,
                       defaultDuration: localDuration,
                       defaultHideContentForPlayers: localDefaultHideContentForPlayers,
+                      showLineupsToPlayers: localShowLineupsToPlayers,
                       icsUrl: localIcsUrl.trim()
                     });
                     setShowSettings(false);

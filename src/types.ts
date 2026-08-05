@@ -35,6 +35,7 @@ export interface Lineup {
   showNumber?: boolean;
   showName?: boolean;
   isArchived?: boolean;
+  isPublishedToPlayers?: boolean;
   teamLogoUrl?: string;
   pitchType?: 'classic' | 'grass' | 'blue' | 'solid-blue' | 'blue-stripes' | 'blue-grass' | 'solid-white' | 'solid-black';
   orientation?: 'vertical' | 'landscape';
@@ -138,6 +139,7 @@ export interface TrainingSettings {
   defaultEndTime?: string;
   defaultDuration?: number;
   defaultHideContentForPlayers?: boolean;
+  showLineupsToPlayers?: boolean;
   icsUrl?: string;
   lastSyncedAt?: number;
   lastSyncCount?: number;
