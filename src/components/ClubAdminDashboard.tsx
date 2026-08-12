@@ -277,6 +277,7 @@ export default function ClubAdminDashboard({
   const onCropCompleteMemberPhoto = async (croppedBlob: Blob) => {
     setImageToCrop(null);
     setIsUploadingPhoto(true);
+    let finalPhotoUrl = '';
 
     try {
       // 1. First try persistent local/SQLite server upload endpoint
@@ -292,37 +293,43 @@ export default function ClubAdminDashboard({
       if (res.ok) {
         const data = await res.json();
         if (data.url) {
+          finalPhotoUrl = data.url;
           setMemberPhotoUrl(data.url);
-          setIsUploadingPhoto(false);
-          return;
         }
       }
     } catch (serverErr) {
       console.warn('Server upload fallback:', serverErr);
     }
 
-    try {
-      // 2. Try Firebase Storage
-      const extension = croppedBlob.type === 'image/png' ? 'png' : 'jpg';
-      const fileName = `member_${Date.now()}.${extension}`;
-      const memberPath = editingMember ? `members/${editingMember.userId}/${fileName}` : `members/temp/${fileName}`;
-      const storageRef = ref(storage, memberPath);
-      
-      const uploadResult = await uploadBytes(storageRef, croppedBlob);
-      const downloadURL = await getDownloadURL(uploadResult.ref);
-
-      setMemberPhotoUrl(downloadURL);
-    } catch (err) {
-      console.error('Failed to upload member photo to storage, falling back to data URL:', err);
-      // 3. Fallback to Data URL
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        setMemberPhotoUrl(reader.result as string);
-      };
-      reader.readAsDataURL(croppedBlob);
-    } finally {
-      setIsUploadingPhoto(false);
+    if (!finalPhotoUrl) {
+      try {
+        // 2. Try Firebase Storage
+        const extension = croppedBlob.type === 'image/png' ? 'png' : 'jpg';
+        const fileName = `member_${Date.now()}.${extension}`;
+        const memberPath = editingMember ? `members/${editingMember.userId}/${fileName}` : `members/temp/${fileName}`;
+        const storageRef = ref(storage, memberPath);
+        
+        const uploadResult = await uploadBytes(storageRef, croppedBlob);
+        finalPhotoUrl = await getDownloadURL(uploadResult.ref);
+        setMemberPhotoUrl(finalPhotoUrl);
+      } catch (err) {
+        console.error('Failed to upload member photo to storage, falling back to data URL:', err);
+        // 3. Fallback to Data URL
+        const reader = new FileReader();
+        await new Promise<void>((resolve) => {
+          reader.onloadend = () => {
+            if (typeof reader.result === 'string') {
+              finalPhotoUrl = reader.result;
+              setMemberPhotoUrl(finalPhotoUrl);
+            }
+            resolve();
+          };
+          reader.readAsDataURL(croppedBlob);
+        });
+      }
     }
+
+    setIsUploadingPhoto(false);
   };
   const [memberRoles, setMemberRoles] = useState<('admin' | 'coach' | 'player' | 'parent')[]>([]);
   const [memberTeams, setMemberTeams] = useState<string[]>([]);
@@ -1668,32 +1675,52 @@ export default function ClubAdminDashboard({
             const squadSnap = await getDoc(squadRef);
             let teamSquad: SquadPlayer[] = squadSnap.exists() ? (squadSnap.data().squad || []) : [];
 
-            const isLeader = newOrUpdatedMember.roles.includes('coach') || newOrUpdatedMember.roles.includes('admin');
-            const role: 'leader' | 'player' = isLeader ? 'leader' : 'player';
+            const hasPlayerRole = newOrUpdatedMember.roles.includes('player') || !newOrUpdatedMember.roles.some(r => r === 'coach' || r === 'admin');
+            const hasLeaderRole = newOrUpdatedMember.roles.includes('coach') || newOrUpdatedMember.roles.includes('admin');
 
-            // Filter out any stale duplicate entries for this player in team squad
+            // Filter out existing entries for this player/member from teamSquad
             teamSquad = teamSquad.filter(sp => {
               const spEmail = (sp.email || '').trim().toLowerCase();
               const spName = (sp.name || '').trim().toLowerCase();
+              const baseSpId = (sp.id || '').replace('_leader', '');
 
-              if (newOrUpdatedMember.userId && sp.id === newOrUpdatedMember.userId) return false;
-              if (displayEmail && spEmail === displayEmail.toLowerCase()) return false;
-              if (cleanName && spName === cleanName.toLowerCase()) return false;
-              return true;
+              const matchesMember = (newOrUpdatedMember.userId && (sp.id === newOrUpdatedMember.userId || baseSpId === newOrUpdatedMember.userId)) ||
+                (displayEmail && spEmail === displayEmail.toLowerCase()) ||
+                (cleanName && spName === cleanName.toLowerCase());
+
+              if (!matchesMember) return true;
+              return false;
             });
 
             if (isAssigned) {
-              teamSquad.push({
-                id: newOrUpdatedMember.userId,
-                name: newOrUpdatedMember.fullName,
-                email: displayEmail || undefined,
-                phone: newOrUpdatedMember.phone,
-                personnummer: newOrUpdatedMember.personnummer,
-                position: newOrUpdatedMember.position,
-                number: newOrUpdatedMember.number,
-                photoUrl: newOrUpdatedMember.photoUrl,
-                role
-              });
+              if (hasPlayerRole) {
+                teamSquad.push({
+                  id: newOrUpdatedMember.userId,
+                  name: newOrUpdatedMember.fullName,
+                  email: displayEmail || undefined,
+                  phone: newOrUpdatedMember.phone,
+                  personnummer: newOrUpdatedMember.personnummer,
+                  position: newOrUpdatedMember.position,
+                  number: newOrUpdatedMember.number,
+                  photoUrl: newOrUpdatedMember.photoUrl,
+                  role: 'player',
+                  roles: newOrUpdatedMember.roles
+                });
+              }
+              if (hasLeaderRole) {
+                teamSquad.push({
+                  id: `${newOrUpdatedMember.userId}_leader`,
+                  name: newOrUpdatedMember.fullName,
+                  email: displayEmail || undefined,
+                  phone: newOrUpdatedMember.phone,
+                  personnummer: newOrUpdatedMember.personnummer,
+                  position: newOrUpdatedMember.position,
+                  number: newOrUpdatedMember.number,
+                  photoUrl: newOrUpdatedMember.photoUrl,
+                  role: 'leader',
+                  roles: newOrUpdatedMember.roles
+                });
+              }
             }
 
             teamSquad = deduplicateSquad(teamSquad);

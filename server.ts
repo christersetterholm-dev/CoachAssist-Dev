@@ -66,8 +66,7 @@ function initDatabase(): InstanceType<typeof Database> {
         id TEXT PRIMARY KEY,
         data TEXT NOT NULL,
         updatedAt INTEGER NOT NULL,
-        coachUid TEXT,
-        FOREIGN KEY (coachUid) REFERENCES users(id) ON DELETE SET NULL
+        coachUid TEXT
       );
 
       CREATE TABLE IF NOT EXISTS clubs_data (
@@ -142,7 +141,128 @@ function initDatabase(): InstanceType<typeof Database> {
 
 const db = initDatabase();
 
-const JWT_SECRET = process.env.JWT_SECRET || 'coachassist-local-secret-key-12345';
+// Persistent or env-based JWT secret
+let JWT_SECRET = process.env.JWT_SECRET || '';
+
+async function ensureJwtSecret(): Promise<string> {
+  if (JWT_SECRET) return JWT_SECRET;
+
+  try {
+    const row: any = db.prepare("SELECT data FROM system_docs WHERE path = 'system/jwt_secret'").get();
+    if (row && row.data) {
+      JWT_SECRET = typeof row.data === 'string' ? JSON.parse(row.data) : row.data;
+      if (JWT_SECRET) {
+        setFirestoreDoc('app_docs/system_jwt_secret', { data: JSON.stringify(JWT_SECRET), updatedAt: Date.now() }).catch(() => {});
+        return JWT_SECRET;
+      }
+    }
+  } catch (e) {}
+
+  try {
+    const fDoc = await getFirestoreDoc('app_docs/system_jwt_secret');
+    if (fDoc && fDoc.data) {
+      JWT_SECRET = typeof fDoc.data === 'string' ? JSON.parse(fDoc.data) : fDoc.data;
+      if (JWT_SECRET) {
+        try {
+          db.prepare("INSERT OR REPLACE INTO system_docs (path, data, updatedAt) VALUES ('system/jwt_secret', ?, ?)").run(
+            JSON.stringify(JWT_SECRET),
+            Date.now()
+          );
+        } catch (_) {}
+        return JWT_SECRET;
+      }
+    }
+  } catch (e) {}
+
+  JWT_SECRET = crypto.randomBytes(32).toString('hex');
+  try {
+    db.prepare("INSERT OR REPLACE INTO system_docs (path, data, updatedAt) VALUES ('system/jwt_secret', ?, ?)").run(
+      JSON.stringify(JWT_SECRET),
+      Date.now()
+    );
+  } catch (e) {
+    console.warn('[JWT Secret] Failed to save generated secret to SQLite:', e);
+  }
+
+  setFirestoreDoc('app_docs/system_jwt_secret', { data: JSON.stringify(JWT_SECRET), updatedAt: Date.now() }).catch(() => {});
+  return JWT_SECRET;
+}
+
+try {
+  if (!JWT_SECRET) {
+    const row: any = db.prepare("SELECT data FROM system_docs WHERE path = 'system/jwt_secret'").get();
+    if (row && row.data) {
+      JWT_SECRET = typeof row.data === 'string' ? JSON.parse(row.data) : row.data;
+    }
+  }
+} catch (_) {}
+
+if (!JWT_SECRET) {
+  JWT_SECRET = crypto.randomBytes(32).toString('hex');
+  try {
+    db.prepare("INSERT OR REPLACE INTO system_docs (path, data, updatedAt) VALUES ('system/jwt_secret', ?, ?)").run(
+      JSON.stringify(JWT_SECRET),
+      Date.now()
+    );
+  } catch (_) {}
+}
+
+// Rate Limiting Middleware
+interface RateLimitRecord {
+  count: number;
+  resetAt: number;
+}
+const rateLimitMap = new Map<string, RateLimitRecord>();
+
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, record] of rateLimitMap.entries()) {
+    if (record.resetAt <= now) {
+      rateLimitMap.delete(key);
+    }
+  }
+}, 60000);
+
+function createRateLimiter(options: { windowMs: number; max: number; message: string }) {
+  return (req: express.Request, res: express.Response, next: express.NextFunction) => {
+    const clientIp = (req.headers['x-forwarded-for'] as string || req.socket.remoteAddress || 'unknown').split(',')[0].trim();
+    const key = `${req.path}:${clientIp}`;
+    const now = Date.now();
+
+    const record = rateLimitMap.get(key);
+    if (!record || record.resetAt <= now) {
+      rateLimitMap.set(key, { count: 1, resetAt: now + options.windowMs });
+      return next();
+    }
+
+    if (record.count >= options.max) {
+      const retryAfter = Math.ceil((record.resetAt - now) / 1000);
+      res.setHeader('Retry-After', retryAfter);
+      return res.status(429).json({ error: options.message });
+    }
+
+    record.count += 1;
+    next();
+  };
+}
+
+const loginRateLimiter = createRateLimiter({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  message: 'För många inloggningsförsök. Vänligen vänta 15 minuter och försök igen.'
+});
+
+const registerRateLimiter = createRateLimiter({
+  windowMs: 60 * 60 * 1000,
+  max: 10,
+  message: 'För många registreringsförsök. Vänligen försök igen om en timme.'
+});
+
+const resetRateLimiter = createRateLimiter({
+  windowMs: 15 * 60 * 1000,
+  max: 5,
+  message: 'För många återställningsförsök. Vänligen vänta 15 minuter och försök igen.'
+});
 
 // --- FIRESTORE PERSISTENT BACKEND STORAGE (CLOUD RUN RESILIENCE) ---
 let firebaseConfig: any = null;
@@ -415,12 +535,44 @@ async function loadAndApplyPwaIconsFromFirestore() {
   }
 }
 
+async function loadAndApplyDbConfigFromFirestore() {
+  try {
+    const docData = await getFirestoreDoc('app_docs/system_db_config');
+    if (docData && docData.data) {
+      const parsed = typeof docData.data === 'string' ? JSON.parse(docData.data) : docData.data;
+      if (parsed && parsed.mode) {
+        dbModeConfig = { ...dbModeConfig, ...parsed };
+        console.log(`[DB Config] Restored database mode from Firestore on startup: ${dbModeConfig.mode}`);
+        
+        // Cache back to SQLite so local queries during startup use it
+        try {
+          db.prepare(`
+            INSERT INTO system_docs (path, data, updatedAt)
+            VALUES ('system/db_config', ?, ?)
+            ON CONFLICT(path) DO UPDATE SET data = excluded.data, updatedAt = excluded.updatedAt
+          `).run(JSON.stringify(dbModeConfig), dbModeConfig.updatedAt || Date.now());
+        } catch (sqliteErr) {
+          console.error('[DB Config] Error caching restored database mode to SQLite:', sqliteErr);
+        }
+      }
+    }
+  } catch (err) {
+    console.error('[DB Config] Error restoring database mode from Firestore on startup:', err);
+  }
+}
+
 async function startServer() {
   const app = express();
   const PORT = process.env.PORT || 3000;
 
+  // Restore JWT secret from Firestore or SQLite on startup
+  await ensureJwtSecret();
+
   // Restore custom PWA icons from Firestore on startup
   loadAndApplyPwaIconsFromFirestore();
+
+  // Restore database configuration mode from Firestore on startup
+  await loadAndApplyDbConfigFromFirestore();
 
   // Helper to inject current PWA app name and theme color into server-rendered HTML
   function injectPwaMetaToHtml(html: string): string {
@@ -852,7 +1004,7 @@ async function startServer() {
   // --- AUTHENTICATION ENDPOINTS ---
 
   // Register
-  app.post('/api/auth/register', async (req, res) => {
+  app.post('/api/auth/register', registerRateLimiter, async (req, res) => {
     const { email, password, username } = req.body;
     if (!email || !password) {
       return res.status(400).json({ error: 'E-post och lösenord krävs.' });
@@ -939,7 +1091,7 @@ async function startServer() {
         }).catch(e => console.error('Firestore username save error:', e));
       }
 
-      const token = jwt.sign({ id: userId, email: trimmedEmail, username: trimmedUsername }, JWT_SECRET, { expiresIn: '30d' });
+      const token = jwt.sign({ id: userId, email: trimmedEmail, username: trimmedUsername }, JWT_SECRET, { expiresIn: '3650d' });
       res.json({
         token,
         user: {
@@ -957,7 +1109,7 @@ async function startServer() {
   });
 
   // Login (supports Email OR Username)
-  app.post('/api/auth/login', async (req, res) => {
+  app.post('/api/auth/login', loginRateLimiter, async (req, res) => {
     const { email, identifier, password } = req.body;
     const loginInput = (email || identifier || '').trim().toLowerCase();
 
@@ -1030,7 +1182,7 @@ async function startServer() {
         }
       }
 
-      const token = jwt.sign({ id: userRow.id, email: userRow.email, username: userRow.username }, JWT_SECRET, { expiresIn: '30d' });
+      const token = jwt.sign({ id: userRow.id, email: userRow.email, username: userRow.username }, JWT_SECRET, { expiresIn: '3650d' });
       res.json({
         token,
         user: {
@@ -1093,7 +1245,7 @@ async function startServer() {
   };
 
   // Phase 1: Request password reset email code
-  app.post('/api/auth/request-reset', async (req, res) => {
+  app.post('/api/auth/request-reset', resetRateLimiter, async (req, res) => {
     const { email } = req.body;
     if (!email || typeof email !== 'string' || !email.includes('@')) {
       return res.status(400).json({ error: 'Ange en giltig e-postadress.' });
@@ -1157,7 +1309,7 @@ async function startServer() {
   });
 
   // Phase 2: Verify code and update password
-  app.post('/api/auth/reset-password', async (req, res) => {
+  app.post('/api/auth/reset-password', resetRateLimiter, async (req, res) => {
     const { email, code, newPassword } = req.body;
     if (!email || !code || !newPassword) {
       return res.status(400).json({ error: 'E-postadress, verifieringskod och nytt lösenord krävs.' });
@@ -1241,7 +1393,7 @@ async function startServer() {
       }).catch(e => console.error('Firestore reset password update error:', e));
 
       // Issue fresh authentication JWT token
-      const token = jwt.sign({ id: userRow.id, email: userRow.email }, JWT_SECRET, { expiresIn: '30d' });
+      const token = jwt.sign({ id: userRow.id, email: userRow.email }, JWT_SECRET, { expiresIn: '3650d' });
 
       res.json({
         message: 'Lösenordet har återställts!',
@@ -1382,7 +1534,7 @@ async function startServer() {
         username: cleanUsername
       }).catch(() => {});
 
-      const newToken = jwt.sign({ id: userId, email: userRow?.email || decoded.email, username: cleanUsername }, JWT_SECRET, { expiresIn: '30d' });
+      const newToken = jwt.sign({ id: userId, email: userRow?.email || decoded.email, username: cleanUsername }, JWT_SECRET, { expiresIn: '3650d' });
 
       res.json({
         success: true,
@@ -1546,7 +1698,7 @@ async function startServer() {
       }).catch(e => console.error('Firestore user email update error:', e));
 
       // Issue updated token
-      const newToken = jwt.sign({ id: userId, email: cleanNewEmail }, JWT_SECRET, { expiresIn: '30d' });
+      const newToken = jwt.sign({ id: userId, email: cleanNewEmail }, JWT_SECRET, { expiresIn: '3650d' });
 
       res.json({
         token: newToken,
@@ -1575,15 +1727,17 @@ async function startServer() {
         const token = partsAuth.length > 1 ? partsAuth[1] : partsAuth[0];
         if (token && token !== 'null' && token !== 'undefined') {
           const decoded: any = jwt.verify(token, JWT_SECRET);
-          if (decoded && decoded.id) return true;
+          if (decoded && (decoded.id || decoded.email)) return true;
         }
       } catch (e) {
         // Token invalid or expired
       }
     }
     const userHeader = (req.headers['x-user-email'] || req.headers['x-user-id']) as string;
-    if (userHeader) return true;
-    return true;
+    if (userHeader && userHeader.trim().length > 0 && userHeader !== 'null' && userHeader !== 'undefined') {
+      return true;
+    }
+    return false;
   };
 
   // GET /api/admin/users - List registered accounts
@@ -2095,6 +2249,9 @@ async function startServer() {
         res.status(500).json({ error: 'Failed to save club data' });
       }
     } else if (pathStr.startsWith('admins/')) {
+      if (!checkAdminPermission(req)) {
+        return res.status(401).json({ error: 'Unauthorized' });
+      }
       try {
         const serializedData = JSON.stringify(data);
         db.prepare(`
@@ -2129,10 +2286,13 @@ async function startServer() {
       cb(null, 'photo_' + uniqueSuffix + ext);
     }
   });
-  const upload = multer({ storage: storageConfig });
+  const upload = multer({ 
+    storage: storageConfig,
+    limits: { fileSize: 10 * 1024 * 1024 } // 10MB file size limit
+  });
 
   // Upload image with disk + SQLite database + Cloud Firestore persistence
-  app.post('/api/upload', upload.any(), (req, res) => {
+  app.post('/api/upload', upload.any(), async (req, res) => {
     const files = req.files as Express.Multer.File[];
     if (!files || files.length === 0) {
       return res.status(400).json({ error: 'No file uploaded' });
@@ -2157,18 +2317,80 @@ async function startServer() {
           VALUES (?, ?, ?, ?)
         `).run(filename, mimeType, base64Data, Date.now());
 
-        // Asynchronously persist to Cloud Firestore for permanent multi-device & container restart durability
-        setFirestoreDoc(`server_uploads/${encodeURIComponent(filename)}`, {
-          mime_type: mimeType,
-          data_base64: base64Data,
-          created_at: Date.now()
-        }).catch(err => console.error('Failed to sync upload to Firestore:', err));
+        // Await persistence to Cloud Firestore for guaranteed multi-device & container restart durability
+        try {
+          const synced = await setFirestoreDoc(`server_uploads/${encodeURIComponent(filename)}`, {
+            mime_type: mimeType,
+            data_base64: base64Data,
+            created_at: Date.now()
+          });
+          if (synced) {
+            console.log(`[Upload] Successfully synced upload ${filename} to Firestore server_uploads.`);
+          } else {
+            console.warn(`[Upload] Firestore sync returned false for ${filename}`);
+          }
+        } catch (fErr) {
+          console.error('[Upload] Failed to sync upload to Firestore:', fErr);
+        }
       }
     } catch (err) {
       console.error('Failed to save uploaded file into SQLite persistence:', err);
     }
 
     res.json({ url: fileUrl });
+  });
+
+  // Serving /uploads/:filename with 3-tier fallback (Disk -> SQLite -> Cloud Firestore)
+  app.get('/uploads/:filename', async (req, res) => {
+    const filename = path.basename(req.params.filename);
+    const fullPath = path.join(UPLOADS_DIR, filename);
+
+    // 1. Check disk first
+    if (fs.existsSync(fullPath)) {
+      return res.sendFile(fullPath, {
+        maxAge: '1y',
+        immutable: true
+      });
+    }
+
+    try {
+      // 2. Check SQLite uploaded_files table
+      const row: any = db.prepare('SELECT mime_type, data_base64 FROM uploaded_files WHERE filename = ?').get(filename);
+      if (row && row.data_base64) {
+        const buffer = Buffer.from(row.data_base64, 'base64');
+        // Cache back to disk asynchronously
+        fs.writeFile(fullPath, buffer, () => {});
+        res.setHeader('Content-Type', row.mime_type || 'image/jpeg');
+        res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+        return res.send(buffer);
+      }
+
+      // 3. Fallback to Cloud Firestore server_uploads collection
+      const doc = await getFirestoreDoc(`server_uploads/${encodeURIComponent(filename)}`);
+      if (doc && doc.data_base64) {
+        const mimeType = doc.mime_type || 'image/jpeg';
+        const buffer = Buffer.from(doc.data_base64, 'base64');
+
+        // Restore back to SQLite & Disk
+        try {
+          db.prepare(`
+            INSERT OR REPLACE INTO uploaded_files (filename, mime_type, data_base64, created_at)
+            VALUES (?, ?, ?, ?)
+          `).run(filename, mimeType, doc.data_base64, Date.now());
+          fs.writeFile(fullPath, buffer, () => {});
+        } catch (restoreErr) {
+          console.warn('[Upload Restore] Error restoring to SQLite/Disk:', restoreErr);
+        }
+
+        res.setHeader('Content-Type', mimeType);
+        res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+        return res.send(buffer);
+      }
+    } catch (err) {
+      console.error(`[Upload Fetch] Error retrieving /uploads/${filename}:`, err);
+    }
+
+    res.status(404).send('File not found');
   });
 
   // Delete image
@@ -2182,10 +2404,9 @@ async function startServer() {
 
       if (fs.existsSync(fullPath)) {
         fs.unlinkSync(fullPath);
-        res.json({ success: true });
-      } else {
-        res.status(404).json({ error: 'File not found' });
       }
+      db.prepare('DELETE FROM uploaded_files WHERE filename = ?').run(filename);
+      res.json({ success: true });
     } catch (e: any) {
       console.error('Error deleting file:', e);
       res.status(500).json({ error: 'Failed to delete file' });
@@ -2306,19 +2527,38 @@ async function startServer() {
       fetchUrl = 'https://' + fetchUrl;
     }
 
-    try {
-      console.log(`[Calendar Proxy] Fetching: ${fetchUrl}`);
-      const response = await axios({
+    const doFetch = async (targetUrl: string) => {
+      return await axios({
         method: 'get',
-        url: fetchUrl,
-        timeout: 10000,
+        url: targetUrl,
+        timeout: 12000,
+        responseType: 'text',
+        maxRedirects: 10,
         headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          'Accept': 'text/calendar, text/plain, */*'
         }
       });
+    };
+
+    try {
+      console.log(`[Calendar Proxy] Fetching: ${fetchUrl}`);
+      let response;
+      try {
+        response = await doFetch(fetchUrl);
+      } catch (firstErr: any) {
+        if (url.trim().startsWith('webcal://') && fetchUrl.startsWith('https://')) {
+          const httpUrl = 'http://' + url.trim().slice(9);
+          console.log(`[Calendar Proxy] HTTPS failed, trying HTTP fallback: ${httpUrl}`);
+          response = await doFetch(httpUrl);
+        } else {
+          throw firstErr;
+        }
+      }
 
       res.setHeader('Content-Type', 'text/calendar; charset=utf-8');
       res.setHeader('Access-Control-Allow-Origin', '*');
+      res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
       res.send(response.data);
     } catch (error: any) {
       console.error(`[Calendar Proxy] Error fetching ${fetchUrl}:`, error.message);
@@ -2384,13 +2624,28 @@ async function startServer() {
           .replace(/\r/g, '');
       };
 
-      // Helper to format date to iCal UTC format YYYYMMDDTHHMMSSZ
-      const formatIcsTime = (timestampMs: number, timeStr?: string) => {
+      // Helper to format date and time to iCal local time YYYYMMDDTHHMMSS
+      const formatIcsLocalTime = (timestampMs: number, timeStr?: string) => {
         const d = new Date(timestampMs);
+        let hh = 18;
+        let mm = 0;
         if (timeStr && typeof timeStr === 'string' && timeStr.includes(':')) {
-          const [hh, mm] = timeStr.split(':').map(Number);
-          d.setHours(isNaN(hh) ? 0 : hh, isNaN(mm) ? 0 : mm, 0, 0);
+          const [parsedH, parsedM] = timeStr.split(':').map(Number);
+          if (!isNaN(parsedH)) hh = parsedH;
+          if (!isNaN(parsedM)) mm = parsedM;
         }
+        
+        const year = d.getFullYear();
+        const month = String(d.getMonth() + 1).padStart(2, '0');
+        const day = String(d.getDate()).padStart(2, '0');
+        const hours = String(hh).padStart(2, '0');
+        const mins = String(mm).padStart(2, '0');
+        return `${year}${month}${day}T${hours}${mins}00`;
+      };
+
+      // Helper to format UTC timestamp for DTSTAMP
+      const formatIcsUtcTime = (timestampMs: number) => {
+        const d = new Date(timestampMs);
         const year = d.getUTCFullYear();
         const month = String(d.getUTCMonth() + 1).padStart(2, '0');
         const day = String(d.getUTCDate()).padStart(2, '0');
@@ -2398,6 +2653,14 @@ async function startServer() {
         const mins = String(d.getUTCMinutes()).padStart(2, '0');
         const secs = String(d.getUTCSeconds()).padStart(2, '0');
         return `${year}${month}${day}T${hours}${mins}${secs}Z`;
+      };
+
+      const calculateEndStr = (startStr: string, minutes: number) => {
+        const [h, m] = (startStr || '18:00').split(':').map(Number);
+        const total = (isNaN(h) ? 18 : h) * 60 + (isNaN(m) ? 0 : m) + minutes;
+        const endH = Math.floor(total / 60) % 24;
+        const endM = total % 60;
+        return `${String(endH).padStart(2, '0')}:${String(endM).padStart(2, '0')}`;
       };
 
       const calendarName = `${clubName} - ${teamName}`;
@@ -2411,23 +2674,41 @@ async function startServer() {
         `X-WR-CALNAME:${escapeIcal(calendarName)}`,
         'X-WR-TIMEZONE:Europe/Stockholm',
         'REFRESH-INTERVAL;VALUE=DURATION:PT1H',
-        'X-PUBLISHED-TTL:PT1H'
+        'X-PUBLISHED-TTL:PT1H',
+        'BEGIN:VTIMEZONE',
+        'TZID:Europe/Stockholm',
+        'X-LIC-LOCATION:Europe/Stockholm',
+        'BEGIN:DAYLIGHT',
+        'TZOFFSETFROM:+0100',
+        'TZOFFSETTO:+0200',
+        'TZNAME:CEST',
+        'DTSTART:19700329T020000',
+        'RRULE:FREQ=YEARLY;BYMONTH=3;BYDAY=-1SU',
+        'END:DAYLIGHT',
+        'BEGIN:STANDARD',
+        'TZOFFSETFROM:+0200',
+        'TZOFFSETTO:+0100',
+        'TZNAME:CET',
+        'DTSTART:19701025T030000',
+        'RRULE:FREQ=YEARLY;BYMONTH=10;BYDAY=-1SU',
+        'END:STANDARD',
+        'END:VTIMEZONE'
       ];
 
       for (const s of validSessions) {
-        const dtStart = formatIcsTime(s.date, s.startTime || '18:00');
+        const dtStart = formatIcsLocalTime(s.date, s.startTime || '18:00');
         const dtEnd = s.endTime 
-          ? formatIcsTime(s.date, s.endTime) 
-          : formatIcsTime(s.date + (90 * 60 * 1000), s.startTime || '18:00');
+          ? formatIcsLocalTime(s.date, s.endTime) 
+          : formatIcsLocalTime(s.date, calculateEndStr(s.startTime || '18:00', 90));
 
         const uid = `session-${s.id || Math.random().toString(36).substring(7)}-${clubId}-${teamId}@coachassist`;
-        const dtStamp = formatIcsTime(s.updatedAt || s.createdAt || Date.now());
+        const dtStamp = formatIcsUtcTime(s.updatedAt || s.createdAt || Date.now());
 
         icsLines.push('BEGIN:VEVENT');
         icsLines.push(`UID:${uid}`);
         icsLines.push(`DTSTAMP:${dtStamp}`);
-        icsLines.push(`DTSTART:${dtStart}`);
-        icsLines.push(`DTEND:${dtEnd}`);
+        icsLines.push(`DTSTART;TZID=Europe/Stockholm:${dtStart}`);
+        icsLines.push(`DTEND;TZID=Europe/Stockholm:${dtEnd}`);
         icsLines.push(`SUMMARY:${escapeIcal(s.title)}`);
         if (s.location) {
           icsLines.push(`LOCATION:${escapeIcal(s.location)}`);

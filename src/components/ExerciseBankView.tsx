@@ -348,7 +348,7 @@ export default function ExerciseBankView({
             placeholder="Sök bland övningar..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="w-full bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 pl-10 pr-4 py-2.5 rounded-xl text-sm focus:outline-none focus:ring-1 focus:ring-indigo-500 text-zinc-800 dark:text-zinc-150 transition-colors placeholder:text-zinc-400"
+            className="w-full bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 pl-10 pr-4 py-2.5 rounded-xl text-sm focus:outline-none focus:ring-1 focus:ring-indigo-500 text-zinc-800 dark:text-zinc-100 transition-colors placeholder:text-zinc-400"
           />
           {search && (
             <button 
@@ -402,7 +402,7 @@ export default function ExerciseBankView({
           <div className="p-4 bg-indigo-50 dark:bg-indigo-950/40 text-indigo-505 dark:text-indigo-400 rounded-full mb-4">
             <Library size={32} />
           </div>
-          <h3 className="text-zinc-800 dark:text-zinc-150 font-bold text-base mb-1">Inga övningar hittades</h3>
+          <h3 className="text-zinc-800 dark:text-zinc-100 font-bold text-base mb-1">Inga övningar hittades</h3>
           <p className="text-zinc-400 dark:text-zinc-500 text-sm max-w-sm">
             {search || selectedCategory !== 'Alla' 
               ? 'Försök ändra din sökning eller klicka på en annan kategori.'
@@ -491,7 +491,7 @@ export default function ExerciseBankView({
                       </div>
                     )}
 
-                    <h4 className="text-zinc-800 dark:text-zinc-150 font-bold text-base line-clamp-2 leading-tight group-hover:text-indigo-650 dark:group-hover:text-indigo-400 transition-colors pr-6">
+                    <h4 className="text-zinc-800 dark:text-zinc-100 font-bold text-base line-clamp-2 leading-tight group-hover:text-indigo-650 dark:group-hover:text-indigo-400 transition-colors pr-6">
                       {ex.name}
                     </h4>
 
@@ -665,7 +665,7 @@ export default function ExerciseBankView({
                       placeholder="Sök pass..."
                       value={sessionSearchQuery}
                       onChange={(e) => setSessionSearchQuery(e.target.value)}
-                      className="w-full bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 pl-9 pr-4 py-2 rounded-xl text-sm focus:outline-none focus:ring-1 focus:ring-indigo-500 text-zinc-805 dark:text-zinc-150 transition-colors"
+                      className="w-full bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 pl-9 pr-4 py-2 rounded-xl text-sm focus:outline-none focus:ring-1 focus:ring-indigo-500 text-zinc-805 dark:text-zinc-100 transition-colors"
                     />
                   </div>
 
@@ -687,7 +687,7 @@ export default function ExerciseBankView({
                           className="w-full text-left p-3.5 bg-zinc-50 hover:bg-indigo-50/40 dark:bg-zinc-900/40 dark:hover:bg-indigo-950/20 border border-zinc-150 dark:border-zinc-800 rounded-xl flex items-center justify-between gap-3 group transition-all"
                         >
                           <div className="flex-1 min-w-0">
-                            <h4 className="text-zinc-800 dark:text-zinc-150 font-black text-sm group-hover:text-indigo-650 dark:group-hover:text-indigo-400 transition-colors truncate">
+                            <h4 className="text-zinc-800 dark:text-zinc-100 font-black text-sm group-hover:text-indigo-650 dark:group-hover:text-indigo-400 transition-colors truncate">
                               {session.title}
                             </h4>
                             <p className="text-xs text-zinc-405 dark:text-zinc-500 mt-0.5 flex items-center gap-1.5 font-bold">
@@ -742,7 +742,7 @@ export default function ExerciseBankView({
                   <span className="p-1.5 bg-indigo-50 dark:bg-indigo-950/50 text-indigo-600 dark:text-indigo-400 rounded-lg">
                     <FolderHeart size={16} />
                   </span>
-                  <h3 className="text-zinc-800 dark:text-zinc-150 font-bold text-base">
+                  <h3 className="text-zinc-800 dark:text-zinc-100 font-bold text-base">
                     Hantera egna kategorier
                   </h3>
                 </div>
@@ -855,7 +855,7 @@ export default function ExerciseBankView({
                   <span className="p-1.5 bg-indigo-50 dark:bg-indigo-950/50 text-indigo-600 dark:text-indigo-400 rounded-lg">
                     <FolderHeart size={16} />
                   </span>
-                  <h3 className="text-zinc-800 dark:text-zinc-150 font-bold text-base">
+                  <h3 className="text-zinc-800 dark:text-zinc-100 font-bold text-base">
                     {editingExercise ? 'Redigera övning' : 'Skapa övning i banken'}
                   </h3>
                 </div>
@@ -990,7 +990,7 @@ export default function ExerciseBankView({
                         value={formImageUrl}
                         onChange={(e) => setFormImageUrl(e.target.value)}
                         placeholder="Klistra in en bildlänk..."
-                        className="flex-1 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 px-4 py-2.5 rounded-xl text-sm focus:outline-none focus:ring-1 focus:ring-indigo-500 text-zinc-805 dark:text-zinc-150"
+                        className="flex-1 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 px-4 py-2.5 rounded-xl text-sm focus:outline-none focus:ring-1 focus:ring-indigo-500 text-zinc-805 dark:text-zinc-100"
                         onKeyDown={(e) => {
                           if (e.key === 'Enter') {
                             e.preventDefault();

@@ -286,6 +286,9 @@ export default function MobileCalendarView({
       const dayDate = new Date(year, month, d);
       const dayOfWeek = dayDate.getDay();
       
+      const now = new Date();
+      const isToday = year === now.getFullYear() && month === now.getMonth() && d === now.getDate();
+      
       const dayEvents = sessions
         .filter(s => !s.isIgnored)
         .filter(s => {
@@ -316,6 +319,7 @@ export default function MobileCalendarView({
         dayNumber: d,
         dayOfWeek,
         dayDate,
+        isToday,
         events: dayEvents,
         weekNumber
       });
@@ -650,29 +654,39 @@ export default function MobileCalendarView({
                   return (
                     <div 
                       key={`empty-${day.dayNumber}`}
-                      className={`flex items-center min-h-[44px] px-2.5 sm:px-4 py-2 border-l-4 border-l-transparent transition-colors gap-1 sm:gap-2 ${
+                      className={`flex items-center min-h-[44px] px-2.5 sm:px-4 py-2 border-l-4 transition-colors gap-1 sm:gap-2 ${
                         isWeekend 
-                          ? 'bg-zinc-200/65 dark:bg-zinc-50/15' 
-                          : 'bg-white dark:bg-zinc-900'
+                          ? 'bg-zinc-200/65 dark:bg-zinc-50/15 border-l-transparent' 
+                          : day.isToday
+                            ? 'bg-indigo-50/70 dark:bg-indigo-950/40 border-l-indigo-600 dark:border-l-indigo-500'
+                            : 'bg-white dark:bg-zinc-900 border-l-transparent'
                       }`}
                     >
-                      <div className={`w-7 sm:w-8.5 text-[11px] sm:text-xs font-bold leading-none shrink-0 ${
+                      <div className={`w-7 sm:w-8.5 text-[11px] sm:text-xs leading-none shrink-0 ${
                         isWeekend 
-                          ? 'text-zinc-400 dark:text-zinc-500 font-extrabold' 
-                          : 'text-indigo-600 dark:text-indigo-400 font-black'
+                          ? 'text-zinc-700 dark:text-zinc-200 font-black'
+                          : day.isToday
+                            ? 'text-indigo-600 dark:text-indigo-400 font-extrabold'
+                            : 'text-indigo-600 dark:text-indigo-400 font-black'
                       }`}>
                         {SWEDISH_WEEKDAYS[day.dayOfWeek]}
                       </div>
 
-                      <div className="w-4.5 sm:w-6 text-xs sm:text-sm font-black text-zinc-900 dark:text-white leading-none shrink-0 text-center sm:text-left">
-                        {day.dayNumber}
+                      <div className="w-6 sm:w-7 flex items-center justify-center shrink-0">
+                        <div className={`w-6 h-6 flex items-center justify-center text-xs sm:text-sm font-black leading-none rounded-full transition-all ${
+                          day.isToday
+                            ? 'bg-red-600 text-white dark:bg-red-600 dark:text-white shadow-xs'
+                            : 'text-zinc-900 dark:text-white'
+                        }`}>
+                          {day.dayNumber}
+                        </div>
                       </div>
 
                       <div className="flex-1" />
 
                       <div className="w-12 text-right shrink-0">
                         {weekLabel && (
-                          <span className="text-[10px] font-black text-zinc-400 dark:text-zinc-500 tracking-tight uppercase">
+                          <span className="text-[10px] font-black text-zinc-600 dark:text-zinc-300 tracking-tight uppercase">
                             {weekLabel}
                           </span>
                         )}
@@ -693,6 +707,19 @@ export default function MobileCalendarView({
                   const registeredPlayersCount = safeAttendance.length - registeredLeadersCount;
                   const totalPlayersSquad = safeSquad.filter(p => p.role !== 'leader').length + (session.guestPlayers?.length || 0);
                   const totalLeadersSquad = safeSquad.filter(p => p.role === 'leader').length;
+
+                  // RSVP Calculations
+                  const rsvps = session.rsvps || {};
+                  const activeLeaders = safeSquad.filter(p => p.role === 'leader');
+                  const activePlayers = safeSquad.filter(p => p.role !== 'leader');
+                  const anmaldaPlayersCount = activePlayers.filter(p => {
+                    const r = rsvps[p.id];
+                    return r && (r.status === 'attending' || r.status === 'partial');
+                  }).length + (session.guestPlayers?.length || 0);
+                  const anmaldaLeadersCount = activeLeaders.filter(p => {
+                    const r = rsvps[p.id];
+                    return r && (r.status === 'attending' || r.status === 'partial');
+                  }).length;
                   const mapsUrl = session.location ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(session.location)}` : null;
 
                   const totalMinutes = session.moments?.reduce((acc, m) => acc + m.duration, 0) || 0;
@@ -714,28 +741,38 @@ export default function MobileCalendarView({
                         className={`flex items-center justify-between min-h-[44px] px-2.5 sm:px-4 py-2 gap-1.5 sm:gap-2 border-l-4 transition-all cursor-pointer select-none ${
                           category === 'match' ? 'border-l-rose-500' : category === 'training' ? 'border-l-emerald-500' : 'border-l-amber-500'
                         } ${
-                          isExpanded
-                            ? 'bg-zinc-50 dark:bg-zinc-800'
-                            : isWeekend 
-                              ? 'bg-zinc-200/65 dark:bg-zinc-50/15 hover:bg-zinc-200/85 dark:hover:bg-zinc-50/25' 
-                              : 'bg-white dark:bg-zinc-900 hover:bg-zinc-50/55 dark:hover:bg-zinc-800/20'
+                          isWeekend 
+                            ? 'bg-zinc-200/65 dark:bg-zinc-50/15 hover:bg-zinc-200/85 dark:hover:bg-zinc-50/25' 
+                            : isExpanded
+                              ? 'bg-zinc-50 dark:bg-zinc-800'
+                              : day.isToday
+                                ? 'bg-indigo-50/40 dark:bg-indigo-950/25 hover:bg-indigo-50/70 dark:hover:bg-indigo-950/40'
+                                : 'bg-white dark:bg-zinc-900 hover:bg-zinc-50/55 dark:hover:bg-zinc-800/20'
                         }`}
                       >
                         <div className="flex items-center gap-1 sm:gap-1.5 flex-1 min-w-0">
-                          <div className={`w-7 sm:w-8.5 text-[11px] sm:text-xs font-bold leading-none shrink-0 ${
+                          <div className={`w-7 sm:w-8.5 text-[11px] sm:text-xs leading-none shrink-0 ${
                             !showDayDetails 
                               ? 'opacity-0 pointer-events-none hidden sm:block' 
                               : isWeekend 
-                                ? 'text-zinc-400 dark:text-zinc-500 font-extrabold' 
+                                ? 'text-zinc-700 dark:text-zinc-200 font-black' 
                                 : 'text-indigo-600 dark:text-indigo-400 font-black'
                           }`}>
                             {SWEDISH_WEEKDAYS[day.dayOfWeek]}
                           </div>
 
-                          <div className={`w-4.5 sm:w-6 text-xs sm:text-sm font-black text-zinc-900 dark:text-white leading-none shrink-0 text-center sm:text-left ${
-                            !showDayDetails ? 'opacity-0 pointer-events-none hidden sm:block' : ''
-                          }`}>
-                            {day.dayNumber}
+                          <div className="w-6 sm:w-7 flex items-center justify-center shrink-0">
+                            {showDayDetails ? (
+                              <div className={`w-6 h-6 flex items-center justify-center text-xs sm:text-sm font-black leading-none rounded-full transition-all ${
+                                day.isToday
+                                  ? 'bg-red-600 text-white dark:bg-red-600 dark:text-white shadow-xs'
+                                  : 'text-zinc-900 dark:text-white'
+                              }`}>
+                                {day.dayNumber}
+                              </div>
+                            ) : (
+                              <div className="w-6 h-6 opacity-0 pointer-events-none hidden sm:block" />
+                            )}
                           </div>
 
                           <div className="w-9 sm:w-11 text-[11px] sm:text-xs font-bold text-zinc-500 dark:text-zinc-400 shrink-0 text-center sm:text-left">
@@ -844,28 +881,43 @@ export default function MobileCalendarView({
                                     Hanteras här <ArrowRight size={10} />
                                   </span>
                                 </div>
-                                <div className="space-y-1.5 text-xs text-zinc-700 dark:text-zinc-300 font-bold">
+                                <div className="space-y-2 text-xs text-zinc-700 dark:text-zinc-300 font-bold">
                                   {totalLeadersSquad > 0 ? (
                                     <>
-                                      <div className="flex items-center justify-between">
+                                      <div className="flex items-center justify-between py-1 border-b border-zinc-100/50 dark:border-zinc-800/40">
                                         <span>Spelarnärvaro:</span>
-                                        <span className="text-indigo-650 dark:text-indigo-400 font-extrabold text-xs">
-                                          {registeredPlayersCount} av {totalPlayersSquad}
-                                        </span>
+                                        <div className="text-right flex flex-col items-end">
+                                          <span className="text-indigo-650 dark:text-indigo-400 font-extrabold text-xs">
+                                            {registeredPlayersCount} av {totalPlayersSquad} deltar
+                                          </span>
+                                          <span className="text-[10px] text-zinc-500 dark:text-zinc-400 font-semibold">
+                                            {anmaldaPlayersCount} anmälda
+                                          </span>
+                                        </div>
                                       </div>
-                                      <div className="flex items-center justify-between text-zinc-400 dark:text-zinc-500 text-[11px]">
+                                      <div className="flex items-center justify-between py-1">
                                         <span>Ledarnärvaro:</span>
-                                        <span>
-                                          {registeredLeadersCount} av {totalLeadersSquad}
-                                        </span>
+                                        <div className="text-right flex flex-col items-end">
+                                          <span className="text-zinc-700 dark:text-zinc-300 font-extrabold text-xs">
+                                            {registeredLeadersCount} av {totalLeadersSquad} deltar
+                                          </span>
+                                          <span className="text-[10px] text-zinc-500 dark:text-zinc-400 font-semibold">
+                                            {anmaldaLeadersCount} anmälda
+                                          </span>
+                                        </div>
                                       </div>
                                     </>
                                   ) : (
-                                    <div className="flex items-center justify-between text-zinc-700 dark:text-zinc-300 font-bold">
+                                    <div className="flex items-center justify-between">
                                         <span>Gemensam träningsnärvaro:</span>
-                                        <span className="text-indigo-650 dark:text-indigo-400 font-extrabold text-xs">
-                                          {registeredPlayersCount} av {totalPlayersSquad}
-                                        </span>
+                                        <div className="text-right flex flex-col items-end">
+                                          <span className="text-indigo-650 dark:text-indigo-400 font-extrabold text-xs">
+                                            {registeredPlayersCount} av {totalPlayersSquad} deltar
+                                          </span>
+                                          <span className="text-[10px] text-zinc-500 dark:text-zinc-400 font-semibold">
+                                            {anmaldaPlayersCount} anmälda
+                                          </span>
+                                        </div>
                                     </div>
                                   )}
                                 </div>
@@ -972,6 +1024,9 @@ export default function MobileCalendarView({
                   const dayStr = dObj.getDate();
                   const monthStr = dObj.toLocaleDateString('sv-SE', { month: 'short' }).toUpperCase().replace('.', '');
                   
+                  const now = new Date();
+                  const isSessionToday = dObj.getFullYear() === now.getFullYear() && dObj.getMonth() === now.getMonth() && dObj.getDate() === now.getDate();
+                  
                   // Total minutes for local moments if exists
                   const totalMinutes = session.moments?.reduce((acc, m) => acc + m.duration, 0) || 0;
                   const sessionDuration = getSessionDurationInMinutes(session.startTime, session.endTime);
@@ -1016,6 +1071,19 @@ export default function MobileCalendarView({
 
                   const totalPlayersSquad = safeSquadMonth.filter(p => p.role !== 'leader').length + (session.guestPlayers?.length || 0);
                   const totalLeadersSquad = safeSquadMonth.filter(p => p.role === 'leader').length;
+
+                  // RSVP Calculations
+                  const rsvps = session.rsvps || {};
+                  const activeLeaders = safeSquadMonth.filter(p => p.role === 'leader');
+                  const activePlayers = safeSquadMonth.filter(p => p.role !== 'leader');
+                  const anmaldaPlayersCount = activePlayers.filter(p => {
+                    const r = rsvps[p.id];
+                    return r && (r.status === 'attending' || r.status === 'partial');
+                  }).length + (session.guestPlayers?.length || 0);
+                  const anmaldaLeadersCount = activeLeaders.filter(p => {
+                    const r = rsvps[p.id];
+                    return r && (r.status === 'attending' || r.status === 'partial');
+                  }).length;
 
                   // Maps URL
                   const mapsUrl = session.location
@@ -1066,14 +1134,24 @@ export default function MobileCalendarView({
                         {/* Details Row under the title */}
                         <div className="flex items-start gap-4">
                           {/* Compact Left Date Badge - Moved down slightly under title */}
-                          <div className="flex flex-col items-center justify-center bg-zinc-50 dark:bg-zinc-950/60 rounded-xl px-2 py-1.5 min-w-[50px] border border-zinc-150 dark:border-zinc-800 text-center select-none shadow-inner shrink-0 leading-none">
-                            <span className="text-[9px] font-black text-indigo-600 dark:text-indigo-400 uppercase tracking-wider mb-0.5">
+                          <div className={`flex flex-col items-center justify-center rounded-xl px-2 py-1.5 min-w-[50px] border text-center select-none shrink-0 leading-none transition-all ${
+                            isSessionToday
+                              ? 'bg-red-600 text-white dark:bg-red-600 dark:text-white border-red-600 dark:border-red-600 shadow-md ring-2 ring-red-300 dark:ring-red-900/60'
+                              : 'bg-zinc-50 dark:bg-zinc-950/60 border-zinc-150 dark:border-zinc-800 shadow-inner'
+                          }`}>
+                            <span className={`text-[9px] font-black uppercase tracking-wider mb-0.5 ${
+                              isSessionToday ? 'text-red-100 dark:text-red-100' : 'text-indigo-600 dark:text-indigo-400'
+                            }`}>
                               {weekdayStr}
                             </span>
-                            <span className="text-lg font-black text-zinc-900 dark:text-white">
+                            <span className={`text-lg font-black ${
+                              isSessionToday ? 'text-white' : 'text-zinc-900 dark:text-white'
+                            }`}>
                               {dayStr}
                             </span>
-                            <span className="text-[8px] font-black text-zinc-400 dark:text-zinc-500 tracking-wider mt-0.5">
+                            <span className={`text-[8px] font-black tracking-wider mt-0.5 ${
+                              isSessionToday ? 'text-red-100 dark:text-red-100' : 'text-zinc-400 dark:text-zinc-500'
+                            }`}>
                               {monthStr}
                             </span>
                           </div>
@@ -1085,8 +1163,6 @@ export default function MobileCalendarView({
                                 {catConfig.icon}
                                 <span>{catConfig.label}</span>
                               </span>
-                              
-
                             </div>
 
                             {/* Time & Place row (Crucial information!) */}
@@ -1182,28 +1258,43 @@ export default function MobileCalendarView({
                                     Öppna dörren till deltagare <ArrowRight size={10} />
                                   </span>
                                 </div>
-                                <div className="space-y-1.5 text-xs text-zinc-700 dark:text-zinc-300 font-bold">
+                                <div className="space-y-2 text-xs text-zinc-700 dark:text-zinc-300 font-bold">
                                   {totalLeadersSquad > 0 ? (
                                     <>
-                                      <div className="flex items-center justify-between">
+                                      <div className="flex items-center justify-between py-1 border-b border-zinc-100/50 dark:border-zinc-800/40">
                                         <span>Spelarnärvaro:</span>
-                                        <span className="text-indigo-650 dark:text-indigo-400 font-extrabold text-xs">
-                                          {registeredPlayersCount} av {totalPlayersSquad}
-                                        </span>
+                                        <div className="text-right flex flex-col items-end">
+                                          <span className="text-indigo-650 dark:text-indigo-400 font-extrabold text-xs">
+                                            {registeredPlayersCount} av {totalPlayersSquad} deltar
+                                          </span>
+                                          <span className="text-[10px] text-zinc-500 dark:text-zinc-400 font-semibold">
+                                            {anmaldaPlayersCount} anmälda
+                                          </span>
+                                        </div>
                                       </div>
-                                      <div className="flex items-center justify-between text-zinc-400 dark:text-zinc-500 text-[11px]">
+                                      <div className="flex items-center justify-between py-1">
                                         <span>Ledarnärvaro:</span>
-                                        <span>
-                                          {registeredLeadersCount} av {totalLeadersSquad}
-                                        </span>
+                                        <div className="text-right flex flex-col items-end">
+                                          <span className="text-zinc-700 dark:text-zinc-300 font-extrabold text-xs">
+                                            {registeredLeadersCount} av {totalLeadersSquad} deltar
+                                          </span>
+                                          <span className="text-[10px] text-zinc-500 dark:text-zinc-400 font-semibold">
+                                            {anmaldaLeadersCount} anmälda
+                                          </span>
+                                        </div>
                                       </div>
                                     </>
                                   ) : (
-                                    <div className="flex items-center justify-between text-zinc-700 dark:text-zinc-300 font-bold">
+                                    <div className="flex items-center justify-between">
                                         <span>Gemensam träningsnärvaro:</span>
-                                        <span className="text-indigo-650 dark:text-indigo-400 font-extrabold text-xs">
-                                          {registeredPlayersCount} av {totalPlayersSquad}
-                                        </span>
+                                        <div className="text-right flex flex-col items-end">
+                                          <span className="text-indigo-650 dark:text-indigo-400 font-extrabold text-xs">
+                                            {registeredPlayersCount} av {totalPlayersSquad} deltar
+                                          </span>
+                                          <span className="text-[10px] text-zinc-500 dark:text-zinc-400 font-semibold">
+                                            {anmaldaPlayersCount} anmälda
+                                          </span>
+                                        </div>
                                     </div>
                                   )}
                                 </div>

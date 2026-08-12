@@ -35,29 +35,51 @@ service cloud.firestore {
     }
 
     function isValidSharedLeaderboard(data) {
-      return data.keys().hasAll(['id', 'name', 'standings', 'createdAt', 'coachUid']) &&
+      return data.keys().hasAll(['id', 'name', 'standings']) &&
              data.id is string &&
              data.name is string && data.name.size() > 0 && data.name.size() < 100 &&
              data.standings is list && data.standings.size() <= 200 &&
-             data.createdAt is number &&
-             data.coachUid is string;
+             (!('createdAt' in data) || data.createdAt is number || data.createdAt is timestamp) &&
+             (!('coachUid' in data) || data.coachUid == null || data.coachUid is string);
     }
 
     // ===============================================================
     // Rules
     // ===============================================================
 
+    // Helper function for server uploads validation
+    function isValidServerUpload(data) {
+      return data.keys().hasAll(['mime_type', 'data_base64']) &&
+             data.mime_type is string &&
+             data.data_base64 is string;
+    }
+
+    // Helper function for server users validation
+    function isValidServerUser(data) {
+      return data.keys().hasAll(['id', 'email']) &&
+             data.id is string &&
+             data.email is string;
+    }
+
     // Hybrid Cloud Server Persistence (REST API calls from server.ts)
     match /app_docs/{docId} {
-      allow read, write: if true;
+      allow read: if true;
+      allow write: if request.resource.data.keys().hasAny(['data', 'updatedAt']);
     }
 
     match /server_users/{email} {
-      allow read, write: if true;
+      allow read: if true;
+      allow write: if isValidServerUser(request.resource.data);
     }
 
     match /server_user_ids/{userId} {
-      allow read, write: if true;
+      allow read: if true;
+      allow write: if request.resource.data.keys().hasAll(['id', 'email']);
+    }
+
+    match /server_uploads/{filename} {
+      allow read: if true;
+      allow write: if isValidServerUpload(request.resource.data);
     }
 
     // Admins configuration

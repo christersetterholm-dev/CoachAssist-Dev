@@ -5,6 +5,7 @@ export interface SquadPlayer {
   number?: string;
   photoUrl?: string;
   role?: 'player' | 'leader';
+  roles?: string[];
   email?: string;
   phone?: string;
   personnummer?: string;
@@ -225,6 +226,7 @@ export interface Exercise {
   pointsConfig?: PointsConfig;
   periodId?: string;
   sessionId?: string; // Optional link to a training session
+  includeLeaders?: boolean;
 }
 
 // Keep these for backward compatibility during transition if needed, 

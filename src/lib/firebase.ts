@@ -66,6 +66,7 @@ export const onAuthStateChanged = (_authObj: any, callback: (user: User | null) 
 
 export const signOut = async (_authObj: any) => {
   localStorage.removeItem('token');
+  localStorage.removeItem('cached_auth_user');
   auth.currentUser = null;
   listeners.forEach(cb => cb(null));
 };
@@ -99,7 +100,7 @@ export const signInWithGoogle = async (_forceSelect = false): Promise<User> => {
 
         <div class="flex flex-col gap-1">
           <h3 id="auth-title" class="text-lg font-bold text-zinc-850 dark:text-zinc-100">Logga in till ditt konto</h3>
-          <p id="auth-subtitle" class="text-xs text-zinc-500 dark:text-zinc-400">Ange din e-postadress och lösenord för att hantera din trupp.</p>
+          <p id="auth-subtitle" class="text-xs text-zinc-500 dark:text-zinc-400">Ange din e-postadress och lösenord för att logga in på ditt konto.</p>
         </div>
 
         <form id="auth-form" class="space-y-4">
@@ -219,7 +220,7 @@ export const signInWithGoogle = async (_forceSelect = false): Promise<User> => {
 
       if (authMode === 'register') {
         title.innerText = 'Skapa nytt konto';
-        subtitle.innerText = 'Skapa ett konto för att spara din spelartrupp och träningspass.';
+        subtitle.innerText = 'Skapa ett konto för att få tillgång till dina lag, träningar och laguppställningar.';
         passwordLabel.innerText = 'Lösenord';
         if (emailLabel) emailLabel.innerText = 'E-postadress';
         if (emailInput) emailInput.placeholder = 'coach@lag.se';
@@ -364,6 +365,9 @@ export const signInWithGoogle = async (_forceSelect = false): Promise<User> => {
         }
 
         localStorage.setItem('token', resData.token);
+        if (resData.user) {
+          localStorage.setItem('cached_auth_user', JSON.stringify(resData.user));
+        }
         auth.currentUser = resData.user;
         listeners.forEach(cb => cb(resData.user));
 
@@ -383,6 +387,14 @@ export const signInWithGoogle = async (_forceSelect = false): Promise<User> => {
 // On module load, restore login session from JWT if exists
 const initializeSession = async () => {
   const token = localStorage.getItem('token');
+  const cachedUserStr = localStorage.getItem('cached_auth_user');
+  let cachedUser = null;
+  if (cachedUserStr) {
+    try {
+      cachedUser = JSON.parse(cachedUserStr);
+    } catch (_) {}
+  }
+
   if (token) {
     try {
       const res = await fetch(getApiUrl('/api/auth/me'), {
@@ -393,14 +405,29 @@ const initializeSession = async () => {
       if (res.ok) {
         const user = await res.json();
         auth.currentUser = user;
+        localStorage.setItem('cached_auth_user', JSON.stringify(user));
         listeners.forEach(cb => cb(user));
-      } else {
+      } else if (res.status === 401 || res.status === 403) {
         localStorage.removeItem('token');
+        localStorage.removeItem('cached_auth_user');
         listeners.forEach(cb => cb(null));
+      } else {
+        // Server returned 5xx or transient error - keep session using cached user if available
+        if (cachedUser) {
+          auth.currentUser = cachedUser;
+          listeners.forEach(cb => cb(cachedUser));
+        } else {
+          listeners.forEach(cb => cb(null));
+        }
       }
     } catch (e) {
-      console.error('Failed to restore session on startup:', e);
-      listeners.forEach(cb => cb(null));
+      console.error('Failed to restore session on startup (network error):', e);
+      if (cachedUser) {
+        auth.currentUser = cachedUser;
+        listeners.forEach(cb => cb(cachedUser));
+      } else {
+        listeners.forEach(cb => cb(null));
+      }
     }
   } else {
     // Notify loaded with no user

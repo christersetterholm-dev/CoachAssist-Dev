@@ -40,26 +40,33 @@ export function parseIcsCalendar(icsData: string): ParsedIcsEvent[] {
     const year = parseInt(value.slice(0, 4), 10);
     const month = parseInt(value.slice(4, 6), 10) - 1;
     const day = parseInt(value.slice(6, 8), 10);
+
+    if (isNaN(year) || isNaN(month) || isNaN(day)) return null;
     
     if (value.includes('T')) {
       const tIndex = value.indexOf('T');
       const hour = parseInt(value.slice(tIndex + 1, tIndex + 3), 10);
       const minute = parseInt(value.slice(tIndex + 3, tIndex + 5), 10);
+
+      const safeHour = isNaN(hour) ? 18 : hour;
+      const safeMin = isNaN(minute) ? 0 : minute;
       
       const isUtc = value.endsWith('Z');
       let dateObj: Date;
       
       if (isUtc) {
         // Construct in UTC, convert to local
-        dateObj = new Date(Date.UTC(year, month, day, hour, minute));
+        dateObj = new Date(Date.UTC(year, month, day, safeHour, safeMin));
       } else {
         // Construct in local timezone
-        dateObj = new Date(year, month, day, hour, minute);
+        dateObj = new Date(year, month, day, safeHour, safeMin);
       }
       
-      const timeStr = dateObj.toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' });
+      const hStr = String(dateObj.getHours()).padStart(2, '0');
+      const mStr = String(dateObj.getMinutes()).padStart(2, '0');
+      const timeStr = `${hStr}:${mStr}`;
       
-      // We set the date timestamp to standard Swedish local midday (12:00:00) so it doesn't shift days with timezone offsets
+      // Set the date timestamp to standard Swedish local midday (12:00:00) so it doesn't shift days with timezone offsets
       const sessionDate = new Date(dateObj.getFullYear(), dateObj.getMonth(), dateObj.getDate(), 12, 0, 0).getTime();
       
       return {
@@ -96,8 +103,12 @@ export function parseIcsCalendar(icsData: string): ParsedIcsEvent[] {
               finalTitle = `[INSTÄLLT] ${finalTitle}`;
             }
 
+            // Fallback deterministic externalId if feed lacks a unique UID
+            const sanitizedTitle = finalTitle.toLowerCase().replace(/[^a-z0-9]/g, '');
+            const fallbackId = `ics-${startInfo.timestamp}-${startInfo.timeStr}-${sanitizedTitle}`;
+
             events.push({
-              externalId: externalId || `ics-${startInfo.timestamp}-${Math.random().toString(36).slice(2, 6)}`,
+              externalId: externalId ? externalId.trim() : fallbackId,
               title: finalTitle,
               date: startInfo.timestamp,
               startTime: startInfo.timeStr || '18:00',

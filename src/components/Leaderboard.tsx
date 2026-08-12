@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Trophy, Share2, Crown, Star, ChevronDown, Eye, EyeOff, Plus, Lock, Trash2, Loader2, Edit2, Check, User } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { SquadPlayer, Exercise, Period, PeriodStandings } from '../types';
-import { db, handleFirestoreError, OperationType } from '../lib/firebase';
+import { db, auth, handleFirestoreError, OperationType } from '../lib/firebase';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { calculateLeaderboard } from '../lib/leaderboardUtils';
 import { CachedImage } from './CachedImage';
@@ -100,6 +100,7 @@ export default function Leaderboard({
             standings: stats.map((p: any) => ({
               playerId: p.id,
               playerName: p.name,
+              role: p.role,
               photoUrl: p.photoUrl || null,
               points: p.totalPoints,
               history: p.history || []
@@ -133,6 +134,7 @@ export default function Leaderboard({
         return {
           id: s.playerId,
           name: s.playerName,
+          role: squadPlayer?.role || 'player',
           photoUrl: s.photoUrl || squadPlayer?.photoUrl || null,
           totalPoints: s.points,
           history: [] // History might not be available for archived periods if exercises are deleted, but here they are kept
@@ -205,13 +207,19 @@ export default function Leaderboard({
   };
 
   const finalStats = (sharedData 
-    ? sharedData.standings.map((s: any) => ({
-        id: s.playerId,
-        name: s.playerName,
-        photoUrl: s.photoUrl || s.imageUrl,
-        totalPoints: s.points,
-        history: s.history || []
-      }))
+    ? sharedData.standings
+        .map((s: any) => ({
+          id: s.playerId,
+          name: s.playerName,
+          role: s.role || squad.find(p => p.id === s.playerId)?.role || 'player',
+          photoUrl: s.photoUrl || s.imageUrl,
+          totalPoints: s.points,
+          history: s.history || []
+        }))
+        .filter((player: any) => {
+          if (player.role !== 'leader') return true;
+          return (player.history && player.history.length > 0) || player.totalPoints > 0;
+        })
     : displayStats).filter((player: any, index: number, self: any[]) => 
       index === self.findIndex((p) => p.id === player.id)
     );
@@ -248,7 +256,8 @@ export default function Leaderboard({
 
     setIsSharing(true);
     try {
-      const period = periods.find(p => p.id === selectedPeriodId);
+      const activePeriodId = selectedPeriodId === 'current' ? currentPeriodId : selectedPeriodId;
+      const period = periods.find(p => p.id === activePeriodId) || periods.find(p => p.id === selectedPeriodId) || periods[0];
       
       // Generate a shorter ID if it doesn't exist
       const generateShortId = () => {
@@ -262,6 +271,7 @@ export default function Leaderboard({
 
       const id = period?.shareId || generateShortId();
       const name = period?.name || 'Poängliga';
+      const effectiveUid = userUid || auth.currentUser?.uid || 'coach';
       
       const dataToShare = {
         id,
@@ -269,6 +279,7 @@ export default function Leaderboard({
         standings: displayStats.map((p: any) => ({
           playerId: p.id,
           playerName: p.name,
+          role: p.role,
           photoUrl: p.photoUrl || null,
           points: p.totalPoints,
           history: p.history || []
@@ -276,7 +287,7 @@ export default function Leaderboard({
         createdAt: Date.now(),
         startDate: period?.startDate || null,
         endDate: period?.endDate || null,
-        coachUid: userUid
+        coachUid: effectiveUid
       };
 
       const path = `shared_leaderboards/${id}`;
@@ -294,19 +305,30 @@ export default function Leaderboard({
 
       const shareUrl = `${window.location.origin}${window.location.pathname}?share=${id}`;
 
-      if (navigator.share) {
-        await navigator.share({
-          title: `Poängligan: ${name}`,
-          text: `Kolla in ställningen i ${name}!`,
-          url: shareUrl
-        });
-      } else {
-        await navigator.clipboard.writeText(shareUrl);
-        alert('Länk kopierad till urklipp!');
+      try {
+        if (navigator.share) {
+          await navigator.share({
+            title: `Poängligan: ${name}`,
+            text: `Kolla in ställningen i ${name}!`,
+            url: shareUrl
+          });
+        } else {
+          await navigator.clipboard.writeText(shareUrl);
+          alert('Länk kopierad till urklipp!\n\n' + shareUrl);
+        }
+      } catch (shareError: any) {
+        if (shareError.name !== 'AbortError') {
+          try {
+            await navigator.clipboard.writeText(shareUrl);
+            alert('Länk kopierad till urklipp!\n\n' + shareUrl);
+          } catch (_) {
+            prompt('Delningslänk skapad! Kopiera länken nedan:', shareUrl);
+          }
+        }
       }
     } catch (error) {
       console.error("Error sharing leaderboard:", error);
-      alert('Kunde inte skapa delningslänk. Kontrollera att du är inloggad.');
+      alert('Kunde inte skapa delningslänk.\nKontrollera att du är inloggad.');
     } finally {
       setIsSharing(false);
     }
@@ -349,10 +371,10 @@ export default function Leaderboard({
   };
 
   return (
-    <div className="max-w-4xl lg:max-w-5xl xl:max-w-6xl 2xl:max-w-7xl mx-auto p-4 sm:p-6 pb-32">
+    <div className="max-w-4xl lg:max-w-5xl xl:max-w-6xl 2xl:max-w-7xl mx-auto p-4 sm:p-6 pb-16">
       <div className="flex flex-col mb-8 gap-6">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-3">
             {!sharedId ? (
                 <div className="flex items-center gap-3">
                   <div className="relative flex-1 min-w-0">
@@ -397,6 +419,17 @@ export default function Leaderboard({
                   {title}
                 </h1>
               )}
+
+            {finalStats.some((p: any) => p.history.length > 0) && (
+              <button
+                onClick={toggleAll}
+                className="flex items-center gap-2 bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300 px-3 py-1.5 sm:px-4 sm:py-2 rounded-xl font-bold border border-zinc-200 dark:border-zinc-700 hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-all shadow-sm text-sm flex-shrink-0"
+                title={allExpanded ? 'Dölj underlag' : 'Visa underlag'}
+              >
+                {allExpanded ? <EyeOff size={18} /> : <Eye size={18} />}
+                <span className="hidden sm:inline">{allExpanded ? 'Dölj underlag' : 'Visa underlag'}</span>
+              </button>
+            )}
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
@@ -467,16 +500,6 @@ export default function Leaderboard({
                 </button>
               </>
             )}
-
-            {finalStats.some((p: any) => p.history.length > 0) && (
-              <button
-                onClick={toggleAll}
-                className="flex items-center gap-2 bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300 px-4 py-2 rounded-xl font-bold border border-zinc-200 dark:border-zinc-700 hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-all shadow-sm text-sm"
-              >
-                {allExpanded ? <EyeOff size={18} /> : <Eye size={18} />}
-                <span className="hidden xs:inline">{allExpanded ? 'Dölj underlag' : 'Visa underlag'}</span>
-              </button>
-            )}
           </div>
         </div>
       </div>
@@ -527,6 +550,11 @@ export default function Leaderboard({
                   <div>
                     <div className="flex items-center gap-2">
                       <span className="font-black text-lg text-zinc-900 dark:text-white line-clamp-1">{player.name}</span>
+                      {player.role === 'leader' && (
+                        <span className="text-[10px] bg-amber-100 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300 font-black px-2 py-0.5 rounded-lg border border-amber-200/60 dark:border-amber-800/40 uppercase tracking-wider">
+                          Ledare
+                        </span>
+                      )}
                     </div>
                     <p className="text-xs text-zinc-500 dark:text-zinc-400">
                       {getSubtitle(player)}
@@ -844,10 +872,10 @@ export default function Leaderboard({
                     onChange={(e) => setBonusData(prev => ({ ...prev, playerId: e.target.value }))}
                     className="w-full px-4 py-3 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-white focus:ring-2 focus:ring-amber-500 outline-none transition-all font-bold text-sm cursor-pointer"
                   >
-                    <option value="">Välj en spelare...</option>
-                    {[...squad].filter(p => p.role !== 'leader').sort((a, b) => a.name.localeCompare(b.name)).map(player => (
+                    <option value="">Välj en spelare eller ledare...</option>
+                    {[...squad].sort((a, b) => a.name.localeCompare(b.name)).map(player => (
                       <option key={player.id} value={player.id}>
-                        {player.name}
+                        {player.name} {player.role === 'leader' ? '(Ledare)' : ''}
                       </option>
                     ))}
                   </select>

@@ -18,7 +18,8 @@ interface GameSetupProps {
     pointsConfig: PointsConfig,
     periodId?: string | null,
     sessionId?: string | null,
-    shouldStart?: boolean
+    shouldStart?: boolean,
+    includeLeaders?: boolean
   ) => void;
   initialGame?: Exercise;
   onCancel?: () => void;
@@ -59,10 +60,7 @@ export default function GameSetup({
   onRemovePlayerFromAttendance
 }: GameSetupProps) {
   const submitShouldStartRef = React.useRef(false);
-  const combinedSquad = [
-    ...(squad || []).filter(p => p.role !== 'leader'), 
-    ...(guestPlayers || []).filter(p => p.role !== 'leader')
-  ];
+  const [includeLeaders, setIncludeLeaders] = useState(initialGame?.includeLeaders ?? false);
   const [gameName, setGameName] = useState(initialGame?.name || '');
   const [selectedIcon] = useState(initialGame?.icon || 'Trophy');
   const [sortByScore, setSortByScore] = useState(initialGame?.sortByScore ?? false);
@@ -99,9 +97,42 @@ export default function GameSetup({
   );
   const sessionTitle = linkedSession?.title || 'Träningspass';
   
+  // Get RSVP attending IDs
+  const rsvpAttendingIds = React.useMemo(() => {
+    if (!linkedSession?.rsvps) return [];
+    return Object.entries(linkedSession.rsvps)
+      .filter(([_, rsvp]) => {
+        const r = rsvp as any;
+        return r && (r.status === 'attending' || r.status === 'partial');
+      })
+      .map(([playerId]) => playerId);
+  }, [linkedSession?.rsvps]);
+
+  const [planningSource, setPlanningSource] = useState<'attendance' | 'rsvp'>(
+    linkedSession?.rsvps && Object.entries(linkedSession.rsvps).some(([_, r]) => {
+      const rsvpVal = r as any;
+      return rsvpVal && (rsvpVal.status === 'attending' || rsvpVal.status === 'partial');
+    })
+      ? 'rsvp'
+      : 'attendance'
+  );
+  
+  const combinedSquad = React.useMemo(() => {
+    return [
+      ...(squad || []).filter(p => includeLeaders ? true : p.role !== 'leader'), 
+      ...(guestPlayers || []).filter(p => includeLeaders ? true : p.role !== 'leader')
+    ];
+  }, [squad, guestPlayers, includeLeaders]);
+
   // Derived helper to identify currently attending players (either from session or standalone)
-  const currentAttendanceIds = sessionAttendance || standaloneAttendance;
-  const isAttendanceActive = Array.isArray(sessionAttendance) || standaloneAttendance.length > 0;
+  const currentAttendanceIds = React.useMemo(() => {
+    if (linkedSession && planningSource === 'rsvp') {
+      return rsvpAttendingIds;
+    }
+    return sessionAttendance || standaloneAttendance;
+  }, [linkedSession, planningSource, rsvpAttendingIds, sessionAttendance, standaloneAttendance]);
+
+  const isAttendanceActive = Array.isArray(sessionAttendance) || standaloneAttendance.length > 0 || (linkedSession && planningSource === 'rsvp');
   
   const [teams, setTeams] = useState<Omit<Team, 'score'>[]>(
     (initialGame?.teams && initialGame.teams.length > 0) 
@@ -126,7 +157,7 @@ export default function GameSetup({
     .filter(p => !assignedPlayerIds.has(p.id));
 
   const absentSquadPlayers = (squad || [])
-    .filter(p => p.role !== 'leader')
+    .filter(p => includeLeaders ? true : p.role !== 'leader')
     .filter(p => !currentAttendanceIds.includes(p.id));
 
   const adjustDefaultTime = (type: 'min' | 'sec', amount: number) => {
@@ -305,10 +336,14 @@ export default function GameSetup({
   };
 
   const generateTeamsFromSessionAttendance = () => {
-    const list = sessionAttendance || standaloneAttendance;
+    const list = currentAttendanceIds;
     if (!list || list.length === 0) {
       if (isAttendanceActive) {
-        alert("Inga spelare är markerade som närvarande i träningen. Gå till fliken 'Deltagare' för att markera vilka som är där.");
+        if (linkedSession && planningSource === 'rsvp') {
+          alert("Inga spelare är anmälda till träningen. Gå till fliken 'Anmälda' för att se anmälningar.");
+        } else {
+          alert("Inga spelare är markerade som närvarande i träningen. Gå till fliken 'Deltagare' för att markera vilka som är där.");
+        }
       } else {
         alert("Ingen närvarolista hittades.");
       }
@@ -325,7 +360,7 @@ export default function GameSetup({
     });
 
     if (attendingPlayers.length === 0) {
-      alert("Hittade inga spelare från närvarolistan i truppen eller bland provspelare.");
+      alert("Hittade inga spelare i truppen eller bland provspelare.");
       return;
     }
 
@@ -495,7 +530,8 @@ export default function GameSetup({
       pointsConfig,
       initialGame ? initialGame.periodId : currentPeriodId,
       initialGame ? initialGame.sessionId : (sessionAttendance ? 'active' : null), // Using 'active' as a placeholder if we're in session mode
-      submitShouldStartRef.current
+      submitShouldStartRef.current,
+      includeLeaders
     );
     // Reset back to default
     submitShouldStartRef.current = false;
@@ -536,8 +572,55 @@ export default function GameSetup({
               </button>
             </div>
 
-            {/* Linked Session Badge - Compact */}
-            {(sessionAttendance || initialGame?.sessionId) && (
+            {/* Linked Session Badge & Planning Source Selector */}
+            {linkedSession ? (
+              <div className="bg-indigo-50/50 dark:bg-indigo-950/20 border border-indigo-100/80 dark:border-indigo-900/30 rounded-2xl p-4 space-y-3 shadow-xs">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-8 h-8 bg-indigo-100 dark:bg-indigo-900/50 rounded-xl flex items-center justify-center text-indigo-600 dark:text-indigo-400">
+                    <Calendar size={18} />
+                  </div>
+                  <div className="flex flex-col text-left">
+                    <span className="text-[10px] font-black text-indigo-950 dark:text-indigo-300 uppercase tracking-widest leading-none mb-1">
+                      Kopplad till: {sessionTitle}
+                    </span>
+                    <span className="text-[9px] text-zinc-500 dark:text-zinc-400 uppercase font-extrabold tracking-wider">
+                      Välj vilka spelare du vill planera lag utifrån:
+                    </span>
+                  </div>
+                </div>
+                
+                <div className="grid grid-cols-2 gap-2 p-1 bg-zinc-100/80 dark:bg-zinc-900 rounded-xl">
+                  <button
+                    type="button"
+                    onClick={() => setPlanningSource('rsvp')}
+                    className={`py-2 px-3 rounded-lg text-xs font-black uppercase tracking-tight transition-all flex flex-col items-center justify-center gap-0.5 border ${
+                      planningSource === 'rsvp'
+                        ? 'bg-white dark:bg-zinc-800 text-indigo-600 dark:text-indigo-400 border-zinc-200/50 dark:border-zinc-700 shadow-xs'
+                        : 'text-zinc-500 dark:text-zinc-400 border-transparent hover:text-zinc-800 dark:hover:text-zinc-200'
+                    }`}
+                  >
+                    <span>Utgå från anmälda</span>
+                    <span className="text-[9px] opacity-75 font-bold">
+                      ({rsvpAttendingIds.length} st)
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPlanningSource('attendance')}
+                    className={`py-2 px-3 rounded-lg text-xs font-black uppercase tracking-tight transition-all flex flex-col items-center justify-center gap-0.5 border ${
+                      planningSource === 'attendance'
+                        ? 'bg-white dark:bg-zinc-800 text-indigo-600 dark:text-indigo-400 border-zinc-200/50 dark:border-zinc-700 shadow-xs'
+                        : 'text-zinc-500 dark:text-zinc-400 border-transparent hover:text-zinc-800 dark:hover:text-zinc-200'
+                    }`}
+                  >
+                    <span>Utgå från närvarande</span>
+                    <span className="text-[9px] opacity-75 font-bold">
+                      ({(sessionAttendance || []).length} st)
+                    </span>
+                  </button>
+                </div>
+              </div>
+            ) : (sessionAttendance || initialGame?.sessionId) ? (
               <div className="bg-indigo-50 dark:bg-indigo-900/10 border border-indigo-100/50 dark:border-indigo-900/30 rounded-xl px-3 py-2 flex items-center gap-3">
                 <Calendar size={14} className="text-indigo-600 dark:text-indigo-400" />
                 <div className="flex items-center gap-2">
@@ -546,7 +629,7 @@ export default function GameSetup({
                   </span>
                 </div>
               </div>
-            )}
+            ) : null}
 
             <div className="p-4 bg-zinc-50 dark:bg-zinc-950 rounded-2xl border border-zinc-100 dark:border-zinc-800">
               <button 
@@ -746,8 +829,8 @@ export default function GameSetup({
           <div className="p-4 bg-zinc-50 dark:bg-zinc-950 rounded-2xl border border-zinc-100 dark:border-zinc-800 mb-8">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
               <div className="flex flex-col shrink-0">
-                <label className="block text-xs font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-wider">Antal lag / Deltagar-läge</label>
-                <div className="flex items-center gap-3 mt-1">
+                <label className="block text-xs font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-wider">Antal lag / Deltagare</label>
+                <div className="flex flex-col gap-2 mt-2">
                    <button
                     type="button"
                     onClick={() => {
@@ -778,6 +861,21 @@ export default function GameSetup({
                       <div className={`absolute top-0.5 w-3 h-3 bg-white rounded-full transition-transform ${excludeGoalkeepers ? 'translate-x-4.5' : 'translate-x-0.5'}`} />
                     </div>
                     <span className={`text-[10px] font-black uppercase tracking-tight ${excludeGoalkeepers ? 'text-indigo-600 dark:text-indigo-400' : 'text-zinc-500 dark:text-zinc-400'}`}>Hoppa över målvakterna</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setIncludeLeaders(!includeLeaders)}
+                    className={`flex items-center gap-2 px-2.5 py-1.5 rounded-lg border transition-all ${
+                      includeLeaders 
+                        ? 'bg-emerald-50 border-emerald-200 dark:bg-emerald-950/20 dark:border-emerald-900/40' 
+                        : 'bg-white dark:bg-zinc-900 border-zinc-200 dark:border-zinc-800 hover:border-zinc-300'
+                    }`}
+                  >
+                    <div className={`w-8 h-4 rounded-full transition-colors relative ${includeLeaders ? 'bg-emerald-600' : 'bg-zinc-300 dark:bg-zinc-700'}`}>
+                      <div className={`absolute top-0.5 w-3 h-3 bg-white rounded-full transition-transform ${includeLeaders ? 'translate-x-4.5' : 'translate-x-0.5'}`} />
+                    </div>
+                    <span className={`text-[10px] font-black uppercase tracking-tight ${includeLeaders ? 'text-emerald-600 dark:text-emerald-400' : 'text-zinc-500 dark:text-zinc-400'}`}>Inkludera tränare & ledare</span>
                   </button>
                 </div>
               </div>
@@ -862,7 +960,7 @@ export default function GameSetup({
                             <option value="">Hämta från truppen...</option>
                             {absentSquadPlayers.map(p => (
                               <option key={p.id} value={p.id}>
-                                {p.name} {p.position ? `(${p.position})` : ''}
+                                {p.name} {p.role === 'leader' ? '(Ledare)' : p.position ? `(${p.position})` : ''}
                               </option>
                             ))}
                           </select>
@@ -1039,7 +1137,7 @@ export default function GameSetup({
                 </div>
               )}
 
-              {((sessionAttendance && sessionAttendance.length > 0) || (standaloneAttendance.length > 0)) && (
+              {isAttendanceActive && (
                 <button
                   type="button"
                   onClick={generateTeamsFromSessionAttendance}
@@ -1054,7 +1152,7 @@ export default function GameSetup({
                         Skapa lag automatiskt
                       </span>
                       <span className="text-[10px] text-indigo-600 dark:text-indigo-400 uppercase font-black tracking-widest">
-                        {(sessionAttendance?.length || standaloneAttendance.length)} DELTAGARE
+                        {currentAttendanceIds.length} {linkedSession && planningSource === 'rsvp' ? 'ANMÄLDA' : 'DELTAGARE'}
                       </span>
                     </div>
                   </div>
@@ -1234,7 +1332,11 @@ export default function GameSetup({
                               >
                                 <div className="flex items-center gap-1">
                                   <span>{player.name}</span>
-                                  {player.position && <span className="opacity-70 text-[8px]">({player.position})</span>}
+                                  {player.role === 'leader' ? (
+                                    <span className="opacity-80 text-[8px] bg-white/25 px-1 rounded-xs">Ledare</span>
+                                  ) : player.position && (
+                                    <span className="opacity-70 text-[8px]">({player.position})</span>
+                                  )}
                                   <button
                                     type="button"
                                     onClick={(e) => {
@@ -1330,13 +1432,13 @@ export default function GameSetup({
                       <div 
                         key="unassigned-overview"
                         data-overview-team-id="none"
-                        className={`bg-zinc-50 dark:bg-zinc-950/30 p-4 rounded-2xl shadow-sm border border-dashed transition-all duration-200 flex flex-col h-full ${draggedPlayerId ? 'scale-[1.02] border-zinc-300 dark:border-zinc-700 opacity-60' : 'border-zinc-205 dark:border-zinc-800'}`}
+                        className={`bg-zinc-50 dark:bg-zinc-950/30 p-4 rounded-2xl shadow-sm border border-dashed transition-all duration-200 flex flex-col h-full ${draggedPlayerId ? 'scale-[1.02] border-zinc-300 dark:border-zinc-700 opacity-60' : 'border-zinc-200 dark:border-zinc-800'}`}
                         style={{ zIndex: isUnassignedDragging ? 100 : (draggedPlayerId ? 10 : 1), position: 'relative' }}
                       >
                         <div className="flex items-center gap-2 mb-3">
-                          <div className="w-3 h-3 rounded-full border border-zinc-400 dark:border-zinc-650" />
+                          <div className="w-3 h-3 rounded-full border border-zinc-400 dark:border-zinc-600" />
                           <span className="font-black text-sm text-zinc-500 dark:text-zinc-400 uppercase tracking-tight flex-1">Ej indelade / Avbytare</span>
-                          <span className="text-[10px] bg-zinc-200/55 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 px-1.5 py-0.5 rounded-full font-bold">
+                          <span className="text-[10px] bg-zinc-200/55 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300 px-1.5 py-0.5 rounded-full font-bold">
                             {unassignedPlayers.length}
                           </span>
                         </div>
@@ -1358,10 +1460,14 @@ export default function GameSetup({
                                   const point = (e.nativeEvent || e).clientX !== undefined ? (e.nativeEvent || e) : info.point;
                                   handleDragEndInOverview(pid, point.clientX || point.x, point.clientY || point.y);
                                 }}
-                                className={`pl-2 pr-1 py-1 rounded-md text-[11px] font-bold text-zinc-700 dark:text-zinc-300 bg-white dark:bg-zinc-850 border border-zinc-150 dark:border-zinc-800 shadow-sm flex items-center gap-1.5 cursor-grab active:cursor-grabbing touch-none z-50 transition-colors hover:border-zinc-300 dark:hover:border-zinc-750`} 
+                                className={`pl-2.5 pr-1 py-1 rounded-md text-[11px] font-bold text-zinc-800 dark:text-zinc-100 bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 shadow-sm flex items-center gap-1.5 cursor-grab active:cursor-grabbing touch-none z-50 transition-colors hover:border-zinc-300 dark:hover:border-zinc-600`} 
                               >
                                 <span>{player.name}</span>
-                                {player.position && <span className="opacity-70 text-[8px]">({player.position})</span>}
+                                {player.role === 'leader' ? (
+                                  <span className="text-emerald-600 dark:text-emerald-400 text-[8px] bg-emerald-50 dark:bg-emerald-950/40 px-1 rounded-xs">Ledare</span>
+                                ) : player.position && (
+                                  <span className="text-zinc-500 dark:text-zinc-400 text-[8px]">({player.position})</span>
+                                )}
                                 <button
                                   type="button"
                                   onPointerDown={(e) => e.stopPropagation()}
@@ -1369,7 +1475,7 @@ export default function GameSetup({
                                     e.stopPropagation();
                                     handleRemovePlayerFromAttendance(pid);
                                   }}
-                                  className="p-0.5 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-400 hover:text-red-500 rounded transition-colors cursor-pointer shrink-0 ml-0.5"
+                                  className="p-0.5 hover:bg-zinc-100 dark:hover:bg-zinc-700 text-zinc-400 dark:text-zinc-400 hover:text-red-500 dark:hover:text-red-400 rounded transition-colors cursor-pointer shrink-0 ml-0.5"
                                   title="Ta bort från närvaro"
                                 >
                                   <X size={10} />
@@ -1446,7 +1552,11 @@ export default function GameSetup({
                                 style={isJoker ? { backgroundColor: '#6366f1', borderColor: '#6366f1' } : {}}
                               >
                                 {player.name}
-                                {player.position && <span className="opacity-70 text-[8px]">({player.position})</span>}
+                                {player.role === 'leader' ? (
+                                  <span className="opacity-85 text-[8px] bg-white/20 px-1 rounded-sm">Ledare</span>
+                                ) : player.position && (
+                                  <span className="opacity-70 text-[8px]">({player.position})</span>
+                                )}
                               </button>
                             );
                           })}

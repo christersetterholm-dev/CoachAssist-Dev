@@ -47,13 +47,14 @@ export default function TeamOverviewModal({
   // Unassigned players are those who are in the attending list but not in assignedPlayerIds
   // If attendingIds is empty or not provided (standalone exercise or when draft planning),
   // we default to all squad players who are not in any team.
+  const includeLeaders = exercise.includeLeaders ?? false;
   const hasValidAttendance = attendingIds && attendingIds.length > 0;
   const unassignedPlayers = hasValidAttendance
-    ? squad.filter(p => attendingIds.includes(p.id) && !assignedPlayerIds.has(p.id) && p.role !== 'leader')
-    : squad.filter(p => !assignedPlayerIds.has(p.id) && p.role !== 'leader');
+    ? squad.filter(p => attendingIds.includes(p.id) && !assignedPlayerIds.has(p.id) && (includeLeaders ? true : p.role !== 'leader'))
+    : squad.filter(p => !assignedPlayerIds.has(p.id) && (includeLeaders ? true : p.role !== 'leader'));
 
   const absentSquadPlayers = squad
-    .filter(p => !p.id.startsWith('guest_') && p.role !== 'leader')
+    .filter(p => !p.id.startsWith('guest_') && (includeLeaders ? true : p.role !== 'leader'))
     .filter(p => attendingIds && !attendingIds.includes(p.id));
 
   const isUnassignedDragging = draggedPlayerId && unassignedPlayers.some(p => p.id === draggedPlayerId);
@@ -363,10 +364,10 @@ export default function TeamOverviewModal({
                       onDragEnd={() => {
                         handleDragEnd(pid);
                       }}
-                      className={`pl-3 ${onRemovePlayerFromAttendance ? 'pr-1.5' : 'pr-3'} py-1.5 rounded-xl text-xs font-bold text-zinc-700 dark:text-zinc-300 bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 shadow-sm flex items-center gap-1.5 cursor-grab active:cursor-grabbing touch-none z-50 transition-colors hover:border-zinc-300`} 
+                      className={`pl-3 ${onRemovePlayerFromAttendance ? 'pr-1.5' : 'pr-3'} py-1.5 rounded-xl text-xs font-bold text-zinc-800 dark:text-zinc-100 bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 shadow-sm flex items-center gap-1.5 cursor-grab active:cursor-grabbing touch-none z-50 transition-colors hover:border-zinc-300 dark:hover:border-zinc-600`} 
                     >
                       <span>{player.name}</span>
-                      {player.position && <span className="opacity-70 text-[8px]">({player.position})</span>}
+                      {player.position && <span className="text-zinc-500 dark:text-zinc-400 text-[8px]">({player.position})</span>}
                       {onRemovePlayerFromAttendance && (
                         <button
                           type="button"
@@ -375,7 +376,7 @@ export default function TeamOverviewModal({
                             e.stopPropagation();
                             onRemovePlayerFromAttendance(pid);
                           }}
-                          className="p-0.5 hover:bg-zinc-100 dark:hover:bg-zinc-700 text-zinc-400 hover:text-red-500 rounded-md transition-colors cursor-pointer shrink-0 ml-1"
+                          className="p-0.5 hover:bg-zinc-100 dark:hover:bg-zinc-700 text-zinc-400 dark:text-zinc-400 hover:text-red-500 dark:hover:text-red-400 rounded-md transition-colors cursor-pointer shrink-0 ml-1"
                           title="Ta bort från närvaro"
                         >
                           <X size={12} />

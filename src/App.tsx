@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { RotateCcw, Trophy, ArrowLeft, Check, Sun, Moon, Timer as TimerIcon, Edit2, Zap, Rocket, Users, LayoutDashboard, Unlock, LogIn, LogOut, User as UserIcon, ShieldCheck, Cloud, Layout, Globe, AlertTriangle, Calendar, Settings, RefreshCw, Bell, Building2 } from 'lucide-react';
+import { RotateCcw, Trophy, ArrowLeft, Check, Sun, Moon, Timer as TimerIcon, Edit2, Zap, Rocket, Users, LayoutDashboard, Unlock, LogIn, LogOut, User as UserIcon, ShieldCheck, Cloud, Globe, AlertTriangle, Calendar, Settings, RefreshCw, Bell, Building2, Shirt } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { SquadPlayer, Exercise, Team, PointsConfig, Period, PeriodStandings, Lineup, TrainingSession, TrainingSettings, CoachData, BankExercise, SessionMoment, UserProfile, ClubMember, ClubTeam, Club } from './types';
 import { auth, signInWithGoogle, db, handleFirestoreError, OperationType, getApiUrl, doc, onSnapshot, setDoc, getDoc, collection, getDocs } from './lib/firebase';
@@ -1446,6 +1446,7 @@ export default function App() {
               standings: stats.map((p: any) => ({
                 playerId: p.id,
                 playerName: p.name,
+                role: p.role,
                 imageUrl: p.photoUrl || null,
                 points: p.totalPoints,
                 history: p.history || []
@@ -1565,7 +1566,8 @@ export default function App() {
     pointsConfig: PointsConfig,
     periodId?: string | null,
     sessionId?: string | null,
-    shouldStart?: boolean
+    shouldStart?: boolean,
+    includeLeaders?: boolean
   ) => {
     const now = Date.now();
     const resolvedSessionId = (sessionId && sessionId !== 'active') ? sessionId : (activeSessionId || undefined);
@@ -1585,7 +1587,8 @@ export default function App() {
       createdAt: now,
       updatedAt: now,
       periodId: periodId || null,
-      sessionId: resolvedSessionId
+      sessionId: resolvedSessionId,
+      includeLeaders
     };
     
     const nextActiveExerciseId = shouldStart !== false ? newExercise.id : previousActiveExerciseId;
@@ -1630,7 +1633,9 @@ export default function App() {
     jokerPlayerIds: string[], 
     pointsConfig: PointsConfig,
     periodId?: string | null,
-    sessionId?: string | null
+    sessionId?: string | null,
+    _shouldStart?: boolean,
+    includeLeaders?: boolean
   ) => {
     if (!activeExerciseId) return;
     
@@ -1664,7 +1669,8 @@ export default function App() {
             pointsConfig,
             updatedAt: Date.now(),
             periodId: periodId || e.periodId,
-            sessionId: sessionId || (activeSessionId || e.sessionId)
+            sessionId: sessionId || (activeSessionId || e.sessionId),
+            includeLeaders
           };
         }),
         sessions: linkToMomentId && activeSessionId 
@@ -2503,7 +2509,7 @@ export default function App() {
           <Cloud size={32} />
         </div>
         <h2 className="text-xl font-black text-zinc-900 dark:text-white mb-2 tracking-tight">Synkroniserar...</h2>
-        <p className="text-sm text-zinc-500 dark:text-zinc-400 font-medium">Hämtar din trupp från molnet</p>
+        <p className="text-sm text-zinc-500 dark:text-zinc-400 font-medium">Hämtar information från molnet</p>
       </div>
     );
   }
@@ -2550,12 +2556,12 @@ export default function App() {
                     if (view === 'setup') return isEditingActiveExercise ? 'Redigera tävlingsmoment' : 'Skapa tävlingsmoment';
                     if (view === 'training') return 'Kalender';
                     if (view === 'squad') return 'Truppen';
-                    if (view === 'leaderboard') return 'Topplista';
+                    if (view === 'leaderboard') return 'Poängliga';
                     if (view === 'profile') return 'Profil';
                     if (view === 'lineup') return 'Laguppställning';
                     if (view === 'teampage') return 'Lagsidan';
                     if (view === 'clubadmin') return 'Administration';
-                    if (sharedLeaderboardId) return 'Delad Topplista';
+                    if (sharedLeaderboardId) return 'Delad Poängliga';
                     return 'Kalender';
                   })()}
                 </span>
@@ -2569,7 +2575,7 @@ export default function App() {
             </div>
             
             <div className="flex items-center gap-2">
-              {(isSyncing || (user && sessionActionCount > 0)) && (
+              {(isSyncing || (user && sessionActionCount > 0 && activeExerciseId === null && view !== 'exercise')) && (
                 <motion.div 
                   initial={{ opacity: 0, scale: 0.8 }}
                   animate={{ opacity: 1, scale: 1 }}
@@ -2782,7 +2788,7 @@ export default function App() {
         </div>
       )}
 
-      <main className={`flex-1 flex flex-col min-h-0 w-full max-w-full overflow-x-hidden ${view === 'exercise' || view === 'teampage' ? 'overflow-hidden' : 'overflow-y-auto pb-24 sm:pb-28'}`}>
+      <main className={`flex-1 flex flex-col min-h-0 w-full max-w-full overflow-x-hidden ${view === 'exercise' || view === 'teampage' ? 'overflow-hidden' : view === 'lineup' ? 'overflow-y-auto pb-28 sm:pb-24' : 'overflow-y-auto pb-20 sm:pb-24'}`}>
         <AnimatePresence mode="wait">
           {view === 'training' && (
             sharedLeaderboardId ? (
@@ -3478,27 +3484,27 @@ export default function App() {
 
       {/* Bottom Navigation */}
       {view !== 'exercise' && (
-        <nav className="fixed bottom-0 left-0 right-0 bg-white dark:bg-zinc-900 border-t border-zinc-200 dark:border-zinc-800 px-6 pt-3 pb-[calc(0.75rem+env(safe-area-inset-bottom,0px))] z-40 shadow-[0_-4px_20px_rgba(0,0,0,0.05)]">
+        <nav className="fixed bottom-0 left-0 right-0 bg-white dark:bg-zinc-900 border-t border-zinc-200 dark:border-zinc-800 px-3 sm:px-6 pt-2 pb-[calc(0.4rem+env(safe-area-inset-bottom,0px))] z-40 shadow-[0_-4px_20px_rgba(0,0,0,0.05)]">
           <div className="max-w-xl mx-auto flex items-center justify-between gap-1">
             <button
               onClick={() => setView('training')}
               className={`flex-1 flex flex-col items-center gap-1 transition-colors ${view === 'training' ? 'text-indigo-600 dark:text-indigo-400' : 'text-zinc-400 hover:text-zinc-600'}`}
             >
-              <Calendar size={24} />
+              <Calendar size={22} />
               <span className="text-[10px] font-bold uppercase tracking-wider">Kalender</span>
             </button>
             <button
               onClick={() => setView('leaderboard')}
               className={`flex-1 flex flex-col items-center gap-1 transition-colors ${view === 'leaderboard' ? 'text-indigo-600 dark:text-indigo-400' : 'text-zinc-400 hover:text-zinc-600'}`}
             >
-              <LayoutDashboard size={24} />
+              <LayoutDashboard size={22} />
               <span className="text-[10px] font-bold uppercase tracking-wider text-center">Poängliga</span>
             </button>
             <button
               onClick={() => setView('squad')}
               className={`flex-1 flex flex-col items-center gap-1 transition-colors ${view === 'squad' ? 'text-indigo-600 dark:text-indigo-400' : 'text-zinc-400 hover:text-zinc-600'}`}
             >
-              <Users size={24} />
+              <Users size={22} />
               <span className="text-[10px] font-bold uppercase tracking-wider text-center">Truppen</span>
             </button>
             {canViewLineup && (
@@ -3506,7 +3512,7 @@ export default function App() {
                 onClick={() => setView('lineup')}
                 className={`flex-1 flex flex-col items-center gap-1 transition-colors ${view === 'lineup' ? 'text-indigo-600 dark:text-indigo-400' : 'text-zinc-400 hover:text-zinc-600'}`}
               >
-                <Layout size={24} />
+                <Shirt size={22} />
                 <span className="text-[10px] font-bold uppercase tracking-wider text-center">Laguppst.</span>
               </button>
             )}
@@ -3514,7 +3520,7 @@ export default function App() {
               onClick={() => setView('teampage')}
               className={`flex-1 flex flex-col items-center gap-1 transition-colors ${view === 'teampage' ? 'text-indigo-600 dark:text-indigo-400' : 'text-zinc-400 hover:text-zinc-600'}`}
             >
-              <Globe size={24} />
+              <Globe size={22} />
               <span className="text-[10px] font-bold uppercase tracking-wider text-center">Lagsida</span>
             </button>
           </div>

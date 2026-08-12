@@ -215,6 +215,21 @@ function SessionItem({
   const totalPlayersSquad = squad ? squad.filter((p: any) => p.role !== 'leader').length + (session.guestPlayers?.length || 0) : 0;
   const totalLeadersSquad = squad ? squad.filter((p: any) => p.role === 'leader').length : 0;
 
+  // RSVP Calculations
+  const rsvps = session.rsvps || {};
+  const activeLeaders = squad ? squad.filter((p: any) => p.role === 'leader') : [];
+  const activePlayers = squad ? squad.filter((p: any) => p.role !== 'leader') : [];
+
+  const anmaldaPlayersCount = squad ? activePlayers.filter(p => {
+    const r = rsvps[p.id];
+    return r && (r.status === 'attending' || r.status === 'partial');
+  }).length + (session.guestPlayers?.length || 0) : 0;
+
+  const anmaldaLeadersCount = squad ? activeLeaders.filter(p => {
+    const r = rsvps[p.id];
+    return r && (r.status === 'attending' || r.status === 'partial');
+  }).length : 0;
+
   return (
     <motion.div
       key={session.id}
@@ -458,28 +473,43 @@ function SessionItem({
                     Öppna deltagarlistan <ArrowRight size={10} />
                   </span>
                 </div>
-                <div className="space-y-1.5 text-xs text-zinc-700 dark:text-zinc-300 font-bold">
+                <div className="space-y-2 text-xs text-zinc-700 dark:text-zinc-300 font-bold">
                   {totalLeadersSquad > 0 ? (
                     <>
-                      <div className="flex items-center justify-between">
+                      <div className="flex items-center justify-between py-1 border-b border-zinc-100/50 dark:border-zinc-800/40">
                         <span>Spelarnärvaro:</span>
-                        <span className="text-indigo-650 dark:text-indigo-400 font-extrabold text-xs">
-                          {registeredPlayersCount} av {totalPlayersSquad}
-                        </span>
+                        <div className="text-right flex flex-col items-end">
+                          <span className="text-indigo-650 dark:text-indigo-400 font-extrabold text-xs">
+                            {registeredPlayersCount} av {totalPlayersSquad} deltar
+                          </span>
+                          <span className="text-[10px] text-zinc-500 dark:text-zinc-400 font-semibold">
+                            {anmaldaPlayersCount} anmälda
+                          </span>
+                        </div>
                       </div>
-                      <div className="flex items-center justify-between text-zinc-400 dark:text-zinc-500 text-[11px]">
+                      <div className="flex items-center justify-between py-1">
                         <span>Ledarnärvaro:</span>
-                        <span>
-                          {registeredLeadersCount} av {totalLeadersSquad}
-                        </span>
+                        <div className="text-right flex flex-col items-end">
+                          <span className="text-zinc-700 dark:text-zinc-300 font-extrabold text-xs">
+                            {registeredLeadersCount} av {totalLeadersSquad} deltar
+                          </span>
+                          <span className="text-[10px] text-zinc-500 dark:text-zinc-400 font-semibold">
+                            {anmaldaLeadersCount} anmälda
+                          </span>
+                        </div>
                       </div>
                     </>
                   ) : (
-                    <div className="flex items-center justify-between text-zinc-700 dark:text-zinc-300 font-bold">
+                    <div className="flex items-center justify-between">
                       <span>Gemensam träningsnärvaro:</span>
-                      <span className="text-indigo-650 dark:text-indigo-400 font-extrabold text-xs">
-                        {registeredPlayersCount} av {totalPlayersSquad}
-                      </span>
+                      <div className="text-right flex flex-col items-end">
+                        <span className="text-indigo-650 dark:text-indigo-400 font-extrabold text-xs">
+                          {registeredPlayersCount} av {totalPlayersSquad} deltar
+                        </span>
+                        <span className="text-[10px] text-zinc-500 dark:text-zinc-400 font-semibold">
+                          {anmaldaPlayersCount} anmälda
+                        </span>
+                      </div>
                     </div>
                   )}
                 </div>
@@ -759,33 +789,17 @@ export default function TrainingManager({
       const result = await syncTeamCalendar(urlToUse, sessions || [], forceOverwrite);
 
       if (result.success) {
-        // Find newly added sessions
-        const existingIds = new Set((sessions || []).map(s => s.id));
-        const newSessionsToAdd = result.updatedSessions.filter(s => !existingIds.has(s.id));
-        
-        // Update existing sessions that changed
-        for (const updatedS of result.updatedSessions) {
-          if (existingIds.has(updatedS.id)) {
-            const orig = sessions.find(s => s.id === updatedS.id);
-            if (orig && JSON.stringify(orig) !== JSON.stringify(updatedS)) {
-              onUpdateSession(updatedS);
-            }
-          }
-        }
-
-        if (newSessionsToAdd.length > 0) {
-          onAddSessionsBatch?.(newSessionsToAdd);
-        }
+        onReorderSessions(result.updatedSessions);
 
         const updatedSettings: TrainingSettings = {
           ...(settings || { defaultStartTime: '18:00' }),
           icsUrl: urlToUse,
           lastSyncedAt: result.lastSyncedAt,
-          lastSyncCount: result.addedCount + result.updatedCount
+          lastSyncCount: result.addedCount + result.updatedCount + result.removedCount
         };
         onUpdateSettings?.(updatedSettings);
 
-        if (!isSilent || result.addedCount > 0 || result.updatedCount > 0) {
+        if (!isSilent || result.addedCount > 0 || result.updatedCount > 0 || result.removedCount > 0) {
           setSyncMessage(result.message);
           setTimeout(() => setSyncMessage(null), 5000);
         }
@@ -806,7 +820,12 @@ export default function TrainingManager({
     }
   };
 
+  const prevIcsUrlRef = React.useRef(settings?.icsUrl);
   React.useEffect(() => {
+    if (settings?.icsUrl !== prevIcsUrlRef.current) {
+      setHasAutoSynced(false);
+      prevIcsUrlRef.current = settings?.icsUrl;
+    }
     if (settings?.icsUrl && !hasAutoSynced && isCloudDataLoaded) {
       setHasAutoSynced(true);
       handleSyncCalendar(settings.icsUrl, true);
@@ -1158,14 +1177,14 @@ export default function TrainingManager({
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-black/40 backdrop-blur-sm z-[100] flex items-center justify-center p-4 text-left"
+            className="fixed inset-0 bg-black/40 backdrop-blur-sm z-[100] flex items-center justify-center p-3 sm:p-4 text-left overflow-hidden"
             onClick={() => setShowSettings(false)}
           >
             <motion.div
               initial={{ scale: 0.9, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
               exit={{ scale: 0.9, opacity: 0 }}
-              className="bg-white dark:bg-zinc-900 rounded-3xl p-6 sm:p-8 max-w-md w-full shadow-2xl border border-zinc-100 dark:border-zinc-800 max-h-[85vh] overflow-y-auto"
+              className="bg-white dark:bg-zinc-900 rounded-3xl p-5 sm:p-8 max-w-md w-full max-w-[calc(100vw-1.5rem)] shadow-2xl border border-zinc-100 dark:border-zinc-800 max-h-[85vh] overflow-y-auto overflow-x-hidden min-w-0"
               onClick={(e) => e.stopPropagation()}
             >
               <div className="flex items-center justify-between mb-6">
@@ -1321,15 +1340,15 @@ export default function TrainingManager({
 
                     return (
                       <div className="p-3 bg-indigo-50/70 dark:bg-indigo-950/30 rounded-xl border border-indigo-100 dark:border-indigo-900/40 mb-4">
-                        <div className="flex items-center justify-between gap-2 mb-1">
-                          <div className="flex items-center gap-1.5">
-                            <Calendar size={13} className="text-indigo-600 dark:text-indigo-400" />
-                            <span className="text-[10px] font-black uppercase text-indigo-700 dark:text-indigo-300 tracking-wider">
+                        <div className="flex items-center justify-between gap-2 mb-1 min-w-0">
+                          <div className="flex items-center gap-1.5 min-w-0 shrink">
+                            <Calendar size={13} className="text-indigo-600 dark:text-indigo-400 shrink-0" />
+                            <span className="text-[10px] font-black uppercase text-indigo-700 dark:text-indigo-300 tracking-wider truncate">
                               Lagets Prenumerationslänk (iCal)
                             </span>
                           </div>
                           {activeClubInfo && (
-                            <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-md bg-indigo-100 dark:bg-indigo-900/50 text-indigo-800 dark:text-indigo-200">
+                            <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-md bg-indigo-100 dark:bg-indigo-900/50 text-indigo-800 dark:text-indigo-200 truncate shrink-0 max-w-[130px]">
                               {activeClubInfo.clubName} • {activeClubInfo.teamName}
                             </span>
                           )}
@@ -1337,8 +1356,8 @@ export default function TrainingManager({
                         <p className="text-[10px] text-zinc-500 dark:text-zinc-400 mb-2">
                           Spelare och ledare kan klistra in denna i sin mobil/Google/Apple Kalender för att få alla lagets träningar och matcher automatiskt.
                         </p>
-                        <div className="flex items-center justify-between gap-2 bg-white dark:bg-zinc-900 px-2.5 py-1.5 rounded-lg border border-indigo-100 dark:border-indigo-900/30">
-                          <span className="text-[11px] font-mono font-bold text-zinc-800 dark:text-zinc-200 truncate select-all">
+                        <div className="flex items-center justify-between gap-2 bg-white dark:bg-zinc-900 px-2.5 py-1.5 rounded-lg border border-indigo-100 dark:border-indigo-900/30 min-w-0">
+                          <span className="text-[11px] font-mono font-bold text-zinc-800 dark:text-zinc-200 truncate select-all min-w-0 flex-1">
                             {outboundUrl}
                           </span>
                           <button

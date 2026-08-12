@@ -30,7 +30,22 @@ export function calculateLeaderboard(
 
   // Calculate total points for each player based on relevant exercises
   const uniqueSquad = Array.from(new Map(squad.map(p => [p.id, p])).values());
-  return uniqueSquad.filter(p => !p.id.startsWith('guest_') && p.role !== 'leader').map(player => {
+  return uniqueSquad
+    .filter(p => !p.id.startsWith('guest_'))
+    .filter(player => {
+      // Regular players are always shown in the leaderboard
+      if (player.role !== 'leader') return true;
+
+      // Leaders are only shown if they participated in at least one exercise or received bonus points in this period
+      const inExercise = relevantExercises.some(e =>
+        e.teams?.some(t => t.playerIds?.includes(player.id)) ||
+        e.jokerPlayerIds?.includes(player.id)
+      );
+      const hasBonus = bonusPoints.some(bp => bp.playerId === player.id);
+
+      return inExercise || hasBonus;
+    })
+    .map(player => {
     const history: { date: number; exerciseName: string; points: number; isBonus?: boolean }[] = [];
     let totalPoints = 0;
 

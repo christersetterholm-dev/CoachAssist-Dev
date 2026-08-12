@@ -401,7 +401,7 @@ function MomentItem({
                                 value={imageUrlInput}
                                 onChange={(e) => setImageUrlInput(e.target.value)}
                                 placeholder="Klistra in en bildlänk..."
-                                className="flex-1 min-w-0 bg-transparent border-none p-0 text-xs font-bold text-zinc-805 dark:text-zinc-150 focus:ring-0 placeholder:text-zinc-400"
+                                className="flex-1 min-w-0 bg-transparent border-none p-0 text-xs font-bold text-zinc-805 dark:text-zinc-100 focus:ring-0 placeholder:text-zinc-400"
                                 onKeyDown={(e) => {
                                   if (e.key === 'Enter') {
                                     e.preventDefault();

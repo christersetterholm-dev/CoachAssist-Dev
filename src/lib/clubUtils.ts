@@ -17,14 +17,21 @@ export function deduplicateSquad(squad: SquadPlayer[]): SquadPlayer[] {
     const cleanEmail = (player.email || '').trim().toLowerCase();
     const cleanPnr = (player.personnummer || '').replace(/\D/g, '');
     const cleanNum = (player.number || '').trim();
+    const playerRole: 'leader' | 'player' = player.role === 'leader' ? 'leader' : 'player';
+    const basePlayerId = (player.id || '').replace('_leader', '');
 
     const idx = result.findIndex(existing => {
+      const exRole: 'leader' | 'player' = existing.role === 'leader' ? 'leader' : 'player';
+      // Only treat as duplicate if they have the exact same squad role ('player' vs 'player' or 'leader' vs 'leader')
+      if (exRole !== playerRole) return false;
+
+      const baseExId = (existing.id || '').replace('_leader', '');
       const exName = existing.name.trim().toLowerCase();
       const exEmail = (existing.email || '').trim().toLowerCase();
       const exPnr = (existing.personnummer || '').replace(/\D/g, '');
       const exNum = (existing.number || '').trim();
 
-      if (player.id && existing.id && player.id === existing.id) return true;
+      if (basePlayerId && baseExId && basePlayerId === baseExId) return true;
       if (cleanPnr && exPnr && cleanPnr === exPnr) return true;
       if (cleanEmail && exEmail && cleanEmail === exEmail) return true;
 
@@ -39,8 +46,6 @@ export function deduplicateSquad(squad: SquadPlayer[]): SquadPlayer[] {
 
     if (idx !== -1) {
       const existing = result[idx];
-      const targetRole: 'leader' | 'player' =
-        (existing.role === 'leader' || player.role === 'leader') ? 'leader' : 'player';
 
       const pickVal = (newVal?: string, oldVal?: string) => {
         if (newVal !== undefined && newVal !== null && newVal.trim() !== '') return newVal.trim();
@@ -48,8 +53,10 @@ export function deduplicateSquad(squad: SquadPlayer[]): SquadPlayer[] {
         return undefined;
       };
 
+      const mergedRoles = Array.from(new Set([...(existing.roles || []), ...(player.roles || [])]));
+
       result[idx] = {
-        id: player.id || existing.id,
+        id: existing.id || player.id,
         name: player.name?.trim() || existing.name?.trim() || cleanName,
         email: pickVal(player.email, existing.email),
         phone: pickVal(player.phone, existing.phone),
@@ -57,7 +64,8 @@ export function deduplicateSquad(squad: SquadPlayer[]): SquadPlayer[] {
         position: pickVal(player.position, existing.position),
         number: pickVal(player.number, existing.number),
         photoUrl: pickVal(player.photoUrl, existing.photoUrl),
-        role: targetRole
+        role: playerRole,
+        roles: mergedRoles.length > 0 ? mergedRoles : undefined
       };
     } else {
       result.push({
@@ -69,7 +77,7 @@ export function deduplicateSquad(squad: SquadPlayer[]): SquadPlayer[] {
         position: player.position ? player.position.trim() : undefined,
         number: player.number ? player.number.trim() : undefined,
         photoUrl: player.photoUrl ? player.photoUrl.trim() : undefined,
-        role: player.role === 'leader' ? 'leader' : 'player'
+        role: playerRole
       });
     }
   }
@@ -189,13 +197,16 @@ export async function syncSquadToClubMembers(
 
     let isModified = false;
 
+    const playerEntries = cleanSquad.filter(p => p.role !== 'leader');
+    const leaderEntries = cleanSquad.filter(p => p.role === 'leader');
+
     for (const player of cleanSquad) {
       if (!player.name || !player.name.trim()) continue;
       const cleanName = player.name.trim();
       const cleanEmail = (player.email || '').trim().toLowerCase();
       const cleanPnr = (player.personnummer || '').replace(/\D/g, '');
       const cleanNum = (player.number || '').trim();
-      const targetRole: 'coach' | 'player' = player.role === 'leader' ? 'coach' : 'player';
+      const basePlayerId = (player.id || '').replace('_leader', '');
 
       const idx = members.findIndex(m => {
         const mEmail = (m.email || '').trim().toLowerCase();
@@ -203,7 +214,7 @@ export async function syncSquadToClubMembers(
         const mPnr = (m.personnummer || '').replace(/\D/g, '');
         const mNum = (m.number || '').trim();
 
-        if (player.id && m.userId === player.id) return true;
+        if (basePlayerId && (m.userId === basePlayerId || m.userId === player.id)) return true;
         if (cleanPnr && mPnr && cleanPnr === mPnr) return true;
         if (cleanEmail && mEmail === cleanEmail) return true;
 
@@ -222,12 +233,41 @@ export async function syncSquadToClubMembers(
         const existingRoles = existing.roles || [];
         const existingTeams = existing.teams || [];
 
-        const updatedRoles = Array.from(new Set([...existingRoles, targetRole]));
+        const matchesPlayer = (p: SquadPlayer) => {
+          const bId = (p.id || '').replace('_leader', '');
+          if (bId && (bId === existing.userId || p.id === existing.userId)) return true;
+          if (cleanPnr && p.personnummer && cleanPnr === (p.personnummer || '').replace(/\D/g, '')) return true;
+          if (cleanEmail && p.email && cleanEmail === (p.email || '').trim().toLowerCase()) return true;
+          return p.name.trim().toLowerCase() === existing.fullName.trim().toLowerCase();
+        };
+
+        const inPlayerList = playerEntries.some(matchesPlayer);
+        const inLeaderList = leaderEntries.some(matchesPlayer);
+
+        let updatedRoles = [...existingRoles];
+        if (inPlayerList && !updatedRoles.includes('player')) {
+          updatedRoles.push('player');
+        }
+        if (!inPlayerList && updatedRoles.includes('player') && inLeaderList) {
+          updatedRoles = updatedRoles.filter(r => r !== 'player');
+        }
+        if (inLeaderList && !updatedRoles.includes('coach')) {
+          updatedRoles.push('coach');
+        }
+        if (!inLeaderList && (updatedRoles.includes('coach') || updatedRoles.includes('admin')) && inPlayerList) {
+          updatedRoles = updatedRoles.filter(r => r !== 'coach');
+        }
+
+        if (updatedRoles.length === 0) {
+          updatedRoles = [player.role === 'leader' ? 'coach' : 'player'];
+        }
+
         const updatedTeams = Array.from(new Set([...existingTeams, teamId]));
         const targetPhoto = player.photoUrl || existing.photoUrl;
 
         const hasChanged = 
           updatedRoles.length !== existingRoles.length ||
+          updatedRoles.some(r => !existingRoles.includes(r)) ||
           updatedTeams.length !== existingTeams.length ||
           existing.fullName !== cleanName ||
           (player.phone && existing.phone !== player.phone) ||
@@ -253,8 +293,9 @@ export async function syncSquadToClubMembers(
           isModified = true;
         }
       } else {
+        const targetRole: 'coach' | 'player' = player.role === 'leader' ? 'coach' : 'player';
         const newMember: ClubMember = {
-          userId: player.id || 'player_' + Math.random().toString(36).substring(2, 10),
+          userId: basePlayerId || 'player_' + Math.random().toString(36).substring(2, 10),
           email: player.email || '',
           fullName: cleanName,
           phone: player.phone || undefined,
@@ -317,7 +358,7 @@ export async function syncAllTeamSquadsToClubMembers(
               const mPnr = (m.personnummer || '').replace(/\D/g, '');
               const mNum = (m.number || '').trim();
 
-              if (sp.id && m.userId === sp.id) return true;
+              if (sp.id && (m.userId === sp.id || m.userId === sp.id.replace('_leader', ''))) return true;
               if (cleanPnr && mPnr && cleanPnr === mPnr) return true;
               if (cleanEmail && mEmail === cleanEmail) return true;
 
@@ -360,7 +401,7 @@ export async function syncAllTeamSquadsToClubMembers(
               }
             } else {
               const newMember: ClubMember = {
-                userId: sp.id || 'player_' + Math.random().toString(36).substring(2, 10),
+                userId: sp.id ? sp.id.replace('_leader', '') : 'player_' + Math.random().toString(36).substring(2, 10),
                 email: sp.email || '',
                 fullName: cleanName,
                 phone: sp.phone || undefined,
@@ -427,58 +468,98 @@ export async function getMergedSquadAndClubMembers(
       const cleanEmail = (member.email || '').trim().toLowerCase();
       const cleanPnr = (member.personnummer || '').replace(/\D/g, '');
       const cleanNum = (member.number || '').trim();
+      const memberUserId = member.userId;
 
-      const squadIdx = updatedSquad.findIndex(sp => {
-        const spEmail = (sp.email || '').trim().toLowerCase();
-        const spName = (sp.name || '').trim().toLowerCase();
-        const spPnr = (sp.personnummer || '').replace(/\D/g, '');
-        const spNum = (sp.number || '').trim();
+      const hasPlayerRole = member.roles?.includes('player') || !member.roles?.some(r => r === 'coach' || r === 'admin');
+      const hasLeaderRole = member.roles?.some(r => r === 'coach' || r === 'admin');
 
-        if (member.userId && sp.id === member.userId) return true;
-        if (cleanPnr && spPnr && cleanPnr === spPnr) return true;
-        if (cleanEmail && spEmail === cleanEmail) return true;
+      const findSquadIdx = (targetRole: 'player' | 'leader') => {
+        return updatedSquad.findIndex(sp => {
+          if (sp.role !== targetRole) return false;
+          const baseSpId = (sp.id || '').replace('_leader', '');
+          const spEmail = (sp.email || '').trim().toLowerCase();
+          const spName = (sp.name || '').trim().toLowerCase();
+          const spPnr = (sp.personnummer || '').replace(/\D/g, '');
+          const spNum = (sp.number || '').trim();
 
-        if (spName === cleanName.toLowerCase()) {
-          if (cleanNum && spNum) {
-            return cleanNum === spNum;
+          if (memberUserId && (sp.id === memberUserId || baseSpId === memberUserId)) return true;
+          if (cleanPnr && spPnr && cleanPnr === spPnr) return true;
+          if (cleanEmail && spEmail === cleanEmail) return true;
+
+          if (spName === cleanName.toLowerCase()) {
+            if (cleanNum && spNum) {
+              return cleanNum === spNum;
+            }
+            return true;
           }
-          return true;
+          return false;
+        });
+      };
+
+      if (hasPlayerRole) {
+        const playerIdx = findSquadIdx('player');
+        if (playerIdx === -1) {
+          const newSquadPlayer: SquadPlayer = {
+            id: memberUserId || crypto.randomUUID(),
+            name: cleanName,
+            email: member.email || undefined,
+            phone: member.phone || undefined,
+            personnummer: member.personnummer || undefined,
+            position: member.position || undefined,
+            number: member.number || undefined,
+            photoUrl: member.photoUrl || undefined,
+            role: 'player',
+            roles: member.roles || ['player']
+          };
+          updatedSquad.push(newSquadPlayer);
+        } else {
+          const existingSp = updatedSquad[playerIdx];
+          const mergedRoles = Array.from(new Set([...(existingSp.roles || []), ...(member.roles || [])]));
+          updatedSquad[playerIdx] = {
+            ...existingSp,
+            email: member.email || existingSp.email,
+            phone: member.phone || existingSp.phone,
+            personnummer: member.personnummer || existingSp.personnummer,
+            position: member.position || existingSp.position,
+            number: member.number || existingSp.number,
+            photoUrl: member.photoUrl || existingSp.photoUrl,
+            role: 'player',
+            roles: mergedRoles
+          };
         }
-        return false;
-      });
+      }
 
-      if (squadIdx === -1) {
-        const isLeader = member.roles?.some(r => r === 'coach' || r === 'admin');
-        const newSquadPlayer: SquadPlayer = {
-          id: member.userId || crypto.randomUUID(),
-          name: cleanName,
-          email: member.email || undefined,
-          phone: member.phone || undefined,
-          personnummer: member.personnummer || undefined,
-          position: member.position || undefined,
-          number: member.number || undefined,
-          photoUrl: member.photoUrl || undefined,
-          role: isLeader ? 'leader' : 'player',
-        };
-        updatedSquad.push(newSquadPlayer);
-      } else {
-        const existingSp = updatedSquad[squadIdx];
-        const newEmail = member.email || existingSp.email;
-        const newPhone = member.phone || existingSp.phone;
-        const newPnr = member.personnummer || existingSp.personnummer;
-        const newPos = member.position || existingSp.position;
-        const newNum = member.number || existingSp.number;
-        const newPhoto = existingSp.photoUrl || member.photoUrl;
-
-        updatedSquad[squadIdx] = {
-          ...existingSp,
-          email: newEmail,
-          phone: newPhone,
-          personnummer: newPnr,
-          position: newPos,
-          number: newNum,
-          photoUrl: newPhoto
-        };
+      if (hasLeaderRole) {
+        const leaderIdx = findSquadIdx('leader');
+        if (leaderIdx === -1) {
+          const newSquadLeader: SquadPlayer = {
+            id: memberUserId ? `${memberUserId}_leader` : crypto.randomUUID(),
+            name: cleanName,
+            email: member.email || undefined,
+            phone: member.phone || undefined,
+            personnummer: member.personnummer || undefined,
+            position: member.position || undefined,
+            number: member.number || undefined,
+            photoUrl: member.photoUrl || undefined,
+            role: 'leader',
+            roles: member.roles || ['coach']
+          };
+          updatedSquad.push(newSquadLeader);
+        } else {
+          const existingSp = updatedSquad[leaderIdx];
+          const mergedRoles = Array.from(new Set([...(existingSp.roles || []), ...(member.roles || [])]));
+          updatedSquad[leaderIdx] = {
+            ...existingSp,
+            email: member.email || existingSp.email,
+            phone: member.phone || existingSp.phone,
+            personnummer: member.personnummer || existingSp.personnummer,
+            position: member.position || existingSp.position,
+            number: member.number || existingSp.number,
+            photoUrl: member.photoUrl || existingSp.photoUrl,
+            role: 'leader',
+            roles: mergedRoles
+          };
+        }
       }
     }
 
@@ -491,6 +572,7 @@ export async function getMergedSquadAndClubMembers(
       const spName = (sp.name || '').trim().toLowerCase();
       const spPnr = (sp.personnummer || '').replace(/\D/g, '');
       const spNum = (sp.number || '').trim();
+      const baseSpId = (sp.id || '').replace('_leader', '');
 
       const m = members.find(mem => {
         const mEmail = (mem.email || '').trim().toLowerCase();
@@ -498,7 +580,7 @@ export async function getMergedSquadAndClubMembers(
         const mPnr = (mem.personnummer || '').replace(/\D/g, '');
         const mNum = (mem.number || '').trim();
 
-        if (sp.id && mem.userId === sp.id) return true;
+        if (sp.id && (mem.userId === sp.id || mem.userId === baseSpId)) return true;
         if (spPnr && mPnr && spPnr === mPnr) return true;
         if (spEmail && mEmail === spEmail) return true;
 

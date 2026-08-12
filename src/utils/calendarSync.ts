@@ -8,6 +8,7 @@ export interface SyncResult {
   updatedSessions: TrainingSession[];
   addedCount: number;
   updatedCount: number;
+  removedCount: number;
   skippedCount: number;
   lastSyncedAt: number;
 }
@@ -24,6 +25,7 @@ export async function syncTeamCalendar(
       updatedSessions: existingSessions,
       addedCount: 0,
       updatedCount: 0,
+      removedCount: 0,
       skippedCount: 0,
       lastSyncedAt: Date.now()
     };
@@ -45,6 +47,7 @@ export async function syncTeamCalendar(
         updatedSessions: existingSessions,
         addedCount: 0,
         updatedCount: 0,
+        removedCount: 0,
         skippedCount: 0,
         lastSyncedAt: Date.now()
       };
@@ -60,26 +63,44 @@ export async function syncTeamCalendar(
 
     const currentSessionsList = [...existingSessions];
     const newSessionsToAdd: TrainingSession[] = [];
+    const matchedExistingIds = new Set<string>();
+
     let skippedCount = 0;
     let updatedCount = 0;
+    let removedCount = 0;
+
+    // Calculate time horizon of external events
+    let minIcsDate = Infinity;
+    let maxIcsDate = -Infinity;
+    for (const ev of events) {
+      if (ev.date < minIcsDate) minIcsDate = ev.date;
+      if (ev.date > maxIcsDate) maxIcsDate = ev.date;
+    }
+
+    const nowTimestamp = Date.now();
+    const horizonStart = Math.min(minIcsDate, nowTimestamp - 24 * 60 * 60 * 1000);
+    const horizonEnd = maxIcsDate + 24 * 60 * 60 * 1000;
 
     for (const ev of events) {
+      // 1. Match by externalId if present
       const matchByExternalId = ev.externalId ? currentSessionsList.find(s => s.externalId === ev.externalId) : undefined;
       
       let matchByProximity = undefined;
       if (!matchByExternalId) {
+        // 2. Proximity matching ONLY applies to sessions without an externalId (manually created local sessions)
         matchByProximity = currentSessionsList.find(s => {
-          return !s.externalId && formatToYYYYMMDD(s.date) === formatToYYYYMMDD(ev.date) && s.startTime === ev.startTime;
+          if (matchedExistingIds.has(s.id) || s.externalId) return false;
+          // Match same date and start time
+          return formatToYYYYMMDD(s.date) === formatToYYYYMMDD(ev.date) && s.startTime === ev.startTime;
         });
 
         if (!matchByProximity && ev.title) {
           const cleanEvTitle = ev.title.replace(/^\[INSTÄLLT\]\s*/i, '').trim().toLowerCase();
           matchByProximity = currentSessionsList.find(s => {
-            if (s.externalId) return false;
+            if (matchedExistingIds.has(s.id) || s.externalId) return false;
+            // Match same date and identical title (excluding [INSTÄLLT])
             const cleanSTitle = s.title.replace(/^\[INSTÄLLT\]\s*/i, '').trim().toLowerCase();
-            const isSameTitle = cleanSTitle === cleanEvTitle || (cleanSTitle.includes('träning') && cleanEvTitle.includes('träning'));
-            const dayDiff = Math.abs(s.date - ev.date) / (1000 * 60 * 60 * 24);
-            return isSameTitle && dayDiff <= 4;
+            return formatToYYYYMMDD(s.date) === formatToYYYYMMDD(ev.date) && cleanSTitle === cleanEvTitle;
           });
         }
       }
@@ -87,6 +108,8 @@ export async function syncTeamCalendar(
       const matchedSession = matchByExternalId || matchByProximity;
 
       if (matchedSession) {
+        matchedExistingIds.add(matchedSession.id);
+
         if ((matchedSession.isCompleted || matchedSession.isIgnored) && !forceOverwrite) {
           skippedCount++;
           continue;
@@ -128,6 +151,7 @@ export async function syncTeamCalendar(
         }
 
         if (changed) {
+          updated.updatedAt = Date.now();
           currentSessionsList[sessionIndex] = updated;
           updatedCount++;
         }
@@ -162,14 +186,70 @@ export async function syncTeamCalendar(
       }
     }
 
-    const finalSessions = [...newSessionsToAdd, ...currentSessionsList];
+    // Filter out auto-synced sessions that were removed from external ICS feed and have no local edits/planning
+    const finalSessionsList: TrainingSession[] = [];
+    for (const session of currentSessionsList) {
+      if (matchedExistingIds.has(session.id)) {
+        finalSessionsList.push(session);
+        continue;
+      }
+
+      // If it has no externalId, it was created manually in the app -> keep it
+      if (!session.externalId) {
+        finalSessionsList.push(session);
+        continue;
+      }
+
+      // If it is outside the horizon range of the ICS feed, keep it
+      if (session.date < horizonStart || session.date > horizonEnd) {
+        finalSessionsList.push(session);
+        continue;
+      }
+
+      // Check if session has user edits or planning content
+      const hasLocalEdits = 
+        session.isLocallyEdited || 
+        session.isCompleted || 
+        session.isIgnored || 
+        (session.moments && session.moments.length > 0) || 
+        (session.attendance && session.attendance.length > 0) || 
+        (session.rsvps && Object.keys(session.rsvps).length > 0) || 
+        (session.notes && session.notes.trim().length > 0);
+
+      if (hasLocalEdits) {
+        // Keep user's planned session even if removed from external feed
+        finalSessionsList.push(session);
+      } else {
+        // Unedited auto-synced session removed from external feed -> remove it
+        removedCount++;
+      }
+    }
+
+    const combinedSessions = [...newSessionsToAdd, ...finalSessionsList];
+    combinedSessions.sort((a, b) => {
+      if (a.date !== b.date) return a.date - b.date;
+      return (a.startTime || '').localeCompare(b.startTime || '');
+    });
+
+    const addedCount = newSessionsToAdd.length;
+    let message = '';
+    if (addedCount === 0 && updatedCount === 0 && removedCount === 0) {
+      message = 'Kalendern är redan helt uppdaterad (inga ändringar hittades).';
+    } else {
+      const parts: string[] = [];
+      if (addedCount > 0) parts.push(`${addedCount} nya pass`);
+      if (updatedCount > 0) parts.push(`${updatedCount} uppdaterade pass`);
+      if (removedCount > 0) parts.push(`${removedCount} borttagna/inställda pass`);
+      message = `Synkning klar! ${parts.join(', ')}.`;
+    }
 
     return {
       success: true,
-      message: `Synkning klar! Läste in ${newSessionsToAdd.length} nya pass och uppdaterade ${updatedCount} pass.`,
-      updatedSessions: finalSessions,
-      addedCount: newSessionsToAdd.length,
+      message,
+      updatedSessions: combinedSessions,
+      addedCount,
       updatedCount,
+      removedCount,
       skippedCount,
       lastSyncedAt: Date.now()
     };
@@ -180,6 +260,7 @@ export async function syncTeamCalendar(
       updatedSessions: existingSessions,
       addedCount: 0,
       updatedCount: 0,
+      removedCount: 0,
       skippedCount: 0,
       lastSyncedAt: Date.now()
     };

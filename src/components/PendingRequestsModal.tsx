@@ -174,8 +174,9 @@ export const PendingRequestsModal: React.FC<PendingRequestsModalProps> = ({
         const squadSnap = await getDoc(squadRef);
         let squad: SquadPlayer[] = squadSnap.exists() ? (squadSnap.data().squad || []) : [];
 
-        const isLeader = role === 'coach' || role === 'admin';
-        const squadRole: 'leader' | 'player' = isLeader ? 'leader' : 'player';
+        const memberRoles = existingIdx !== -1 ? (members[existingIdx].roles || [role]) : [role];
+        const isPlayer = memberRoles.includes('player');
+        const squadRole: 'leader' | 'player' = isPlayer ? 'player' : 'leader';
 
         const squadIdx = squad.findIndex(sp => sp.id === req.uid || (sp.email && sp.email.toLowerCase() === cleanEmail));
         if (squadIdx !== -1) {

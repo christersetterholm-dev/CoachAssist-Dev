@@ -209,43 +209,81 @@ export default function SquadManager({ squad, onUpdateSquad, activeClubId, activ
     for (const member of membersToAdd) {
       const cleanName = member.fullName.trim();
       const cleanEmail = (member.email || '').trim().toLowerCase();
+      const memberUserId = member.userId;
 
-      const idx = updatedSquad.findIndex(sp => 
-        (member.userId && sp.id === member.userId) ||
-        (cleanEmail && sp.email && sp.email.trim().toLowerCase() === cleanEmail) ||
-        (sp.name.trim().toLowerCase() === cleanName.toLowerCase())
-      );
+      const hasPlayerRole = member.roles?.includes('player') || !member.roles?.some(r => r === 'coach' || r === 'admin');
+      const hasLeaderRole = member.roles?.some(r => r === 'coach' || r === 'admin');
 
-      const isLeader = member.roles?.some(r => r === 'coach' || r === 'admin');
-      const targetRole: 'leader' | 'player' = isLeader ? 'leader' : 'player';
+      const findIdx = (targetRole: 'player' | 'leader') => {
+        return updatedSquad.findIndex(sp => {
+          if (sp.role !== targetRole) return false;
+          const baseSpId = (sp.id || '').replace('_leader', '');
+          if (memberUserId && (sp.id === memberUserId || baseSpId === memberUserId)) return true;
+          if (cleanEmail && sp.email && sp.email.trim().toLowerCase() === cleanEmail) return true;
+          return sp.name.trim().toLowerCase() === cleanName.toLowerCase();
+        });
+      };
 
-      if (idx !== -1) {
-        updatedSquad[idx] = {
-          ...updatedSquad[idx],
-          name: cleanName,
-          email: member.email || updatedSquad[idx].email,
-          phone: member.phone || updatedSquad[idx].phone,
-          personnummer: member.personnummer || updatedSquad[idx].personnummer,
-          position: member.position || updatedSquad[idx].position,
-          number: member.number || updatedSquad[idx].number,
-          photoUrl: member.photoUrl || updatedSquad[idx].photoUrl,
-          role: targetRole
-        };
-        countUpdated++;
-      } else {
-        const newPlayer: SquadPlayer = {
-          id: member.userId || crypto.randomUUID(),
-          name: cleanName,
-          email: member.email || undefined,
-          phone: member.phone || undefined,
-          personnummer: member.personnummer || undefined,
-          position: member.position || undefined,
-          number: member.number || undefined,
-          photoUrl: member.photoUrl || undefined,
-          role: targetRole
-        };
-        updatedSquad.push(newPlayer);
-        countAdded++;
+      if (hasPlayerRole) {
+        const playerIdx = findIdx('player');
+        if (playerIdx !== -1) {
+          updatedSquad[playerIdx] = {
+            ...updatedSquad[playerIdx],
+            name: cleanName,
+            email: member.email || updatedSquad[playerIdx].email,
+            phone: member.phone || updatedSquad[playerIdx].phone,
+            personnummer: member.personnummer || updatedSquad[playerIdx].personnummer,
+            position: member.position || updatedSquad[playerIdx].position,
+            number: member.number || updatedSquad[playerIdx].number,
+            photoUrl: member.photoUrl || updatedSquad[playerIdx].photoUrl,
+            role: 'player'
+          };
+          countUpdated++;
+        } else {
+          updatedSquad.push({
+            id: memberUserId || crypto.randomUUID(),
+            name: cleanName,
+            email: member.email || undefined,
+            phone: member.phone || undefined,
+            personnummer: member.personnummer || undefined,
+            position: member.position || undefined,
+            number: member.number || undefined,
+            photoUrl: member.photoUrl || undefined,
+            role: 'player'
+          });
+          countAdded++;
+        }
+      }
+
+      if (hasLeaderRole) {
+        const leaderIdx = findIdx('leader');
+        if (leaderIdx !== -1) {
+          updatedSquad[leaderIdx] = {
+            ...updatedSquad[leaderIdx],
+            name: cleanName,
+            email: member.email || updatedSquad[leaderIdx].email,
+            phone: member.phone || updatedSquad[leaderIdx].phone,
+            personnummer: member.personnummer || updatedSquad[leaderIdx].personnummer,
+            position: member.position || updatedSquad[leaderIdx].position,
+            number: member.number || updatedSquad[leaderIdx].number,
+            photoUrl: member.photoUrl || updatedSquad[leaderIdx].photoUrl,
+            role: 'leader'
+          };
+          countUpdated++;
+        } else {
+          updatedSquad.push({
+            id: memberUserId ? `${memberUserId}_leader` : crypto.randomUUID(),
+            name: cleanName,
+            email: member.email || undefined,
+            phone: member.phone || undefined,
+            personnummer: member.personnummer || undefined,
+            position: member.position || undefined,
+            number: member.number || undefined,
+            photoUrl: member.photoUrl || undefined,
+            role: 'leader'
+          });
+          countAdded++;
+        }
       }
     }
 
@@ -391,6 +429,7 @@ export default function SquadManager({ squad, onUpdateSquad, activeClubId, activ
   const onCropComplete = async (croppedBlob: Blob) => {
     setImageToCrop(null);
     setIsUploading(true);
+    let finalPhotoUrl = '';
 
     // 1. First try server persistent upload
     try {
@@ -406,39 +445,50 @@ export default function SquadManager({ squad, onUpdateSquad, activeClubId, activ
       if (res.ok) {
         const data = await res.json();
         if (data.url) {
+          finalPhotoUrl = data.url;
           setNewPhotoUrl(data.url);
-          setIsUploading(false);
-          return;
         }
       }
     } catch (serverErr) {
       console.warn('Server upload fallback:', serverErr);
     }
 
-    // 2. Try Firebase / Local Storage abstraction
-    try {
-      const extension = croppedBlob.type === 'image/png' ? 'png' : 'jpg';
-      const fileName = `photo_${Date.now()}.${extension}`;
-      const playerPath = editingPlayer ? `squad/${editingPlayer.id}/${fileName}` : `squad/temp/${fileName}`;
-      const storageRef = ref(storage, playerPath);
-      
-      const uploadResult = await uploadBytes(storageRef, croppedBlob);
-      const downloadURL = await getDownloadURL(uploadResult.ref);
-
-      setNewPhotoUrl(downloadURL);
-    } catch (error) {
-      console.warn("Storage upload fallback to Data URL:", error);
-      // 3. Fallback: convert cropped blob to Data URL so photo upload never fails
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        if (typeof reader.result === 'string') {
-          setNewPhotoUrl(reader.result);
-        }
-      };
-      reader.readAsDataURL(croppedBlob);
-    } finally {
-      setIsUploading(false);
+    if (!finalPhotoUrl) {
+      // 2. Try Firebase / Storage abstraction
+      try {
+        const extension = croppedBlob.type === 'image/png' ? 'png' : 'jpg';
+        const fileName = `photo_${Date.now()}.${extension}`;
+        const playerPath = editingPlayer ? `squad/${editingPlayer.id}/${fileName}` : `squad/temp/${fileName}`;
+        const storageRef = ref(storage, playerPath);
+        
+        const uploadResult = await uploadBytes(storageRef, croppedBlob);
+        finalPhotoUrl = await getDownloadURL(uploadResult.ref);
+        setNewPhotoUrl(finalPhotoUrl);
+      } catch (error) {
+        console.warn("Storage upload fallback to Data URL:", error);
+        // 3. Fallback: convert cropped blob to Data URL so photo upload never fails
+        const reader = new FileReader();
+        await new Promise<void>((resolve) => {
+          reader.onloadend = () => {
+            if (typeof reader.result === 'string') {
+              finalPhotoUrl = reader.result;
+              setNewPhotoUrl(finalPhotoUrl);
+            }
+            resolve();
+          };
+          reader.readAsDataURL(croppedBlob);
+        });
+      }
     }
+
+    // Auto-update editingPlayer in squad if editing existing player
+    if (editingPlayer && finalPhotoUrl) {
+      onUpdateSquad(squad.map(p => 
+        p.id === editingPlayer.id ? { ...p, photoUrl: finalPhotoUrl } : p
+      ));
+    }
+
+    setIsUploading(false);
   };
 
   // Import conflict state
@@ -474,7 +524,7 @@ export default function SquadManager({ squad, onUpdateSquad, activeClubId, activ
 
         if (idx !== -1) {
           const existing = updatedSquad[idx];
-          const targetRole: 'leader' | 'player' = (existing.role === 'leader' || np.role === 'leader') ? 'leader' : 'player';
+          const targetRole: 'leader' | 'player' = (existing.role === 'player' || np.role === 'player') ? 'player' : (existing.role === 'leader' || np.role === 'leader') ? 'leader' : 'player';
           updatedSquad[idx] = {
             ...existing,
             position: np.position || existing.position,
@@ -664,7 +714,7 @@ export default function SquadManager({ squad, onUpdateSquad, activeClubId, activ
   };
 
   return (
-    <div className="w-full max-w-4xl lg:max-w-5xl xl:max-w-6xl 2xl:max-w-7xl mx-auto p-4 sm:p-6 pb-32 min-w-0">
+    <div className="w-full max-w-4xl lg:max-w-5xl xl:max-w-6xl 2xl:max-w-7xl mx-auto p-4 sm:p-6 pb-16 min-w-0">
       {fetchStatusMessage && (
         <div className={`p-4 mb-6 rounded-2xl border text-xs sm:text-sm font-extrabold flex items-center justify-between shadow-sm animate-in fade-in ${
           fetchStatusMessage.type === 'success' 

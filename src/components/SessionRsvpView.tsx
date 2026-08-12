@@ -225,6 +225,80 @@ export const SessionRsvpView: React.FC<SessionRsvpViewProps> = ({
     return { attending, partial, declined, unanswered, total: safeSquad.length, presentCount };
   }, [safeSquad, rsvps, attendance]);
 
+  const playerStats = useMemo(() => {
+    const playersList = allMembers.filter(p => p.role !== 'leader');
+    
+    let attending = 0;
+    let partial = 0;
+    let declined = 0;
+    let unanswered = 0;
+    let present = 0;
+
+    playersList.forEach(p => {
+      const rsvp = rsvps[p.id];
+      if (!rsvp) {
+        unanswered++;
+      } else if (rsvp.status === 'attending') {
+        attending++;
+      } else if (rsvp.status === 'partial') {
+        partial++;
+      } else if (rsvp.status === 'declined') {
+        declined++;
+      }
+
+      if (attendance.includes(p.id)) {
+        present++;
+      }
+    });
+
+    return {
+      total: playersList.length,
+      attending,
+      partial,
+      declined,
+      unanswered,
+      present,
+      coming: attending + partial
+    };
+  }, [allMembers, rsvps, attendance]);
+
+  const leaderStats = useMemo(() => {
+    const leadersList = allMembers.filter(p => p.role === 'leader');
+    
+    let attending = 0;
+    let partial = 0;
+    let declined = 0;
+    let unanswered = 0;
+    let present = 0;
+
+    leadersList.forEach(p => {
+      const rsvp = rsvps[p.id];
+      if (!rsvp) {
+        unanswered++;
+      } else if (rsvp.status === 'attending') {
+        attending++;
+      } else if (rsvp.status === 'partial') {
+        partial++;
+      } else if (rsvp.status === 'declined') {
+        declined++;
+      }
+
+      if (attendance.includes(p.id)) {
+        present++;
+      }
+    });
+
+    return {
+      total: leadersList.length,
+      attending,
+      partial,
+      declined,
+      unanswered,
+      present,
+      coming: attending + partial
+    };
+  }, [allMembers, rsvps, attendance]);
+
   // Toggle individual presence
   const handleTogglePresence = (id: string) => {
     if (!id) return;
@@ -249,6 +323,30 @@ export const SessionRsvpView: React.FC<SessionRsvpViewProps> = ({
       updatedAt: Date.now()
     });
     setSavedToast('Alla medlemmar och provspelare markerades som närvarande.');
+    setTimeout(() => setSavedToast(null), 3000);
+  };
+
+  // Mark all registered (rsvp'd attending or partial) as present
+  const handleMarkAllRsvpdAsPresent = () => {
+    const rsvpdIds = Object.entries(rsvps)
+      .filter(([_, rsvp]) => {
+        const r = rsvp as PlayerRsvp;
+        return r && (r.status === 'attending' || r.status === 'partial');
+      })
+      .map(([playerId]) => playerId);
+
+    if (rsvpdIds.length === 0) {
+      alert("Det finns inga anmälda spelare att markera som närvarande.");
+      return;
+    }
+
+    const mergedAttendance = Array.from(new Set([...attendance, ...rsvpdIds]));
+    onUpdateSession({
+      ...session,
+      attendance: mergedAttendance,
+      updatedAt: Date.now()
+    });
+    setSavedToast('Alla anmälda spelare har markerats som närvarande.');
     setTimeout(() => setSavedToast(null), 3000);
   };
 
@@ -561,6 +659,129 @@ export const SessionRsvpView: React.FC<SessionRsvpViewProps> = ({
         </div>
       )}
 
+      {/* Detailed Attendance & Registration Breakdown */}
+      <div className="p-5 rounded-3xl bg-white dark:bg-zinc-900 border border-zinc-150 dark:border-zinc-800 shadow-sm space-y-4">
+        <div className="flex items-center justify-between border-b border-zinc-100 dark:border-zinc-800 pb-3">
+          <div className="flex items-center gap-2">
+            <UserCheck className="text-indigo-600 dark:text-indigo-400" size={18} />
+            <h3 className="font-extrabold text-sm text-zinc-900 dark:text-white uppercase tracking-wider">
+              Närvaro- & Anmälningsöversikt
+            </h3>
+          </div>
+          <span className="text-[10px] bg-indigo-50 dark:bg-indigo-950 text-indigo-650 dark:text-indigo-400 font-extrabold px-2 py-0.5 rounded-full uppercase tracking-wider">
+            Summering
+          </span>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          {/* Spelare Section */}
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <div className="p-1.5 rounded-lg bg-indigo-50 dark:bg-indigo-950/40 text-indigo-600 dark:text-indigo-400">
+                  <Users size={16} />
+                </div>
+                <span className="font-black text-sm text-zinc-800 dark:text-zinc-200">Spelare</span>
+              </div>
+              <div className="text-right">
+                <span className="text-xs text-zinc-500 dark:text-zinc-400">Totalt i truppen: </span>
+                <span className="font-extrabold text-sm text-zinc-900 dark:text-white">{playerStats.total}</span>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4 bg-zinc-50 dark:bg-zinc-950/40 p-3 rounded-2xl border border-zinc-100 dark:border-zinc-800/60">
+              <div>
+                <span className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-wider mb-0.5">Anmälda (Kan delta)</span>
+                <div className="flex items-baseline gap-1">
+                  <span className="text-xl font-black text-emerald-600 dark:text-emerald-450">{playerStats.coming}</span>
+                  <span className="text-[10px] text-zinc-500 dark:text-zinc-400 font-bold">st</span>
+                </div>
+              </div>
+              <div>
+                <span className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-wider mb-0.5">Deltar (Närvarande)</span>
+                <div className="flex items-baseline gap-1">
+                  <span className="text-xl font-black text-indigo-600 dark:text-indigo-400">{playerStats.present}</span>
+                  <span className="text-[10px] text-zinc-500 dark:text-zinc-400 font-bold">av {playerStats.total}</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Visual Attendance Progress Bar */}
+            <div className="space-y-1">
+              <div className="flex justify-between text-[10px] font-bold text-zinc-500 dark:text-zinc-400">
+                <span>Deltagande: {playerStats.total > 0 ? Math.round((playerStats.present / playerStats.total) * 100) : 0}%</span>
+                <span>Anmälda: {playerStats.total > 0 ? Math.round((playerStats.coming / playerStats.total) * 100) : 0}%</span>
+              </div>
+              <div className="relative w-full h-2 bg-zinc-100 dark:bg-zinc-800 rounded-full overflow-hidden">
+                {/* Anmälda bar (bg-emerald-500/30) */}
+                <div 
+                  className="absolute top-0 left-0 h-full bg-emerald-500/30 dark:bg-emerald-450/25 rounded-full transition-all"
+                  style={{ width: `${playerStats.total > 0 ? (playerStats.coming / playerStats.total) * 100 : 0}%` }}
+                />
+                {/* Present bar (bg-indigo-600) */}
+                <div 
+                  className="absolute top-0 left-0 h-full bg-indigo-600 dark:bg-indigo-500 rounded-full transition-all"
+                  style={{ width: `${playerStats.total > 0 ? (playerStats.present / playerStats.total) * 100 : 0}%` }}
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* Ledare/Tränare Section */}
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <div className="p-1.5 rounded-lg bg-amber-50 dark:bg-amber-950/40 text-amber-600 dark:text-amber-400">
+                  <ShieldCheck size={16} />
+                </div>
+                <span className="font-black text-sm text-zinc-800 dark:text-zinc-200">Tränare & Ledare</span>
+              </div>
+              <div className="text-right">
+                <span className="text-xs text-zinc-500 dark:text-zinc-400">Totalt i truppen: </span>
+                <span className="font-extrabold text-sm text-zinc-900 dark:text-white">{leaderStats.total}</span>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4 bg-zinc-50 dark:bg-zinc-950/40 p-3 rounded-2xl border border-zinc-100 dark:border-zinc-800/60">
+              <div>
+                <span className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-wider mb-0.5">Anmälda (Kan delta)</span>
+                <div className="flex items-baseline gap-1">
+                  <span className="text-xl font-black text-emerald-600 dark:text-emerald-450">{leaderStats.coming}</span>
+                  <span className="text-[10px] text-zinc-500 dark:text-zinc-400 font-bold">st</span>
+                </div>
+              </div>
+              <div>
+                <span className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-wider mb-0.5">Deltar (Närvarande)</span>
+                <div className="flex items-baseline gap-1">
+                  <span className="text-xl font-black text-indigo-600 dark:text-indigo-400">{leaderStats.present}</span>
+                  <span className="text-[10px] text-zinc-500 dark:text-zinc-400 font-bold">av {leaderStats.total}</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Visual Attendance Progress Bar for Leaders */}
+            <div className="space-y-1">
+              <div className="flex justify-between text-[10px] font-bold text-zinc-500 dark:text-zinc-400">
+                <span>Deltagande: {leaderStats.total > 0 ? Math.round((leaderStats.present / leaderStats.total) * 100) : 0}%</span>
+                <span>Anmälda: {leaderStats.total > 0 ? Math.round((leaderStats.coming / leaderStats.total) * 100) : 0}%</span>
+              </div>
+              <div className="relative w-full h-2 bg-zinc-100 dark:bg-zinc-800 rounded-full overflow-hidden">
+                {/* Anmälda bar (bg-emerald-500/30) */}
+                <div 
+                  className="absolute top-0 left-0 h-full bg-emerald-500/30 dark:bg-emerald-450/25 rounded-full transition-all"
+                  style={{ width: `${leaderStats.total > 0 ? (leaderStats.coming / leaderStats.total) * 100 : 0}%` }}
+                />
+                {/* Present bar (bg-indigo-600) */}
+                <div 
+                  className="absolute top-0 left-0 h-full bg-indigo-600 dark:bg-indigo-500 rounded-full transition-all"
+                  style={{ width: `${leaderStats.total > 0 ? (leaderStats.present / leaderStats.total) * 100 : 0}%` }}
+                />
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
       {/* Top Stats Overview Cards */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         <button
@@ -835,6 +1056,14 @@ export const SessionRsvpView: React.FC<SessionRsvpViewProps> = ({
             >
               <UserPlus size={14} className="text-indigo-600 dark:text-indigo-400" />
               <span>+ Provspelare</span>
+            </button>
+
+            <button
+              onClick={handleMarkAllRsvpdAsPresent}
+              className="px-3 py-2 rounded-xl bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 hover:border-emerald-500 text-emerald-700 dark:text-emerald-400 font-bold text-xs flex items-center gap-1.5 shadow-sm transition-all cursor-pointer hover:bg-emerald-50 dark:hover:bg-emerald-950/40"
+            >
+              <CheckCheck size={14} />
+              <span>Markera alla anmälda som närvarande</span>
             </button>
 
             <button

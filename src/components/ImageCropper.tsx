@@ -87,7 +87,7 @@ export default function ImageCropper({ image, onCropComplete, onCancel, aspect =
     const cropWidth = Math.round(pixelCrop.width);
     const cropHeight = Math.round(pixelCrop.height);
 
-    const maxSize = 512; // Enforce high quality resolution for team logos & profile pictures
+    const maxSize = aspect === 1 ? 280 : 400; // Optimal resolution for profile pictures, avatars & team logos
     let targetWidth = cropWidth;
     let targetHeight = cropHeight;
 
@@ -112,10 +112,9 @@ export default function ImageCropper({ image, onCropComplete, onCancel, aspect =
     ctx.drawImage(sourceCanvas, -cropX, -cropY);
 
     return new Promise((resolve) => {
-      // Prefer lossless PNG to support transparent backgrounds (essential for logo overlays)
-      const isPng = imageSrc.startsWith('data:image/png') || imageSrc.toLowerCase().includes('.png') || imageSrc.toLowerCase().includes('.svg') || !imageSrc.startsWith('data:');
-      const mimeType = isPng ? 'image/png' : 'image/jpeg';
-      const quality = 0.95;
+      const isTransparentPng = imageSrc.startsWith('data:image/png') || imageSrc.toLowerCase().includes('.png') || imageSrc.toLowerCase().includes('.svg');
+      const mimeType = isTransparentPng ? 'image/png' : 'image/jpeg';
+      const quality = 0.85;
 
       canvas.toBlob((file) => {
         if (file) resolve(file);
