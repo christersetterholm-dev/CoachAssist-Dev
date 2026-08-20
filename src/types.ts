@@ -25,6 +25,7 @@ export interface Lineup {
   matchTitle: string;
   teamName?: string;
   date: number;
+  sessionId?: string; // Optional link to a training or match session
   players: LineupPlayer[];
   playerScale?: number; // 0.5 to 1.5
   nameTagStyle?: 'light' | 'dark';
@@ -38,6 +39,8 @@ export interface Lineup {
   isArchived?: boolean;
   isPublishedToPlayers?: boolean;
   teamLogoUrl?: string;
+  createdAt?: number;
+  updatedAt?: number;
   pitchType?: 'classic' | 'grass' | 'blue' | 'solid-blue' | 'blue-stripes' | 'blue-grass' | 'solid-white' | 'solid-black';
   orientation?: 'vertical' | 'landscape';
   attackDirection?: 'up' | 'down' | 'left' | 'right';
@@ -188,6 +191,8 @@ export interface TrainingSession {
   date: number; // Timestamp
   startTime: string; // "HH:MM"
   endTime?: string; // Optional
+  type?: 'training' | 'match' | 'cup' | 'other';
+  category?: 'training' | 'match' | 'cup' | 'other';
   location?: string; // Location of the event
   moments: SessionMoment[];
   attendance?: string[]; // Player IDs or names
@@ -204,6 +209,7 @@ export interface TrainingSession {
   notes?: string;
   description?: string;
   externalId?: string;
+  lineupId?: string; // Optional link to a match lineup
   createdAt: number;
   updatedAt: number;
 }

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Trophy, Share2, Crown, Star, ChevronDown, Eye, EyeOff, Plus, Lock, Trash2, Loader2, Edit2, Check, User } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { SquadPlayer, Exercise, Period, PeriodStandings } from '../types';
@@ -58,27 +58,44 @@ export default function Leaderboard({
   const [sharedData, setSharedData] = useState<any>(null);
   const [isLoadingShared, setIsLoadingShared] = useState(!!sharedId);
 
+  const fetchShared = useCallback(async () => {
+    if (!sharedId) return;
+    setIsLoadingShared(true);
+
+    const maxAttempts = 3;
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        const docRef = doc(db, 'shared_leaderboards', sharedId);
+        const docSnap = await getDoc(docRef);
+        if (docSnap.exists() && docSnap.data()) {
+          const rawData = docSnap.data();
+          const validData = (rawData && rawData.standings) 
+            ? rawData 
+            : (rawData && rawData.data ? (rawData.data.standings ? rawData.data : rawData.data) : rawData);
+
+          if (validData && (validData.standings || validData.name)) {
+            setSharedData(validData);
+            setIsLoadingShared(false);
+            return;
+          }
+        }
+      } catch (error) {
+        console.warn(`[Leaderboard] Fetch attempt ${attempt} failed:`, error);
+      }
+
+      if (attempt < maxAttempts) {
+        await new Promise(res => setTimeout(res, attempt * 800));
+      }
+    }
+
+    setIsLoadingShared(false);
+  }, [sharedId]);
+
   useEffect(() => {
     if (sharedId) {
-      const fetchShared = async () => {
-        setIsLoadingShared(true);
-        const path = `shared_leaderboards/${sharedId}`;
-        try {
-          const docRef = doc(db, 'shared_leaderboards', sharedId);
-          const docSnap = await getDoc(docRef);
-          if (docSnap.exists()) {
-            setSharedData(docSnap.data());
-          }
-        } catch (error) {
-          console.error("Error fetching shared leaderboard:", error);
-          handleFirestoreError(error, OperationType.GET, path);
-        } finally {
-          setIsLoadingShared(false);
-        }
-      };
       fetchShared();
     }
-  }, [sharedId]);
+  }, [sharedId, fetchShared]);
 
   useEffect(() => {
     if (!sharedId && currentPeriodId && selectedPeriodId === 'current') {
@@ -346,13 +363,20 @@ export default function Leaderboard({
   if (sharedId && !sharedData) {
     return (
       <div className="flex flex-col items-center justify-center py-20 px-4 text-center">
-        <div className="w-20 h-20 bg-red-50 dark:bg-red-900/20 rounded-3xl flex items-center justify-center text-red-600 dark:text-red-400 mb-6">
-          <Trash2 size={40} />
+        <div className="w-20 h-20 bg-amber-50 dark:bg-amber-900/20 rounded-3xl flex items-center justify-center text-amber-600 dark:text-amber-400 mb-6">
+          <Trophy size={40} />
         </div>
-        <h3 className="text-xl font-bold text-zinc-900 dark:text-white mb-2">Länken hittades inte</h3>
-        <p className="text-zinc-500 dark:text-zinc-400 max-w-xs">
-          Denna poängliga kan ha tagits bort eller så är länken felaktig.
+        <h3 className="text-xl font-bold text-zinc-900 dark:text-white mb-2">Poängligan kunde inte hämtas</h3>
+        <p className="text-zinc-500 dark:text-zinc-400 max-w-xs mb-6 text-sm">
+          Det kan beror på en tillfällig fördröjning i nätverket. Klicka nedan för att försöka hämta poängligan igen.
         </p>
+        <button
+          onClick={() => fetchShared()}
+          className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold px-5 py-2.5 rounded-xl text-sm transition-all shadow-md active:scale-95"
+        >
+          <Loader2 size={16} className={isLoadingShared ? 'animate-spin' : 'hidden'} />
+          <span>Försök igen</span>
+        </button>
       </div>
     );
   }

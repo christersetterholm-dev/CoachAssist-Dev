@@ -113,6 +113,18 @@ function initDatabase(): InstanceType<typeof Database> {
     try {
       database.exec('ALTER TABLE users ADD COLUMN temp_password TEXT;');
     } catch (_) {}
+    try {
+      database.exec('ALTER TABLE users ADD COLUMN google_id TEXT;');
+    } catch (_) {}
+    try {
+      database.exec('ALTER TABLE users ADD COLUMN google_email TEXT;');
+    } catch (_) {}
+    try {
+      database.exec('ALTER TABLE users ADD COLUMN avatar_url TEXT;');
+    } catch (_) {}
+    try {
+      database.exec("ALTER TABLE users ADD COLUMN auth_provider TEXT DEFAULT 'local';");
+    } catch (_) {}
   };
 
   try {
@@ -1411,6 +1423,431 @@ async function startServer() {
     }
   });
 
+  // Get Auth Config (Google Client ID)
+  app.get('/api/auth/config', (req, res) => {
+    const googleClientId = process.env.GOOGLE_CLIENT_ID || process.env.VITE_GOOGLE_CLIENT_ID || '';
+    res.json({
+      googleClientId,
+      googleAuthEnabled: !!googleClientId
+    });
+  });
+
+  // Verify Google ID token or Access token
+  async function verifyGoogleToken(params: { idToken?: string; accessToken?: string; credential?: string }): Promise<{
+    googleId: string;
+    email: string;
+    emailVerified: boolean;
+    name?: string;
+    picture?: string;
+  } | null> {
+    const token = params.idToken || params.credential;
+    if (token) {
+      try {
+        const response = await fetch(`https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(token)}`);
+        if (response.ok) {
+          const data: any = await response.json();
+          if (data && data.sub && data.email) {
+            return {
+              googleId: data.sub,
+              email: data.email.trim().toLowerCase(),
+              emailVerified: data.email_verified === 'true' || data.email_verified === true,
+              name: data.name || data.given_name || undefined,
+              picture: data.picture || undefined
+            };
+          }
+        }
+      } catch (err) {
+        console.error('Error verifying Google ID token with tokeninfo:', err);
+      }
+    }
+
+    if (params.accessToken) {
+      try {
+        const response = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+          headers: {
+            'Authorization': `Bearer ${params.accessToken}`
+          }
+        });
+        if (response.ok) {
+          const data: any = await response.json();
+          if (data && data.sub && data.email) {
+            return {
+              googleId: data.sub,
+              email: data.email.trim().toLowerCase(),
+              emailVerified: data.email_verified === 'true' || data.email_verified === true,
+              name: data.name || data.given_name || undefined,
+              picture: data.picture || undefined
+            };
+          }
+        }
+      } catch (err) {
+        console.error('Error verifying Google access token with userinfo:', err);
+      }
+    }
+
+    return null;
+  }
+
+  // Login / Register with Google
+  app.post('/api/auth/google', loginRateLimiter, async (req, res) => {
+    try {
+      const googleUser = await verifyGoogleToken(req.body);
+      if (!googleUser) {
+        return res.status(400).json({ error: 'Google-inloggningen kunde inte verifieras. Vänligen försök igen.' });
+      }
+
+      if (!googleUser.emailVerified) {
+        return res.status(400).json({ error: 'Google-kontots e-postadress är inte verifierad av Google.' });
+      }
+
+      const googleId = googleUser.googleId;
+      const email = googleUser.email;
+      const picture = googleUser.picture || null;
+      const displayName = googleUser.name || email.split('@')[0];
+
+      // 1. Look up existing user by google_id
+      let userRow: any = db.prepare('SELECT * FROM users WHERE google_id = ?').get(googleId);
+
+      // If not in SQLite, check Firestore
+      if (!userRow) {
+        const fGoogleUser = await getFirestoreDoc(`server_users_google/${encodeURIComponent(googleId)}`);
+        if (fGoogleUser && fGoogleUser.id) {
+          userRow = db.prepare('SELECT * FROM users WHERE id = ?').get(fGoogleUser.id);
+          if (!userRow) {
+            const fUser = (await getFirestoreDoc(`server_users/${encodeURIComponent(fGoogleUser.email)}`)) ||
+                          (await getFirestoreDoc(`server_user_ids/${encodeURIComponent(fGoogleUser.id)}`));
+            if (fUser && fUser.id) {
+              try {
+                db.prepare(`
+                  INSERT OR REPLACE INTO users (id, email, username, password_hash, google_id, google_email, avatar_url, auth_provider, created_at, has_logged_in)
+                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+                `).run(
+                  fUser.id,
+                  fUser.email || email,
+                  fUser.username || null,
+                  fUser.password_hash || 'google_only_' + crypto.randomBytes(8).toString('hex'),
+                  googleId,
+                  email,
+                  picture,
+                  fUser.auth_provider || 'google',
+                  fUser.created_at || Date.now()
+                );
+                userRow = db.prepare('SELECT * FROM users WHERE id = ?').get(fUser.id);
+              } catch (e) {
+                console.error('Error caching Google user to SQLite:', e);
+              }
+            }
+          }
+        }
+      }
+
+      // 2. If not found by google_id, look up by email to automatically link accounts
+      if (!userRow) {
+        userRow = db.prepare('SELECT * FROM users WHERE LOWER(email) = ?').get(email);
+        if (!userRow) {
+          const fUser = await getFirestoreDoc(`server_users/${encodeURIComponent(email)}`);
+          if (fUser && fUser.id) {
+            try {
+              db.prepare(`
+                INSERT OR REPLACE INTO users (id, email, username, password_hash, google_id, google_email, avatar_url, auth_provider, created_at, has_logged_in)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+              `).run(
+                fUser.id,
+                fUser.email || email,
+                fUser.username || null,
+                fUser.password_hash || 'google_only_' + crypto.randomBytes(8).toString('hex'),
+                googleId,
+                email,
+                picture,
+                'both',
+                fUser.created_at || Date.now()
+              );
+              userRow = db.prepare('SELECT * FROM users WHERE id = ?').get(fUser.id);
+            } catch (e) {
+              console.error('Error caching email match to SQLite:', e);
+            }
+          }
+        }
+
+        // If found by email, link google account
+        if (userRow) {
+          const hasRegularPwd = userRow.password_hash && !userRow.password_hash.startsWith('google_only_');
+          const newAuthProvider = hasRegularPwd ? 'both' : 'google';
+          db.prepare('UPDATE users SET google_id = ?, google_email = ?, avatar_url = COALESCE(avatar_url, ?), auth_provider = ?, has_logged_in = 1 WHERE id = ?').run(
+            googleId,
+            email,
+            picture,
+            newAuthProvider,
+            userRow.id
+          );
+          userRow.google_id = googleId;
+          userRow.google_email = email;
+          userRow.avatar_url = userRow.avatar_url || picture;
+          userRow.auth_provider = newAuthProvider;
+        }
+      }
+
+      // 3. If user doesn't exist yet, create a new user
+      if (!userRow) {
+        const userId = crypto.randomUUID();
+        const dummyPasswordHash = 'google_only_' + crypto.randomBytes(16).toString('hex');
+        const createdAt = Date.now();
+
+        db.prepare(`
+          INSERT INTO users (id, email, username, password_hash, google_id, google_email, avatar_url, auth_provider, created_at, has_logged_in)
+          VALUES (?, ?, ?, ?, ?, ?, ?, 'google', ?, 1)
+        `).run(
+          userId,
+          email,
+          null,
+          dummyPasswordHash,
+          googleId,
+          email,
+          picture,
+          createdAt
+        );
+
+        userRow = {
+          id: userId,
+          email: email,
+          username: null,
+          password_hash: dummyPasswordHash,
+          google_id: googleId,
+          google_email: email,
+          avatar_url: picture,
+          auth_provider: 'google',
+          created_at: createdAt
+        };
+      }
+
+      // Sync user data to Firestore
+      setFirestoreDoc(`server_users/${encodeURIComponent(userRow.email)}`, {
+        id: userRow.id,
+        email: userRow.email,
+        username: userRow.username || null,
+        google_id: googleId,
+        google_email: email,
+        avatar_url: userRow.avatar_url || picture,
+        auth_provider: userRow.auth_provider || 'google',
+        password_hash: userRow.password_hash,
+        created_at: userRow.created_at || Date.now(),
+        has_logged_in: 1
+      }).catch(e => console.error('Firestore google user sync error:', e));
+
+      setFirestoreDoc(`server_user_ids/${encodeURIComponent(userRow.id)}`, {
+        id: userRow.id,
+        email: userRow.email,
+        username: userRow.username || null,
+        google_id: googleId,
+        google_email: email,
+        avatar_url: userRow.avatar_url || picture,
+        auth_provider: userRow.auth_provider || 'google',
+        created_at: userRow.created_at || Date.now()
+      }).catch(e => console.error('Firestore user_id sync error:', e));
+
+      setFirestoreDoc(`server_users_google/${encodeURIComponent(googleId)}`, {
+        id: userRow.id,
+        email: userRow.email,
+        google_id: googleId
+      }).catch(e => console.error('Firestore google_id sync error:', e));
+
+      const token = jwt.sign({ id: userRow.id, email: userRow.email, username: userRow.username }, JWT_SECRET, { expiresIn: '3650d' });
+
+      res.json({
+        token,
+        user: {
+          uid: userRow.id,
+          email: userRow.email,
+          username: userRow.username || null,
+          displayName: userRow.username || displayName,
+          photoURL: userRow.avatar_url || picture || null,
+          googleLinked: true,
+          googleEmail: userRow.google_email || email,
+          hasPassword: !!(userRow.password_hash && !userRow.password_hash.startsWith('google_only_'))
+        }
+      });
+    } catch (error: any) {
+      console.error('Google login endpoint error:', error);
+      res.status(500).json({ error: 'Inloggning med Google misslyckades: ' + (error.message || error) });
+    }
+  });
+
+  // Link Google Account to Logged In User
+  app.post('/api/auth/link-google', async (req, res) => {
+    const authHeader = req.headers.authorization;
+    if (!authHeader) {
+      return res.status(401).json({ error: 'Du måste vara inloggad för att koppla ett Google-konto.' });
+    }
+
+    try {
+      const authStr = Array.isArray(authHeader) ? authHeader[0] : authHeader;
+      const partsAuth = authStr.split(' ');
+      const token = partsAuth.length > 1 ? partsAuth[1] : partsAuth[0];
+
+      const decoded: any = jwt.verify(token, JWT_SECRET);
+      const userId = decoded.id;
+
+      const googleUser = await verifyGoogleToken(req.body);
+      if (!googleUser) {
+        return res.status(400).json({ error: 'Google-verifieringen misslyckades. Vänligen försök igen.' });
+      }
+
+      if (!googleUser.emailVerified) {
+        return res.status(400).json({ error: 'Google-kontots e-postadress är inte verifierad av Google.' });
+      }
+
+      const googleId = googleUser.googleId;
+      const googleEmail = googleUser.email;
+      const picture = googleUser.picture || null;
+
+      // Check if this googleId is already linked to ANOTHER user
+      let existingWithGoogle: any = db.prepare('SELECT id, email FROM users WHERE google_id = ? AND id != ?').get(googleId, userId);
+      if (!existingWithGoogle) {
+        const fGoogleUser = await getFirestoreDoc(`server_users_google/${encodeURIComponent(googleId)}`);
+        if (fGoogleUser && fGoogleUser.id && fGoogleUser.id !== userId) {
+          existingWithGoogle = fGoogleUser;
+        }
+      }
+
+      if (existingWithGoogle) {
+        return res.status(400).json({
+          error: `Detta Google-konto (${googleEmail}) är redan kopplat till ett annat konto i CoachAssist.`
+        });
+      }
+
+      let userRow: any = db.prepare('SELECT * FROM users WHERE id = ?').get(userId);
+      if (!userRow) {
+        return res.status(404).json({ error: 'Användarkontot hittades inte.' });
+      }
+
+      const hasRegularPassword = userRow.password_hash && !userRow.password_hash.startsWith('google_only_');
+      const newAuthProvider = hasRegularPassword ? 'both' : 'google';
+
+      db.prepare('UPDATE users SET google_id = ?, google_email = ?, avatar_url = COALESCE(avatar_url, ?), auth_provider = ? WHERE id = ?').run(
+        googleId,
+        googleEmail,
+        picture,
+        newAuthProvider,
+        userId
+      );
+
+      // Persist to Firestore
+      setFirestoreDoc(`server_users/${encodeURIComponent(userRow.email)}`, {
+        id: userRow.id,
+        email: userRow.email,
+        username: userRow.username || null,
+        google_id: googleId,
+        google_email: googleEmail,
+        avatar_url: userRow.avatar_url || picture,
+        auth_provider: newAuthProvider,
+        password_hash: userRow.password_hash,
+        created_at: userRow.created_at || Date.now()
+      }).catch(() => {});
+
+      setFirestoreDoc(`server_user_ids/${encodeURIComponent(userRow.id)}`, {
+        id: userRow.id,
+        email: userRow.email,
+        username: userRow.username || null,
+        google_id: googleId,
+        google_email: googleEmail,
+        avatar_url: userRow.avatar_url || picture,
+        auth_provider: newAuthProvider,
+        created_at: userRow.created_at || Date.now()
+      }).catch(() => {});
+
+      setFirestoreDoc(`server_users_google/${encodeURIComponent(googleId)}`, {
+        id: userRow.id,
+        email: userRow.email,
+        google_id: googleId
+      }).catch(() => {});
+
+      res.json({
+        success: true,
+        googleEmail: googleEmail,
+        message: `Ditt Google-konto (${googleEmail}) har kopplats till din profil.`
+      });
+    } catch (error: any) {
+      console.error('Link Google account error:', error);
+      res.status(500).json({ error: 'Kunde inte koppla Google-kontot: ' + (error.message || error) });
+    }
+  });
+
+  // Unlink Google Account from Logged In User
+  app.post('/api/auth/unlink-google', async (req, res) => {
+    const authHeader = req.headers.authorization;
+    if (!authHeader) {
+      return res.status(401).json({ error: 'Du måste vara inloggad för att koppla bort ett Google-konto.' });
+    }
+
+    try {
+      const authStr = Array.isArray(authHeader) ? authHeader[0] : authHeader;
+      const partsAuth = authStr.split(' ');
+      const token = partsAuth.length > 1 ? partsAuth[1] : partsAuth[0];
+
+      const decoded: any = jwt.verify(token, JWT_SECRET);
+      const userId = decoded.id;
+
+      let userRow: any = db.prepare('SELECT * FROM users WHERE id = ?').get(userId);
+      if (!userRow) {
+        return res.status(404).json({ error: 'Användarkontot hittades inte.' });
+      }
+
+      if (!userRow.google_id) {
+        return res.status(400).json({ error: 'Inget Google-konto är kopplat till denna profil.' });
+      }
+
+      const hasRegularPassword = userRow.password_hash && !userRow.password_hash.startsWith('google_only_');
+      if (!hasRegularPassword) {
+        return res.status(400).json({
+          error: 'Du måste först ange ett lösenord under "Byt lösenord" innan du kan koppla bort ditt Google-konto, så att du kan logga in i fortsättningen.'
+        });
+      }
+
+      const oldGoogleId = userRow.google_id;
+
+      db.prepare("UPDATE users SET google_id = NULL, google_email = NULL, auth_provider = 'local' WHERE id = ?").run(userId);
+
+      // Update Firestore
+      setFirestoreDoc(`server_users/${encodeURIComponent(userRow.email)}`, {
+        id: userRow.id,
+        email: userRow.email,
+        username: userRow.username || null,
+        google_id: null,
+        google_email: null,
+        avatar_url: userRow.avatar_url || null,
+        auth_provider: 'local',
+        password_hash: userRow.password_hash,
+        created_at: userRow.created_at || Date.now()
+      }).catch(() => {});
+
+      setFirestoreDoc(`server_user_ids/${encodeURIComponent(userRow.id)}`, {
+        id: userRow.id,
+        email: userRow.email,
+        username: userRow.username || null,
+        google_id: null,
+        google_email: null,
+        avatar_url: userRow.avatar_url || null,
+        auth_provider: 'local',
+        created_at: userRow.created_at || Date.now()
+      }).catch(() => {});
+
+      if (oldGoogleId) {
+        setFirestoreDoc(`server_users_google/${encodeURIComponent(oldGoogleId)}`, {
+          id: null,
+          unlinkedAt: Date.now()
+        }).catch(() => {});
+      }
+
+      res.json({
+        success: true,
+        message: 'Google-kontot har kopplats bort från din profil.'
+      });
+    } catch (error: any) {
+      console.error('Unlink Google account error:', error);
+      res.status(500).json({ error: 'Kunde inte koppla bort Google-kontot: ' + (error.message || error) });
+    }
+  });
+
   // Get Me (Current Session Info)
   app.get('/api/auth/me', async (req, res) => {
     const authHeader = req.headers.authorization;
@@ -1424,7 +1861,7 @@ async function startServer() {
       const token = partsAuth.length > 1 ? partsAuth[1] : partsAuth[0];
 
       const decoded: any = jwt.verify(token, JWT_SECRET);
-      let userRow: any = db.prepare('SELECT id, email, username FROM users WHERE id = ?').get(decoded.id);
+      let userRow: any = db.prepare('SELECT id, email, username, google_id, google_email, avatar_url, password_hash, auth_provider FROM users WHERE id = ?').get(decoded.id);
 
       if (!userRow) {
         // Attempt restore from Firestore
@@ -1435,16 +1872,24 @@ async function startServer() {
         const username = fUser?.username || decoded.username || null;
         const passwordHash = fUser?.password_hash || 'restored_session';
         const createdAt = fUser?.created_at || Date.now();
+        const googleId = fUser?.google_id || null;
+        const googleEmail = fUser?.google_email || null;
+        const avatarUrl = fUser?.avatar_url || null;
+        const authProvider = fUser?.auth_provider || 'local';
 
         try {
-          db.prepare('INSERT OR REPLACE INTO users (id, email, username, password_hash, created_at) VALUES (?, ?, ?, ?, ?)').run(
+          db.prepare('INSERT OR REPLACE INTO users (id, email, username, password_hash, google_id, google_email, avatar_url, auth_provider, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)').run(
             decoded.id,
             userEmail,
             username,
             passwordHash,
+            googleId,
+            googleEmail,
+            avatarUrl,
+            authProvider,
             createdAt
           );
-          userRow = { id: decoded.id, email: userEmail, username };
+          userRow = { id: decoded.id, email: userEmail, username, google_id: googleId, google_email: googleEmail, avatar_url: avatarUrl, password_hash: passwordHash, auth_provider: authProvider };
         } catch (e) {
           console.error('Error auto-restoring user in SQLite:', e);
         }
@@ -1459,7 +1904,10 @@ async function startServer() {
         email: userRow.email,
         username: userRow.username || null,
         displayName: userRow.username || userRow.email.split('@')[0],
-        photoURL: null
+        photoURL: userRow.avatar_url || null,
+        googleLinked: !!userRow.google_id,
+        googleEmail: userRow.google_email || null,
+        hasPassword: !!(userRow.password_hash && !userRow.password_hash.startsWith('google_only_'))
       });
     } catch (err) {
       res.status(401).json({ error: 'Token är ogiltig eller har gått ut' });
@@ -2041,18 +2489,53 @@ async function startServer() {
       const id = pathStr.split('/')[1];
       try {
         let row: any = db.prepare('SELECT data FROM shared_leaderboards WHERE id = ?').get(id);
-        if (!row) {
-          const fDoc = await getFirestoreDoc(`app_docs/shared_leaderboards_${id}`);
-          if (fDoc && fDoc.data) {
-            const rawData = typeof fDoc.data === 'string' ? fDoc.data : JSON.stringify(fDoc.data);
-            db.prepare('INSERT OR REPLACE INTO shared_leaderboards (id, data, updatedAt, coachUid) VALUES (?, ?, ?, ?)').run(
-              id, rawData, Date.now(), fDoc.coachUid || null
-            );
-            return res.json(typeof fDoc.data === 'string' ? JSON.parse(fDoc.data) : fDoc.data);
+        if (row) {
+          try {
+            const parsed = typeof row.data === 'string' ? JSON.parse(row.data) : row.data;
+            const leaderboardObj = (parsed && parsed.data && (parsed.data.standings || parsed.data.name)) ? parsed.data : parsed;
+            return res.json(leaderboardObj);
+          } catch (pErr) {
+            console.warn('Failed to parse local SQLite shared_leaderboards data:', pErr);
           }
-          return res.status(404).json({ error: 'Not found' });
         }
-        res.json(JSON.parse(row.data));
+
+        // Fallback: fetch from Firestore if not found or corrupted in SQLite
+        let fDoc = await getFirestoreDoc(`app_docs/shared_leaderboards_${id}`);
+        if (!fDoc) {
+          fDoc = await getFirestoreDoc(`shared_leaderboards/${id}`);
+        }
+
+        // Retry once if Firestore is warming up or transient delay occurs
+        if (!fDoc) {
+          await new Promise(r => setTimeout(r, 600));
+          fDoc = await getFirestoreDoc(`app_docs/shared_leaderboards_${id}`) || await getFirestoreDoc(`shared_leaderboards/${id}`);
+        }
+
+        if (fDoc) {
+          let leaderboardObj: any = null;
+          if (fDoc.data) {
+            leaderboardObj = typeof fDoc.data === 'string' ? JSON.parse(fDoc.data) : fDoc.data;
+            if (leaderboardObj && leaderboardObj.data && (leaderboardObj.data.standings || leaderboardObj.data.name)) {
+              leaderboardObj = leaderboardObj.data;
+            }
+          } else if (fDoc.standings || fDoc.name) {
+            leaderboardObj = fDoc;
+          }
+
+          if (leaderboardObj) {
+            const rawData = JSON.stringify(leaderboardObj);
+            try {
+              db.prepare('INSERT OR REPLACE INTO shared_leaderboards (id, data, updatedAt, coachUid) VALUES (?, ?, ?, ?)').run(
+                id, rawData, Date.now(), fDoc.coachUid || leaderboardObj.coachUid || null
+              );
+            } catch (sqErr) {
+              console.warn('Could not cache shared leaderboard to SQLite:', sqErr);
+            }
+            return res.json(leaderboardObj);
+          }
+        }
+
+        return res.status(404).json({ error: 'Not found' });
       } catch (e: any) {
         console.error('Error fetching shared leaderboard:', e);
         res.status(500).json({ error: 'Failed to fetch shared leaderboard' });
@@ -2161,8 +2644,9 @@ async function startServer() {
     if (pathStr.startsWith('shared_leaderboards/')) {
       const id = pathStr.split('/')[1];
       try {
-        const serializedData = JSON.stringify(data);
-        const coachUid = data.coachUid || null;
+        const cleanObj = (data && data.data && (data.data.standings || data.data.name)) ? data.data : data;
+        const serializedData = typeof cleanObj === 'string' ? cleanObj : JSON.stringify(cleanObj);
+        const coachUid = cleanObj?.coachUid || data?.coachUid || null;
         
         db.prepare(`
           INSERT INTO shared_leaderboards (id, data, updatedAt, coachUid)
@@ -2170,8 +2654,11 @@ async function startServer() {
           ON CONFLICT(id) DO UPDATE SET data = excluded.data, updatedAt = excluded.updatedAt, coachUid = excluded.coachUid
         `).run(id, serializedData, Date.now(), coachUid);
 
-        setFirestoreDoc(`app_docs/shared_leaderboards_${id}`, { data: serializedData, coachUid, updatedAt: Date.now() })
-          .catch(e => console.error('Firestore shared leaderboard sync error:', e));
+        // Sync to Firestore in background
+        Promise.all([
+          setFirestoreDoc(`app_docs/shared_leaderboards_${id}`, { data: serializedData, coachUid, updatedAt: Date.now() }),
+          setFirestoreDoc(`shared_leaderboards/${id}`, typeof cleanObj === 'object' ? cleanObj : JSON.parse(serializedData))
+        ]).catch(e => console.error('Firestore shared leaderboard sync error:', e));
 
         res.json({ success: true });
       } catch (e: any) {

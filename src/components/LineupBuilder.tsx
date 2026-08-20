@@ -1,10 +1,10 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { motion, AnimatePresence, useDragControls } from 'motion/react';
 // import html2canvas from 'html-to-image'; // Removed
-import { SquadPlayer, Lineup, LineupPlayer, FormationVariant, FormationPosition, TacticalSavedBoard } from '../types';
+import { SquadPlayer, Lineup, LineupPlayer, FormationVariant, FormationPosition, TacticalSavedBoard, TrainingSession } from '../types';
 import { User as FirebaseUser } from 'firebase/auth';
 import { CachedImage } from './CachedImage';
-import { Plus, Minus, X, Trash2, Image as ImageIcon, User, Save, Settings, ClipboardList, Camera, Check, Edit2, Undo2, Redo2, Maximize2, Minimize2, Copy, Trophy, Upload, Pencil, ArrowUpRight, Eraser, RotateCcw, Trash, Shirt, Pin, PinOff, Smartphone, Monitor, ChevronDown, ChevronUp, RefreshCw, GripVertical, Footprints, Archive, ArchiveRestore, Layout, Eye, EyeOff, Target, Play, Move, Route, Type, FolderOpen, Cloud, CloudOff, Bookmark, Network } from 'lucide-react';
+import { Plus, Minus, X, Trash2, Image as ImageIcon, User, Save, Settings, ClipboardList, Camera, Check, Edit2, Undo2, Redo2, Maximize2, Minimize2, Copy, Trophy, Upload, Pencil, ArrowUpRight, Eraser, RotateCcw, Trash, Shirt, Pin, PinOff, Smartphone, Monitor, ChevronDown, ChevronUp, RefreshCw, GripVertical, Footprints, Archive, ArchiveRestore, Layout, Eye, EyeOff, Target, Play, Move, Route, Type, FolderOpen, Cloud, CloudOff, Bookmark, Network, UserCheck } from 'lucide-react';
 
 import { FORMATION_TEMPLATES } from '../lib/formations';
 import { Reorder } from 'motion/react';
@@ -17,6 +17,7 @@ interface LineupBuilderProps {
   squad: SquadPlayer[];
   lineup: Lineup | null;
   lineups: Lineup[];
+  sessions?: TrainingSession[];
   onUpdateLineup: (lineup: Lineup) => void;
   onSaveLineup: (lineup: Lineup) => void;
   onDeleteLineup: (id: string) => void;
@@ -344,6 +345,7 @@ export default function LineupBuilder({
   squad, 
   lineup, 
   lineups,
+  sessions = [],
   onUpdateLineup, 
   onSaveLineup,
   onDeleteLineup,
@@ -389,10 +391,18 @@ export default function LineupBuilder({
   const [lineupName, setLineupName] = useState(lineup?.matchTitle || '');
   const [teamName, setTeamName] = useState(lineup?.teamName || '');
   
-  // Exclude leaders (role === 'leader') from lineup building and drawing boards
+  // Find linked training/match session if any
+  const linkedSession = useMemo(() => {
+    if (!lineup?.sessionId || !sessions) return null;
+    return sessions.find(s => s.id === lineup.sessionId) || null;
+  }, [lineup?.sessionId, sessions]);
+
+  // Exclude leaders (role === 'leader') from lineup building and drawing boards, but include any guests from linked session
   const squadPlayers = React.useMemo(() => {
-    return squad.filter(p => p.role !== 'leader');
-  }, [squad]);
+    const baseSquad = squad.filter(p => p.role !== 'leader');
+    const guests = linkedSession?.guestPlayers || [];
+    return [...baseSquad, ...guests];
+  }, [squad, linkedSession]);
   const [players, setPlayers] = useState<LineupPlayer[]>(lineup?.players || []);
   const [playerScale, setPlayerScale] = useState(lineup?.playerScale || 1);
   const [nameTagStyle, setNameTagStyle] = useState<'light' | 'dark'>(lineup?.nameTagStyle || 'light');
@@ -1318,6 +1328,7 @@ export default function LineupBuilder({
   // Use refs for dragging to keep event listeners stable and avoid re-binding performance hits
   const dragInfoRef = useRef<{ id: string; x: number; y: number; hoveredId: string | null } | null>(null);
   const lastInteractionTimeRef = useRef<number>(0);
+  const lastPushedDateRef = useRef<number>(0);
 
   // Global listeners for dragging - Optimized for performance
   useEffect(() => {
@@ -1461,11 +1472,13 @@ export default function LineupBuilder({
   }, [draggingId, players, tacticalPlayers, isMaximized, pushHistory]);
 
   useEffect(() => {
-    // Ignore internal prop updates for 2 seconds after a local change
-    // This solves the "sliding back" issue where a stale parent update overwrites the local drop position
+    // Ignore internal prop updates for 8 seconds after a local change, or if the incoming update is older than our last local push
+    // This solves the "sliding back" / "jumping back" issue where a stale parent update overwrites the local drop position
     const timeSinceInteraction = Date.now() - lastInteractionTimeRef.current;
-    if (isRestoringHistory.current || draggingId || timeSinceInteraction < 2000 || hasUnsavedChanges) {
-      if (!draggingId && timeSinceInteraction >= 2000 && !hasUnsavedChanges) {
+    const isStaleProp = lineup && lineup.date && lastPushedDateRef.current && (lineup.date < lastPushedDateRef.current);
+
+    if (isRestoringHistory.current || draggingId || timeSinceInteraction < 8000 || hasUnsavedChanges || isStaleProp) {
+      if (!draggingId && timeSinceInteraction >= 8000 && !hasUnsavedChanges && !isStaleProp) {
         isRestoringHistory.current = false;
       }
       return;
@@ -1724,9 +1737,11 @@ export default function LineupBuilder({
     if (!hasUnsavedChanges) return;
 
     const timeout = setTimeout(() => {
+      const pushTime = Date.now();
+      lastPushedDateRef.current = pushTime;
       onUpdateLineup({
         ...currentState,
-        date: Date.now() // Set new date only when actually pushing changes
+        date: pushTime // Set new date only when actually pushing changes
       });
     }, 400); // Reduced from 800ms to 400ms for extra fast auto-save
     
@@ -1735,9 +1750,11 @@ export default function LineupBuilder({
       // Flush changes ONLY when unmounting or switching to a different lineup
       // to avoid triggering parent updates on every single micro-render/drag step.
       if (hasUnsavedChanges && (!lineup || lineup.id !== currentIdRef.current)) {
+        const pushTime = Date.now();
+        lastPushedDateRef.current = pushTime;
         onUpdateLineup({
           ...currentState,
-          date: Date.now()
+          date: pushTime
         });
       }
     };
@@ -6234,6 +6251,46 @@ export default function LineupBuilder({
                     </button>
                   </div>
 
+                  {linkedSession && (
+                    <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 p-3 bg-indigo-50 dark:bg-indigo-950/40 rounded-2xl border border-indigo-100 dark:border-indigo-800/60 mb-3 text-xs">
+                      <div className="flex items-center gap-2">
+                        <UserCheck size={16} className="text-emerald-600 dark:text-emerald-400 shrink-0" />
+                        <span className="font-bold text-zinc-900 dark:text-zinc-100">
+                          Kopplad match: <span className="text-indigo-600 dark:text-indigo-400 font-black">{linkedSession.title || 'Match'}</span> ({(linkedSession.attendance || []).length} anmälda)
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const attendingIds = linkedSession.attendance || [];
+                          const existingPlayerIds = new Set(players.map(p => p.playerId));
+                          const newPlayersToAdd: LineupPlayer[] = [];
+                          
+                          attendingIds.forEach(id => {
+                            if (!existingPlayerIds.has(id)) {
+                              newPlayersToAdd.push({
+                                id: `sub_${Date.now()}_${Math.random().toString(36).substring(7)}`,
+                                playerId: id,
+                                x: 50,
+                                y: 50,
+                                isSubstitute: true,
+                              });
+                            }
+                          });
+
+                          if (newPlayersToAdd.length > 0) {
+                            setPlayers(prev => [...prev, ...newPlayersToAdd]);
+                            setHasUnsavedChanges(true);
+                          }
+                        }}
+                        className="px-2.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-black text-[10px] uppercase tracking-wider transition-all shadow-xs shrink-0 cursor-pointer active:scale-95 flex items-center gap-1.5"
+                      >
+                        <Plus size={13} />
+                        <span>Lägg alla närvarande på bänken</span>
+                      </button>
+                    </div>
+                  )}
+
                   <div className="flex items-center justify-between gap-2 mb-3 px-1">
                     <span className="text-[10px] uppercase tracking-wider text-zinc-500 dark:text-zinc-400 font-bold">
                       Spelare ({(Array.from(new Map(squadPlayers.map(sp => [sp.id, sp])).values())).length} st)
@@ -6288,6 +6345,7 @@ export default function LineupBuilder({
                           (pickerMode === 'sub' && itemInLineup.isSubstitute)
                         );
                         const isOtherMode = itemInLineup && !isCurrentMode;
+                        const isAttendingSession = linkedSession ? (linkedSession.attendance || []).includes(sp.id) : false;
 
                         return (
                           <button
@@ -6339,12 +6397,24 @@ export default function LineupBuilder({
                                   <span className="text-[7px] font-black uppercase tracking-tighter">{itemInLineup.isSubstitute ? 'BÄNK' : 'PLAN'}</span>
                                 </div>
                               )}
+                              {isAttendingSession && !isCurrentMode && !isOtherMode && (
+                                <div className="absolute -bottom-1.5 -right-1.5 bg-emerald-500 text-white rounded-full p-0.5 shadow-xs border border-white dark:border-zinc-900" title="Anmäld till matchen">
+                                  <Check size={10} strokeWidth={3} />
+                                </div>
+                              )}
                             </div>
-                            <span className={`text-[10px] font-black text-center line-clamp-1 uppercase tracking-tight ${
-                              isOtherMode ? 'text-zinc-500 dark:text-zinc-500' : 'text-zinc-900 dark:text-white'
-                            }`}>
-                              {sp.name}
-                            </span>
+                            <div className="flex flex-col items-center min-w-0 w-full">
+                              <span className={`text-[10px] font-black text-center line-clamp-1 uppercase tracking-tight ${
+                                isCurrentMode ? 'text-indigo-900 dark:text-indigo-200' : isOtherMode ? 'text-zinc-500 dark:text-zinc-500' : 'text-zinc-900 dark:text-white'
+                              }`}>
+                                {sp.name}
+                              </span>
+                              {isAttendingSession && (
+                                <span className="text-[8px] font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-wider">
+                                  Anmäld
+                                </span>
+                              )}
+                            </div>
                           </button>
                         );
                       });

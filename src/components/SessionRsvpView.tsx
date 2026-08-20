@@ -22,6 +22,8 @@ import {
   CheckCheck,
   RotateCcw,
   Trash2,
+  Trophy,
+  ArrowRight,
   X
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
@@ -36,6 +38,7 @@ interface SessionRsvpViewProps {
   userRoles?: string[];
   userProfile?: UserProfile;
   adminUrl?: string;
+  onOpenLineup?: (session: TrainingSession) => void;
 }
 
 function isValidPlayerName(name: string): boolean {
@@ -86,7 +89,8 @@ export const SessionRsvpView: React.FC<SessionRsvpViewProps> = ({
   onUpdateSession,
   user,
   userRoles = [],
-  adminUrl
+  adminUrl,
+  onOpenLineup
 }) => {
   const [filter, setFilter] = useState<'all' | 'present' | 'attending' | 'partial' | 'declined' | 'unanswered' | 'guests'>('all');
   const [searchQuery, setSearchQuery] = useState('');
@@ -94,6 +98,7 @@ export const SessionRsvpView: React.FC<SessionRsvpViewProps> = ({
   const [showAdminModal, setShowAdminModal] = useState(false);
   const [showPasteModal, setShowPasteModal] = useState(false);
   const [showGuestModal, setShowGuestModal] = useState(false);
+  const [pasteAlsoMarkPresent, setPasteAlsoMarkPresent] = useState<boolean>(true);
 
   // Form states for logged-in player's own RSVP
   const [selectedPlayerId, setSelectedPlayerId] = useState<string>('');
@@ -587,16 +592,27 @@ export const SessionRsvpView: React.FC<SessionRsvpViewProps> = ({
       }
     });
 
+    let newAttendance = [...attendance];
+    if (pasteAlsoMarkPresent) {
+      const attendingIds = Object.entries(newRsvps)
+        .filter(([_, r]) => r && (r.status === 'attending' || r.status === 'partial'))
+        .map(([pid]) => pid);
+      
+      const newGuestAttendingIds = newGuestPlayers.map(g => g.id);
+      newAttendance = Array.from(new Set([...newAttendance, ...attendingIds, ...newGuestAttendingIds]));
+    }
+
     onUpdateSession({
       ...session,
       rsvps: newRsvps,
       guestPlayers: newGuestPlayers,
+      attendance: newAttendance,
       updatedAt: Date.now()
     });
 
     setShowPasteModal(false);
     setPasteValue("");
-    setSavedToast(`Importerat! Anmälningar och kommentarer har uppdaterats.`);
+    setSavedToast(pasteAlsoMarkPresent ? `Importerat! ${newAttendance.length} personer markerades som närvarande.` : `Importerat! Anmälningar och kommentarer har uppdaterats.`);
     setTimeout(() => setSavedToast(null), 3500);
   };
 
@@ -656,6 +672,33 @@ export const SessionRsvpView: React.FC<SessionRsvpViewProps> = ({
           <p className="text-xs sm:text-sm leading-relaxed text-amber-800 dark:text-amber-300">
             För att förhindra obehöriga anmälningar och skydda truppens sekretess måste du vara inloggad för att se deltagaranmälningar samt lämna din egen anmälan.
           </p>
+        </div>
+      )}
+
+      {/* Match Lineup CTA Banner if onOpenLineup is available */}
+      {onOpenLineup && (
+        <div className="bg-gradient-to-r from-indigo-900 via-indigo-800 to-indigo-950 text-white p-4 sm:p-5 rounded-3xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 shadow-sm border border-indigo-700/60">
+          <div className="flex items-center gap-3.5">
+            <div className="w-11 h-11 rounded-2xl bg-white/10 flex items-center justify-center shrink-0 border border-white/15">
+              <Trophy size={22} className="text-amber-400" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] font-black uppercase tracking-wider bg-indigo-500/40 text-indigo-200 px-2 py-0.5 rounded-md">Matchaktivitet</span>
+                <span className="text-xs font-bold text-indigo-200">{stats.coming} anmälda spelare</span>
+              </div>
+              <p className="text-sm font-black text-white mt-0.5">Skapa eller öppna laguppställning med anmälda spelare</p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => onOpenLineup(session)}
+            className="px-4 py-2.5 bg-white hover:bg-indigo-50 text-indigo-950 rounded-xl font-black text-xs uppercase tracking-wider flex items-center gap-2 shadow-md transition-all active:scale-95 cursor-pointer shrink-0"
+          >
+            <Users size={14} className="text-indigo-600" />
+            <span>Öppna laguppställning</span>
+            <ArrowRight size={14} />
+          </button>
         </div>
       )}
 
@@ -1230,7 +1273,7 @@ export const SessionRsvpView: React.FC<SessionRsvpViewProps> = ({
                       : 'bg-zinc-50/70 dark:bg-zinc-900/60 border-zinc-200 dark:border-zinc-800'
                   }`}
                 >
-                  {/* Top Row: Avatar, Full Name & Position on Left | Status Badge & Presence Toggle on Right */}
+                  {/* Top Row: Avatar, Full Name & Position on Left | Primary Presence Toggle on Right */}
                   <div className="flex items-start justify-between gap-3">
                     <div className="flex items-start gap-3 min-w-0 flex-1">
                       <div className="w-10 h-10 rounded-xl bg-zinc-100 dark:bg-zinc-800 flex items-center justify-center shrink-0 overflow-hidden border border-zinc-200 dark:border-zinc-700 mt-0.5">
@@ -1277,56 +1320,26 @@ export const SessionRsvpView: React.FC<SessionRsvpViewProps> = ({
                       </div>
                     </div>
 
-                    {/* Right Column: Status Badge & Presence Button */}
-                    <div className="flex flex-col items-end gap-1.5 shrink-0">
-                      {!isGuest && (
-                        <div className="shrink-0">
-                          {status === 'attending' && (
-                            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-emerald-100 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800 text-[10px] font-black uppercase tracking-wider">
-                              <CheckCircle2 size={12} />
-                              Kan delta
-                            </span>
-                          )}
-                          {status === 'partial' && (
-                            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-amber-100 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-800 text-[10px] font-black uppercase tracking-wider">
-                              <AlertTriangle size={12} />
-                              Delvis
-                            </span>
-                          )}
-                          {status === 'declined' && (
-                            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-rose-100 dark:bg-rose-950/60 text-rose-800 dark:text-rose-300 border border-rose-300 dark:border-rose-800 text-[10px] font-black uppercase tracking-wider">
-                              <XCircle size={12} />
-                              Kan ej
-                            </span>
-                          )}
-                          {status === 'unanswered' && (
-                            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300 border border-zinc-200 dark:border-zinc-700 text-[10px] font-black uppercase tracking-wider">
-                              <HelpCircle size={12} />
-                              Ej svarat
-                            </span>
-                          )}
-                        </div>
-                      )}
-
-                      {/* Presence Button directly under Status Badge */}
+                    {/* Right Column: Unified Presence Toggle Button */}
+                    <div className="flex items-center gap-1.5 shrink-0">
                       <button
                         type="button"
                         onClick={() => handleTogglePresence(player.id)}
-                        className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg font-black text-[10px] uppercase tracking-wider transition-all shadow-xs cursor-pointer active:scale-95 ${
+                        className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl font-black text-xs uppercase tracking-wider transition-all shadow-xs cursor-pointer active:scale-95 ${
                           isPresent
                             ? 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-emerald-200 dark:shadow-none border border-emerald-500'
-                            : 'bg-zinc-200 dark:bg-zinc-800 hover:bg-zinc-300 text-zinc-700 dark:text-zinc-300 border border-zinc-300 dark:border-zinc-700'
+                            : 'bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-600 dark:text-zinc-300 border border-zinc-200 dark:border-zinc-700'
                         }`}
                         title={isPresent ? 'Markerad som närvarande på passet (Klicka för att avmarkera)' : 'Ej markerad som närvarande (Klicka för att markera närvarande)'}
                       >
                         {isPresent ? (
                           <>
-                            <Check size={12} strokeWidth={3} />
+                            <Check size={14} strokeWidth={3} />
                             <span>Närvarande</span>
                           </>
                         ) : (
                           <>
-                            <X size={12} />
+                            <X size={14} />
                             <span>Frånvarande</span>
                           </>
                         )}
@@ -1336,7 +1349,7 @@ export const SessionRsvpView: React.FC<SessionRsvpViewProps> = ({
                         <button
                           type="button"
                           onClick={() => removeGuest(player.id)}
-                          className="p-1 text-zinc-400 hover:text-rose-600 transition-colors rounded-lg hover:bg-rose-50 dark:hover:bg-rose-950/30"
+                          className="p-1.5 text-zinc-400 hover:text-rose-600 transition-colors rounded-lg hover:bg-rose-50 dark:hover:bg-rose-950/30"
                           title="Ta bort provspelare"
                         >
                           <Trash2 size={14} />
@@ -1353,54 +1366,79 @@ export const SessionRsvpView: React.FC<SessionRsvpViewProps> = ({
                     </div>
                   )}
 
-                  {/* Bottom Row: Timestamp & Larger Coach Quick Buttons */}
+                  {/* Bottom Row: RSVP Status summary & Quick RSVP buttons */}
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 text-xs font-semibold text-zinc-500 dark:text-zinc-400 pt-2 border-t border-zinc-100 dark:border-zinc-800/60">
-                    <span className="text-[11px] leading-tight">
-                      {!isGuest && rsvp
-                        ? `Svarade ${new Date(rsvp.updatedAt).toLocaleDateString('sv-SE', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}${rsvp.updatedBy ? ` (${rsvp.updatedBy})` : ''}`
-                        : isGuest
-                        ? 'Provspelare tillagd på detta pass'
-                        : 'Ingen anmälan registrerad ännu'}
-                    </span>
+                    <div className="flex items-center gap-2">
+                      {!isGuest ? (
+                        <>
+                          <span className="text-[11px] font-bold">Anmälan:</span>
+                          {status === 'attending' && (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-emerald-100 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300 font-bold text-[10px] uppercase">
+                              <CheckCircle2 size={11} /> Kan delta
+                            </span>
+                          )}
+                          {status === 'partial' && (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-amber-100 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300 font-bold text-[10px] uppercase">
+                              <AlertTriangle size={11} /> Delvis
+                            </span>
+                          )}
+                          {status === 'declined' && (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-rose-100 dark:bg-rose-950/60 text-rose-800 dark:text-rose-300 font-bold text-[10px] uppercase">
+                              <XCircle size={11} /> Kan ej
+                            </span>
+                          )}
+                          {status === 'unanswered' && (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 font-bold text-[10px] uppercase">
+                              <HelpCircle size={11} /> Ej svarat
+                            </span>
+                          )}
+                        </>
+                      ) : (
+                        <span className="text-[11px] font-medium text-purple-600 dark:text-purple-400">Provspelare</span>
+                      )}
+                    </div>
 
-                    {/* Quick coach edit buttons with LARGER touch targets */}
+                    {/* Quick coach edit buttons with 1-click status & presence sync */}
                     {isCoachOrAdmin && !isGuest && (
                       <div className="flex items-center gap-1.5 shrink-0">
                         <button
                           type="button"
-                          title={status === 'attending' ? 'Klicka för att rensa/klicka ur anmälan' : 'Markera anmälan: Kan delta (Ja)'}
+                          title={status === 'attending' ? 'Redan markerad som Kommer (Klicka för att rensa)' : 'Sätt anmälan: Kommer (markerar även närvarande)'}
                           onClick={() => saveRsvpForPlayer(player.id, 'attending', rsvp?.comment, `Tränare (${user?.displayName || 'Tränare'})`)}
-                          className={`px-3 py-2 min-h-[38px] min-w-[42px] rounded-xl border text-xs font-black uppercase cursor-pointer transition-all active:scale-95 flex items-center justify-center ${
+                          className={`px-2.5 py-1 rounded-lg border text-xs font-black uppercase cursor-pointer transition-all active:scale-95 flex items-center gap-1 ${
                             status === 'attending'
-                              ? 'bg-emerald-600 text-white border-emerald-500 ring-2 ring-emerald-400/40 shadow-xs'
-                              : 'bg-zinc-100 dark:bg-zinc-800/80 text-zinc-700 dark:text-zinc-300 border-zinc-200 dark:border-zinc-700 hover:border-emerald-500 hover:text-emerald-600 dark:hover:text-emerald-400'
+                              ? 'bg-emerald-600 text-white border-emerald-500 shadow-xs'
+                              : 'bg-zinc-100 dark:bg-zinc-800/80 text-zinc-700 dark:text-zinc-300 border-zinc-200 dark:border-zinc-700 hover:border-emerald-500 hover:text-emerald-600'
                           }`}
                         >
-                          Ja
+                          <Check size={12} />
+                          <span>Kommer</span>
                         </button>
                         <button
                           type="button"
-                          title={status === 'partial' ? 'Klicka för att rensa/klicka ur anmälan' : 'Markera anmälan: Delvis'}
+                          title={status === 'partial' ? 'Redan markerad som Delvis (Klicka för att rensa)' : 'Sätt anmälan: Delvis'}
                           onClick={() => saveRsvpForPlayer(player.id, 'partial', rsvp?.comment, `Tränare (${user?.displayName || 'Tränare'})`)}
-                          className={`px-3 py-2 min-h-[38px] min-w-[42px] rounded-xl border text-xs font-black uppercase cursor-pointer transition-all active:scale-95 flex items-center justify-center ${
+                          className={`px-2.5 py-1 rounded-lg border text-xs font-black uppercase cursor-pointer transition-all active:scale-95 flex items-center gap-1 ${
                             status === 'partial'
-                              ? 'bg-amber-600 text-white border-amber-500 ring-2 ring-amber-400/40 shadow-xs'
-                              : 'bg-zinc-100 dark:bg-zinc-800/80 text-zinc-700 dark:text-zinc-300 border-zinc-200 dark:border-zinc-700 hover:border-amber-500 hover:text-amber-600 dark:hover:text-amber-400'
+                              ? 'bg-amber-600 text-white border-amber-500 shadow-xs'
+                              : 'bg-zinc-100 dark:bg-zinc-800/80 text-zinc-700 dark:text-zinc-300 border-zinc-200 dark:border-zinc-700 hover:border-amber-500 hover:text-amber-600'
                           }`}
                         >
-                          Delvis
+                          <AlertTriangle size={12} />
+                          <span>Delvis</span>
                         </button>
                         <button
                           type="button"
-                          title={status === 'declined' ? 'Klicka för att rensa/klicka ur anmälan' : 'Markera anmälan: Kan ej (Nej)'}
+                          title={status === 'declined' ? 'Redan markerad som Kan ej (Klicka för att rensa)' : 'Sätt anmälan: Kan ej (tar bort från närvaro)'}
                           onClick={() => saveRsvpForPlayer(player.id, 'declined', rsvp?.comment, `Tränare (${user?.displayName || 'Tränare'})`)}
-                          className={`px-3 py-2 min-h-[38px] min-w-[42px] rounded-xl border text-xs font-black uppercase cursor-pointer transition-all active:scale-95 flex items-center justify-center ${
+                          className={`px-2.5 py-1 rounded-lg border text-xs font-black uppercase cursor-pointer transition-all active:scale-95 flex items-center gap-1 ${
                             status === 'declined'
-                              ? 'bg-rose-600 text-white border-rose-500 ring-2 ring-rose-400/40 shadow-xs'
-                              : 'bg-zinc-100 dark:bg-zinc-800/80 text-zinc-700 dark:text-zinc-300 border-zinc-200 dark:border-zinc-700 hover:border-rose-500 hover:text-rose-600 dark:hover:text-rose-400'
+                              ? 'bg-rose-600 text-white border-rose-500 shadow-xs'
+                              : 'bg-zinc-100 dark:bg-zinc-800/80 text-zinc-700 dark:text-zinc-300 border-zinc-200 dark:border-zinc-700 hover:border-rose-500 hover:text-rose-600'
                           }`}
                         >
-                          Nej
+                          <X size={12} />
+                          <span>Kan ej</span>
                         </button>
                       </div>
                     )}
@@ -1464,6 +1502,23 @@ export const SessionRsvpView: React.FC<SessionRsvpViewProps> = ({
                   placeholder={`Klistra in anmälningar här, t.ex:\n\nHaythem Noor Deltar (Kommer 10 min sent)\nCornelis Setterholm - Deltar ej - Bortrest\nErik Johansson Deltar`}
                   className="w-full bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-2xl p-4 text-xs font-bold text-zinc-900 dark:text-white outline-none focus:ring-2 focus:ring-indigo-500 placeholder-zinc-400 font-mono"
                 />
+
+                <label className="flex items-center gap-2.5 p-3 rounded-xl bg-indigo-50/60 dark:bg-indigo-950/40 border border-indigo-100 dark:border-indigo-800/60 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={pasteAlsoMarkPresent}
+                    onChange={(e) => setPasteAlsoMarkPresent(e.target.checked)}
+                    className="w-4 h-4 rounded text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+                  />
+                  <div>
+                    <span className="block text-xs font-black text-indigo-950 dark:text-indigo-200">
+                      Markera automatiskt anmälda som närvarande
+                    </span>
+                    <span className="block text-[11px] text-zinc-500 dark:text-zinc-400">
+                      Sparar dubbelklick – spelarna blir direkt valbara i laguppställning och övningar.
+                    </span>
+                  </div>
+                </label>
               </div>
 
               <div className="flex items-center justify-end gap-3 pt-2">

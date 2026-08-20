@@ -136,11 +136,12 @@ export default function App() {
   const [pendingRequestsCount, setPendingRequestsCount] = useState<number>(0);
   const [isPendingRequestsModalOpen, setIsPendingRequestsModalOpen] = useState<boolean>(false);
 
-  const checkRootAdminStatus = async (uid: string, email: string) => {
+  const checkRootAdminStatus = async (uid: string, email: string, googleEmail?: string | null) => {
     try {
-      const lowerEmail = email.trim().toLowerCase();
+      const lowerEmail = (email || '').trim().toLowerCase();
+      const lowerGoogleEmail = (googleEmail || '').trim().toLowerCase();
       const hardcodedRoots = ['christer.setterholm@gmail.com', 'christer@setterholm.se'];
-      let isRoot = hardcodedRoots.includes(lowerEmail);
+      let isRoot = (lowerEmail && hardcodedRoots.includes(lowerEmail)) || (lowerGoogleEmail && hardcodedRoots.includes(lowerGoogleEmail));
 
       // Check specific admin UID document
       const adminDoc = await getDoc(doc(db, 'admins', uid));
@@ -154,7 +155,10 @@ export default function App() {
         if (rootAdminsListDoc.exists()) {
           const data = rootAdminsListDoc.data();
           if (data && Array.isArray(data.admins)) {
-            const hasEmail = data.admins.some((adm: any) => adm.email.trim().toLowerCase() === lowerEmail);
+            const hasEmail = data.admins.some((adm: any) => {
+              const admEmail = (adm.email || '').trim().toLowerCase();
+              return (lowerEmail && admEmail === lowerEmail) || (lowerGoogleEmail && admEmail === lowerGoogleEmail);
+            });
             if (hasEmail) {
               isRoot = true;
             }
@@ -170,7 +174,7 @@ export default function App() {
         // Ensure a document exists in the admins collection to satisfy the Security Rules 'exists' check
         await setDoc(doc(db, 'admins', uid), {
           uid,
-          email: lowerEmail,
+          email: lowerEmail || lowerGoogleEmail,
           role: 'root_admin',
           assignedAt: Date.now()
         }, { merge: true });
@@ -201,9 +205,10 @@ export default function App() {
           }
 
           // Add current user if missing from list
-          if (!currentAdmins.some((adm: any) => adm.email.trim().toLowerCase() === lowerEmail)) {
+          const effectiveEmail = lowerEmail || lowerGoogleEmail;
+          if (effectiveEmail && !currentAdmins.some((adm: any) => adm.email.trim().toLowerCase() === effectiveEmail)) {
             currentAdmins.push({
-              email: lowerEmail,
+              email: effectiveEmail,
               uid: uid,
               role: 'root_admin',
               assignedAt: Date.now()
@@ -218,9 +223,10 @@ export default function App() {
     } catch (err) {
       console.error('Failed to check root admin status:', err);
       // Fallback to runtime email check if rules block write or firestore error
-      const lowerEmail = email.trim().toLowerCase();
+      const lowerEmail = (email || '').trim().toLowerCase();
+      const lowerGoogleEmail = (googleEmail || '').trim().toLowerCase();
       const hardcodedRoots = ['christer.setterholm@gmail.com', 'christer@setterholm.se'];
-      const isRoot = hardcodedRoots.includes(lowerEmail);
+      const isRoot = (lowerEmail && hardcodedRoots.includes(lowerEmail)) || (lowerGoogleEmail && hardcodedRoots.includes(lowerGoogleEmail));
       setIsRootAdmin(isRoot);
     }
   };
@@ -865,7 +871,7 @@ export default function App() {
         setIsRootAdmin(false);
       } else {
         loadUserProfile(newUser.uid, newUser.email || '');
-        checkRootAdminStatus(newUser.uid, newUser.email || '');
+        checkRootAdminStatus(newUser.uid, newUser.email || '', newUser.googleEmail || null);
       }
     });
     return () => unsubscribe();
@@ -3253,6 +3259,7 @@ export default function App() {
               squad={squad} 
               lineup={effectiveActiveLineup} 
               lineups={lineups}
+              sessions={sessions}
               onUpdateLineup={updateLineup}
               onSaveLineup={handleSaveLineup}
               onDeleteLineup={handleDeleteLineup}
@@ -3635,6 +3642,58 @@ export default function App() {
               setSessionActionCount(prev => prev + 1);
             }}
             onDeleteExercise={deleteExercise}
+            onOpenLineup={(sess) => {
+              // Check if lineup exists for this session
+              let targetLineup = lineups.find(l => l.sessionId === sess.id);
+              if (!targetLineup && sess.lineupId) {
+                targetLineup = lineups.find(l => l.id === sess.lineupId);
+              }
+
+              if (targetLineup) {
+                setData(prev => ({
+                  ...prev,
+                  activeLineupId: targetLineup!.id
+                }));
+              } else {
+                // Auto-create linked lineup with all attending players on bench
+                const attendingIds = sess.attendance || [];
+                const initialPlayers = attendingIds.map((playerId, idx) => ({
+                  id: `player_${Date.now()}_${idx}_${Math.random().toString(36).substring(7)}`,
+                  playerId,
+                  x: 50,
+                  y: 50,
+                  isSubstitute: true,
+                }));
+
+                const newLineup: Lineup = {
+                  id: `lineup_${Date.now()}_${Math.random().toString(36).substring(7)}`,
+                  teamName: activeClubInfo?.teamName || '',
+                  matchTitle: sess.title || 'Match',
+                  date: sess.date || Date.now(),
+                  formation: '4-3-3',
+                  players: initialPlayers,
+                  sessionId: sess.id,
+                  createdAt: Date.now(),
+                  updatedAt: Date.now(),
+                };
+
+                setData(prev => ({
+                  ...prev,
+                  lineups: [newLineup, ...prev.lineups],
+                  activeLineupId: newLineup.id
+                }));
+
+                onUpdateSession({
+                  ...sess,
+                  lineupId: newLineup.id,
+                  updatedAt: Date.now()
+                });
+              }
+
+              setActiveSessionId(null);
+              setView('lineup');
+              setSessionActionCount(prev => prev + 1);
+            }}
           />
         )}
       </AnimatePresence>

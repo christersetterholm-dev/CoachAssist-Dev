@@ -1,12 +1,16 @@
 export interface User {
   uid: string;
   email: string | null;
+  username?: string | null;
   displayName: string | null;
   photoURL: string | null;
   emailVerified: boolean;
   isAnonymous: boolean;
   tenantId: string | null;
   providerData: any[];
+  googleLinked?: boolean;
+  googleEmail?: string | null;
+  hasPassword?: boolean;
 }
 
 export const getApiUrl = (path: string): string => {
@@ -71,7 +75,152 @@ export const signOut = async (_authObj: any) => {
   listeners.forEach(cb => cb(null));
 };
 
-// Programmatic Modal Sign-In with Email and Password
+// Google Identity Services (GSI) Client Loader
+let gsiScriptLoaded: Promise<void> | null = null;
+
+export const loadGsiClient = (): Promise<void> => {
+  if (gsiScriptLoaded) return gsiScriptLoaded;
+  gsiScriptLoaded = new Promise<void>((resolve, reject) => {
+    if (typeof (window as any).google !== 'undefined' && (window as any).google?.accounts?.oauth2) {
+      resolve();
+      return;
+    }
+    const existing = document.querySelector('script[src="https://accounts.google.com/gsi/client"]');
+    if (existing) {
+      existing.addEventListener('load', () => resolve());
+      existing.addEventListener('error', (e) => reject(new Error('Kunde inte ladda Google Identity Services: ' + e)));
+      return;
+    }
+    const script = document.createElement('script');
+    script.src = 'https://accounts.google.com/gsi/client';
+    script.async = true;
+    script.defer = true;
+    script.onload = () => resolve();
+    script.onerror = (e) => reject(new Error('Kunde inte ladda Google Identity Services: ' + e));
+    document.head.appendChild(script);
+  });
+  return gsiScriptLoaded;
+};
+
+// Retrieve Google OAuth Client ID from env or backend config
+export const getGoogleClientId = async (): Promise<string> => {
+  const envId = (import.meta as any).env?.VITE_GOOGLE_CLIENT_ID;
+  if (envId) return envId;
+  try {
+    const res = await fetch(getApiUrl('/api/auth/config'));
+    if (res.ok) {
+      const data = await res.json();
+      if (data && data.googleClientId) return data.googleClientId;
+    }
+  } catch (_) {}
+  return '';
+};
+
+// Trigger Google OAuth 2.0 Token Popup
+export const triggerGoogleAuth = async (forceSelect = false): Promise<{ accessToken: string }> => {
+  await loadGsiClient();
+  const clientId = await getGoogleClientId();
+  if (!clientId) {
+    throw new Error('Google-inloggning kräver ett Google OAuth Client ID. Lägg till VITE_GOOGLE_CLIENT_ID (eller GOOGLE_CLIENT_ID) i miljövariablerna (.env).');
+  }
+
+  return new Promise((resolve, reject) => {
+    try {
+      const client = (window as any).google.accounts.oauth2.initTokenClient({
+        client_id: clientId,
+        scope: 'email profile openid',
+        callback: (response: any) => {
+          if (response && response.access_token) {
+            resolve({ accessToken: response.access_token });
+          } else if (response && response.error) {
+            reject(new Error(`Google-inloggning avbröts: ${response.error_description || response.error}`));
+          } else {
+            reject(new Error('Google returnerade ingen giltig token.'));
+          }
+        },
+        error_callback: (err: any) => {
+          reject(new Error(err?.message || 'Google OAuth-fönstret misslyckades eller blockerades.'));
+        }
+      });
+      client.requestAccessToken({ prompt: forceSelect ? 'select_account' : '' });
+    } catch (err: any) {
+      reject(new Error('Kunde inte starta Google-inloggning: ' + (err.message || err)));
+    }
+  });
+};
+
+// Refresh current user session from /api/auth/me
+export const refreshCurrentUser = async (): Promise<User | null> => {
+  const token = localStorage.getItem('token');
+  if (!token) return null;
+  try {
+    const res = await fetch(getApiUrl('/api/auth/me'), {
+      headers: { 'Authorization': `Bearer ${token}` }
+    });
+    if (res.ok) {
+      const user = await res.json();
+      auth.currentUser = user;
+      localStorage.setItem('cached_auth_user', JSON.stringify(user));
+      listeners.forEach(cb => cb(user));
+      return user;
+    }
+  } catch (e) {
+    console.error('Error refreshing current user:', e);
+  }
+  return auth.currentUser;
+};
+
+// Link Google Account to current logged-in user
+export const linkGoogleAccount = async (forceSelect = true): Promise<{ success: boolean; googleEmail?: string; message?: string }> => {
+  const token = localStorage.getItem('token');
+  if (!token) {
+    throw new Error('Du måste vara inloggad för att koppla ett konto.');
+  }
+
+  const { accessToken } = await triggerGoogleAuth(forceSelect);
+  const res = await fetch(getApiUrl('/api/auth/link-google'), {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${token}`
+    },
+    body: JSON.stringify({ accessToken })
+  });
+
+  const data = await res.json();
+  if (!res.ok) {
+    throw new Error(data.error || 'Kunde inte koppla Google-konto.');
+  }
+
+  await refreshCurrentUser();
+  return data;
+};
+
+// Unlink Google Account from current logged-in user
+export const unlinkGoogleAccount = async (): Promise<{ success: boolean; message: string }> => {
+  const token = localStorage.getItem('token');
+  if (!token) {
+    throw new Error('Du måste vara inloggad för att koppla bort ett konto.');
+  }
+
+  const res = await fetch(getApiUrl('/api/auth/unlink-google'), {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${token}`
+    }
+  });
+
+  const data = await res.json();
+  if (!res.ok) {
+    throw new Error(data.error || 'Kunde inte koppla bort Google-konto.');
+  }
+
+  await refreshCurrentUser();
+  return data;
+};
+
+// Programmatic Modal Sign-In with Email, Username, or Google
 export const signInWithGoogle = async (_forceSelect = false): Promise<User> => {
   return new Promise<User>((resolve, reject) => {
     if (document.getElementById('custom-auth-modal')) {
@@ -100,7 +249,26 @@ export const signInWithGoogle = async (_forceSelect = false): Promise<User> => {
 
         <div class="flex flex-col gap-1">
           <h3 id="auth-title" class="text-lg font-bold text-zinc-850 dark:text-zinc-100">Logga in till ditt konto</h3>
-          <p id="auth-subtitle" class="text-xs text-zinc-500 dark:text-zinc-400">Ange din e-postadress och lösenord för att logga in på ditt konto.</p>
+          <p id="auth-subtitle" class="text-xs text-zinc-500 dark:text-zinc-400">Logga in med Google eller ange dina inloggningsuppgifter.</p>
+        </div>
+
+        <!-- Google Login Button Section -->
+        <div id="auth-google-container" class="space-y-3">
+          <button type="button" id="auth-google-btn" class="w-full bg-white hover:bg-zinc-50 dark:bg-zinc-800 dark:hover:bg-zinc-750 text-zinc-700 dark:text-zinc-200 border border-zinc-300 dark:border-zinc-700 font-bold py-3.5 px-4 rounded-xl text-sm transition-all shadow-sm flex items-center justify-center gap-3 cursor-pointer hover:shadow">
+            <svg class="w-5 h-5 shrink-0" viewBox="0 0 24 24">
+              <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+              <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+              <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"/>
+              <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"/>
+            </svg>
+            <span id="auth-google-btn-text">Fortsätt med Google</span>
+          </button>
+
+          <div id="auth-divider" class="relative flex items-center justify-center my-1">
+            <div class="border-t border-zinc-200 dark:border-zinc-800 w-full"></div>
+            <span class="bg-white dark:bg-zinc-900 px-3 text-xs text-zinc-400 dark:text-zinc-500 font-medium whitespace-nowrap">eller med uppgifter</span>
+            <div class="border-t border-zinc-200 dark:border-zinc-800 w-full"></div>
+          </div>
         </div>
 
         <form id="auth-form" class="space-y-4">
@@ -136,14 +304,14 @@ export const signInWithGoogle = async (_forceSelect = false): Promise<User> => {
           <div id="auth-info" class="hidden text-xs font-medium text-emerald-800 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800/40 px-3.5 py-2.5 rounded-xl"></div>
           <div id="auth-error" class="hidden text-xs font-medium text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-900/30 px-3.5 py-2.5 rounded-xl"></div>
 
-          <button type="submit" id="auth-submit-btn" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3.5 px-4 rounded-xl text-sm transition-colors shadow-lg shadow-indigo-100 dark:shadow-none flex items-center justify-center gap-2">
+          <button type="submit" id="auth-submit-btn" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3.5 px-4 rounded-xl text-sm transition-colors shadow-lg shadow-indigo-100 dark:shadow-none flex items-center justify-center gap-2 cursor-pointer">
             <span>Logga in</span>
           </button>
         </form>
 
         <div class="flex items-center justify-center gap-2 text-xs text-zinc-500 dark:text-zinc-400">
           <span id="auth-switch-text">Har du inget konto?</span>
-          <button id="auth-switch-btn" class="font-bold text-indigo-500 hover:text-indigo-600 dark:text-indigo-400 dark:hover:text-indigo-300 underline transition-colors">Skapa konto</button>
+          <button id="auth-switch-btn" class="font-bold text-indigo-500 hover:text-indigo-600 dark:text-indigo-400 dark:hover:text-indigo-300 underline transition-colors cursor-pointer">Skapa konto</button>
         </div>
       </div>
     `;
@@ -167,6 +335,8 @@ export const signInWithGoogle = async (_forceSelect = false): Promise<User> => {
     const closeBtn = modal.querySelector('#auth-close-btn') as HTMLButtonElement;
     const switchBtn = modal.querySelector('#auth-switch-btn') as HTMLButtonElement;
     const forgotBtn = modal.querySelector('#auth-forgot-btn') as HTMLButtonElement;
+    const googleBtn = modal.querySelector('#auth-google-btn') as HTMLButtonElement;
+    const googleContainer = modal.querySelector('#auth-google-container') as HTMLElement;
     const form = modal.querySelector('#auth-form') as HTMLFormElement;
     const errorDiv = modal.querySelector('#auth-error') as HTMLDivElement;
     const infoDiv = modal.querySelector('#auth-info') as HTMLDivElement;
@@ -214,16 +384,55 @@ export const signInWithGoogle = async (_forceSelect = false): Promise<User> => {
       reject(new Error('Inloggningen avbröts av användaren'));
     };
 
+    if (googleBtn) {
+      googleBtn.onclick = async () => {
+        errorDiv.classList.add('hidden');
+        infoDiv.classList.add('hidden');
+        googleBtn.disabled = true;
+        googleBtn.classList.add('opacity-70');
+        try {
+          const { accessToken } = await triggerGoogleAuth(_forceSelect);
+          const url = getApiUrl('/api/auth/google');
+          const response = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ accessToken })
+          });
+          const resData = await response.json();
+          if (!response.ok) {
+            throw new Error(resData.error || 'Google-inloggningen misslyckades.');
+          }
+
+          localStorage.setItem('token', resData.token);
+          if (resData.user) {
+            localStorage.setItem('cached_auth_user', JSON.stringify(resData.user));
+          }
+          auth.currentUser = resData.user;
+          listeners.forEach(cb => cb(resData.user));
+
+          cleanUpModal();
+          resolve(resData.user);
+        } catch (err: any) {
+          errorDiv.innerText = err.message || 'Kunde inte logga in med Google';
+          errorDiv.classList.remove('hidden');
+        } finally {
+          googleBtn.disabled = false;
+          googleBtn.classList.remove('opacity-70');
+        }
+      };
+    }
+
     const updateAuthUI = () => {
       errorDiv.classList.add('hidden');
       infoDiv.classList.add('hidden');
 
       if (authMode === 'register') {
         title.innerText = 'Skapa nytt konto';
-        subtitle.innerText = 'Skapa ett konto för att få tillgång till dina lag, träningar och laguppställningar.';
+        subtitle.innerText = 'Skapa ett konto med Google eller e-post för att spara din trupp och ansluta till lag.';
         passwordLabel.innerText = 'Lösenord';
         if (emailLabel) emailLabel.innerText = 'E-postadress';
         if (emailInput) emailInput.placeholder = 'coach@lag.se';
+        googleContainer.classList.remove('hidden');
         usernameContainer.classList.remove('hidden');
         emailContainer.classList.remove('hidden');
         codeContainer.classList.add('hidden');
@@ -239,6 +448,7 @@ export const signInWithGoogle = async (_forceSelect = false): Promise<User> => {
         subtitle.innerText = 'Ange din e-postadress för att få en 6-siffrig verifieringskod.';
         if (emailLabel) emailLabel.innerText = 'E-postadress';
         if (emailInput) emailInput.placeholder = 'coach@lag.se';
+        googleContainer.classList.add('hidden');
         usernameContainer.classList.add('hidden');
         emailContainer.classList.remove('hidden');
         codeContainer.classList.add('hidden');
@@ -255,6 +465,7 @@ export const signInWithGoogle = async (_forceSelect = false): Promise<User> => {
         passwordLabel.innerText = 'Nytt lösenord';
         if (emailLabel) emailLabel.innerText = 'E-postadress';
         if (emailInput) emailInput.placeholder = 'coach@lag.se';
+        googleContainer.classList.add('hidden');
         usernameContainer.classList.add('hidden');
         emailContainer.classList.remove('hidden');
         codeContainer.classList.remove('hidden');
@@ -267,10 +478,11 @@ export const signInWithGoogle = async (_forceSelect = false): Promise<User> => {
         switchBtn.innerText = 'Tillbaka till inloggning';
       } else {
         title.innerText = 'Logga in till ditt konto';
-        subtitle.innerText = 'Logga in med e-post eller användarnamn och lösenord.';
+        subtitle.innerText = 'Logga in med Google, e-post eller användarnamn.';
         passwordLabel.innerText = 'Lösenord';
         if (emailLabel) emailLabel.innerText = 'E-postadress eller användarnamn';
         if (emailInput) emailInput.placeholder = 'coach@lag.se eller användarnamn';
+        googleContainer.classList.remove('hidden');
         usernameContainer.classList.add('hidden');
         emailContainer.classList.remove('hidden');
         codeContainer.classList.add('hidden');
@@ -279,8 +491,9 @@ export const signInWithGoogle = async (_forceSelect = false): Promise<User> => {
         passwordInput.required = true;
         codeInput.required = false;
         submitBtn.querySelector('span')!.innerText = 'Logga in';
-        switchText.innerText = 'Saknar du inloggningsuppgifter? Kontakta din föreningsadministratör.';
-        switchBtn.classList.add('hidden');
+        switchText.innerText = 'Har du inget konto?';
+        switchBtn.innerText = 'Skapa konto';
+        switchBtn.classList.remove('hidden');
       }
     };
 

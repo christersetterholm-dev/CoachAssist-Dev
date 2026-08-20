@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { User, Phone, Fingerprint, Check, Save, AtSign, Lock, Key, Eye, EyeOff, ShieldCheck, AlertCircle, Landmark, Info } from 'lucide-react';
+import { User, Phone, Fingerprint, Check, Save, AtSign, Lock, Key, Eye, EyeOff, ShieldCheck, AlertCircle, Landmark, Info, Link2, Unlink } from 'lucide-react';
 import { UserProfile, Club, ClubMetadata, ClubMember } from '../types';
-import { db, getApiUrl, auth } from '../lib/firebase';
+import { db, getApiUrl, auth, linkGoogleAccount, unlinkGoogleAccount } from '../lib/firebase';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 
 interface ProfileAndSettingsProps {
@@ -36,6 +36,13 @@ export default function ProfileAndSettings({
   const [emailUpdateError, setEmailUpdateError] = useState<string>('');
   const [usernameError, setUsernameError] = useState<string>('');
 
+  // Google Account Linking State
+  const [googleLinked, setGoogleLinked] = useState<boolean>(auth.currentUser?.googleLinked ?? false);
+  const [googleEmail, setGoogleEmail] = useState<string>(auth.currentUser?.googleEmail || '');
+  const [hasPassword, setHasPassword] = useState<boolean>(auth.currentUser?.hasPassword ?? true);
+  const [googleLinkStatus, setGoogleLinkStatus] = useState<'idle' | 'linking' | 'unlinking' | 'success' | 'error'>('idle');
+  const [googleLinkMsg, setGoogleLinkMsg] = useState<string>('');
+
   // Sync state when props change
   useEffect(() => {
     const fetchedUsername = currentProfile.username || auth.currentUser?.username || '';
@@ -51,22 +58,31 @@ export default function ProfileAndSettings({
     setEmailInput(currentProfile.email || userEmail || '');
     setUsernameInput(fetchedUsername);
 
-    if (!fetchedUsername) {
-      const token = localStorage.getItem('token');
-      if (token) {
-        fetch(getApiUrl('/api/auth/me'), {
-          headers: { 'Authorization': `Bearer ${token}` }
-        })
-          .then(res => res.ok ? res.json() : null)
-          .then(data => {
-            if (data?.username) {
+    const token = localStorage.getItem('token');
+    if (token) {
+      fetch(getApiUrl('/api/auth/me'), {
+        headers: { 'Authorization': `Bearer ${token}` }
+      })
+        .then(res => res.ok ? res.json() : null)
+        .then(data => {
+          if (data) {
+            if (data.username) {
               if (auth.currentUser) auth.currentUser.username = data.username;
               setUsernameInput(data.username);
               setProfile(prev => ({ ...prev, username: data.username }));
             }
-          })
-          .catch(() => {});
-      }
+            if (typeof data.googleLinked === 'boolean') {
+              setGoogleLinked(data.googleLinked);
+            }
+            if (data.googleEmail) {
+              setGoogleEmail(data.googleEmail);
+            }
+            if (typeof data.hasPassword === 'boolean') {
+              setHasPassword(data.hasPassword);
+            }
+          }
+        })
+        .catch(() => {});
     }
   }, [currentProfile, userEmail]);
 
@@ -309,6 +325,41 @@ export default function ProfileAndSettings({
     }
   };
 
+  const handleLinkGoogle = async () => {
+    setGoogleLinkStatus('linking');
+    setGoogleLinkMsg('');
+    try {
+      const res = await linkGoogleAccount(true);
+      setGoogleLinked(true);
+      setGoogleEmail(res.googleEmail || auth.currentUser?.googleEmail || '');
+      setGoogleLinkStatus('success');
+      setGoogleLinkMsg(res.message || 'Ditt Google-konto har kopplats samman med ditt CoachAssist-konto!');
+      setTimeout(() => setGoogleLinkStatus('idle'), 5000);
+    } catch (err: any) {
+      setGoogleLinkStatus('error');
+      setGoogleLinkMsg(err.message || 'Kunde inte koppla Google-konto.');
+    }
+  };
+
+  const handleUnlinkGoogle = async () => {
+    if (!window.confirm('Är du säker på att du vill koppla bort Google-kontot från ditt CoachAssist-konto?')) {
+      return;
+    }
+    setGoogleLinkStatus('unlinking');
+    setGoogleLinkMsg('');
+    try {
+      const res = await unlinkGoogleAccount();
+      setGoogleLinked(false);
+      setGoogleEmail('');
+      setGoogleLinkStatus('success');
+      setGoogleLinkMsg(res.message || 'Google-kontot har kopplats bort.');
+      setTimeout(() => setGoogleLinkStatus('idle'), 5000);
+    } catch (err: any) {
+      setGoogleLinkStatus('error');
+      setGoogleLinkMsg(err.message || 'Kunde inte koppla bort Google-konto.');
+    }
+  };
+
   return (
     <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 max-w-6xl mx-auto p-4 sm:p-6" id="profile-settings-page">
       {/* Profile Form & Password Change (Left Column) */}
@@ -458,8 +509,12 @@ export default function ProfileAndSettings({
               <Lock size={24} />
             </div>
             <div>
-              <h2 className="text-xl font-black text-zinc-900 dark:text-white tracking-tight">Byt lösenord</h2>
-              <p className="text-xs text-zinc-500 dark:text-zinc-400 font-medium">Säkra ditt konto genom att uppdatera ditt lösenord.</p>
+              <h2 className="text-xl font-black text-zinc-900 dark:text-white tracking-tight">{!hasPassword && googleLinked ? 'Skapa lösenord' : 'Byt lösenord'}</h2>
+              <p className="text-xs text-zinc-500 dark:text-zinc-400 font-medium">
+                {!hasPassword && googleLinked
+                  ? 'Du loggar för närvarande in med Google. Skapa ett lösenord om du även vill kunna logga in manuellt.'
+                  : 'Säkra ditt konto genom att uppdatera ditt lösenord.'}
+              </p>
             </div>
           </div>
 
@@ -582,6 +637,114 @@ export default function ProfileAndSettings({
               </button>
             </div>
           </form>
+        </div>
+
+        {/* Google Account Linking Card */}
+        <div className="bg-white dark:bg-zinc-900 rounded-3xl border border-zinc-150 dark:border-zinc-800 shadow-xl p-6 sm:p-8">
+          <div className="flex items-center gap-3.5 mb-6">
+            <div className="w-12 h-12 rounded-2xl bg-amber-500/10 dark:bg-amber-950/40 flex items-center justify-center text-amber-600 dark:text-amber-400">
+              <Link2 size={24} />
+            </div>
+            <div>
+              <h2 className="text-xl font-black text-zinc-900 dark:text-white tracking-tight">Kopplade inloggningsmetoder</h2>
+              <p className="text-xs text-zinc-500 dark:text-zinc-400 font-medium">Logga in snabbt och säkert genom att ansluta ditt Google-konto.</p>
+            </div>
+          </div>
+
+          <div className="space-y-4">
+            <div className="p-4.5 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50/70 dark:bg-zinc-950/60 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div className="flex items-center gap-3.5">
+                <div className="w-11 h-11 rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 flex items-center justify-center shadow-xs shrink-0">
+                  <svg className="w-6 h-6" viewBox="0 0 24 24">
+                    <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+                    <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+                    <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"/>
+                    <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"/>
+                  </svg>
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="font-extrabold text-sm text-zinc-900 dark:text-white">Google-konto</span>
+                    {googleLinked ? (
+                      <span className="inline-flex items-center gap-1 text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-400">
+                        <Check size={11} /> Kopplat
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center text-[10px] font-bold px-2 py-0.5 rounded-full bg-zinc-200 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400">
+                        Ej anslutet
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5 font-medium">
+                    {googleLinked && googleEmail ? (
+                      <span>Ansluten som <strong className="text-zinc-800 dark:text-zinc-200">{googleEmail}</strong></span>
+                    ) : (
+                      'Logga in smidigt med ditt Google-konto'
+                    )}
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                {googleLinked ? (
+                  <button
+                    type="button"
+                    onClick={handleUnlinkGoogle}
+                    disabled={googleLinkStatus === 'unlinking' || googleLinkStatus === 'linking'}
+                    className="w-full sm:w-auto px-4 py-2.5 rounded-xl border border-red-200 hover:border-red-300 dark:border-red-900/50 dark:hover:border-red-800 bg-white hover:bg-red-50 dark:bg-zinc-900 dark:hover:bg-red-950/30 text-red-600 dark:text-red-400 font-bold text-xs flex items-center justify-center gap-1.5 transition-all shadow-xs cursor-pointer disabled:opacity-50"
+                  >
+                    {googleLinkStatus === 'unlinking' ? (
+                      <>
+                        <div className="w-3.5 h-3.5 border-2 border-red-500 border-t-transparent rounded-full animate-spin"></div>
+                        <span>Kopplar bort...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Unlink size={14} />
+                        <span>Koppla bort</span>
+                      </>
+                    )}
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={handleLinkGoogle}
+                    disabled={googleLinkStatus === 'linking' || googleLinkStatus === 'unlinking'}
+                    className="w-full sm:w-auto px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs flex items-center justify-center gap-1.5 transition-all shadow-sm cursor-pointer disabled:opacity-50"
+                  >
+                    {googleLinkStatus === 'linking' ? (
+                      <>
+                        <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                        <span>Kopplar konto...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Link2 size={14} />
+                        <span>Koppla Google-konto</span>
+                      </>
+                    )}
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {googleLinkMsg && (
+              <div className={`p-3.5 rounded-2xl text-xs font-bold flex items-center gap-2 ${
+                googleLinkStatus === 'success'
+                  ? 'bg-emerald-50 text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800'
+                  : 'bg-red-50 text-red-700 dark:bg-red-950/50 dark:text-red-300 border border-red-200 dark:border-red-800'
+              }`}>
+                {googleLinkStatus === 'success' ? <ShieldCheck size={18} /> : <AlertCircle size={18} />}
+                <span>{googleLinkMsg}</span>
+              </div>
+            )}
+
+            <div className="p-3.5 rounded-2xl bg-zinc-50 dark:bg-zinc-950/40 border border-zinc-150 dark:border-zinc-800/80 text-zinc-500 dark:text-zinc-400 text-xs leading-relaxed">
+              <p>
+                När ditt Google-konto är kopplat kan du logga in antingen via knappen <strong>"Fortsätt med Google"</strong> eller med ditt vanliga användarnamn/e-post och lösenord.
+              </p>
+            </div>
+          </div>
         </div>
       </div>
 

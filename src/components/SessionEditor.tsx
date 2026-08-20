@@ -33,6 +33,7 @@ interface SessionEditorProps {
   exerciseBankCategories?: string[];
   onSaveToBank?: (moment: SessionMoment) => any;
   onUpdateBankExercise?: (id: string, updates: Partial<any>) => void;
+  onOpenLineup?: (session: TrainingSession) => void;
 }
 
 interface MomentItemProps {
@@ -836,6 +837,7 @@ export default function SessionEditor({
   exerciseBankCategories = [],
   onSaveToBank,
   onUpdateBankExercise,
+  onOpenLineup,
   user,
   userRoles,
   userProfile
@@ -1278,6 +1280,17 @@ export default function SessionEditor({
                 <UserCheck size={14} className={activeTab === 'attendance' || activeTab === 'rsvp' ? 'text-white shrink-0' : 'text-indigo-500 shrink-0'} />
                 <span className="truncate">Närvaro ({session.attendance?.length || 0})</span>
               </button>
+
+              {onOpenLineup && (
+                <button
+                  onClick={() => onOpenLineup(session)}
+                  className="px-3.5 h-11 rounded-xl text-[10px] md:text-xs font-black uppercase tracking-tight border transition-all flex items-center justify-center gap-1.5 flex-1 sm:flex-initial cursor-pointer bg-white dark:bg-zinc-900 hover:bg-zinc-50 dark:hover:bg-zinc-800 text-zinc-600 dark:text-zinc-300 border-zinc-200 dark:border-zinc-800"
+                  title="Öppna matchens laguppställning"
+                >
+                  <Users size={14} className="text-emerald-500 shrink-0" />
+                  <span className="truncate">Laguppställning</span>
+                </button>
+              )}
             </div>
           </div>
         </div>
@@ -1307,6 +1320,34 @@ export default function SessionEditor({
               </div>
 
               <div className="space-y-6">
+                <div>
+                  <label className="block text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-2">Typ av aktivitet</label>
+                  <div className="grid grid-cols-2 gap-2 bg-zinc-100 dark:bg-zinc-800 p-1 rounded-xl">
+                    <button
+                      type="button"
+                      onClick={() => onUpdate({ ...session, type: 'training', category: 'training' })}
+                      className={`py-2 rounded-lg text-xs font-black uppercase tracking-wider transition-all flex items-center justify-center gap-1.5 ${
+                        (session.type !== 'match' && session.category !== 'match')
+                          ? 'bg-white dark:bg-zinc-700 text-zinc-900 dark:text-white shadow-sm'
+                          : 'text-zinc-500 hover:text-zinc-900 dark:text-zinc-400'
+                      }`}
+                    >
+                      <span>🏃 Träning</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => onUpdate({ ...session, type: 'match', category: 'match' })}
+                      className={`py-2 rounded-lg text-xs font-black uppercase tracking-wider transition-all flex items-center justify-center gap-1.5 ${
+                        (session.type === 'match' || session.category === 'match')
+                          ? 'bg-indigo-600 text-white shadow-sm'
+                          : 'text-zinc-500 hover:text-zinc-900 dark:text-zinc-400'
+                      }`}
+                    >
+                      <span>⚽ Match</span>
+                    </button>
+                  </div>
+                </div>
+
                 <div>
                   <label className="block text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-2">Datum</label>
                   <input
@@ -1644,6 +1685,7 @@ export default function SessionEditor({
               userRoles={userRoles}
               userProfile={userProfile}
               adminUrl={adminUrl}
+              onOpenLineup={onOpenLineup ? () => onOpenLineup(session) : undefined}
             />
           )}
           

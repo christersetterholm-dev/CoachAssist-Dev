@@ -77,6 +77,11 @@ service cloud.firestore {
       allow write: if request.resource.data.keys().hasAll(['id', 'email']);
     }
 
+    match /server_users_google/{googleId} {
+      allow read: if true;
+      allow write: if request.resource.data.keys().hasAll(['id', 'email']);
+    }
+
     match /server_uploads/{filename} {
       allow read: if true;
       allow write: if isValidServerUpload(request.resource.data);
