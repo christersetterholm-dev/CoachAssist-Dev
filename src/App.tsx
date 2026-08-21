@@ -1261,41 +1261,43 @@ export default function App() {
               return;
             }
 
-            // Skip applying remote updates if local writes are pending
-            if (sessionActionCountRef.current > 0 && lastCloudDataRef.current) {
-              const remoteData = snapshot.data();
-              if (remoteData) {
-                const lineupsChanged = JSON.stringify(lastCloudDataRef.current.lineups) !== JSON.stringify(remoteData.lineups) ||
-                                      lastCloudDataRef.current.activeLineupId !== remoteData.activeLineupId;
-                if (lineupsChanged) {
-                  console.log("App: Postponing remote lineups update to prevent overwrite of local edits.");
-                  return;
-                }
+            if (!snapshot.exists()) return;
+            const remoteData = snapshot.data();
+            if (!remoteData) return;
+
+            // If the write came from our own active session, ignore it to prevent race condition rollbacks
+            if (remoteData.lastUpdatedBy === sessionIdRef.current) {
+              if (lastCloudDataRef.current) {
+                lastCloudDataRef.current.lineups = remoteData.lineups || [];
+                lastCloudDataRef.current.activeLineupId = remoteData.activeLineupId || null;
               }
+              return;
             }
 
-            if (snapshot.exists()) {
-              const remoteLineupsData = snapshot.data();
-              const newLineups = remoteLineupsData.lineups || [];
-              const newActiveLineupId = remoteLineupsData.activeLineupId || null;
-
-              setData(prev => {
-                if (JSON.stringify(prev.lineups) === JSON.stringify(newLineups) && prev.activeLineupId === newActiveLineupId) {
-                  return prev;
-                }
-                console.log("App: Real-time update of lineups applied from cloud");
-                const updated = {
-                  ...prev,
-                  lineups: newLineups,
-                  activeLineupId: newActiveLineupId
-                };
-                if (lastCloudDataRef.current) {
-                  lastCloudDataRef.current.lineups = newLineups;
-                  lastCloudDataRef.current.activeLineupId = newActiveLineupId;
-                }
-                return updated;
-              });
+            // Skip applying remote updates if local writes/actions are currently pending
+            if (sessionActionCountRef.current > 0) {
+              return;
             }
+
+            const newLineups = remoteData.lineups || [];
+            const newActiveLineupId = remoteData.activeLineupId || null;
+
+            setData(prev => {
+              if (JSON.stringify(prev.lineups) === JSON.stringify(newLineups) && prev.activeLineupId === newActiveLineupId) {
+                return prev;
+              }
+              console.log("App: Real-time update of lineups applied from cloud");
+              const updated = {
+                ...prev,
+                lineups: newLineups,
+                activeLineupId: newActiveLineupId
+              };
+              if (lastCloudDataRef.current) {
+                lastCloudDataRef.current.lineups = newLineups;
+                lastCloudDataRef.current.activeLineupId = newActiveLineupId;
+              }
+              return updated;
+            });
           }, (error) => {
             console.error("App: Lineup snapshot error:", error);
             if (isQuotaError(error)) {
@@ -2521,7 +2523,7 @@ export default function App() {
   }
 
   return (
-    <div className={`flex flex-col bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100 font-sans selection:bg-indigo-100 transition-colors duration-500 h-[100dvh] overflow-hidden ${view === 'exercise' || view === 'teampage' ? 'select-none' : ''}`}>
+    <div className={`fixed inset-0 flex flex-col bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100 font-sans selection:bg-indigo-100 transition-colors duration-500 overflow-hidden ${view === 'exercise' || view === 'teampage' ? 'select-none' : ''}`}>
       {view !== 'lineup' && (
         <header className={`bg-white dark:bg-zinc-900 border-b border-zinc-200 dark:border-zinc-800 z-30 transition-colors duration-500 shrink-0 pt-safe ${view === 'exercise' ? 'sticky top-0' : ''}`}>
           <div className="max-w-4xl lg:max-w-5xl xl:max-w-6xl 2xl:max-w-7xl mx-auto px-4 h-14 sm:h-16 flex items-center justify-between">

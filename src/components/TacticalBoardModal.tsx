@@ -833,26 +833,27 @@ export default function TacticalBoardModal({
     <div className="fixed inset-0 z-50 bg-zinc-950 flex flex-col text-zinc-100 overflow-hidden font-sans">
       
       {/* Top Bar Header */}
-      <div className="h-16 border-b border-zinc-800 bg-zinc-900 px-4 flex items-center justify-between shrink-0">
-        <div className="flex items-center gap-3">
-          <button
-            onClick={() => setIsSidebarOpen(!isSidebarOpen)}
-            className="p-2 bg-zinc-800/50 hover:bg-zinc-800 border border-zinc-700 hover:border-zinc-600 text-zinc-400 hover:text-white rounded-xl transition-all flex items-center justify-center mr-1"
-            title={isSidebarOpen ? "Dölj sidopanel" : "Visa sidopanel"}
-          >
-            <Layout size={18} className={isSidebarOpen ? "text-indigo-400" : ""} />
-          </button>
-          <button
-            onClick={() => setIsToolboxVisible(!isToolboxVisible)}
-            className="p-2 bg-zinc-800/50 hover:bg-zinc-800 border border-zinc-700 hover:border-zinc-600 text-zinc-400 hover:text-white rounded-xl transition-all flex items-center justify-center mr-1"
-            title={isToolboxVisible ? "Dölj ritverktyg" : "Visa ritverktyg"}
-          >
-            {isToolboxVisible ? <EyeOff size={18} className="text-indigo-400" /> : <Eye size={18} />}
-          </button>
-          <div>
-            <h1 className="text-sm font-black uppercase tracking-tight leading-none text-zinc-100">{title}</h1>
+      <div className="pt-safe border-b border-zinc-800 bg-zinc-900 px-4 shrink-0">
+        <div className="h-14 sm:h-16 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => setIsSidebarOpen(!isSidebarOpen)}
+              className="p-2 bg-zinc-800/50 hover:bg-zinc-800 border border-zinc-700 hover:border-zinc-600 text-zinc-400 hover:text-white rounded-xl transition-all flex items-center justify-center mr-1"
+              title={isSidebarOpen ? "Dölj sidopanel" : "Visa sidopanel"}
+            >
+              <Layout size={18} className={isSidebarOpen ? "text-indigo-400" : ""} />
+            </button>
+            <button
+              onClick={() => setIsToolboxVisible(!isToolboxVisible)}
+              className="p-2 bg-zinc-800/50 hover:bg-zinc-800 border border-zinc-700 hover:border-zinc-600 text-zinc-400 hover:text-white rounded-xl transition-all flex items-center justify-center mr-1"
+              title={isToolboxVisible ? "Dölj ritverktyg" : "Visa ritverktyg"}
+            >
+              {isToolboxVisible ? <EyeOff size={18} className="text-indigo-400" /> : <Eye size={18} />}
+            </button>
+            <div>
+              <h1 className="text-sm font-black uppercase tracking-tight leading-none text-zinc-100">{title}</h1>
+            </div>
           </div>
-        </div>
 
         {/* Quick status message */}
         <div className="hidden md:flex items-center gap-2 text-[10px] font-bold uppercase text-zinc-500 bg-zinc-950 px-3 py-1.5 rounded-full border border-zinc-800/60">
@@ -883,6 +884,7 @@ export default function TacticalBoardModal({
           </button>
         </div>
       </div>
+    </div>
 
       {/* Main Workspace Frame */}
       <div className="flex-1 flex overflow-hidden min-h-0 relative">

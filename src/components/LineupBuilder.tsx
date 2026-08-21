@@ -426,7 +426,7 @@ export default function LineupBuilder({
   const [logoToCrop, setLogoToCrop] = useState<string | null>(null);
   const logoInputRef = useRef<HTMLInputElement>(null);
 
-  const [previewZoom, setPreviewZoom] = useState(1);
+  const [previewZoom, setPreviewZoom] = useState(0.9);
   const [isSettingsExpanded, setIsSettingsExpanded] = useState(false);
   const [isFormationsExpanded, setIsFormationsExpanded] = useState(true);
   const [isSavedLineupsExpanded, setIsSavedLineupsExpanded] = useState(true);
@@ -736,57 +736,10 @@ export default function LineupBuilder({
   const [lineupHistories, setLineupHistories] = useState<Record<string, any[]>>({});
   const [lineupFutures, setLineupFutures] = useState<Record<string, any[]>>({});
   const isRestoringHistory = useRef(false);
-  // Sync local state when lineup prop changes (remote updates)
-  useEffect(() => {
-    if (!lineup) return;
-    
-    const isNewId = lineup.id !== currentIdRef.current;
-    
-    // We only want to force a full state reset if it's a new ID
-    // or if we DON'T have unsaved changes (meaning we are following the cloud truth).
-    if (isNewId || !hasUnsavedChanges) {
-      setLineupName(lineup.matchTitle || '');
-      setTeamName(lineup.teamName || '');
-      setPlayers(lineup.players || []);
-      setPlayerScale(lineup.playerScale ?? 1.0);
-      setNameTagStyle(lineup.nameTagStyle || 'light');
-      setNameDisplayMode(lineup.nameDisplayMode || 'full');
-      setShowNameBackground(lineup.showNameBackground ?? true);
-      setNameBackgroundType(lineup.nameBackgroundType || 'classic');
-      setShowPhoto(lineup.showPhoto ?? true);
-      setShowName(lineup.showName ?? true);
-      setShowNumber(lineup.showNumber ?? true);
-      setTeamLogoUrl(lineup.teamLogoUrl || '');
-      setPitchType(lineup.pitchType || 'classic');
-      setCurrentFormation(lineup.formation || '');
-      setTeamNotes(lineup.notes?.team?.text || '');
-      setTeamMedia(lineup.notes?.team?.media || []);
-      setOpponentNotes(lineup.notes?.opponent?.text || '');
-      setOpponentMedia(lineup.notes?.opponent?.media || []);
-      setTacticalDrawings(lineup.tacticalBoard?.drawings || []);
-      setFootballPos(lineup.tacticalBoard?.footballPos || null);
-      setFootballScale(lineup.tacticalBoard?.footballScale || 1);
-      setOpponents(lineup.tacticalBoard?.opponents || []);
-      setShowOpponents(lineup.tacticalBoard?.showOpponents ?? true);
-      setOpponentColor(lineup.tacticalBoard?.opponentColor || '#ef4444');
-      const savedTacticalPlayers = lineup.tacticalBoard?.players || [];
-      setTacticalPlayers(
-        savedTacticalPlayers.length > 0 
-          ? savedTacticalPlayers.map(p => ({ ...p }))
-          : (lineup.players || []).map(p => ({ ...p }))
-      );
-      
-      // Deduplicate players by ID
-      const deduplicatedPlayers = Array.from(new Map((lineup.players || []).map(p => [p.id, p])).values());
-      setPlayers(deduplicatedPlayers);
-      
-      currentIdRef.current = lineup.id;
-      setHasUnsavedChanges(false);
-    }
-  }, [lineup, hasUnsavedChanges]);;
-
   const currentId = lineup?.id || 'temp';
   const currentIdRef = useRef(currentId);
+  const lastInteractionTimeRef = useRef<number>(0);
+  const lastPushedDateRef = useRef<number>(lineup?.date || 0);
   const history = lineupHistories[currentId] || [];
   const future = lineupFutures[currentId] || [];
 
@@ -1327,8 +1280,6 @@ export default function LineupBuilder({
 
   // Use refs for dragging to keep event listeners stable and avoid re-binding performance hits
   const dragInfoRef = useRef<{ id: string; x: number; y: number; hoveredId: string | null } | null>(null);
-  const lastInteractionTimeRef = useRef<number>(0);
-  const lastPushedDateRef = useRef<number>(0);
 
   // Global listeners for dragging - Optimized for performance
   useEffect(() => {
@@ -1472,123 +1423,7 @@ export default function LineupBuilder({
   }, [draggingId, players, tacticalPlayers, isMaximized, pushHistory]);
 
   useEffect(() => {
-    // Ignore internal prop updates for 8 seconds after a local change, or if the incoming update is older than our last local push
-    // This solves the "sliding back" / "jumping back" issue where a stale parent update overwrites the local drop position
-    const timeSinceInteraction = Date.now() - lastInteractionTimeRef.current;
-    const isStaleProp = lineup && lineup.date && lastPushedDateRef.current && (lineup.date < lastPushedDateRef.current);
-
-    if (isRestoringHistory.current || draggingId || timeSinceInteraction < 8000 || hasUnsavedChanges || isStaleProp) {
-      if (!draggingId && timeSinceInteraction >= 8000 && !hasUnsavedChanges && !isStaleProp) {
-        isRestoringHistory.current = false;
-      }
-      return;
-    }
-    if (lineup) {
-      setLineupName(prev => {
-        if (prev !== lineup.matchTitle) return lineup.matchTitle;
-        return prev;
-      });
-      setTeamName(prev => {
-        if (prev !== (lineup.teamName || '')) return lineup.teamName || '';
-        return prev;
-      });
-      setPlayers(prev => {
-        const deduplicated = Array.from(new Map((lineup.players || []).map(p => [p.id, p])).values());
-        if (JSON.stringify(prev) !== JSON.stringify(deduplicated)) return deduplicated;
-        return prev;
-      });
-      setPlayerScale(prev => {
-        if (prev !== lineup.playerScale) return lineup.playerScale || 1;
-        return prev;
-      });
-      setNameTagStyle(prev => {
-         const style = lineup.nameTagStyle || 'light';
-         if (prev !== style) return style;
-         return prev;
-      });
-      setNameDisplayMode(prev => {
-        const mode = lineup.nameDisplayMode || 'first';
-        if (prev !== mode) return mode;
-        return prev;
-      });
-      setShowNameBackground(prev => {
-        const show = lineup.showNameBackground ?? true;
-        if (prev !== show) return show;
-        return prev;
-      });
-      setNameBackgroundType(prev => {
-        const type = lineup.nameBackgroundType || 'classic';
-        if (prev !== type) return type;
-        return prev;
-      });
-      setShowPhoto(prev => {
-        const show = lineup.showPhoto ?? true;
-        if (prev !== show) return show;
-        return prev;
-      });
-      setShowNumber(prev => {
-        const show = lineup.showNumber ?? true;
-        if (prev !== show) return show;
-        return prev;
-      });
-      setTeamLogoUrl(prev => {
-        if (prev !== (lineup.teamLogoUrl || '')) return lineup.teamLogoUrl || '';
-        return prev;
-      });
-      setPitchType(prev => {
-        const type = lineup.pitchType || 'classic';
-        if (prev !== type) return type;
-        return prev;
-      });
-      setCurrentFormation(prev => {
-        const form = lineup.formation || '';
-        if (prev !== form) return form;
-        return prev;
-      });
-
-      // Update tactical board from remote data if different
-      setTacticalDrawings(prev => {
-        const remote = lineup.tacticalBoard?.drawings || [];
-        if (JSON.stringify(prev) !== JSON.stringify(remote)) return remote;
-        return prev;
-      });
-      setFootballPos(prev => {
-        const remote = lineup.tacticalBoard?.footballPos || null;
-        if (JSON.stringify(prev) !== JSON.stringify(remote)) return remote;
-        return prev;
-      });
-      setOpponents(prev => {
-        const remote = lineup.tacticalBoard?.opponents || [];
-        if (JSON.stringify(prev) !== JSON.stringify(remote)) return remote;
-        return prev;
-      });
-      setShowOpponents(prev => {
-        const remote = lineup.tacticalBoard?.showOpponents ?? true;
-        if (prev !== remote) return remote;
-        return prev;
-      });
-
-      setTeamNotes(prev => {
-        const remote = lineup.notes?.team?.text || '';
-        if (prev !== remote) return remote;
-        return prev;
-      });
-      setTeamMedia(prev => {
-        const remote = lineup.notes?.team?.media || [];
-        if (JSON.stringify(prev) !== JSON.stringify(remote)) return remote;
-        return prev;
-      });
-      setOpponentNotes(prev => {
-        const remote = lineup.notes?.opponent?.text || '';
-        if (prev !== remote) return remote;
-        return prev;
-      });
-      setOpponentMedia(prev => {
-        const remote = lineup.notes?.opponent?.media || [];
-        if (JSON.stringify(prev) !== JSON.stringify(remote)) return remote;
-        return prev;
-      });
-    } else {
+    if (!lineup) {
       setLineupName('');
       setTeamName('');
       setPlayers([]);
@@ -1602,8 +1437,163 @@ export default function LineupBuilder({
       setTeamLogoUrl('');
       setPitchType('classic');
       setCurrentFormation('');
+      currentIdRef.current = 'temp';
+      return;
     }
-  }, [lineup, hasUnsavedChanges]);
+
+    const isNewId = lineup.id !== currentIdRef.current;
+
+    // CASE 1: Switched to a different lineup or initial mount -> ALWAYS load full state
+    if (isNewId) {
+      setLineupName(lineup.matchTitle || '');
+      setTeamName(lineup.teamName || '');
+      const deduplicated = Array.from(new Map((lineup.players || []).map(p => [p.id, p])).values());
+      setPlayers(deduplicated);
+      setPlayerScale(lineup.playerScale ?? 1.0);
+      setNameTagStyle(lineup.nameTagStyle || 'light');
+      setNameDisplayMode(lineup.nameDisplayMode || 'full');
+      setShowNameBackground(lineup.showNameBackground ?? true);
+      setNameBackgroundType(lineup.nameBackgroundType || 'classic');
+      setShowPhoto(lineup.showPhoto ?? true);
+      setShowName(lineup.showName ?? true);
+      setShowNumber(lineup.showNumber ?? true);
+      setTeamLogoUrl(lineup.teamLogoUrl || '');
+      setPitchType(lineup.pitchType || 'classic');
+      setCurrentFormation(lineup.formation || '');
+      setTeamNotes(lineup.notes?.team?.text || '');
+      setTeamMedia(lineup.notes?.team?.media || []);
+      setOpponentNotes(lineup.notes?.opponent?.text || '');
+      setOpponentMedia(lineup.notes?.opponent?.media || []);
+      setTacticalDrawings(lineup.tacticalBoard?.drawings || []);
+      setFootballPos(lineup.tacticalBoard?.footballPos || null);
+      setFootballScale(lineup.tacticalBoard?.footballScale || 1);
+      setOpponents(lineup.tacticalBoard?.opponents || []);
+      setShowOpponents(lineup.tacticalBoard?.showOpponents ?? true);
+      setOpponentColor(lineup.tacticalBoard?.opponentColor || '#ef4444');
+      const savedTacticalPlayers = lineup.tacticalBoard?.players || [];
+      setTacticalPlayers(
+        savedTacticalPlayers.length > 0 
+          ? savedTacticalPlayers.map(p => ({ ...p }))
+          : (lineup.players || []).map(p => ({ ...p }))
+      );
+
+      currentIdRef.current = lineup.id;
+      lastPushedDateRef.current = lineup.date || Date.now();
+      lastInteractionTimeRef.current = 0;
+      setHasUnsavedChanges(false);
+      isRestoringHistory.current = false;
+      return;
+    }
+
+    // CASE 2: Same lineup -> Check anti-clobber protection guards
+    const timeSinceInteraction = Date.now() - lastInteractionTimeRef.current;
+    const isStaleProp = Boolean(lineup.date && lastPushedDateRef.current && (lineup.date <= lastPushedDateRef.current));
+
+    // If currently dragging, interacted recently (< 6s), has local unsaved changes, or incoming prop is stale/older than local push:
+    if (isRestoringHistory.current || draggingId || timeSinceInteraction < 6000 || hasUnsavedChanges || isStaleProp) {
+      if (!draggingId && timeSinceInteraction >= 6000 && !hasUnsavedChanges && !isStaleProp) {
+        isRestoringHistory.current = false;
+      }
+      return;
+    }
+
+    // Genuinely newer remote update from another client/tab
+    setLineupName(prev => (prev !== lineup.matchTitle ? (lineup.matchTitle || '') : prev));
+    setTeamName(prev => (prev !== (lineup.teamName || '') ? (lineup.teamName || '') : prev));
+    setPlayers(prev => {
+      const deduplicated = Array.from(new Map((lineup.players || []).map(p => [p.id, p])).values());
+      if (JSON.stringify(prev) !== JSON.stringify(deduplicated)) return deduplicated;
+      return prev;
+    });
+    setPlayerScale(prev => (prev !== lineup.playerScale ? (lineup.playerScale || 1) : prev));
+    setNameTagStyle(prev => {
+       const style = lineup.nameTagStyle || 'light';
+       if (prev !== style) return style;
+       return prev;
+    });
+    setNameDisplayMode(prev => {
+      const mode = lineup.nameDisplayMode || 'first';
+      if (prev !== mode) return mode;
+      return prev;
+    });
+    setShowNameBackground(prev => {
+      const show = lineup.showNameBackground ?? true;
+      if (prev !== show) return show;
+      return prev;
+    });
+    setNameBackgroundType(prev => {
+      const type = lineup.nameBackgroundType || 'classic';
+      if (prev !== type) return type;
+      return prev;
+    });
+    setShowPhoto(prev => {
+      const show = lineup.showPhoto ?? true;
+      if (prev !== show) return show;
+      return prev;
+    });
+    setShowNumber(prev => {
+      const show = lineup.showNumber ?? true;
+      if (prev !== show) return show;
+      return prev;
+    });
+    setTeamLogoUrl(prev => (prev !== (lineup.teamLogoUrl || '') ? (lineup.teamLogoUrl || '') : prev));
+    setPitchType(prev => {
+      const type = lineup.pitchType || 'classic';
+      if (prev !== type) return type;
+      return prev;
+    });
+    setCurrentFormation(prev => {
+      const form = lineup.formation || '';
+      if (prev !== form) return form;
+      return prev;
+    });
+
+    setTacticalDrawings(prev => {
+      const remote = lineup.tacticalBoard?.drawings || [];
+      if (JSON.stringify(prev) !== JSON.stringify(remote)) return remote;
+      return prev;
+    });
+    setFootballPos(prev => {
+      const remote = lineup.tacticalBoard?.footballPos || null;
+      if (JSON.stringify(prev) !== JSON.stringify(remote)) return remote;
+      return prev;
+    });
+    setOpponents(prev => {
+      const remote = lineup.tacticalBoard?.opponents || [];
+      if (JSON.stringify(prev) !== JSON.stringify(remote)) return remote;
+      return prev;
+    });
+    setShowOpponents(prev => {
+      const remote = lineup.tacticalBoard?.showOpponents ?? true;
+      if (prev !== remote) return remote;
+      return prev;
+    });
+
+    setTeamNotes(prev => {
+      const remote = lineup.notes?.team?.text || '';
+      if (prev !== remote) return remote;
+      return prev;
+    });
+    setTeamMedia(prev => {
+      const remote = lineup.notes?.team?.media || [];
+      if (JSON.stringify(prev) !== JSON.stringify(remote)) return remote;
+      return prev;
+    });
+    setOpponentNotes(prev => {
+      const remote = lineup.notes?.opponent?.text || '';
+      if (prev !== remote) return remote;
+      return prev;
+    });
+    setOpponentMedia(prev => {
+      const remote = lineup.notes?.opponent?.media || [];
+      if (JSON.stringify(prev) !== JSON.stringify(remote)) return remote;
+      return prev;
+    });
+
+    if (lineup.date) {
+      lastPushedDateRef.current = lineup.date;
+    }
+  }, [lineup, hasUnsavedChanges, draggingId]);
 
   // Separate effect to handle "Reset" when unsaved changes was set to false by auto-save
   useEffect(() => {
@@ -2045,13 +2035,16 @@ export default function LineupBuilder({
 
   const handleSave = (title: string = tempTitle, team: string = tempTeamName) => {
     const idToUpdate = editingLineupId || lineup?.id;
+    const now = Date.now();
+    lastInteractionTimeRef.current = now;
+    lastPushedDateRef.current = now;
     
     if (!idToUpdate) {
       const newLineup: Lineup = {
         id: crypto.randomUUID(),
         matchTitle: title || 'Ny Laguppställning',
         teamName: team || 'Ditt Lag',
-        date: Date.now(),
+        date: now,
         players: [],
         playerScale: 1,
         nameTagStyle: 'light',
@@ -2078,18 +2071,56 @@ export default function LineupBuilder({
     }
 
     if (idToUpdate === lineup?.id) {
+      pushHistory();
       setLineupName(title);
       setTeamName(team);
-      setHasUnsavedChanges(true); // Let the auto-save effect handle the construction of the object
+      setHasUnsavedChanges(false);
       setIsEditingTitle(false);
       setEditingLineupId(null);
+      
+      if (lineup) {
+        onUpdateLineup({
+          ...lineup,
+          matchTitle: title,
+          teamName: team,
+          players,
+          playerScale,
+          nameTagStyle,
+          nameDisplayMode,
+          showNameBackground,
+          nameBackgroundType,
+          showPhoto,
+          showName,
+          showNumber,
+          teamLogoUrl,
+          pitchType,
+          orientation: lineup.orientation,
+          attackDirection: lineup.attackDirection,
+          formation: currentFormation,
+          notes: {
+            team: { text: teamNotes, media: teamMedia },
+            opponent: { text: opponentNotes, media: opponentMedia }
+          },
+          tacticalBoard: {
+            drawings: tacticalDrawings,
+            footballPos,
+            footballScale,
+            opponents,
+            showOpponents,
+            opponentColor,
+            players: tacticalPlayers
+          },
+          date: now
+        });
+      }
     } else {
       const target = lineups.find(x => x.id === idToUpdate);
       if (target) {
         onUpdateLineup({
           ...target,
           matchTitle: title,
-          teamName: team
+          teamName: team,
+          date: now
         });
       }
       setIsEditingTitle(false);
@@ -2471,7 +2502,7 @@ export default function LineupBuilder({
         {/* Pitch and Bench Side-by-Side Flex Layout */}
         <div 
           className={`flex ${!isFieldMaximized && orientation === 'landscape' ? 'flex-col lg:flex-row gap-4 items-center lg:items-start justify-center' : 'flex-col'} w-full origin-top`}
-          style={previewZoom !== 1 ? { zoom: previewZoom } : undefined}
+          style={{ zoom: previewZoom }}
         >
           {/* Pitch Container */}
           <div className={`${!isFieldMaximized && orientation === 'landscape' ? 'w-auto flex-shrink-0 flex justify-center' : 'w-full'} relative`}>
@@ -4800,11 +4831,11 @@ export default function LineupBuilder({
                         >
                           <Plus size={14} />
                         </button>
-                        {previewZoom !== 1 && (
+                        {previewZoom !== 0.9 && (
                           <button 
-                            onClick={() => setPreviewZoom(1)}
+                            onClick={() => setPreviewZoom(0.9)}
                             className="w-8 h-8 flex items-center justify-center bg-white dark:bg-zinc-900 hover:bg-zinc-200 dark:hover:bg-zinc-800 rounded-lg text-zinc-600 dark:text-zinc-400 hover:text-indigo-600 transition-all border border-zinc-200 dark:border-zinc-800/80"
-                            title="Återställ zoom"
+                            title="Återställ zoom (90%)"
                           >
                             <RotateCcw size={12} />
                           </button>
