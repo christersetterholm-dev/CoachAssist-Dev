@@ -37,6 +37,7 @@ interface LineupBuilderProps {
   syncError?: string | null;
   isCoachOrAdmin?: boolean;
   onManualSync?: () => Promise<void> | void;
+  onManualPush?: () => Promise<void> | void;
   onMaximizedChange?: (isMaximized: boolean) => void;
 }
 
@@ -375,6 +376,7 @@ export default function LineupBuilder({
   syncError = null,
   isCoachOrAdmin = true,
   onManualSync,
+  onManualPush,
   onMaximizedChange
 }: LineupBuilderProps) {
   const SoccerBallIcon = ({ size = 20, className = "" }: { size?: number, className?: string }) => (
@@ -1736,8 +1738,8 @@ export default function LineupBuilder({
       showNumber,
       teamLogoUrl,
       pitchType,
-      orientation: lineup.orientation,
-      attackDirection: lineup.attackDirection,
+      orientation,
+      attackDirection,
       formation: currentFormation,
       notes: {
         team: { text: teamNotes, media: teamMedia },
@@ -1790,6 +1792,8 @@ export default function LineupBuilder({
       lineup.showNumber !== showNumber ||
       lineup.teamLogoUrl !== teamLogoUrl ||
       lineup.formation !== currentFormation ||
+      (lineup.orientation || 'vertical') !== orientation ||
+      (lineup.attackDirection || 'up') !== attackDirection ||
       pitchType !== (lineup.pitchType || 'classic') ||
       JSON.stringify(lineup.players || []) !== JSON.stringify(players) ||
       JSON.stringify(remoteTactical) !== JSON.stringify(currentState.tacticalBoard) ||
@@ -1813,6 +1817,7 @@ export default function LineupBuilder({
         ...currentState,
         date: pushTime // Set new date only when actually pushing changes
       });
+      setHasUnsavedChanges(false);
     }, 400); // Reduced from 800ms to 400ms for extra fast auto-save
     
     return () => {
@@ -1826,6 +1831,7 @@ export default function LineupBuilder({
           ...currentState,
           date: pushTime
         });
+        setHasUnsavedChanges(false);
       }
     };
   }, [lineupName, teamName, players, tacticalPlayers, playerScale, nameTagStyle, nameDisplayMode, showNameBackground, nameBackgroundType, currentFormation, showPhoto, showName, showNumber, teamLogoUrl, pitchType, orientation, attackDirection, tacticalDrawings, footballPos, footballScale, opponents, showOpponents, opponentColor, teamNotes, teamMedia, opponentNotes, opponentMedia, lineup?.id, hasUnsavedChanges]);
@@ -2499,16 +2505,77 @@ export default function LineupBuilder({
                   {!isSimplified && (
                     <AnimatePresence>
                       {(hasUnsavedChanges || (user && sessionActionCount > 0) || isSyncing || isQuotaExceeded || syncError) && (
-                        <motion.span
+                        <motion.button
+                          type="button"
                           initial={{ opacity: 0, scale: 0.8 }}
                           animate={{ opacity: 1, scale: 1 }}
                           exit={{ opacity: 0, scale: 0.8 }}
-                          className={`inline-flex items-center gap-1.5 ml-1 text-[9px] font-black px-1.5 py-0.5 rounded-full border transition-all duration-300 ${
+                          onClick={async (e) => {
+                            e.stopPropagation();
+                            if (isSyncing) return;
+                            if (hasUnsavedChanges && lineup) {
+                              const pushTime = Date.now();
+                              lastPushedDateRef.current = pushTime;
+                              const pushState: Lineup = {
+                                ...lineup,
+                                matchTitle: lineupName,
+                                teamName,
+                                players,
+                                playerScale,
+                                nameTagStyle,
+                                nameDisplayMode,
+                                showNameBackground,
+                                nameBackgroundType,
+                                showPhoto,
+                                showName,
+                                showNumber,
+                                teamLogoUrl,
+                                pitchType,
+                                orientation,
+                                attackDirection,
+                                formation: currentFormation,
+                                notes: {
+                                  team: { text: teamNotes, media: teamMedia },
+                                  opponent: { text: opponentNotes, media: opponentMedia }
+                                },
+                                tacticalBoard: {
+                                  drawings: tacticalDrawings,
+                                  footballPos,
+                                  footballScale,
+                                  opponents,
+                                  showOpponents,
+                                  opponentColor,
+                                  players: tacticalPlayers
+                                },
+                                date: pushTime
+                              };
+                              onUpdateLineup(pushState);
+                              setHasUnsavedChanges(false);
+                            }
+                            if (onManualPush) {
+                              try {
+                                await onManualPush();
+                              } catch (err) {
+                                console.error("LineupBuilder: Manual push failed:", err);
+                              }
+                            }
+                          }}
+                          disabled={isSyncing}
+                          title={
+                            isQuotaExceeded 
+                              ? "Molngränsen nådd" 
+                              : syncError 
+                                ? `Synkfel: ${syncError}. Klicka för att försöka spara igen.` 
+                                : isSyncing 
+                                  ? "Synkroniserar till molnet..." 
+                                  : "Ändringar väntar. Klicka för att spara till molnet direkt."
+                          }
+                          className={`inline-flex items-center gap-1.5 ml-1 text-[9px] font-black px-2 py-0.5 rounded-full border transition-all duration-300 ${
                             isQuotaExceeded || syncError
-                              ? 'bg-red-500/10 text-red-500 border-red-500/20 dark:bg-red-500/20'
+                              ? 'bg-red-500/10 text-red-500 border-red-500/20 dark:bg-red-500/20 cursor-pointer hover:bg-red-500/20 active:scale-95'
                               : isSyncing
-                                ? 'bg-indigo-500/10 text-indigo-500 border-indigo-500/30 dark:bg-indigo-500/20 animate-pulse'
-                                : 'bg-amber-500/10 text-amber-500 border-amber-500/20 dark:bg-amber-500/20'
+                                ? 'bg-indigo-500/10 text-indigo-500 border-indigo-500/30 dark:bg-indigo-500/20 animate-pulse cursor-wait'
+                                : 'bg-amber-500/10 text-amber-500 border-amber-500/20 dark:bg-amber-500/20 cursor-pointer hover:bg-amber-500/20 active:scale-95'
                           }`}
                         >
                           {isQuotaExceeded ? (
@@ -2520,6 +2587,7 @@ export default function LineupBuilder({
                             <>
                               <CloudOff size={10} className="shrink-0 text-red-500" />
                               <span className="max-w-[120px] truncate" title={syncError}>Synkfel</span>
+                              <span className="underline ml-0.5">Försök igen</span>
                             </>
                           ) : isSyncing ? (
                             <>
@@ -2530,9 +2598,10 @@ export default function LineupBuilder({
                             <>
                               <Cloud size={10} className="shrink-0 animate-pulse text-amber-500" />
                               <span>Väntar...</span>
+                              <span className="underline opacity-80 ml-0.5">Spara nu</span>
                             </>
                           )}
-                        </motion.span>
+                        </motion.button>
                       )}
                     </AnimatePresence>
                   )}

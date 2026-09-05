@@ -1634,6 +1634,7 @@ export default function App() {
           setIsQuotaExceeded(true);
         }
         if (isSubscribed) {
+          syncUserIdRef.current = user.uid;
           setHasPulledFromCloud(true);
           setIsInitialSyncDone(true);
         }
@@ -1653,18 +1654,19 @@ export default function App() {
 
   // Push Local Actions to Cloud with dynamic debounce and granular dirty tracking
   useEffect(() => {
-    if (activeExerciseId !== null || view === 'exercise') {
-      // Skip auto-sync while in competition
+    if (view === 'exercise') {
+      // Skip auto-sync while actively in competition view
       return;
     }
 
     if (user && isAuthReady && isProfileLoaded && isInitialSyncDone && hasPulledFromCloud && sessionActionCount > 0 && !isSyncing && !isQuotaExceeded) {
-      if (syncUserIdRef.current !== user.uid) return;
+      if (syncUserIdRef.current && syncUserIdRef.current !== user.uid) return;
+      syncUserIdRef.current = user.uid;
 
       const debounceDelay = 2000; // Fast 2s debounce to reliably save all changes 2 seconds after user finishes editing
 
       const syncData = async () => {
-        if (syncUserIdRef.current !== user.uid || isSyncing) return;
+        if (!user || (syncUserIdRef.current && syncUserIdRef.current !== user.uid) || isSyncing) return;
 
         const capturedActionCount = sessionActionCount;
 
@@ -2939,7 +2941,7 @@ export default function App() {
             </div>
             
             <div className="flex items-center gap-2">
-              {(isSyncing || (user && sessionActionCount > 0 && activeExerciseId === null && view !== 'exercise')) && (
+              {(isSyncing || (user && sessionActionCount > 0 && view !== 'exercise')) && (
                 <motion.div 
                   initial={{ opacity: 0, scale: 0.8 }}
                   animate={{ opacity: 1, scale: 1 }}
@@ -3692,6 +3694,7 @@ export default function App() {
               syncError={syncError}
               isCoachOrAdmin={isCoachOrAdmin}
               onManualSync={pullLatestData}
+              onManualPush={handleManualPush}
               onMaximizedChange={setIsLineupMaximized}
             />
           )}
