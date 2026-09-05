@@ -4,7 +4,7 @@ import { motion, AnimatePresence, useDragControls } from 'motion/react';
 import { SquadPlayer, Lineup, LineupPlayer, FormationVariant, FormationPosition, TacticalSavedBoard, TrainingSession } from '../types';
 import { User as FirebaseUser } from 'firebase/auth';
 import { CachedImage } from './CachedImage';
-import { Plus, Minus, X, Trash2, Image as ImageIcon, User, Save, Settings, ClipboardList, Camera, Check, Edit2, Undo2, Redo2, Maximize2, Minimize2, Copy, Trophy, Upload, Pencil, ArrowUpRight, Eraser, RotateCcw, Trash, Shirt, Pin, PinOff, Smartphone, Monitor, ChevronDown, ChevronUp, RefreshCw, GripVertical, Footprints, Archive, ArchiveRestore, Layout, Eye, EyeOff, Target, Play, Move, Route, Type, FolderOpen, Cloud, CloudOff, Bookmark, Network, UserCheck } from 'lucide-react';
+import { Plus, Minus, X, Trash2, Image as ImageIcon, User, Save, Settings, ClipboardList, Camera, Check, Edit2, Undo2, Redo2, Maximize2, Minimize2, Copy, Trophy, Upload, Pencil, ArrowUpRight, Eraser, RotateCcw, Trash, Shirt, Pin, PinOff, Smartphone, Monitor, ChevronDown, ChevronUp, RefreshCw, GripVertical, Footprints, Archive, ArchiveRestore, Layout, Eye, EyeOff, Target, Play, Move, Route, Type, FolderOpen, Cloud, CloudOff, Bookmark, Network, UserCheck, Link, Unlink, Calendar } from 'lucide-react';
 
 import { FORMATION_TEMPLATES } from '../lib/formations';
 import { Reorder } from 'motion/react';
@@ -36,6 +36,8 @@ interface LineupBuilderProps {
   isQuotaExceeded?: boolean;
   syncError?: string | null;
   isCoachOrAdmin?: boolean;
+  onManualSync?: () => Promise<void> | void;
+  onMaximizedChange?: (isMaximized: boolean) => void;
 }
 
 interface DelaunayPoint {
@@ -219,8 +221,9 @@ interface LineupReorderItemProps {
   toggleArchive: (e: any, id: string) => void;
   onCopyLineup: (id: string) => void;
   onDeleteLineup: (id: string) => void;
-  onEditTitle: (id: string, title: string, team: string) => void;
+  onEditTitle: (id: string, title: string, team: string, sessionId?: string) => void;
   onTogglePublish?: (id: string) => void;
+  sessions?: TrainingSession[];
   isCoachOrAdmin?: boolean;
 }
 
@@ -233,11 +236,13 @@ function LineupReorderItem({
   onDeleteLineup,
   onEditTitle,
   onTogglePublish,
+  sessions,
   isCoachOrAdmin = true
 }: LineupReorderItemProps) {
   const controls = useDragControls();
 
   const titleText = l.matchTitle || l.teamName || 'Namnlös Match';
+  const linkedSession = l.sessionId && sessions ? sessions.find(s => s.id === l.sessionId) : null;
 
   return (
     <Reorder.Item 
@@ -268,6 +273,11 @@ function LineupReorderItem({
             <h4 className="font-black text-zinc-900 dark:text-white tracking-tight leading-snug text-sm sm:text-base break-words min-w-0">
               {titleText}
             </h4>
+            {linkedSession ? (
+              <span className="inline-flex items-center gap-1 text-[9px] font-bold text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-950/40 border border-indigo-200 dark:border-indigo-800/60 px-1.5 py-0.5 rounded-md shrink-0" title={`Kopplad till match: ${linkedSession.title}`}>
+                <UserCheck size={10} className="text-emerald-500" /> Kopplad match
+              </span>
+            ) : null}
             {l.isPublishedToPlayers ? (
               <span className="inline-flex items-center gap-1 text-[9px] font-black uppercase tracking-wider text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800/60 px-1.5 py-0.5 rounded-md shrink-0">
                 <Eye size={10} /> Publicerad
@@ -307,9 +317,9 @@ function LineupReorderItem({
         {isCoachOrAdmin && (
           <>
             <button
-              onClick={() => onEditTitle(l.id, l.matchTitle || '', l.teamName || '')}
-              className="p-2 text-zinc-400 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-zinc-50 dark:hover:bg-zinc-800 rounded-xl transition-all"
-              title="Redigera rubriker"
+              onClick={() => onEditTitle(l.id, l.matchTitle || '', l.teamName || '', l.sessionId)}
+              className="p-2 text-zinc-400 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-zinc-50 dark:hover:bg-zinc-800 rounded-xl transition-all cursor-pointer"
+              title="Redigera rubriker & matchkoppling"
             >
               <Pencil size={16} />
             </button>
@@ -363,7 +373,9 @@ export default function LineupBuilder({
   sessionActionCount = 0,
   isQuotaExceeded = false,
   syncError = null,
-  isCoachOrAdmin = true
+  isCoachOrAdmin = true,
+  onManualSync,
+  onMaximizedChange
 }: LineupBuilderProps) {
   const SoccerBallIcon = ({ size = 20, className = "" }: { size?: number, className?: string }) => (
     <svg 
@@ -408,7 +420,7 @@ export default function LineupBuilder({
   const [nameTagStyle, setNameTagStyle] = useState<'light' | 'dark'>(lineup?.nameTagStyle || 'light');
   const [nameDisplayMode, setNameDisplayMode] = useState<'first' | 'last' | 'full' | 'initials' | 'firstLastInitial' | 'initialLastName'>(lineup?.nameDisplayMode || 'first');
   const [showNameBackground, setShowNameBackground] = useState(lineup?.showNameBackground ?? true);
-  const [nameBackgroundType, setNameBackgroundType] = useState<'classic' | 'badge' | 'minimal'>(lineup?.nameBackgroundType || 'classic');
+  const [nameBackgroundType, setNameBackgroundType] = useState<'classic' | 'badge' | 'minimal' | 'solid' | 'none' | 'transparent'>(lineup?.nameBackgroundType || 'classic');
   const [showPhoto, setShowPhoto] = useState(lineup?.showPhoto ?? true);
   const [showName, setShowName] = useState(lineup?.showName ?? true);
   const [showImport, setShowImport] = useState(false);
@@ -426,7 +438,7 @@ export default function LineupBuilder({
   const [logoToCrop, setLogoToCrop] = useState<string | null>(null);
   const logoInputRef = useRef<HTMLInputElement>(null);
 
-  const [previewZoom, setPreviewZoom] = useState(0.9);
+  const [previewZoom, setPreviewZoom] = useState(1);
   const [isSettingsExpanded, setIsSettingsExpanded] = useState(false);
   const [isFormationsExpanded, setIsFormationsExpanded] = useState(true);
   const [isSavedLineupsExpanded, setIsSavedLineupsExpanded] = useState(true);
@@ -470,6 +482,16 @@ export default function LineupBuilder({
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [dragPos, setDragPos] = useState<{ x: number, y: number } | null>(null);
   const [isMaximized, setIsMaximized] = useState(false);
+
+  useEffect(() => {
+    onMaximizedChange?.(isMaximized);
+  }, [isMaximized, onMaximizedChange]);
+
+  useEffect(() => {
+    return () => {
+      onMaximizedChange?.(false);
+    };
+  }, [onMaximizedChange]);
   const [isControlsVisible, setIsControlsVisible] = useState(false);
   const [isDrawingsVisible, setIsDrawingsVisible] = useState(false);
   const [showDelaunayNetwork, setShowDelaunayNetwork] = useState(false);
@@ -724,6 +746,7 @@ export default function LineupBuilder({
   const [draggingOpponentId, setDraggingOpponentId] = useState<string | null>(null);
   const [tempTitle, setTempTitle] = useState('');
   const [tempTeamName, setTempTeamName] = useState('');
+  const [tempSessionId, setTempSessionId] = useState<string | undefined>(lineup?.sessionId);
   const [editingLineupId, setEditingLineupId] = useState<string | null>(null);
   const [showPreview, setShowPreview] = useState(false);
   const [isScreenshotMode, setIsScreenshotMode] = useState(false);
@@ -1328,6 +1351,10 @@ export default function LineupBuilder({
       const x = Number(Math.max(2, Math.min(98, rawX)).toFixed(2));
       const y = Number(Math.max(2, Math.min(98, rawY)).toFixed(2));
 
+      // Visual coordinates for the dragging avatar (wider range to allow dragging over the bench area)
+      const visualX = Number(Math.max(-10, Math.min(110, rawX)).toFixed(2));
+      const visualY = Number(Math.max(-10, Math.min(125, rawY)).toFixed(2));
+
       // Swap detection: Find closest starter player within radius
       let closestId = null;
       let minDistance = 4; // Further reduced radius (from 6) to avoid accidental "sucking"
@@ -1350,8 +1377,8 @@ export default function LineupBuilder({
       dragInfoRef.current.y = y;
       dragInfoRef.current.hoveredId = closestId;
       
-      // Update visual states for rendering
-      setDragPos({ x, y });
+      // Update visual states for rendering (using visualX/visualY to follow cursor nicely below baseline)
+      setDragPos({ x: visualX, y: visualY });
       setHoveredPlayerId(closestId);
     };
 
@@ -1363,8 +1390,29 @@ export default function LineupBuilder({
         
         const isInFieldX = e.clientX >= rect.left && e.clientX <= rect.right;
         const isInFieldY = e.clientY >= rect.top && e.clientY <= rect.bottom;
+
+        const rawVX = ((e.clientX - rect.left) / rect.width) * 100;
+        const rawVY = ((e.clientY - rect.top) / rect.height) * 100;
+
+        let rawX, rawY;
+        if (orientation === 'landscape') {
+          if (attackDirection === 'right') {
+            rawX = rawVY;
+            rawY = 100 - rawVX;
+          } else { // left
+            rawX = 100 - rawVY;
+            rawY = rawVX;
+          }
+        } else if (attackDirection === 'down') {
+          rawX = 100 - rawVX;
+          rawY = 100 - rawVY;
+        } else {
+          rawX = rawVX;
+          rawY = rawVY;
+        }
         
         const targetId = info.hoveredId;
+        const isDroppedOnBench = (orientation === 'landscape' ? (rawVY > 95 && rawVX >= -10 && rawVX <= 110) : (rawY > 98 && rawX >= -10 && rawX <= 110));
         
         if (targetId) {
           // --- SWAP LOGIC ---
@@ -1391,6 +1439,30 @@ export default function LineupBuilder({
               return p;
             });
           });
+        } else if (isDroppedOnBench) {
+          // --- DROP ON BENCH WITH SLOT INSERTION ---
+          pushHistory();
+          setActivePlayers((prev: LineupPlayer[]) => {
+            const alreadySubs = prev.filter(lp => lp.isSubstitute && lp.id !== draggingId);
+            if (alreadySubs.length >= 7) {
+              alert("Du kan inte ha mer än 7 avbytare på bänken.");
+              return prev;
+            }
+
+            const dPlayer = prev.find(p => p.id === draggingId);
+            if (!dPlayer) return prev;
+
+            const startersList = prev.filter(p => !p.isSubstitute && p.id !== draggingId);
+            const otherSubs = prev.filter(p => p.isSubstitute && p.id !== draggingId);
+
+            // Determine target slot (0 to 6)
+            const dropSlotIndex = Math.min(6, Math.max(0, Math.floor((orientation === 'landscape' ? rawVX : rawX) / (100 / 7))));
+
+            const updatedSubs = [...otherSubs];
+            updatedSubs.splice(dropSlotIndex, 0, { ...dPlayer, isSubstitute: true, isHolding: false });
+
+            return [...startersList, ...updatedSubs];
+          });
         } else if (isInFieldX && isInFieldY) {
           pushHistory();
           setActivePlayers((prev: LineupPlayer[]) => prev.map(p => 
@@ -1400,9 +1472,16 @@ export default function LineupBuilder({
           ));
         } else {
           pushHistory();
-          setActivePlayers((prev: LineupPlayer[]) => prev.map(p => 
-            p.id === draggingId ? { ...p, isSubstitute: true, isHolding: false } : p
-          ));
+          setActivePlayers((prev: LineupPlayer[]) => {
+            const alreadySubs = prev.filter(lp => lp.isSubstitute && lp.id !== draggingId);
+            if (alreadySubs.length >= 7) {
+              alert("Du kan inte ha mer än 7 avbytare på bänken.");
+              return prev;
+            }
+            return prev.map(p => 
+              p.id === draggingId ? { ...p, isSubstitute: true, isHolding: false } : p
+            );
+          });
         }
         setHasUnsavedChanges(true);
       }
@@ -1447,6 +1526,7 @@ export default function LineupBuilder({
     if (isNewId) {
       setLineupName(lineup.matchTitle || '');
       setTeamName(lineup.teamName || '');
+      setTempSessionId(lineup.sessionId);
       const deduplicated = Array.from(new Map((lineup.players || []).map(p => [p.id, p])).values());
       setPlayers(deduplicated);
       setPlayerScale(lineup.playerScale ?? 1.0);
@@ -2033,7 +2113,7 @@ export default function LineupBuilder({
     }
   };
 
-  const handleSave = (title: string = tempTitle, team: string = tempTeamName) => {
+  const handleSave = (title: string = tempTitle, team: string = tempTeamName, sessId: string | undefined = tempSessionId) => {
     const idToUpdate = editingLineupId || lineup?.id;
     const now = Date.now();
     lastInteractionTimeRef.current = now;
@@ -2045,6 +2125,7 @@ export default function LineupBuilder({
         matchTitle: title || 'Ny Laguppställning',
         teamName: team || 'Ditt Lag',
         date: now,
+        sessionId: sessId || undefined,
         players: [],
         playerScale: 1,
         nameTagStyle: 'light',
@@ -2083,6 +2164,7 @@ export default function LineupBuilder({
           ...lineup,
           matchTitle: title,
           teamName: team,
+          sessionId: sessId || undefined,
           players,
           playerScale,
           nameTagStyle,
@@ -2120,6 +2202,7 @@ export default function LineupBuilder({
           ...target,
           matchTitle: title,
           teamName: team,
+          sessionId: sessId || undefined,
           date: now
         });
       }
@@ -2128,10 +2211,12 @@ export default function LineupBuilder({
     }
   };
 
-  const openTitleEditForLineup = (id: string, currentTitle: string, currentTeam: string) => {
+  const openTitleEditForLineup = (id: string, currentTitle: string, currentTeam: string, currentSessionId?: string) => {
     setEditingLineupId(id);
     setTempTitle(currentTitle);
     setTempTeamName(currentTeam);
+    const targetLineup = lineups.find(l => l.id === id);
+    setTempSessionId(currentSessionId !== undefined ? currentSessionId : targetLineup?.sessionId);
     setIsEditingTitle(true);
   };
 
@@ -2227,6 +2312,14 @@ export default function LineupBuilder({
   const togglePlayerInLineup = (playerId: string, isSubstitute: boolean) => {
     const existingPlayer = activePlayers.find(p => p.playerId === playerId);
     
+    if (isSubstitute) {
+      const alreadySubs = activePlayers.filter(p => p.isSubstitute && p.playerId !== playerId);
+      if (alreadySubs.length >= 7) {
+        alert("Du kan inte ha mer än 7 avbytare på bänken.");
+        return;
+      }
+    }
+
     pushHistory();
     if (existingPlayer) {
       // If it exists but with different status, update status
@@ -2253,9 +2346,18 @@ export default function LineupBuilder({
   };
 
   const toggleSubstitute = (id: string) => {
+    const p = activePlayers.find(player => player.id === id);
+    if (p && !p.isSubstitute) {
+      const alreadySubs = activePlayers.filter(lp => lp.isSubstitute);
+      if (alreadySubs.length >= 7) {
+        alert("Du kan inte ha mer än 7 avbytare på bänken.");
+        return;
+      }
+    }
+
     pushHistory();
-    setActivePlayers((prev: LineupPlayer[]) => prev.map(p => 
-      p.id === id ? { ...p, isSubstitute: !p.isSubstitute } : p
+    setActivePlayers((prev: LineupPlayer[]) => prev.map(lp => 
+      lp.id === id ? { ...lp, isSubstitute: !lp.isSubstitute } : lp
     ));
     setHasUnsavedChanges(true);
   };
@@ -2267,17 +2369,7 @@ export default function LineupBuilder({
     setHasUnsavedChanges(true);
   };
 
-  const handleReorderSubs = (newSubs: LineupPlayer[]) => {
-    // Keep history for undo/redo
-    // Note: Reorder triggers frequently, but pushHistory is memoized/guarded usually? 
-    // Actually in TrainingManager it was pushed on each reorder.
-    // However, if we want to avoid too many snapshots, we might need a debounce, 
-    // but typically Framer Motion sorting is interactive.
-    
-    const starters = activePlayers.filter(p => !p.isSubstitute);
-    setActivePlayers([...starters, ...newSubs]);
-    setHasUnsavedChanges(true);
-  };
+
 
   const updateSquadPlayerInfo = (playerId: string, updates: Partial<SquadPlayer>) => {
     onUpdateSquad(squad.map(p => p.id === playerId ? { ...p, ...updates } : p));
@@ -2390,6 +2482,7 @@ export default function LineupBuilder({
               onClick={isSimplified ? undefined : () => {
                 setTempTitle(lineupName);
                 setTempTeamName(teamName);
+                setTempSessionId(lineup?.sessionId);
                 setIsEditingTitle(true);
               }}
             >
@@ -2397,9 +2490,12 @@ export default function LineupBuilder({
                 <h1 className="text-xl sm:text-2xl font-black text-zinc-900 dark:text-white tracking-tight leading-none">
                   {teamName || 'Ditt Lag'}
                 </h1>
-                <h2 className="text-xs sm:text-sm font-bold text-zinc-500 dark:text-zinc-400 tracking-tight leading-none flex items-center gap-1.5 overflow-hidden mt-1">
-                  <span className="whitespace-nowrap">{lineupName || 'Namnlös Match'}</span>
-                  {!isSimplified && <Edit2 size={12} className="opacity-0 group-hover/title:opacity-100 transition-opacity" />}
+                <div className="flex items-center gap-2 flex-wrap mt-1">
+                  <h2 className="text-xs sm:text-sm font-bold text-zinc-500 dark:text-zinc-400 tracking-tight leading-none flex items-center gap-1.5 overflow-hidden">
+                    <span className="whitespace-nowrap">{lineupName || 'Namnlös Match'}</span>
+                    {!isSimplified && <Edit2 size={12} className="opacity-0 group-hover/title:opacity-100 transition-opacity" />}
+                  </h2>
+
                   {!isSimplified && (
                     <AnimatePresence>
                       {(hasUnsavedChanges || (user && sessionActionCount > 0) || isSyncing || isQuotaExceeded || syncError) && (
@@ -2407,7 +2503,7 @@ export default function LineupBuilder({
                           initial={{ opacity: 0, scale: 0.8 }}
                           animate={{ opacity: 1, scale: 1 }}
                           exit={{ opacity: 0, scale: 0.8 }}
-                          className={`inline-flex items-center gap-1.5 ml-2 text-[9px] font-black px-1.5 py-0.5 rounded-full border transition-all duration-300 ${
+                          className={`inline-flex items-center gap-1.5 ml-1 text-[9px] font-black px-1.5 py-0.5 rounded-full border transition-all duration-300 ${
                             isQuotaExceeded || syncError
                               ? 'bg-red-500/10 text-red-500 border-red-500/20 dark:bg-red-500/20'
                               : isSyncing
@@ -2440,7 +2536,7 @@ export default function LineupBuilder({
                       )}
                     </AnimatePresence>
                   )}
-                </h2>
+                </div>
               </div>
               {(!lineupName && !teamName && !isSimplified) && (
                 <span className="text-[10px] font-black text-zinc-400 uppercase tracking-widest mt-2">Tryck för att ändra rubriker</span>
@@ -2499,13 +2595,13 @@ export default function LineupBuilder({
           </div>
         )}
 
-        {/* Pitch and Bench Side-by-Side Flex Layout */}
+        {/* Pitch and Bench Stacked Flex Layout */}
         <div 
-          className={`flex ${!isFieldMaximized && orientation === 'landscape' ? 'flex-col lg:flex-row gap-4 items-center lg:items-start justify-center' : 'flex-col'} w-full origin-top`}
+          className="flex flex-col items-center justify-center w-full origin-top"
           style={{ zoom: previewZoom }}
         >
           {/* Pitch Container */}
-          <div className={`${!isFieldMaximized && orientation === 'landscape' ? 'w-auto flex-shrink-0 flex justify-center' : 'w-full'} relative`}>
+          <div className="w-full flex flex-col items-center justify-center relative">
           {/* Tactical Toolbar for selected drawing */}
           {(selectedDrawingId || tacticalTool === 'eraser') && !isTransforming && (
             <div 
@@ -2629,7 +2725,7 @@ export default function LineupBuilder({
                       setTacticalTool('eraser');
                     }}
                     className={`p-2 rounded-xl transition-colors ${
-                      tacticalTool === 'eraser'
+                      ((tacticalTool as any) === 'eraser')
                         ? 'bg-indigo-600 text-white shadow-md'
                         : 'bg-orange-50 dark:bg-orange-900/10 text-orange-650 dark:text-orange-400 hover:bg-orange-100'
                     }`}
@@ -2666,7 +2762,7 @@ export default function LineupBuilder({
 
           {/* The Football Pitch */}
           <div 
-            className={`football-pitch relative rounded-none sm:rounded-[40px] overflow-hidden border-y-[6px] border-x-0 sm:border-[8px] border-white/20 shadow-none sm:shadow-2xl transition-all duration-500 ${isFieldMaximized ? 'mb-0' : 'mb-0 sm:mb-3'} ${
+            className={`football-pitch relative rounded-none sm:rounded-2xl overflow-hidden border-y-[6px] border-x-0 sm:border-[8px] border-white/20 shadow-none transition-all duration-500 ${isFieldMaximized ? 'mb-0' : 'mb-0'} ${
               orientation === 'landscape'
                 ? `aspect-[105/68] w-auto h-auto mx-auto ${
                     isFieldMaximized 
@@ -2710,7 +2806,7 @@ export default function LineupBuilder({
                   ${(pitchType === 'classic') ? '#8dc343' : '#7dd3fc'} 10%,
                   ${(pitchType === 'classic') ? '#7db436' : '#38bdf8'} 10%,
                   ${(pitchType === 'classic') ? '#7db436' : '#38bdf8'} 20%
-                )${(pitchType === 'blue' || pitchType === 'blue-grass') ? ', radial-gradient(circle at 2px 2px, rgba(255,255,255,0.05) 1px, transparent 0)' : ''}`
+                )${(pitchType === 'blue') ? ', radial-gradient(circle at 2px 2px, rgba(255,255,255,0.05) 1px, transparent 0)' : ''}`
               ) : (pitchType === 'grass' || pitchType === 'blue-grass') ? (
                 `radial-gradient(circle at 2px 2px, rgba(255,255,255,0.1) 1px, transparent 0)`
               ) : 'none',
@@ -3468,141 +3564,141 @@ export default function LineupBuilder({
               );
             })()}
           </AnimatePresence>
-          </div>
-        </div>
-      </div>
+          </div> {/* Closes rotating container */}
+          </div> {/* Closes football-pitch */}
 
-        {/* Bench Area */}
-        {!isFieldMaximized && (
-          <div className={`bench-container mb-0 ${orientation === 'landscape' ? 'w-full lg:w-[124px] lg:shrink-0 lg:max-h-[85vh] lg:overflow-y-auto no-scrollbar' : 'w-full'}`}>
-            <Reorder.Group 
-              axis={orientation === 'landscape' ? "y" : "x"}
-              values={subs}
-              onReorder={handleReorderSubs}
-              className={`p-1.5 sm:p-3 bg-zinc-50 dark:bg-zinc-950 rounded-none sm:rounded-3xl border-y sm:border border-x-0 sm:border-x border-zinc-100 dark:border-zinc-800 transition-all ${
-                orientation === 'landscape'
-                  ? 'grid grid-cols-4 lg:flex lg:flex-col gap-2 lg:gap-4 justify-center lg:justify-start lg:items-center w-full lg:py-6'
-                  : subs.length > 7 
-                    ? 'grid grid-cols-4 sm:flex sm:flex-wrap justify-center gap-2 sm:gap-3' 
-                    : 'flex flex-wrap justify-center gap-1.5 sm:gap-3'
-              }`}
+          {/* New Dynamic Bench/Dugout Area (Outside Pitch) */}
+          {!isFieldMaximized && (
+            <div 
+              className="mt-0 px-3 py-1 sm:px-6 sm:py-1 rounded-none sm:rounded-2xl border-x-0 sm:border border-zinc-200/60 dark:border-zinc-600/80 bg-zinc-100/95 dark:bg-zinc-700/90 backdrop-blur-sm shadow-md transition-all mx-auto select-none"
+              style={{
+                width: orientation === 'landscape' 
+                  ? `min(96vw, 1024px, calc((100vh - 160px) * ${R}))` 
+                  : `min(100%, 680px, calc((100dvh - 200px) * ${invR}))`,
+              }}
             >
-              {subs.length === 0 ? (
-                <p className="text-[10px] text-zinc-400 dark:text-zinc-600 italic py-4 text-center w-full">Inga avbytare...</p>
-              ) : (
-                subs.map(p => {
-                  const sp = getSquadPlayer(p.playerId);
-                  if (!sp) return null;
-                  const isDragging = draggingId === p.id;
-                  
-                  return (
-                    <Reorder.Item 
-                      key={p.id} 
-                      value={p}
-                      className={`flex flex-col items-center gap-0 group transition-all ${isDragging ? 'opacity-0' : 'opacity-100'} ${isSimplified ? '' : 'cursor-grab active:cursor-grabbing'}`}
-                      onClick={isSimplified ? undefined : (e) => {
-                        e.stopPropagation();
-                        if (isEditMode) {
-                          setSelectedForEdit(p.id)
-                        } else {
-                          // Quick add to holding area on pitch
-                          pushHistory();
-                          setActivePlayers((prev: LineupPlayer[]) => {
-                            // Any existing holding player gets deselected, but remains on the field!
-                            const nextState = prev.map(lp => {
-                              if (lp.id === p.id) {
-                                return lp; // Clicked player
-                              }
-                              if (lp.isHolding) {
-                                return { ...lp, isHolding: false };
-                              }
-                              return lp;
-                            });
+              <div className="flex flex-wrap items-center justify-center gap-2 sm:gap-3 w-full">
+                {subs.length === 0 ? (
+                  <p className="text-[11px] text-zinc-400 dark:text-zinc-500 font-bold italic py-3 text-center w-full uppercase tracking-wider">
+                    Inga avbytare valda (dra hit spelare för att bänka)
+                  </p>
+                ) : (
+                  subs.map((p) => {
+                    const sp = getSquadPlayer(p.playerId);
+                    if (!sp) return null;
+                    const isDragging = draggingId === p.id;
 
-                            // Calculate best spawn corner based on current field starters
-                            const spawnPos = calculateBestSpawnPosition(nextState);
-
-                            return nextState.map(lp => {
-                              if (lp.id === p.id) {
-                                return { ...lp, isSubstitute: false, x: spawnPos.x, y: spawnPos.y, isHolding: true };
+                    return (
+                      <div 
+                        key={p.id}
+                        className={`flex flex-col items-center justify-start relative group transition-all duration-300 touch-none select-none ${isDragging ? 'opacity-20 scale-90' : 'opacity-100'}`}
+                      >
+                        <div
+                          className={`rounded-full border-2 bg-zinc-100 dark:bg-zinc-800 transition-all cursor-grab active:cursor-grabbing hover:scale-105 relative touch-none select-none ${
+                            isEditMode ? 'border-indigo-500 ring-4 ring-indigo-500/20' : 'border-white'
+                          }`}
+                          style={{ 
+                            width: `${3.2 * playerScale}rem`, 
+                            height: `${3.2 * playerScale}rem`,
+                          }}
+                          onPointerDown={(e) => {
+                            e.stopPropagation();
+                            if (!isEditMode) {
+                              pushHistory();
+                              setDraggingId(p.id);
+                              const rect = e.currentTarget.getBoundingClientRect();
+                              const fieldRect = document.querySelector('.football-pitch')?.getBoundingClientRect();
+                              if (fieldRect) {
+                                const x = ((rect.left + rect.width / 2 - fieldRect.left) / fieldRect.width) * 100;
+                                const y = ((rect.top + rect.height / 2 - fieldRect.top) / fieldRect.height) * 100;
+                                setDragPos({ x, y });
                               }
-                              return lp;
-                            });
-                          });
-                          setHasUnsavedChanges(true);
-                        }
-                      }}
-                    >
-                      <div className="relative">
-                        <div 
-                          className={`rounded-full border-2 border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 flex items-center justify-center overflow-hidden shadow-sm transition-all ${!isSimplified ? 'group-hover:scale-110' : ''}`}
-                          style={{
-                            width: `${3.0 * playerScale}rem`,
-                            height: `${3.0 * playerScale}rem`,
-                            display: showPhoto ? 'flex' : 'none'
+                            }
+                          }}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (isEditMode) {
+                              setSelectedForEdit(p.id);
+                            }
                           }}
                         >
-                          {sp.photoUrl ? (
-                            <CachedImage 
-                              src={sp.photoUrl} 
-                              alt={sp.name} 
-                              className="w-full h-full object-cover" 
-                              loading="lazy"
-                              decoding="async"
-                            />
-                          ) : (
-                            <div className="w-full h-full bg-zinc-100 dark:bg-zinc-800 flex items-center justify-center text-zinc-400">
+                          <div
+                            className="rounded-full overflow-hidden w-full h-full flex items-center justify-center"
+                            style={{
+                              display: showPhoto ? 'flex' : 'none',
+                            }}
+                          >
+                            {sp.photoUrl ? (
+                              <CachedImage 
+                                src={sp.photoUrl} 
+                                alt={sp.name} 
+                                className="w-full h-full object-cover pointer-events-none" 
+                                decoding="async"
+                              />
+                            ) : (
+                              <div className="w-full h-full bg-gradient-to-br from-blue-900 to-indigo-950 flex items-center justify-center text-white/50">
+                                <User size={20 * playerScale} />
+                              </div>
+                            )}
+                          </div>
+
+                          {(!showPhoto && (!sp.number || !showNumber)) && (
+                            <div className="rounded-full overflow-hidden w-full h-full bg-gradient-to-br from-blue-900 to-indigo-950 flex items-center justify-center text-white/50">
                               <User size={20 * playerScale} />
                             </div>
                           )}
+
+                          {/* Number badge on bench player */}
+                          {sp.number && showNumber && (
+                            <div 
+                              className="absolute bg-zinc-900 text-white rounded-full flex items-center justify-center font-black border-2 border-white shadow-md z-10"
+                              style={{
+                                width: showPhoto ? `${1.2 * playerScale}rem` : `${3.2 * playerScale}rem`,
+                                height: showPhoto ? `${1.2 * playerScale}rem` : `${3.2 * playerScale}rem`,
+                                fontSize: showPhoto ? `${0.5 * playerScale}rem` : `${1.2 * playerScale}rem`,
+                                bottom: showPhoto ? -4 : 'auto',
+                                right: showPhoto ? -4 : 'auto',
+                                top: !showPhoto ? '50%' : 'auto',
+                                left: !showPhoto ? '50%' : 'auto',
+                                transform: !showPhoto ? 'translate(-50%, -50%)' : 'none',
+                                position: showPhoto ? 'absolute' : 'relative',
+                                background: showPhoto ? undefined : 'linear-gradient(to bottom right, #1e3a8a, #1e1b4b)',
+                              }}
+                            >
+                              {sp.number}
+                            </div>
+                          )}
                         </div>
-                        {sp.number && showNumber && (
+
+                        {/* Player Name below the circle */}
+                        {showName && (
                           <div 
-                            className="absolute bg-zinc-900 text-white rounded-full flex items-center justify-center font-black border-2 border-white shadow-lg transition-all"
+                            className="mt-1.5 font-bold text-center tracking-tight leading-tight max-w-[80px] truncate"
                             style={{
-                              width: `${1.3 * playerScale}rem`,
-                              height: `${1.3 * playerScale}rem`,
                               fontSize: `${0.55 * playerScale}rem`,
-                              bottom: showPhoto ? 0 : 'auto',
-                              right: showPhoto ? -2 : 'auto',
-                              top: !showPhoto ? '50%' : 'auto',
-                              left: !showPhoto ? '50%' : 'auto',
-                              transform: !showPhoto ? 'translate(-50%, -50%)' : 'none',
-                              position: showPhoto ? 'absolute' : 'relative',
-                              zIndex: 10
                             }}
                           >
-                            {sp.number}
+                            {(() => {
+                              const displayName = getVisibleName(sp.name);
+                              const useSingleLine = ['initials', 'firstLastInitial', 'initialLastName'].includes(nameDisplayMode);
+                              const parts = useSingleLine ? [displayName] : displayName.split(' ');
+                              return parts.map((part, i) => (
+                                <div key={i} className="truncate whitespace-nowrap text-zinc-800 dark:text-zinc-300">{part}</div>
+                              ));
+                            })()}
                           </div>
                         )}
                       </div>
-                      {showName && (
-                        <div 
-                          className="font-bold text-zinc-900 dark:text-white max-w-[70px] text-center leading-tight transition-all"
-                          style={{
-                            fontSize: `${0.55 * playerScale}rem`,
-                            marginTop: `${0.2 * playerScale}rem`
-                          }}
-                        >
-                          {(() => {
-                            const displayName = getVisibleName(sp.name);
-                            const useSingleLine = ['initials', 'firstLastInitial', 'initialLastName'].includes(nameDisplayMode);
-                            const parts = useSingleLine ? [displayName] : displayName.split(' ');
-                            return parts.map((part, i) => (
-                              <div key={i} className="truncate whitespace-nowrap">{part}</div>
-                            ));
-                          })()}
-                        </div>
-                      )}
-                    </Reorder.Item>
-                  );
-                })
-              )}
-            </Reorder.Group>
-          </div>
-        )}
+                    );
+                  })
+                )}
+              </div>
+            </div>
+          )}
+
+        </div>
         
-        </div> {/* Close main side-by-side Flex Layout */}
+        </div>
       </div>
     );
   };
@@ -4505,7 +4601,7 @@ export default function LineupBuilder({
                                   id: p.id,
                                   x: p.x,
                                   y: p.y,
-                                  role: p.role || 'Player'
+                                  role: getSquadPlayer(p.playerId)?.position || 'Player'
                                 }));
                               
                               if (positions.length > 0) {
@@ -4831,11 +4927,11 @@ export default function LineupBuilder({
                         >
                           <Plus size={14} />
                         </button>
-                        {previewZoom !== 0.9 && (
+                        {previewZoom !== 1 && (
                           <button 
-                            onClick={() => setPreviewZoom(0.9)}
+                            onClick={() => setPreviewZoom(1)}
                             className="w-8 h-8 flex items-center justify-center bg-white dark:bg-zinc-900 hover:bg-zinc-200 dark:hover:bg-zinc-800 rounded-lg text-zinc-600 dark:text-zinc-400 hover:text-indigo-600 transition-all border border-zinc-200 dark:border-zinc-800/80"
-                            title="Återställ zoom (90%)"
+                            title="Återställ zoom (100%)"
                           >
                             <RotateCcw size={12} />
                           </button>
@@ -5289,11 +5385,50 @@ export default function LineupBuilder({
                               onSaveLineup({ ...target, isPublishedToPlayers: !target.isPublishedToPlayers });
                             }
                           }}
+                          sessions={sessions}
                           isCoachOrAdmin={isCoachOrAdmin}
                         />
                       ));
                     })()}
                   </Reorder.Group>
+
+                  {/* Manuell synkronisering under Laguppställningar */}
+                  {onManualSync && (
+                    <div className="pt-3 mt-2 border-t border-zinc-100 dark:border-zinc-800 animate-in fade-in duration-300">
+                      <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 p-3.5 bg-zinc-50 dark:bg-zinc-950/60 rounded-2xl border border-zinc-200/80 dark:border-zinc-800/80 shadow-sm">
+                        <div className="flex items-center gap-3">
+                          <div className="w-9 h-9 rounded-xl bg-indigo-50 dark:bg-indigo-950/40 text-indigo-600 dark:text-indigo-400 flex items-center justify-center shrink-0 shadow-inner">
+                            <RefreshCw size={18} className={isSyncing ? "animate-spin" : ""} />
+                          </div>
+                          <div className="flex flex-col">
+                            <span className="text-xs font-black text-zinc-900 dark:text-white uppercase tracking-wider">Synkronisering</span>
+                            <span className="text-[11px] font-medium text-zinc-500 dark:text-zinc-400">
+                              {isSyncing ? 'Hämtar och synkar med molnet...' : 'Hämta senaste ändringar mellan enheter'}
+                            </span>
+                          </div>
+                        </div>
+                        <button
+                          onClick={async () => {
+                            try {
+                              await onManualSync();
+                            } catch (err) {
+                              console.error("Manual sync failed:", err);
+                            }
+                          }}
+                          disabled={isSyncing}
+                          className="flex items-center justify-center gap-2 px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-400 text-white rounded-xl font-bold text-xs uppercase tracking-wider transition-all shadow-md active:scale-95 shrink-0 cursor-pointer"
+                        >
+                          <RefreshCw size={14} className={isSyncing ? "animate-spin" : ""} />
+                          <span>{isSyncing ? 'Synkar...' : 'Synka nu'}</span>
+                        </button>
+                      </div>
+                      {sessionActionCount > 0 && (
+                        <p className="text-[10px] font-bold text-amber-600 dark:text-amber-400 mt-2 px-1">
+                          Obs: Du har {sessionActionCount} osynkade lokala ändringar som sparas och skickas upp till molnet först.
+                        </p>
+                      )}
+                    </div>
+                  )}
 
                   {/* Archived Lineups Section */}
                   {isCoachOrAdmin && lineups.some(l => l.isArchived) && (
@@ -5339,9 +5474,9 @@ export default function LineupBuilder({
 
                                   <div className="flex items-center gap-1 shrink-0 ml-2">
                                     <button
-                                      onClick={() => openTitleEditForLineup(l.id, l.matchTitle || '', l.teamName || '')}
-                                      className="p-1.5 text-zinc-400 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-zinc-100/50 dark:hover:bg-zinc-900/40 rounded-lg transition-all"
-                                      title="Redigera rubriker"
+                                      onClick={() => openTitleEditForLineup(l.id, l.matchTitle || '', l.teamName || '', l.sessionId)}
+                                      className="p-1.5 text-zinc-400 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-zinc-100/50 dark:hover:bg-zinc-900/40 rounded-lg transition-all cursor-pointer"
+                                      title="Redigera rubriker & matchkoppling"
                                     >
                                       <Pencil size={14} />
                                     </button>
@@ -5422,10 +5557,10 @@ export default function LineupBuilder({
               initial={{ scale: 0.9, y: 20 }}
               animate={{ scale: 1, y: 0 }}
               exit={{ scale: 0.9, y: 20 }}
-              className="bg-white dark:bg-zinc-900 rounded-[32px] p-8 max-w-sm w-full shadow-2xl border border-zinc-100 dark:border-zinc-800"
+              className="bg-white dark:bg-zinc-900 rounded-[32px] p-6 sm:p-8 max-w-md w-full shadow-2xl border border-zinc-100 dark:border-zinc-800 max-h-[90vh] overflow-y-auto"
               onClick={(e) => e.stopPropagation()}
             >
-              <h3 className="text-xl font-black text-zinc-900 dark:text-white mb-6 tracking-tight">Redigera rubriker</h3>
+              <h3 className="text-xl font-black text-zinc-900 dark:text-white mb-5 tracking-tight">Redigera uppställning & match</h3>
               
               <div className="space-y-4 mb-6">
                 <div>
@@ -5436,9 +5571,10 @@ export default function LineupBuilder({
                     value={tempTeamName}
                     onChange={(e) => setTempTeamName(e.target.value)}
                     placeholder="Ditt lags namn..."
-                    className="w-full px-5 py-4 bg-zinc-50 dark:bg-zinc-950 border-2 border-zinc-100 dark:border-zinc-800 rounded-2xl text-lg font-bold outline-none focus:border-indigo-600 transition-colors"
+                    className="w-full px-4 py-3 sm:px-5 sm:py-3.5 bg-zinc-50 dark:bg-zinc-950 border-2 border-zinc-100 dark:border-zinc-800 rounded-2xl text-base font-bold outline-none focus:border-indigo-600 transition-colors"
                   />
                 </div>
+
                 <div>
                   <label className="block text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-1.5 ml-1">Matchrubrik</label>
                   <input
@@ -5446,13 +5582,94 @@ export default function LineupBuilder({
                     value={tempTitle}
                     onChange={(e) => setTempTitle(e.target.value)}
                     placeholder="Namn på matchen..."
-                    className="w-full px-5 py-4 bg-zinc-50 dark:bg-zinc-950 border-2 border-zinc-100 dark:border-zinc-800 rounded-2xl text-lg font-bold outline-none focus:border-indigo-600 transition-colors"
+                    className="w-full px-4 py-3 sm:px-5 sm:py-3.5 bg-zinc-50 dark:bg-zinc-950 border-2 border-zinc-100 dark:border-zinc-800 rounded-2xl text-base font-bold outline-none focus:border-indigo-600 transition-colors"
                     onKeyDown={(e) => {
                       if (e.key === 'Enter') {
-                        handleSave(tempTitle, tempTeamName);
+                        handleSave(tempTitle, tempTeamName, tempSessionId);
                       }
                     }}
                   />
+                </div>
+
+                <div className="pt-2 border-t border-zinc-100 dark:border-zinc-800/80">
+                  <div className="flex items-center justify-between mb-2 px-1">
+                    <label className="text-[10px] font-black text-zinc-400 uppercase tracking-widest flex items-center gap-1.5">
+                      <Calendar size={12} className="text-indigo-500" />
+                      <span>Koppling till match & närvaro</span>
+                    </label>
+                    {tempSessionId && (
+                      <span className="text-[9px] font-black px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-600 dark:bg-emerald-950/50 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800">
+                        Kopplad
+                      </span>
+                    )}
+                  </div>
+
+                  {tempSessionId ? (
+                    (() => {
+                      const sess = sessions?.find(s => s.id === tempSessionId);
+                      return (
+                        <div className="p-3.5 bg-indigo-50/70 dark:bg-indigo-950/30 rounded-2xl border border-indigo-100 dark:border-indigo-800/60 flex flex-col gap-2.5">
+                          <div className="flex items-center justify-between gap-2">
+                            <div className="min-w-0 flex-1">
+                              <div className="flex items-center gap-1.5 text-xs font-bold text-zinc-900 dark:text-zinc-100 truncate">
+                                <UserCheck size={14} className="text-emerald-500 shrink-0" />
+                                <span className="truncate">{sess?.title || 'Kopplad match'}</span>
+                              </div>
+                              <p className="text-[10px] text-zinc-500 dark:text-zinc-400 mt-0.5">
+                                {sess?.date ? new Date(sess.date).toLocaleDateString('sv-SE', { day: 'numeric', month: 'short' }) : ''} • {(sess?.attendance || []).length} anmälda spelare
+                              </p>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => setTempSessionId(undefined)}
+                              className="px-2.5 py-1.5 bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/40 dark:hover:bg-rose-900/60 text-rose-600 dark:text-rose-400 rounded-xl font-bold text-[10px] uppercase tracking-wider transition-all border border-rose-200 dark:border-rose-800 shrink-0 cursor-pointer active:scale-95 flex items-center gap-1"
+                              title="Frikoppla från matchens närvarolista"
+                            >
+                              <Unlink size={12} />
+                              <span>Frikoppla</span>
+                            </button>
+                          </div>
+                          <p className="text-[10px] text-zinc-400 dark:text-zinc-500 leading-tight">
+                            Närvarolistan från denna match visas i spelarväljaren. Klicka på "Frikoppla" om du vill att denna laguppställning ska vara helt oberoende.
+                          </p>
+                        </div>
+                      );
+                    })()
+                  ) : (
+                    <div className="space-y-2">
+                      <div className="relative">
+                        <select
+                          value={tempSessionId || ''}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            setTempSessionId(val ? val : undefined);
+                            if (val) {
+                              const matched = sessions?.find(s => s.id === val);
+                              if (matched && (!tempTitle || tempTitle === 'Namnlös Match' || tempTitle.includes('(kopia)'))) {
+                                setTempTitle(matched.title || tempTitle);
+                              }
+                            }
+                          }}
+                          className="w-full px-4 py-3 bg-zinc-50 dark:bg-zinc-950 border-2 border-zinc-100 dark:border-zinc-800 rounded-2xl text-xs font-bold outline-none focus:border-indigo-600 transition-colors appearance-none cursor-pointer pr-10 text-zinc-700 dark:text-zinc-200"
+                        >
+                          <option value="">Fristående (ej kopplad till match i kalendern)</option>
+                          {sessions && sessions.map(s => {
+                            const isMatch = s.type === 'match' || s.type === 'cup';
+                            const dateStr = s.date ? new Date(s.date).toLocaleDateString('sv-SE', { day: 'numeric', month: 'short' }) : '';
+                            return (
+                              <option key={s.id} value={s.id}>
+                                {isMatch ? '⚽ ' : '📋 '}{s.title || 'Aktivitet'} {dateStr ? `(${dateStr})` : ''} - {(s.attendance || []).length} anmälda
+                              </option>
+                            );
+                          })}
+                        </select>
+                        <ChevronDown size={14} className="absolute right-3.5 top-1/2 -translate-y-1/2 text-zinc-400 pointer-events-none" />
+                      </div>
+                      <p className="text-[10px] text-zinc-400 dark:text-zinc-500 leading-tight px-1">
+                        Laguppställningen är fristående och påverkas inte av ändringar i kalenderns närvaro.
+                      </p>
+                    </div>
+                  )}
                 </div>
               </div>
               <div className="flex gap-3">
@@ -5461,13 +5678,13 @@ export default function LineupBuilder({
                     setIsEditingTitle(false);
                     setEditingLineupId(null);
                   }}
-                  className="flex-1 py-4 bg-zinc-100 dark:bg-zinc-800 text-zinc-500 font-bold rounded-2xl active:scale-95 transition-all"
+                  className="flex-1 py-3.5 bg-zinc-100 dark:bg-zinc-800 text-zinc-500 font-bold rounded-2xl active:scale-95 transition-all text-sm cursor-pointer"
                 >
                   Avbryt
                 </button>
                 <button
-                  onClick={() => handleSave(tempTitle, tempTeamName)}
-                  className="flex-1 py-4 bg-indigo-600 text-white font-black rounded-2xl active:scale-95 shadow-lg shadow-indigo-100 dark:shadow-none transition-all"
+                  onClick={() => handleSave(tempTitle, tempTeamName, tempSessionId)}
+                  className="flex-1 py-3.5 bg-indigo-600 text-white font-black rounded-2xl active:scale-95 shadow-lg shadow-indigo-100 dark:shadow-none transition-all text-sm cursor-pointer"
                 >
                   Spara
                 </button>
@@ -6211,7 +6428,7 @@ export default function LineupBuilder({
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+            className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[150] flex items-center justify-center p-3 sm:p-4 overflow-hidden pb-safe"
             onClick={() => {
               setPickerMode(null);
               setShowImport(false);
@@ -6219,17 +6436,17 @@ export default function LineupBuilder({
             }}
           >
             <motion.div
-              initial={{ scale: 0.9, opacity: 0 }}
+              initial={{ scale: 0.92, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.9, opacity: 0 }}
-              className="bg-white dark:bg-zinc-900 rounded-3xl p-6 max-w-lg w-full shadow-2xl border border-zinc-100 dark:border-zinc-800"
+              exit={{ scale: 0.92, opacity: 0 }}
+              className="bg-white dark:bg-zinc-900 rounded-3xl p-4 sm:p-6 max-w-lg w-full shadow-2xl border border-zinc-100 dark:border-zinc-800 flex flex-col max-h-[85dvh] sm:max-h-[90dvh] overflow-hidden"
               onClick={(e) => e.stopPropagation()}
             >
-              <div className="flex items-center justify-between mb-6">
+              <div className="flex items-center justify-between mb-4 shrink-0">
                 <div className="flex bg-zinc-100 dark:bg-zinc-800/80 p-1 rounded-2xl border border-transparent dark:border-zinc-700/60">
                   <button 
                     onClick={() => setShowImport(false)}
-                    className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${
+                    className={`px-3.5 sm:px-4 py-1.5 sm:py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all cursor-pointer ${
                       !showImport 
                       ? 'bg-white dark:bg-zinc-700 text-indigo-600 dark:text-indigo-300 shadow-sm border border-zinc-200/50 dark:border-zinc-600/60' 
                       : 'text-zinc-500 dark:text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200'
@@ -6239,7 +6456,7 @@ export default function LineupBuilder({
                   </button>
                   <button 
                     onClick={() => setShowImport(true)}
-                    className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${
+                    className={`px-3.5 sm:px-4 py-1.5 sm:py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all cursor-pointer ${
                       showImport 
                       ? 'bg-white dark:bg-zinc-700 text-indigo-600 dark:text-indigo-300 shadow-sm border border-zinc-200/50 dark:border-zinc-600/60' 
                       : 'text-zinc-500 dark:text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200'
@@ -6252,95 +6469,135 @@ export default function LineupBuilder({
                   setPickerMode(null);
                   setShowImport(false);
                   setImportResult(null);
-                }} className="text-zinc-400 hover:text-zinc-600 dark:text-zinc-400 dark:hover:text-white p-2 transition-colors">
-                  <X size={24} />
+                }} className="text-zinc-400 hover:text-zinc-600 dark:text-zinc-400 dark:hover:text-white p-1.5 transition-colors cursor-pointer rounded-xl hover:bg-zinc-100 dark:hover:bg-zinc-800">
+                  <X size={22} />
                 </button>
               </div>
 
               {!showImport ? (
                 <>
-                  <div className="flex bg-zinc-100/80 dark:bg-zinc-950 p-1 rounded-xl mb-4 border border-zinc-200/60 dark:border-zinc-800">
-                    <button 
-                      onClick={() => setPickerMode('starter')}
-                      className={`flex-1 px-4 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${
-                        pickerMode === 'starter' 
-                        ? 'bg-white dark:bg-zinc-800 text-indigo-600 dark:text-indigo-300 shadow-sm border border-zinc-200/50 dark:border-zinc-700/60' 
-                        : 'text-zinc-500 dark:text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200'
-                      }`}
-                    >
-                      På planen ({starters.length})
-                    </button>
-                    <button 
-                      onClick={() => setPickerMode('sub')}
-                      className={`flex-1 px-4 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${
-                        pickerMode === 'sub' 
-                        ? 'bg-white dark:bg-zinc-800 text-indigo-600 dark:text-indigo-300 shadow-sm border border-zinc-200/50 dark:border-zinc-700/60' 
-                        : 'text-zinc-500 dark:text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200'
-                      }`}
-                    >
-                      På bänken ({subs.length})
-                    </button>
-                  </div>
-
-                  {linkedSession && (
-                    <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 p-3 bg-indigo-50 dark:bg-indigo-950/40 rounded-2xl border border-indigo-100 dark:border-indigo-800/60 mb-3 text-xs">
-                      <div className="flex items-center gap-2">
-                        <UserCheck size={16} className="text-emerald-600 dark:text-emerald-400 shrink-0" />
-                        <span className="font-bold text-zinc-900 dark:text-zinc-100">
-                          Kopplad match: <span className="text-indigo-600 dark:text-indigo-400 font-black">{linkedSession.title || 'Match'}</span> ({(linkedSession.attendance || []).length} anmälda)
-                        </span>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const attendingIds = linkedSession.attendance || [];
-                          const existingPlayerIds = new Set(players.map(p => p.playerId));
-                          const newPlayersToAdd: LineupPlayer[] = [];
-                          
-                          attendingIds.forEach(id => {
-                            if (!existingPlayerIds.has(id)) {
-                              newPlayersToAdd.push({
-                                id: `sub_${Date.now()}_${Math.random().toString(36).substring(7)}`,
-                                playerId: id,
-                                x: 50,
-                                y: 50,
-                                isSubstitute: true,
-                              });
-                            }
-                          });
-
-                          if (newPlayersToAdd.length > 0) {
-                            setPlayers(prev => [...prev, ...newPlayersToAdd]);
-                            setHasUnsavedChanges(true);
-                          }
-                        }}
-                        className="px-2.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-black text-[10px] uppercase tracking-wider transition-all shadow-xs shrink-0 cursor-pointer active:scale-95 flex items-center gap-1.5"
+                  <div className="shrink-0">
+                    <div className="flex bg-zinc-100/80 dark:bg-zinc-950 p-1 rounded-xl mb-3 border border-zinc-200/60 dark:border-zinc-800">
+                      <button 
+                        onClick={() => setPickerMode('starter')}
+                        className={`flex-1 px-3 sm:px-4 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all cursor-pointer ${
+                          pickerMode === 'starter' 
+                          ? 'bg-white dark:bg-zinc-800 text-indigo-600 dark:text-indigo-300 shadow-sm border border-zinc-200/50 dark:border-zinc-700/60' 
+                          : 'text-zinc-500 dark:text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200'
+                        }`}
                       >
-                        <Plus size={13} />
-                        <span>Lägg alla närvarande på bänken</span>
+                        På planen ({starters.length})
+                      </button>
+                      <button 
+                        onClick={() => setPickerMode('sub')}
+                        className={`flex-1 px-3 sm:px-4 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all cursor-pointer ${
+                          pickerMode === 'sub' 
+                          ? 'bg-white dark:bg-zinc-800 text-indigo-600 dark:text-indigo-300 shadow-sm border border-zinc-200/50 dark:border-zinc-700/60' 
+                          : 'text-zinc-500 dark:text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200'
+                        }`}
+                      >
+                        På bänken ({subs.length})
                       </button>
                     </div>
-                  )}
 
-                  <div className="flex items-center justify-between gap-2 mb-3 px-1">
-                    <span className="text-[10px] uppercase tracking-wider text-zinc-500 dark:text-zinc-400 font-bold">
-                      Spelare ({(Array.from(new Map(squadPlayers.map(sp => [sp.id, sp])).values())).length} st)
-                    </span>
-                    <button
-                      onClick={() => setSortBySelected(!sortBySelected)}
-                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all border ${
-                        sortBySelected
-                          ? 'bg-indigo-600 border-indigo-500 text-white shadow-sm'
-                          : 'bg-zinc-100 dark:bg-zinc-800 border-zinc-200 dark:border-zinc-700 text-zinc-600 dark:text-zinc-300 hover:bg-zinc-200 dark:hover:bg-zinc-700'
-                      }`}
-                      title={sortBySelected ? "Inaktivera sortering" : "Sortera valda först"}
-                    >
-                      <span className="shrink-0">Sortera valda först</span>
-                      <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${sortBySelected ? 'bg-white' : 'bg-zinc-400 dark:bg-zinc-500'}`} />
-                    </button>
+                    {linkedSession ? (
+                      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 p-2.5 sm:p-3 bg-indigo-50 dark:bg-indigo-950/40 rounded-2xl border border-indigo-100 dark:border-indigo-800/60 mb-2.5 text-xs">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <UserCheck size={15} className="text-emerald-600 dark:text-emerald-400 shrink-0" />
+                          <span className="font-bold text-zinc-900 dark:text-zinc-100 text-xs truncate">
+                            Kopplad match: <span className="text-indigo-600 dark:text-indigo-400 font-black">{linkedSession.title || 'Match'}</span> ({(linkedSession.attendance || []).length} anmälda)
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-1.5 w-full sm:w-auto justify-end">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const attendingIds = linkedSession.attendance || [];
+                              const existingPlayerIds = new Set(players.map(p => p.playerId));
+                              const newPlayersToAdd: LineupPlayer[] = [];
+                              
+                              attendingIds.forEach(id => {
+                                if (!existingPlayerIds.has(id)) {
+                                  newPlayersToAdd.push({
+                                    id: `sub_${Date.now()}_${Math.random().toString(36).substring(7)}`,
+                                    playerId: id,
+                                    x: 50,
+                                    y: 50,
+                                    isSubstitute: true,
+                                  });
+                                }
+                              });
+
+                              if (newPlayersToAdd.length > 0) {
+                                setPlayers(prev => [...prev, ...newPlayersToAdd]);
+                                setHasUnsavedChanges(true);
+                              }
+                            }}
+                            className="px-2.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-black text-[10px] uppercase tracking-wider transition-all shadow-xs shrink-0 cursor-pointer active:scale-95 flex items-center gap-1.5"
+                          >
+                            <Plus size={13} />
+                            <span>Lägg till anmälda</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (lineup) {
+                                onUpdateLineup({ ...lineup, sessionId: undefined });
+                                setHasUnsavedChanges(true);
+                              }
+                            }}
+                            className="px-2.5 py-1.5 bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/40 dark:hover:bg-rose-900/60 text-rose-600 dark:text-rose-400 rounded-xl font-black text-[10px] uppercase tracking-wider transition-all border border-rose-200 dark:border-rose-800 shrink-0 cursor-pointer active:scale-95 flex items-center gap-1"
+                            title="Frikoppla från matchens närvaro"
+                          >
+                            <Unlink size={12} />
+                            <span>Frikoppla</span>
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="flex items-center justify-between gap-2 p-2 sm:p-2.5 bg-zinc-50 dark:bg-zinc-900/60 rounded-xl border border-zinc-100 dark:border-zinc-800 mb-2.5 text-[11px]">
+                        <span className="text-zinc-500 dark:text-zinc-400 font-medium">
+                          Fristående laguppställning (ej bunden till närvaro)
+                        </span>
+                        {sessions && sessions.length > 0 && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setTempTitle(lineupName);
+                              setTempTeamName(teamName);
+                              setTempSessionId(undefined);
+                              setIsEditingTitle(true);
+                            }}
+                            className="text-[10px] font-bold text-indigo-600 dark:text-indigo-400 hover:underline flex items-center gap-1 cursor-pointer shrink-0"
+                          >
+                            <Link size={10} />
+                            <span>Koppla till match</span>
+                          </button>
+                        )}
+                      </div>
+                    )}
+
+                    <div className="flex items-center justify-between gap-2 mb-2 px-1">
+                      <span className="text-[10px] uppercase tracking-wider text-zinc-500 dark:text-zinc-400 font-bold">
+                        Spelare ({(Array.from(new Map(squadPlayers.map(sp => [sp.id, sp])).values())).length} st)
+                      </span>
+                      <button
+                        onClick={() => setSortBySelected(!sortBySelected)}
+                        className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all border cursor-pointer ${
+                          sortBySelected
+                            ? 'bg-indigo-600 border-indigo-500 text-white shadow-sm'
+                            : 'bg-zinc-100 dark:bg-zinc-800 border-zinc-200 dark:border-zinc-700 text-zinc-600 dark:text-zinc-300 hover:bg-zinc-200 dark:hover:bg-zinc-700'
+                        }`}
+                        title={sortBySelected ? "Inaktivera sortering" : "Sortera valda först"}
+                      >
+                        <span className="shrink-0">Sortera valda först</span>
+                        <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${sortBySelected ? 'bg-white' : 'bg-zinc-400 dark:bg-zinc-500'}`} />
+                      </button>
+                    </div>
                   </div>
 
-                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 max-h-[50vh] overflow-y-auto pr-2 custom-scrollbar">
+                  <div className="flex-1 overflow-y-auto min-h-0 pr-1.5 my-1 custom-scrollbar">
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5 sm:gap-3">
                     {(() => {
                       const uniqueSquadPlayers = Array.from(new Map(squadPlayers.map(sp => [sp.id, sp])).values()) as SquadPlayer[];
                       const sortedPlayers = !sortBySelected 
@@ -6382,7 +6639,7 @@ export default function LineupBuilder({
                           <button
                             key={sp.id}
                             onClick={() => togglePlayerInLineup(sp.id, pickerMode === 'sub')}
-                            className={`flex flex-col items-center gap-2 p-3 rounded-2xl border-2 transition-all text-left relative ${
+                            className={`flex flex-col items-center gap-2 p-3 rounded-2xl border-2 transition-all text-left relative cursor-pointer active:scale-95 ${
                               isCurrentMode 
                                 ? 'border-indigo-600 bg-indigo-50 dark:bg-indigo-950/20 shadow-sm' 
                                 : isOtherMode
@@ -6450,10 +6707,11 @@ export default function LineupBuilder({
                         );
                       });
                     })()}
+                    </div>
                   </div>
                 </>
               ) : (
-                <div className="space-y-4">
+                <div className="flex-1 overflow-y-auto min-h-0 pr-1.5 my-2 custom-scrollbar space-y-4">
                   <div className="bg-indigo-50 dark:bg-indigo-900/20 p-4 rounded-2xl border border-indigo-100 dark:border-indigo-800/50">
                     <p className="text-xs text-indigo-700 dark:text-indigo-300 font-medium leading-relaxed">
                       Klistra in en lista med namn (t.ex. från kallelse). Vi matchar dem mot truppen och lägger till dem på planen. Ord som "Deltar" filtreras bort automatiskt.
@@ -6464,7 +6722,7 @@ export default function LineupBuilder({
                     value={pastedText}
                     onChange={(e) => setPastedText(e.target.value)}
                     placeholder="Klistra in namn här..."
-                    className="w-full h-40 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-2xl p-4 text-sm focus:ring-2 focus:ring-indigo-500 outline-none resize-none"
+                    className="w-full h-32 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-2xl p-3 sm:p-4 text-sm focus:ring-2 focus:ring-indigo-500 outline-none resize-none"
                   />
 
                   {importResult && (
@@ -6485,7 +6743,7 @@ export default function LineupBuilder({
                   <button
                     onClick={handleImportPlayers}
                     disabled={!pastedText.trim()}
-                    className="w-full py-4 bg-indigo-600 text-white rounded-2xl font-bold hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-100 dark:shadow-none disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                    className="w-full py-3.5 bg-indigo-600 text-white rounded-2xl font-bold hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-100 dark:shadow-none disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 cursor-pointer"
                   >
                     <Check size={18} />
                     <span>Aktivera spelare</span>
@@ -6493,10 +6751,10 @@ export default function LineupBuilder({
                 </div>
               )}
 
-              <div className="mt-6">
+              <div className="shrink-0 pt-3 border-t border-zinc-100 dark:border-zinc-800/80 mt-auto">
                 <button
                   onClick={() => setPickerMode(null)}
-                  className="w-full py-3 bg-indigo-600 text-white rounded-xl font-bold hover:bg-indigo-700 transition-all"
+                  className="w-full py-3 bg-indigo-600 text-white rounded-xl font-extrabold hover:bg-indigo-700 transition-all cursor-pointer shadow-md shadow-indigo-200 dark:shadow-none active:scale-98"
                 >
                   Klar
                 </button>
@@ -6517,14 +6775,14 @@ export default function LineupBuilder({
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+            className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[150] flex items-center justify-center p-3 sm:p-4 overflow-hidden pb-safe"
             onClick={() => setSelectedForEdit(null)}
           >
             <motion.div
-              initial={{ scale: 0.9, opacity: 0, y: 20 }}
+              initial={{ scale: 0.92, opacity: 0, y: 20 }}
               animate={{ scale: 1, opacity: 1, y: 0 }}
-              exit={{ scale: 0.9, opacity: 0, y: 20 }}
-              className="bg-white dark:bg-zinc-900 rounded-3xl p-8 max-w-sm w-full shadow-2xl border border-zinc-100 dark:border-zinc-800"
+              exit={{ scale: 0.92, opacity: 0, y: 20 }}
+              className="bg-white dark:bg-zinc-900 rounded-3xl p-6 sm:p-8 max-w-sm w-full shadow-2xl border border-zinc-100 dark:border-zinc-800 max-h-[90dvh] overflow-y-auto custom-scrollbar"
               onClick={(e) => e.stopPropagation()}
             >
               {(() => {

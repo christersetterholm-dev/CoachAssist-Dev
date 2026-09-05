@@ -1064,7 +1064,7 @@ export default function MobileCalendarView({
 
                   // Attendance calculation
                   const safeSquadMonth = Array.isArray(squad) ? squad.filter(p => p && typeof p === 'object') : [];
-                  const safeAttendanceMonth = Array.isArray(session.attendance) ? session.attendance.map(item => typeof item === 'string' ? item : String(item?.id || item?.name || item || '')).filter(Boolean) : [];
+                  const safeAttendanceMonth = Array.isArray(session.attendance) ? session.attendance.map(item => typeof item === 'string' ? item : String((item as any)?.id || (item as any)?.name || item || '')).filter(Boolean) : [];
                   const attendingLeaderIds = safeSquadMonth.filter(p => p.role === 'leader').map(p => p.id);
                   const registeredLeadersCount = safeAttendanceMonth.filter(id => attendingLeaderIds.includes(id)).length;
                   const registeredPlayersCount = safeAttendanceMonth.length - registeredLeadersCount;

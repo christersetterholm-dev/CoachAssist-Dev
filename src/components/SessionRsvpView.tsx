@@ -643,7 +643,7 @@ export const SessionRsvpView: React.FC<SessionRsvpViewProps> = ({
     });
   }, [allMembers, attendance, rsvps, filter, searchQuery]);
 
-  const targetAdminUrl = adminUrl || session.adminUrl;
+  const targetAdminUrl = adminUrl || (session as any).adminUrl;
 
   return (
     <div className="space-y-6 pb-12">
@@ -685,7 +685,7 @@ export const SessionRsvpView: React.FC<SessionRsvpViewProps> = ({
             <div>
               <div className="flex items-center gap-2">
                 <span className="text-[10px] font-black uppercase tracking-wider bg-indigo-500/40 text-indigo-200 px-2 py-0.5 rounded-md">Matchaktivitet</span>
-                <span className="text-xs font-bold text-indigo-200">{stats.coming} anmälda spelare</span>
+                <span className="text-xs font-bold text-indigo-200">{stats.attending} anmälda spelare</span>
               </div>
               <p className="text-sm font-black text-white mt-0.5">Skapa eller öppna laguppställning med anmälda spelare</p>
             </div>

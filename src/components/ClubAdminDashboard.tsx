@@ -161,6 +161,7 @@ export default function ClubAdminDashboard({
     role: 'coach' | 'player';
     position?: string;
     number?: string;
+    photoUrl?: string;
   }>>([]);
   const [isProcessingImport, setIsProcessingImport] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -392,7 +393,7 @@ export default function ClubAdminDashboard({
 
     for (const m of members) {
       const userMatch = userAccounts.find(u =>
-        (u.id && (u.id === m.userId || u.id === m.id)) ||
+        (u.id && (u.id === m.userId || u.id === (m as any).id)) ||
         (u.email && m.email && u.email.trim().toLowerCase() === m.email.trim().toLowerCase())
       );
 
@@ -401,7 +402,7 @@ export default function ClubAdminDashboard({
         return t ? t.name : tId;
       }).join(', ');
 
-      const userId = userMatch?.id || m.userId || m.id || crypto.randomUUID();
+      const userId = userMatch?.id || m.userId || (m as any).id || crypto.randomUUID();
       processedUserIds.add(userId);
       if (userMatch?.id) processedUserIds.add(userMatch.id);
 
@@ -411,8 +412,8 @@ export default function ClubAdminDashboard({
 
       result.push({
         id: userId,
-        memberId: m.userId || m.id || userId,
-        name: m.fullName || m.name || m.email.split('@')[0],
+        memberId: m.userId || (m as any).id || userId,
+        name: m.fullName || (m as any).name || m.email.split('@')[0],
         role: roleLabel,
         email: m.email,
         username: userMatch?.username || null,
@@ -478,8 +479,8 @@ export default function ClubAdminDashboard({
       }
 
       const payload = targetMembers.map(m => ({
-        id: m.userId || m.id || crypto.randomUUID(),
-        name: m.fullName || m.name,
+        id: m.userId || (m as any).id || crypto.randomUUID(),
+        name: m.fullName || (m as any).name,
         email: m.email,
         role: m.roles?.includes('admin') ? 'Admin' : m.roles?.includes('coach') ? 'Tränare' : 'Spelare'
       }));

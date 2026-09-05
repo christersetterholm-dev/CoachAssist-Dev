@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { motion } from 'motion/react';
 import { Users, Plus, LayoutList, Play, X, UserPlus, Copy, ChevronDown } from 'lucide-react';
 import { Exercise, SquadPlayer } from '../types';

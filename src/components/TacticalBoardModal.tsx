@@ -23,6 +23,7 @@ interface BoardElement extends LineupPlayer {
   customColor?: string;
   itemType?: 'player' | 'opponent' | 'cone-orange' | 'cone-yellow' | 'cone-blue' | 'goal' | 'ladder';
   hideNumber?: boolean;
+  rotation?: number;
 }
 
 // SoccerBallIcon defined exactly like LineupBuilder
@@ -133,7 +134,7 @@ export default function TacticalBoardModal({
   const [attackDirection, setAttackDirection] = useState<'up' | 'down' | 'left' | 'right'>(activeBoard?.attackDirection || 'up');
 
   // Drawing Tools State
-  const [tacticalTool, setTacticalTool] = useState<'pen' | 'arrow' | 'freehand-arrow' | 'eraser' | 'ball' | 'opponent' | 'move' | 'text' | 'circle' | 'rectangle' | 'square' | 'add-element'>('move');
+  const [tacticalTool, setTacticalTool] = useState<'pen' | 'arrow' | 'freehand-arrow' | 'eraser' | 'ball' | 'opponent' | 'move' | 'text' | 'circle' | 'rectangle' | 'square' | 'add-element' | 'line'>('move');
   const [tacticalColor, setTacticalColor] = useState<string>('#ffffff');
   const [tacticalLineWidth, setTacticalLineWidth] = useState<number>(0.8);
   const [tacticalLineType, setTacticalLineType] = useState<'solid' | 'dashed'>('solid');
@@ -1071,7 +1072,7 @@ export default function TacticalBoardModal({
                       ${(pitchType === 'classic') ? '#8dc343' : '#7dd3fc'} 10%,
                       ${(pitchType === 'classic') ? '#7db436' : '#38bdf8'} 10%,
                       ${(pitchType === 'classic') ? '#7db436' : '#38bdf8'} 20%
-                    )${(pitchType === 'blue' || pitchType === 'blue-grass') ? ', radial-gradient(circle at 2px 2px, rgba(255,255,255,0.05) 1px, transparent 0)' : ''}`
+                    )${(pitchType === 'blue') ? ', radial-gradient(circle at 2px 2px, rgba(255,255,255,0.05) 1px, transparent 0)' : ''}`
                   ) : (pitchType === 'grass' || pitchType === 'blue-grass') ? (
                     `radial-gradient(circle at 2px 2px, rgba(255,255,255,0.1) 1px, transparent 0)`
                   ) : 'none',

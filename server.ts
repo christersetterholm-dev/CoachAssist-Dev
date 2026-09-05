@@ -1202,7 +1202,7 @@ async function startServer() {
           email: userRow.email,
           username: userRow.username || null,
           displayName: userRow.username || userRow.email.split('@')[0],
-          photoURL: null
+          photoURL: userRow.avatar_url || null
         }
       });
     } catch (error: any) {
@@ -1996,6 +1996,60 @@ async function startServer() {
     }
   });
 
+  // Update Avatar Endpoint
+  app.post('/api/auth/update-avatar', async (req, res) => {
+    const authHeader = req.headers.authorization;
+    if (!authHeader) {
+      return res.status(401).json({ error: 'Du måste vara inloggad för att uppdatera din profilbild.' });
+    }
+
+    try {
+      const authStr = Array.isArray(authHeader) ? authHeader[0] : authHeader;
+      const partsAuth = authStr.split(' ');
+      const token = partsAuth.length > 1 ? partsAuth[1] : partsAuth[0];
+
+      const decoded: any = jwt.verify(token, JWT_SECRET);
+      const userId = decoded.id;
+      const { photoUrl } = req.body;
+      const cleanPhotoUrl = typeof photoUrl === 'string' && photoUrl.trim() ? photoUrl.trim() : null;
+
+      // Update in SQLite
+      db.prepare('UPDATE users SET avatar_url = ? WHERE id = ?').run(cleanPhotoUrl, userId);
+
+      // Find user row for full email
+      let userRow: any = db.prepare('SELECT * FROM users WHERE id = ?').get(userId);
+
+      // Update in Firestore
+      if (userRow?.email) {
+        setFirestoreDoc(`server_users/${encodeURIComponent(userRow.email)}`, {
+          id: userId,
+          email: userRow.email,
+          username: userRow.username || null,
+          avatar_url: cleanPhotoUrl,
+          password_hash: userRow.password_hash,
+          created_at: userRow.created_at || Date.now()
+        }).catch(() => {});
+
+        setFirestoreDoc(`server_user_ids/${encodeURIComponent(userId)}`, {
+          id: userId,
+          email: userRow.email,
+          username: userRow.username || null,
+          avatar_url: cleanPhotoUrl,
+          password_hash: userRow.password_hash,
+          created_at: userRow.created_at || Date.now()
+        }).catch(() => {});
+      }
+
+      res.json({
+        success: true,
+        photoURL: cleanPhotoUrl
+      });
+    } catch (error: any) {
+      console.error('Update avatar error:', error);
+      res.status(500).json({ error: 'Kunde inte uppdatera profilbilden.' });
+    }
+  });
+
   // Change Password for Logged-In User
   app.post('/api/auth/change-password', async (req, res) => {
     const authHeader = req.headers.authorization;
@@ -2545,6 +2599,10 @@ async function startServer() {
       const userId = parts[1];
       const segment = parts[3];
 
+      if (userId === 'guest') {
+        return res.status(404).json({ error: 'Guest offline mode has no server database' });
+      }
+
       if (userId !== 'guest') {
         const authHeader = req.headers.authorization;
         if (!authHeader) return res.status(401).json({ error: 'Unauthorized' });
@@ -2564,18 +2622,29 @@ async function startServer() {
         }
       }
 
-      let row: any = db.prepare('SELECT data FROM users_data WHERE userId = ? AND segment = ?').get(userId, segment);
-      if (!row) {
+      const isForce = req.query.force === 'true' || req.query.refresh === 'true';
+      let row: any = db.prepare('SELECT data, updatedAt FROM users_data WHERE userId = ? AND segment = ?').get(userId, segment);
+      
+      // In firestore_only mode, hybrid mode (if stale), or if force refresh requested, query Firestore
+      if (dbModeConfig.mode === 'firestore_only' || isForce || !row || (dbModeConfig.mode === 'hybrid' && (!row.updatedAt || Date.now() - row.updatedAt > 5000))) {
         const fDoc = await getFirestoreDoc(`app_docs/users_${userId}_data_${segment}`);
         if (fDoc && fDoc.data) {
-          const rawData = typeof fDoc.data === 'string' ? fDoc.data : JSON.stringify(fDoc.data);
-          db.prepare(`
-            INSERT INTO users_data (userId, segment, data, updatedAt)
-            VALUES (?, ?, ?, ?)
-            ON CONFLICT(userId, segment) DO UPDATE SET data = excluded.data, updatedAt = excluded.updatedAt
-          `).run(userId, segment, rawData, Date.now());
-          return res.json(typeof fDoc.data === 'string' ? JSON.parse(fDoc.data) : fDoc.data);
+          const remoteUpdatedAt = Number(fDoc.updatedAt) || 0;
+          const localUpdatedAt = Number(row?.updatedAt) || 0;
+          if (dbModeConfig.mode === 'firestore_only' || isForce || !row || remoteUpdatedAt >= localUpdatedAt) {
+            const rawData = typeof fDoc.data === 'string' ? fDoc.data : JSON.stringify(fDoc.data);
+            db.prepare(`
+              INSERT INTO users_data (userId, segment, data, updatedAt)
+              VALUES (?, ?, ?, ?)
+              ON CONFLICT(userId, segment) DO UPDATE SET data = excluded.data, updatedAt = excluded.updatedAt
+            `).run(userId, segment, rawData, remoteUpdatedAt || Date.now());
+            return res.json(typeof fDoc.data === 'string' ? JSON.parse(fDoc.data) : fDoc.data);
+          }
+        } else if (!row) {
+          return res.status(404).json({ error: 'Not found' });
         }
+      }
+      if (!row) {
         return res.status(404).json({ error: 'Not found' });
       }
       res.json(JSON.parse(row.data));
@@ -2594,18 +2663,29 @@ async function startServer() {
         const teamId = parts[3] || 'club_global';
         const segment = parts[5] || parts[3] || 'data';
 
-        let row: any = db.prepare('SELECT data FROM clubs_data WHERE clubId = ? AND teamId = ? AND segment = ?').get(clubId, teamId, segment);
-        if (!row) {
+        const isForce = req.query.force === 'true' || req.query.refresh === 'true';
+        let row: any = db.prepare('SELECT data, updatedAt FROM clubs_data WHERE clubId = ? AND teamId = ? AND segment = ?').get(clubId, teamId, segment);
+        
+        // In firestore_only mode, hybrid mode (if stale), or if force refresh requested, query Firestore
+        if (dbModeConfig.mode === 'firestore_only' || isForce || !row || (dbModeConfig.mode === 'hybrid' && (!row.updatedAt || Date.now() - row.updatedAt > 5000))) {
           const fDoc = await getFirestoreDoc(`app_docs/clubs_${clubId}_${teamId}_${segment}`);
           if (fDoc && fDoc.data) {
-            const rawData = typeof fDoc.data === 'string' ? fDoc.data : JSON.stringify(fDoc.data);
-            db.prepare(`
-              INSERT INTO clubs_data (clubId, teamId, segment, data, updatedAt)
-              VALUES (?, ?, ?, ?, ?)
-              ON CONFLICT(clubId, teamId, segment) DO UPDATE SET data = excluded.data, updatedAt = excluded.updatedAt
-            `).run(clubId, teamId, segment, rawData, Date.now());
-            return res.json(typeof fDoc.data === 'string' ? JSON.parse(fDoc.data) : fDoc.data);
+            const remoteUpdatedAt = Number(fDoc.updatedAt) || 0;
+            const localUpdatedAt = Number(row?.updatedAt) || 0;
+            if (dbModeConfig.mode === 'firestore_only' || isForce || !row || remoteUpdatedAt >= localUpdatedAt) {
+              const rawData = typeof fDoc.data === 'string' ? fDoc.data : JSON.stringify(fDoc.data);
+              db.prepare(`
+                INSERT INTO clubs_data (clubId, teamId, segment, data, updatedAt)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(clubId, teamId, segment) DO UPDATE SET data = excluded.data, updatedAt = excluded.updatedAt
+              `).run(clubId, teamId, segment, rawData, remoteUpdatedAt || Date.now());
+              return res.json(typeof fDoc.data === 'string' ? JSON.parse(fDoc.data) : fDoc.data);
+            }
+          } else if (!row) {
+            return res.status(404).json({ error: 'Not found' });
           }
+        }
+        if (!row) {
           return res.status(404).json({ error: 'Not found' });
         }
         res.json(JSON.parse(row.data));
@@ -2636,7 +2716,7 @@ async function startServer() {
   });
 
   // POST/PUT Document Data
-  app.post('/api/docs', (req, res) => {
+  app.post('/api/docs', async (req, res) => {
     const pathStr = req.query.path as string;
     const { data } = req.body;
     if (!pathStr) return res.status(400).send('Path is required');
@@ -2671,6 +2751,10 @@ async function startServer() {
         const userId = parts[1];
         const segment = parts[3];
 
+        if (userId === 'guest') {
+          return res.status(403).json({ error: 'Guest offline mode cannot save to server database' });
+        }
+
         if (userId !== 'guest') {
           const authHeader = req.headers.authorization;
           if (!authHeader) return res.status(401).json({ error: 'Unauthorized' });
@@ -2691,16 +2775,17 @@ async function startServer() {
         }
 
         const serializedData = JSON.stringify(data);
+        const updateTimestamp = Number(data?.updatedAt) || Date.now();
         db.prepare(`
           INSERT INTO users_data (userId, segment, data, updatedAt)
           VALUES (?, ?, ?, ?)
           ON CONFLICT(userId, segment) DO UPDATE SET data = excluded.data, updatedAt = excluded.updatedAt
-        `).run(userId, segment, serializedData, Date.now());
+        `).run(userId, segment, serializedData, updateTimestamp);
 
-        setFirestoreDoc(`app_docs/users_${userId}_data_${segment}`, { data: serializedData, updatedAt: Date.now() })
+        await setFirestoreDoc(`app_docs/users_${userId}_data_${segment}`, { data: serializedData, updatedAt: updateTimestamp })
           .catch(e => console.error('Firestore user data sync error:', e));
 
-        res.json({ success: true });
+        res.json({ success: true, updatedAt: updateTimestamp });
       } catch (e: any) {
         console.error('Error saving user data:', e);
         res.status(500).json({ error: 'Failed to save user data' });
@@ -2721,16 +2806,17 @@ async function startServer() {
         const segment = parts[5] || parts[3] || 'data';
 
         const serializedData = JSON.stringify(data);
+        const updateTimestamp = Number(data?.updatedAt) || Date.now();
         db.prepare(`
           INSERT INTO clubs_data (clubId, teamId, segment, data, updatedAt)
           VALUES (?, ?, ?, ?, ?)
           ON CONFLICT(clubId, teamId, segment) DO UPDATE SET data = excluded.data, updatedAt = excluded.updatedAt
-        `).run(clubId, teamId, segment, serializedData, Date.now());
+        `).run(clubId, teamId, segment, serializedData, updateTimestamp);
 
-        setFirestoreDoc(`app_docs/clubs_${clubId}_${teamId}_${segment}`, { data: serializedData, updatedAt: Date.now() })
+        await setFirestoreDoc(`app_docs/clubs_${clubId}_${teamId}_${segment}`, { data: serializedData, updatedAt: updateTimestamp })
           .catch(e => console.error('Firestore club data sync error:', e));
 
-        res.json({ success: true });
+        res.json({ success: true, updatedAt: updateTimestamp });
       } catch (e: any) {
         console.error('Error saving club data:', e);
         res.status(500).json({ error: 'Failed to save club data' });

@@ -1,15 +1,16 @@
 import React, { useState, useRef, useMemo } from 'react';
-import { UserPlus, Trash2, Edit2, X, Users, Upload, FileSpreadsheet, FileText, ClipboardList, Camera, Loader2, ArrowUpDown, Check, Search, AlertTriangle } from 'lucide-react';
+import { UserPlus, Trash2, Edit2, X, Users, Upload, FileSpreadsheet, FileText, ClipboardList, Camera, Loader2, ArrowUpDown, Check, Search, AlertTriangle, Activity } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { storage, db, ref, uploadBytes, getDownloadURL, getApiUrl } from '../lib/firebase';
 import { doc, getDoc } from 'firebase/firestore';
-import { SquadPlayer, ClubMember, ClubTeam } from '../types';
+import { SquadPlayer, ClubMember, ClubTeam, TrainingSession } from '../types';
 import { deduplicateSquad } from '../lib/clubUtils';
 import * as XLSX from 'xlsx';
 import Papa from 'papaparse';
 import ImageCropper from './ImageCropper';
 import { CachedImage } from './CachedImage';
 import { sortLeadersByPosition } from '../lib/teamUtils';
+import SquadAttendanceOverview from './SquadAttendanceOverview';
 
 type SortOption = 'standard' | 'number' | 'position' | 'firstname' | 'lastname';
 
@@ -88,6 +89,7 @@ const compareByLastName = (a: SquadPlayer, b: SquadPlayer) => {
 
 interface SquadManagerProps {
   squad: SquadPlayer[];
+  sessions?: TrainingSession[];
   onUpdateSquad: (squad: SquadPlayer[]) => void;
   activeClubId?: string | null;
   activeTeamId?: string | null;
@@ -95,7 +97,8 @@ interface SquadManagerProps {
   key?: React.Key;
 }
 
-export default function SquadManager({ squad, onUpdateSquad, activeClubId, activeTeamId, isCoachOrAdmin = true }: SquadManagerProps) {
+export default function SquadManager({ squad, sessions = [], onUpdateSquad, activeClubId, activeTeamId, isCoachOrAdmin = true }: SquadManagerProps) {
+  const [activeTab, setActiveTab] = useState<'roster' | 'attendance'>('roster');
   const [isAdding, setIsAdding] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
   const [newName, setNewName] = useState('');
@@ -130,6 +133,46 @@ export default function SquadManager({ squad, onUpdateSquad, activeClubId, activ
     setSortBy(option);
     localStorage.setItem('squad_sort_by', option);
   };
+
+  // Quick 30-day attendance lookup for players
+  const quickAttendanceMap = useMemo(() => {
+    if (!sessions || sessions.length === 0) return new Map<string, { pct: number; attended: number; total: number }>();
+    const thirtyDaysAgo = Date.now() - (30 * 24 * 60 * 60 * 1000);
+    const recentSessions = sessions.filter(s => {
+      if (!s || s.isIgnored) return false;
+      const d = Number(s.date);
+      if (isNaN(d) || d < thirtyDaysAgo) return false;
+      return (s.attendance && s.attendance.length > 0) || s.isCompleted || d <= Date.now() + 86400000;
+    });
+
+    const total = recentSessions.length;
+    const map = new Map<string, { pct: number; attended: number; total: number }>();
+    if (total === 0) return map;
+
+    for (const p of squad) {
+      const cleanName = p.name.trim().toLowerCase();
+      const rawId = p.id.replace('_leader', '');
+      let attended = 0;
+      for (const s of recentSessions) {
+        if (s.attendance && Array.isArray(s.attendance)) {
+          const present = s.attendance.some((att: any) => {
+            if (typeof att === 'string') {
+              return att === p.id || att === rawId || att.replace('_leader', '') === rawId || att.trim().toLowerCase() === cleanName;
+            }
+            if (att && typeof att === 'object') {
+              const objId = att.id || att.playerId;
+              return objId === p.id || objId === rawId || (att.name && att.name.trim().toLowerCase() === cleanName);
+            }
+            return false;
+          });
+          if (present) attended++;
+        }
+      }
+      const pct = total > 0 ? Math.round((attended / total) * 100) : 0;
+      map.set(p.id, { pct, attended, total });
+    }
+    return map;
+  }, [sessions, squad]);
 
   const handleOpenFetchMembersModal = async () => {
     setIsFetchingMembers(true);
@@ -731,79 +774,113 @@ export default function SquadManager({ squad, onUpdateSquad, activeClubId, activ
         </div>
       )}
 
-      {isCoachOrAdmin && (
-        <div className="flex flex-wrap items-center justify-end gap-2 mb-8">
+      {/* Top Tab Bar: Trupplista vs Närvaro & Statistik */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6 border-b border-zinc-200/80 dark:border-zinc-800 pb-4">
+        <div className="flex items-center gap-2">
           <button
-            onClick={handleOpenFetchMembersModal}
-            className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2.5 rounded-xl font-black text-xs sm:text-sm transition-all shadow-md shadow-emerald-100 dark:shadow-none cursor-pointer"
-            title="Hämta personer från medlemsregistret/laget"
+            type="button"
+            onClick={() => setActiveTab('roster')}
+            className={`flex items-center gap-2 px-4 py-2.5 rounded-2xl text-xs sm:text-sm font-extrabold transition-all cursor-pointer ${
+              activeTab === 'roster'
+                ? 'bg-indigo-600 text-white shadow-md shadow-indigo-100 dark:shadow-none'
+                : 'bg-zinc-100 dark:bg-zinc-800/80 text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white border border-transparent'
+            }`}
           >
-            <Users size={18} />
-            <span>Hämta medlemmar från laget</span>
+            <Users size={16} />
+            <span>Trupplista ({squad.length})</span>
           </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab('attendance')}
+            className={`flex items-center gap-2 px-4 py-2.5 rounded-2xl text-xs sm:text-sm font-extrabold transition-all cursor-pointer ${
+              activeTab === 'attendance'
+                ? 'bg-indigo-600 text-white shadow-md shadow-indigo-100 dark:shadow-none'
+                : 'bg-zinc-100 dark:bg-zinc-800/80 text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white border border-transparent'
+            }`}
+          >
+            <Activity size={16} />
+            <span>Närvaro & Statistik</span>
+          </button>
+        </div>
 
-          <button
-            onClick={() => {
-              setNewName('');
-              setNewPosition('');
-              setNewNumber('');
-              setNewPhotoUrl('');
-              setIsAdding(true);
-            }}
-            className="p-2.5 bg-indigo-600 text-white rounded-xl font-bold hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-200 dark:shadow-none cursor-pointer"
-            title="Lägg till i truppen"
-          >
-            <UserPlus size={18} />
-          </button>
-          <button
-            onClick={() => setIsImporting(true)}
-            className="flex items-center gap-2 bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300 px-4 py-2.5 rounded-xl font-bold text-xs sm:text-sm hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-all border border-zinc-200 dark:border-zinc-700 cursor-pointer"
-          >
-            <Upload size={18} />
-            <span>Importera fil</span>
-          </button>
-          {squad.length > 0 && (
+        {activeTab === 'roster' && isCoachOrAdmin && (
+          <div className="flex flex-wrap items-center gap-2">
             <button
-              onClick={() => setShowClearConfirm(true)}
-              className="flex items-center gap-2 bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 px-4 py-2.5 rounded-xl font-bold text-xs sm:text-sm hover:bg-red-100 dark:hover:bg-red-900/40 transition-all border border-red-100 dark:border-red-900/30 cursor-pointer"
+              onClick={handleOpenFetchMembersModal}
+              className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white px-3.5 py-2.5 rounded-xl font-black text-xs transition-all shadow-md shadow-emerald-100 dark:shadow-none cursor-pointer"
+              title="Hämta personer från medlemsregistret/laget"
             >
-              <Trash2 size={18} />
-              <span>Rensa</span>
+              <Users size={16} />
+              <span className="hidden sm:inline">Hämta från laget</span>
             </button>
-          )}
-        </div>
-      )}
 
-      {squad.length > 0 && (
-        <div className="w-full min-w-0 flex flex-col md:flex-row md:items-center justify-between gap-4 bg-zinc-50 dark:bg-zinc-950/45 p-4 rounded-3xl border border-zinc-150/80 dark:border-zinc-800/80 mb-8 shadow-sm overflow-hidden">
-          <div className="flex items-center gap-2 text-zinc-550 dark:text-zinc-450">
-            <ArrowUpDown size={16} className="text-zinc-400 shrink-0" />
-            <span className="text-[11px] font-black uppercase tracking-widest shrink-0">Sortera efter</span>
-          </div>
-          <div className="flex items-center gap-1.5 overflow-x-auto whitespace-nowrap scrollbar-none pb-1 md:pb-0 -mx-4 px-4 md:mx-0 md:px-0">
-            {[
-              { value: 'standard', label: 'Standard' },
-              { value: 'number', label: 'Tröjnummer' },
-              { value: 'position', label: 'Position' },
-              { value: 'firstname', label: 'Förnamn' },
-              { value: 'lastname', label: 'Efternamn' }
-            ].map((opt) => (
+            <button
+              onClick={() => {
+                setNewName('');
+                setNewPosition('');
+                setNewNumber('');
+                setNewPhotoUrl('');
+                setIsAdding(true);
+              }}
+              className="p-2.5 bg-indigo-600 text-white rounded-xl font-bold hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-200 dark:shadow-none cursor-pointer"
+              title="Lägg till i truppen"
+            >
+              <UserPlus size={18} />
+            </button>
+            <button
+              onClick={() => setIsImporting(true)}
+              className="flex items-center gap-1.5 bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300 px-3.5 py-2.5 rounded-xl font-bold text-xs hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-all border border-zinc-200 dark:border-zinc-700 cursor-pointer"
+            >
+              <Upload size={16} />
+              <span>Importera fil</span>
+            </button>
+            {squad.length > 0 && (
               <button
-                key={opt.value}
-                type="button"
-                onClick={() => handleSortChange(opt.value as SortOption)}
-                className={`px-3.5 py-2 rounded-xl text-xs font-black uppercase tracking-wider transition-all shrink-0 border ${
-                  sortBy === opt.value
-                    ? 'bg-indigo-600 border-indigo-500 text-white shadow-md shadow-indigo-100 dark:shadow-none'
-                    : 'bg-white dark:bg-zinc-900 text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white border-zinc-200 dark:border-zinc-800'
-                }`}
+                onClick={() => setShowClearConfirm(true)}
+                className="flex items-center gap-1.5 bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 px-3.5 py-2.5 rounded-xl font-bold text-xs hover:bg-red-100 dark:hover:bg-red-900/40 transition-all border border-red-100 dark:border-red-900/30 cursor-pointer"
               >
-                {opt.label}
+                <Trash2 size={16} />
+                <span>Rensa</span>
               </button>
-            ))}
+            )}
           </div>
-        </div>
-      )}
+        )}
+      </div>
+
+      {activeTab === 'attendance' ? (
+        <SquadAttendanceOverview squad={squad} sessions={sessions} isCoachOrAdmin={isCoachOrAdmin} />
+      ) : (
+        <>
+          {squad.length > 0 && (
+            <div className="w-full min-w-0 flex flex-col md:flex-row md:items-center justify-between gap-4 bg-zinc-50 dark:bg-zinc-950/45 p-4 rounded-3xl border border-zinc-150/80 dark:border-zinc-800/80 mb-8 shadow-sm overflow-hidden">
+              <div className="flex items-center gap-2 text-zinc-550 dark:text-zinc-450">
+                <ArrowUpDown size={16} className="text-zinc-400 shrink-0" />
+                <span className="text-[11px] font-black uppercase tracking-widest shrink-0">Sortera efter</span>
+              </div>
+              <div className="flex items-center gap-1.5 overflow-x-auto whitespace-nowrap scrollbar-none pb-1 md:pb-0 -mx-4 px-4 md:mx-0 md:px-0">
+                {[
+                  { value: 'standard', label: 'Standard' },
+                  { value: 'number', label: 'Tröjnummer' },
+                  { value: 'position', label: 'Position' },
+                  { value: 'firstname', label: 'Förnamn' },
+                  { value: 'lastname', label: 'Efternamn' }
+                ].map((opt) => (
+                  <button
+                    key={opt.value}
+                    type="button"
+                    onClick={() => handleSortChange(opt.value as SortOption)}
+                    className={`px-3.5 py-2 rounded-xl text-xs font-black uppercase tracking-wider transition-all shrink-0 border ${
+                      sortBy === opt.value
+                        ? 'bg-indigo-600 border-indigo-500 text-white shadow-md shadow-indigo-100 dark:shadow-none'
+                        : 'bg-white dark:bg-zinc-900 text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white border-zinc-200 dark:border-zinc-800'
+                    }`}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
 
       <AnimatePresence>
         {isImporting && (
@@ -1186,6 +1263,20 @@ Kalle Karlsson	Mittback	4	https://image.url"
                             {player.position}
                           </span>
                         )}
+                        {quickAttendanceMap.has(player.id) && quickAttendanceMap.get(player.id)!.total > 0 && (
+                          <button
+                            type="button"
+                            onClick={() => setActiveTab('attendance')}
+                            className="mt-1 flex items-center gap-1.5 text-[10px] font-bold text-zinc-500 dark:text-zinc-400 hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors text-left"
+                            title="Klicka för att se full närvarostatistik"
+                          >
+                            <span className={`inline-block w-1.5 h-1.5 rounded-full shrink-0 ${
+                              quickAttendanceMap.get(player.id)!.pct >= 80 ? 'bg-emerald-500' :
+                              quickAttendanceMap.get(player.id)!.pct >= 50 ? 'bg-amber-500' : 'bg-zinc-400'
+                            }`} />
+                            <span className="truncate">Närvaro 30d: {quickAttendanceMap.get(player.id)!.pct}%</span>
+                          </button>
+                        )}
                       </div>
                     </div>
                     {isCoachOrAdmin && (
@@ -1286,6 +1377,8 @@ Kalle Karlsson	Mittback	4	https://image.url"
           )}
         </div>
       </div>
+      </>
+      )}
 
       <AnimatePresence>
         {isEditingModalOpen && (

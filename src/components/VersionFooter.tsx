@@ -1,7 +1,7 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { APP_VERSION, APP_BUILD_DATE, APP_NAME } from '../version';
 import { CheckCircle2, RefreshCw, X, ShieldCheck, Info } from 'lucide-react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion, AnimatePresence } from 'motion/react';
 
 interface VersionFooterProps {
   className?: string;

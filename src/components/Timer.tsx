@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Play, Pause, RotateCcw, Bell, BellOff, Plus, Minus, Check, X, Save } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -7,14 +7,25 @@ interface TimerProps {
   defaultSeconds?: number;
   onSaveDefault?: (minutes: number, seconds: number) => void;
   isCoachOrAdmin?: boolean;
+  onRunningChange?: (isRunning: boolean) => void;
 }
 
-export default function Timer({ defaultMinutes = 4, defaultSeconds = 0, onSaveDefault, isCoachOrAdmin = true }: TimerProps) {
+export default function Timer({ defaultMinutes = 4, defaultSeconds = 0, onSaveDefault, isCoachOrAdmin = true, onRunningChange }: TimerProps) {
   const [minutes, setMinutes] = useState(defaultMinutes);
   const [seconds, setSeconds] = useState(defaultSeconds);
   const [presetMinutes, setPresetMinutes] = useState(defaultMinutes);
   const [presetSeconds, setPresetSeconds] = useState(defaultSeconds);
   const [isActive, setIsActive] = useState(false);
+
+  useEffect(() => {
+    onRunningChange?.(isActive);
+  }, [isActive, onRunningChange]);
+
+  useEffect(() => {
+    return () => {
+      onRunningChange?.(false);
+    };
+  }, [onRunningChange]);
   const [isStarted, setIsStarted] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
   const [isFinished, setIsFinished] = useState(false);

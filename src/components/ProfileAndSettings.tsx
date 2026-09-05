@@ -1,8 +1,9 @@
-import React, { useState, useEffect } from 'react';
-import { User, Phone, Fingerprint, Check, Save, AtSign, Lock, Key, Eye, EyeOff, ShieldCheck, AlertCircle, Landmark, Info, Link2, Unlink } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { User, Phone, Fingerprint, Check, Save, AtSign, Lock, Key, Eye, EyeOff, ShieldCheck, AlertCircle, Landmark, Info, Link2, Unlink, Camera, Upload, Trash2, Loader2 } from 'lucide-react';
 import { UserProfile, Club, ClubMetadata, ClubMember } from '../types';
-import { db, getApiUrl, auth, linkGoogleAccount, unlinkGoogleAccount } from '../lib/firebase';
+import { db, getApiUrl, auth, linkGoogleAccount, unlinkGoogleAccount, storage, ref, uploadBytes, getDownloadURL } from '../lib/firebase';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
+import ImageCropper from './ImageCropper';
 
 interface ProfileAndSettingsProps {
   userId: string;
@@ -24,9 +25,15 @@ export default function ProfileAndSettings({
     phone: currentProfile.phone || '',
     personnummer: currentProfile.personnummer || '',
     email: currentProfile.email || userEmail || '',
+    photoUrl: currentProfile.photoUrl || auth.currentUser?.photoURL || '',
     activeClubId: currentProfile.activeClubId || null,
     activeTeamId: currentProfile.activeTeamId || null,
   });
+
+  const [photoUrl, setPhotoUrl] = useState<string>(currentProfile.photoUrl || auth.currentUser?.photoURL || '');
+  const [imageToCrop, setImageToCrop] = useState<string | null>(null);
+  const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [emailInput, setEmailInput] = useState<string>(currentProfile.email || userEmail || '');
   const [usernameInput, setUsernameInput] = useState<string>(currentProfile.username || (auth.currentUser?.username || ''));
@@ -46,15 +53,18 @@ export default function ProfileAndSettings({
   // Sync state when props change
   useEffect(() => {
     const fetchedUsername = currentProfile.username || auth.currentUser?.username || '';
+    const initialPhoto = currentProfile.photoUrl || auth.currentUser?.photoURL || '';
     setProfile({
       fullName: currentProfile.fullName || '',
       phone: currentProfile.phone || '',
       personnummer: currentProfile.personnummer || '',
       email: currentProfile.email || userEmail || '',
       username: fetchedUsername,
+      photoUrl: initialPhoto,
       activeClubId: currentProfile.activeClubId || null,
       activeTeamId: currentProfile.activeTeamId || null,
     });
+    setPhotoUrl(initialPhoto);
     setEmailInput(currentProfile.email || userEmail || '');
     setUsernameInput(fetchedUsername);
 
@@ -119,6 +129,11 @@ export default function ProfileAndSettings({
             const myMemberRecord = members.find(m => m.userId === userId || m.email.trim().toLowerCase() === userEmail.trim().toLowerCase());
 
             if (myMemberRecord) {
+              // If current photoUrl is empty and member has a photo, sync it
+              if (myMemberRecord.photoUrl && !currentProfile.photoUrl && !auth.currentUser?.photoURL) {
+                setPhotoUrl(myMemberRecord.photoUrl);
+                setProfile(prev => ({ ...prev, photoUrl: myMemberRecord.photoUrl }));
+              }
               userMemberships.push({
                 club,
                 roles: myMemberRecord.roles || [],
@@ -149,6 +164,166 @@ export default function ProfileAndSettings({
 
     loadClubData();
   }, [userId, userEmail, isRootAdmin, currentProfile.activeClubId]);
+
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files.length > 0) {
+      const file = e.target.files[0];
+      const reader = new FileReader();
+      reader.addEventListener('load', () => {
+        setImageToCrop(reader.result?.toString() || null);
+      });
+      reader.readAsDataURL(file);
+      e.target.value = '';
+    }
+  };
+
+  const onCropComplete = async (croppedBlob: Blob) => {
+    setImageToCrop(null);
+    setIsUploadingPhoto(true);
+    let finalPhotoUrl = '';
+
+    try {
+      // 1. Try server upload
+      const extension = croppedBlob.type === 'image/png' ? 'png' : 'jpg';
+      const formData = new FormData();
+      formData.append('file', croppedBlob, `avatar_${userId}_${Date.now()}.${extension}`);
+
+      const res = await fetch(getApiUrl('/api/upload'), {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        if (data.url) {
+          finalPhotoUrl = data.url;
+        }
+      }
+    } catch (serverErr) {
+      console.warn('Server avatar upload fallback:', serverErr);
+    }
+
+    if (!finalPhotoUrl) {
+      // 2. Try Storage
+      try {
+        const extension = croppedBlob.type === 'image/png' ? 'png' : 'jpg';
+        const fileName = `avatar_${Date.now()}.${extension}`;
+        const avatarPath = `avatars/${userId}/${fileName}`;
+        const storageRef = ref(storage, avatarPath);
+
+        const uploadResult = await uploadBytes(storageRef, croppedBlob);
+        finalPhotoUrl = await getDownloadURL(uploadResult.ref);
+      } catch (err) {
+        console.error('Storage avatar upload fallback to data URL:', err);
+        // 3. Fallback to Data URL
+        const reader = new FileReader();
+        await new Promise<void>((resolve) => {
+          reader.onloadend = () => {
+            if (typeof reader.result === 'string') {
+              finalPhotoUrl = reader.result;
+            }
+            resolve();
+          };
+          reader.readAsDataURL(croppedBlob);
+        });
+      }
+    }
+
+    if (finalPhotoUrl) {
+      setPhotoUrl(finalPhotoUrl);
+      const updatedProfile: UserProfile = {
+        ...profile,
+        photoUrl: finalPhotoUrl,
+      };
+      setProfile(updatedProfile);
+
+      // Save to Firestore user profile
+      setDoc(doc(db, 'users', userId, 'data', 'profile'), { photoUrl: finalPhotoUrl }, { merge: true }).catch(() => {});
+
+      // Update in server auth / sqlite
+      const token = localStorage.getItem('token');
+      if (token) {
+        fetch(getApiUrl('/api/auth/update-avatar'), {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
+          body: JSON.stringify({ photoUrl: finalPhotoUrl })
+        }).catch(() => {});
+      }
+
+      // Sync with active club members registry
+      if (profile.activeClubId) {
+        getDoc(doc(db, 'clubs', profile.activeClubId, 'teams', 'club_global', 'data', 'members')).then(membersSnap => {
+          if (membersSnap.exists()) {
+            const members: ClubMember[] = membersSnap.data().members || [];
+            const index = members.findIndex(m => m.userId === userId || m.email.trim().toLowerCase() === userEmail.trim().toLowerCase());
+            if (index !== -1) {
+              members[index] = {
+                ...members[index],
+                photoUrl: finalPhotoUrl
+              };
+              setDoc(doc(db, 'clubs', profile.activeClubId!, 'teams', 'club_global', 'data', 'members'), { members }).catch(() => {});
+            }
+          }
+        }).catch(() => {});
+      }
+
+      if (auth.currentUser) {
+        auth.currentUser.photoURL = finalPhotoUrl;
+      }
+      onProfileUpdated(updatedProfile);
+    }
+    setIsUploadingPhoto(false);
+  };
+
+  const handleRemovePhoto = async () => {
+    setPhotoUrl('');
+    const updatedProfile: UserProfile = {
+      ...profile,
+      photoUrl: undefined,
+    };
+    setProfile(updatedProfile);
+
+    // Save to Firestore user profile
+    setDoc(doc(db, 'users', userId, 'data', 'profile'), { photoUrl: null }, { merge: true }).catch(() => {});
+
+    // Update in server auth / sqlite
+    const token = localStorage.getItem('token');
+    if (token) {
+      fetch(getApiUrl('/api/auth/update-avatar'), {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ photoUrl: null })
+      }).catch(() => {});
+    }
+
+    // Sync with active club members registry
+    if (profile.activeClubId) {
+      getDoc(doc(db, 'clubs', profile.activeClubId, 'teams', 'club_global', 'data', 'members')).then(membersSnap => {
+        if (membersSnap.exists()) {
+          const members: ClubMember[] = membersSnap.data().members || [];
+          const index = members.findIndex(m => m.userId === userId || m.email.trim().toLowerCase() === userEmail.trim().toLowerCase());
+          if (index !== -1) {
+            members[index] = {
+              ...members[index],
+              photoUrl: undefined
+            };
+            setDoc(doc(db, 'clubs', profile.activeClubId!, 'teams', 'club_global', 'data', 'members'), { members }).catch(() => {});
+          }
+        }
+      }).catch(() => {});
+    }
+
+    if (auth.currentUser) {
+      auth.currentUser.photoURL = null;
+    }
+    onProfileUpdated(updatedProfile);
+  };
 
   const handleSaveProfile = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -220,11 +395,24 @@ export default function ProfileAndSettings({
         ...profile,
         email: cleanEmail,
         username: cleanUsername,
+        photoUrl: photoUrl.trim() ? photoUrl.trim() : undefined,
         updatedAt: Date.now(),
       } as any;
 
       // Save profile doc
       await setDoc(doc(db, 'users', userId, 'data', 'profile'), updatedProfile);
+
+      // Save to server avatar endpoint
+      if (token) {
+        fetch(getApiUrl('/api/auth/update-avatar'), {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
+          body: JSON.stringify({ photoUrl: photoUrl.trim() || null })
+        }).catch(() => {});
+      }
 
       // Update club global members registry to keep details sync'ed
       if (profile.activeClubId) {
@@ -240,7 +428,8 @@ export default function ProfileAndSettings({
                 email: cleanEmail,
                 fullName: profile.fullName,
                 phone: profile.phone,
-                personnummer: profile.personnummer
+                personnummer: profile.personnummer,
+                photoUrl: photoUrl.trim() ? photoUrl.trim() : undefined
               };
               await setDoc(doc(db, 'clubs', profile.activeClubId, 'teams', 'club_global', 'data', 'members'), { members });
             }
@@ -248,6 +437,10 @@ export default function ProfileAndSettings({
         } catch (e) {
           console.error("Failed to sync personal info into club membership registry:", e);
         }
+      }
+
+      if (auth.currentUser) {
+        auth.currentUser.photoURL = photoUrl.trim() ? photoUrl.trim() : null;
       }
 
       setProfile(updatedProfile);
@@ -376,6 +569,75 @@ export default function ProfileAndSettings({
           </div>
 
           <form onSubmit={handleSaveProfile} className="space-y-5">
+            {/* Profile Avatar Card */}
+            <div className="flex flex-col sm:flex-row items-center sm:items-start gap-4 sm:gap-6 p-4 sm:p-5 rounded-2xl bg-zinc-50 dark:bg-zinc-950/60 border border-zinc-150 dark:border-zinc-800/80">
+              <div className="relative group/avatar shrink-0">
+                <div className="w-20 h-20 sm:w-24 sm:h-24 rounded-2xl overflow-hidden border-2 border-indigo-600/30 dark:border-indigo-400/30 bg-indigo-50 dark:bg-indigo-950/40 shadow-md flex items-center justify-center">
+                  {photoUrl ? (
+                    <img src={photoUrl} alt={profile.fullName || 'Profilbild'} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                  ) : (
+                    <div className="w-full h-full flex items-center justify-center text-indigo-600 dark:text-indigo-400 font-black text-2xl uppercase">
+                      {(profile.fullName || emailInput || 'U').charAt(0)}
+                    </div>
+                  )}
+                  {isUploadingPhoto && (
+                    <div className="absolute inset-0 bg-black/50 backdrop-blur-xs flex items-center justify-center text-white">
+                      <Loader2 size={24} className="animate-spin" />
+                    </div>
+                  )}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  className="absolute -bottom-2 -right-2 p-2 rounded-xl bg-indigo-600 text-white shadow-lg hover:bg-indigo-700 transition-all hover:scale-105 active:scale-95 cursor-pointer"
+                  title="Välj eller ändra bild"
+                >
+                  <Camera size={14} />
+                </button>
+              </div>
+
+              <div className="flex-1 text-center sm:text-left space-y-2">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
+                  <h3 className="text-sm font-extrabold text-zinc-900 dark:text-white">Profilbild</h3>
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-950/50 px-2 py-0.5 rounded-md border border-indigo-100 dark:border-indigo-900/30 w-fit mx-auto sm:mx-0">
+                    Synkad med truppen & föreningen
+                  </span>
+                </div>
+                <p className="text-xs text-zinc-500 dark:text-zinc-400 font-medium">
+                  Bilden visas på din profil, i sidhuvudet och kopplas automatiskt till ditt medlemskort och truppen.
+                </p>
+                <div className="flex flex-wrap items-center justify-center sm:justify-start gap-2 pt-1">
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={isUploadingPhoto}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white dark:bg-zinc-900 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-200 text-xs font-bold border border-zinc-200 dark:border-zinc-700 shadow-xs transition-all cursor-pointer"
+                  >
+                    <Upload size={13} />
+                    <span>Ladda upp bild</span>
+                  </button>
+                  {photoUrl && (
+                    <button
+                      type="button"
+                      onClick={handleRemovePhoto}
+                      disabled={isUploadingPhoto}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-red-50 hover:bg-red-100 dark:bg-red-950/30 dark:hover:bg-red-900/40 text-red-600 dark:text-red-400 text-xs font-bold border border-red-200/50 dark:border-red-900/30 transition-all cursor-pointer"
+                    >
+                      <Trash2 size={13} />
+                      <span>Ta bort</span>
+                    </button>
+                  )}
+                </div>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/*"
+                  onChange={handleFileSelect}
+                  className="hidden"
+                />
+              </div>
+            </div>
+
             <div>
               <label className="block text-xs font-black text-zinc-650 dark:text-zinc-400 uppercase tracking-wider mb-2">Visningsnamn / Fullständigt namn</label>
               <div className="relative">
@@ -899,6 +1161,15 @@ export default function ProfileAndSettings({
           )}
         </div>
       </div>
+
+      {imageToCrop && (
+        <ImageCropper
+          image={imageToCrop}
+          onCropComplete={onCropComplete}
+          onCancel={() => setImageToCrop(null)}
+          aspect={1}
+        />
+      )}
     </div>
   );
 }

@@ -142,7 +142,11 @@ export const triggerGoogleAuth = async (forceSelect = false): Promise<{ accessTo
           reject(new Error(err?.message || 'Google OAuth-fönstret misslyckades eller blockerades.'));
         }
       });
-      client.requestAccessToken({ prompt: forceSelect ? 'select_account' : '' });
+      if (forceSelect) {
+        client.requestAccessToken({ prompt: 'select_account' });
+      } else {
+        client.requestAccessToken();
+      }
     } catch (err: any) {
       reject(new Error('Kunde inte starta Google-inloggning: ' + (err.message || err)));
     }
@@ -654,15 +658,26 @@ export const doc = (_dbObj: any, ...parts: string[]) => {
   return { path: parts.join('/') };
 };
 
-export const getDoc = async (docRef: { path: string }) => {
+export const getDoc = async (docRef: { path: string }, options?: { forceRefresh?: boolean }) => {
   const token = localStorage.getItem('token');
   const headers: Record<string, string> = {};
   if (token) {
     headers['Authorization'] = `Bearer ${token}`;
   }
+  if (options?.forceRefresh) {
+    headers['Cache-Control'] = 'no-cache';
+    headers['Pragma'] = 'no-cache';
+  }
+
+  const queryParams = new URLSearchParams({ path: docRef.path });
+  if (options?.forceRefresh) {
+    queryParams.set('force', 'true');
+    queryParams.set('refresh', 'true');
+    queryParams.set('_t', Date.now().toString());
+  }
 
   try {
-    const res = await fetch(getApiUrl(`/api/docs?path=${encodeURIComponent(docRef.path)}`), {
+    const res = await fetch(getApiUrl(`/api/docs?${queryParams.toString()}`), {
       headers
     });
 
@@ -768,7 +783,7 @@ export const onSnapshot = (docRef: { path: string }, callback: (snapshot: any) =
   const poll = async () => {
     if (isStopped) return;
     try {
-      const snap = await getDoc(docRef);
+      const snap = await getDoc(docRef, { forceRefresh: true });
       if (!isStopped) {
         callback({
           exists: () => snap.exists(),
@@ -785,7 +800,7 @@ export const onSnapshot = (docRef: { path: string }, callback: (snapshot: any) =
   };
   
   poll();
-  const interval = setInterval(poll, 15000);
+  const interval = setInterval(poll, 8000);
   
   return () => {
     isStopped = true;

@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import { useState, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { X, Copy, Download, Upload, Check, Calendar, ListChecks, Info, Search, AlertCircle, FileText, ChevronRight, ExternalLink } from 'lucide-react';
 import { TrainingSession, SessionMoment } from '../types';

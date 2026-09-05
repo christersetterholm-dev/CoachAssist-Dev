@@ -128,7 +128,7 @@ export const CachedImage: React.FC<CachedImageProps> = ({ src, className, alt, c
   }, [validSrc, crossOrigin]);
 
   const [loadError, setLoadError] = useState(false);
-  const { crossOrigin: _excluded, ...cleanProps } = props;
+  const cleanProps = props;
   const finalCrossOrigin = useCors ? 'anonymous' : undefined;
 
   // IMPORTANT: For Data URLs, crossOrigin should be omitted

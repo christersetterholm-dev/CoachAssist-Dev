@@ -372,6 +372,7 @@ export interface UserProfile {
   personnummer?: string;
   email?: string;
   username?: string;
+  photoUrl?: string;
   activeClubId?: string | null;
   activeTeamId?: string | null;
   status?: 'pending' | 'approved' | 'rejected';
