@@ -4031,19 +4031,19 @@ export default function ClubAdminDashboard({
                   </div>
                   <button
                     type="button"
-                    onClick={() => {
+                    onClick={async () => {
                       const updated = {
                         ...(trainingSettings || { defaultStartTime: '18:00' }),
                         icsUrl: tempIcsUrl.trim()
                       };
                       if (onUpdateSettings) onUpdateSettings(updated);
-                      setCalendarSyncMsg({ type: 'success', text: 'Kalenderlänk sparad för laget!' });
-                      setTimeout(() => setCalendarSyncMsg(null), 3000);
+                      setCalendarSyncMsg({ type: 'success', text: 'Kalenderlänk sparad! Startar synkronisering...' });
+                      await handleSyncTeamCalendar();
                     }}
                     className="px-5 py-3 bg-zinc-800 hover:bg-zinc-900 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-white font-bold text-xs rounded-xl flex items-center justify-center gap-2 transition-all cursor-pointer shrink-0"
                   >
                     <Save size={15} />
-                    <span>Spara Länk</span>
+                    <span>Spara & Synka</span>
                   </button>
                 </div>
               </div>

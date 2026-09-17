@@ -373,6 +373,19 @@ function fromFirestoreFields(fields: Record<string, any>): Record<string, any> {
   return result;
 }
 
+let firestoreQuotaExceededUntil = 0;
+let lastFirestoreQuotaMessage = '';
+
+function isFirestoreQuotaExceeded(): boolean {
+  return Date.now() < firestoreQuotaExceededUntil;
+}
+
+function getFirestoreQuotaUpgradeUrl(): string {
+  const { projId } = getActiveFirestoreParams();
+  const dbId = firebaseConfig?.firestoreDatabaseId || '(default)';
+  return `https://console.firebase.google.com/project/${projId}/firestore/databases/${dbId}/data?openUpgradeDialog=true`;
+}
+
 async function getFirestoreDoc(docPath: string): Promise<Record<string, any> | null> {
   if (dbModeConfig.mode === 'local_sqlite') {
     return null; // Standalone local SQLite mode: skip Firestore calls
@@ -382,12 +395,26 @@ async function getFirestoreDoc(docPath: string): Promise<Record<string, any> | n
   try {
     const encodedPath = docPath.split('/').map(encodeURIComponent).join('/');
     const url = `${baseUrl}/${encodedPath}?key=${apiKey}`;
-    const res = await axios.get(url, { validateStatus: s => s < 500, timeout: 5000 });
+    const res = await axios.get(url, { validateStatus: s => s <= 500, timeout: 5000 });
     if (res.status === 200 && res.data?.fields) {
       return fromFirestoreFields(res.data.fields);
     }
+    if (res.status === 429) {
+      const msg = res.data?.error?.message || "Quota exceeded for quota metric 'Free daily read units per project (free tier database)'";
+      console.warn(`[Firestore Quota Exceeded 429] on GET for ${docPath}:`, msg);
+      firestoreQuotaExceededUntil = Date.now() + 60 * 1000;
+      lastFirestoreQuotaMessage = msg;
+      const err: any = new Error(msg);
+      err.status = 429;
+      err.code = 'RESOURCE_EXHAUSTED';
+      err.upgradeUrl = getFirestoreQuotaUpgradeUrl();
+      throw err;
+    }
     return null;
   } catch (e: any) {
+    if (e.status === 429 || e.code === 'RESOURCE_EXHAUSTED') {
+      throw e;
+    }
     console.error(`Firestore GET error for ${docPath}:`, e.message);
     return null;
   }
@@ -405,9 +432,16 @@ async function setFirestoreDoc(docPath: string, data: Record<string, any>): Prom
     const fields = toFirestoreFields(data);
     const res = await axios.patch(url, { fields }, {
       headers: { 'Content-Type': 'application/json' },
-      validateStatus: s => s < 500,
+      validateStatus: s => s <= 500,
       timeout: 5000
     });
+    if (res.status === 429) {
+      const msg = res.data?.error?.message || "Quota exceeded for quota metric 'Free daily read units per project (free tier database)'";
+      console.warn(`[Firestore Quota Exceeded 429] on PATCH for ${docPath}:`, msg);
+      firestoreQuotaExceededUntil = Date.now() + 60 * 1000;
+      lastFirestoreQuotaMessage = msg;
+      return false;
+    }
     return res.status === 200;
   } catch (e: any) {
     console.error(`Firestore PATCH error for ${docPath}:`, e.message);
@@ -1134,34 +1168,45 @@ async function startServer() {
 
       // If user not found in local SQLite (e.g. fresh container restart), restore from Cloud Firestore
       if (!userRow) {
-        let fUser = await getFirestoreDoc(`server_users/${encodeURIComponent(loginInput)}`);
-        if (!fUser || !fUser.id) {
-          const uMapping = await getFirestoreDoc(`server_usernames/${encodeURIComponent(loginInput)}`);
-          if (uMapping && uMapping.email) {
-            fUser = await getFirestoreDoc(`server_users/${encodeURIComponent(uMapping.email)}`);
-          } else if (uMapping && uMapping.id) {
-            fUser = await getFirestoreDoc(`server_user_ids/${encodeURIComponent(uMapping.id)}`);
+        try {
+          let fUser = await getFirestoreDoc(`server_users/${encodeURIComponent(loginInput)}`);
+          if (!fUser || !fUser.id) {
+            const uMapping = await getFirestoreDoc(`server_usernames/${encodeURIComponent(loginInput)}`);
+            if (uMapping && uMapping.email) {
+              fUser = await getFirestoreDoc(`server_users/${encodeURIComponent(uMapping.email)}`);
+            } else if (uMapping && uMapping.id) {
+              fUser = await getFirestoreDoc(`server_user_ids/${encodeURIComponent(uMapping.id)}`);
+            }
           }
-        }
 
-        if (fUser && fUser.id && fUser.password_hash) {
-          try {
-            db.prepare('INSERT OR REPLACE INTO users (id, email, username, password_hash, created_at) VALUES (?, ?, ?, ?, ?)').run(
-              fUser.id,
-              fUser.email || loginInput,
-              fUser.username || null,
-              fUser.password_hash,
-              fUser.created_at || Date.now()
-            );
-            userRow = {
-              id: fUser.id,
-              email: fUser.email || loginInput,
-              username: fUser.username || null,
-              password_hash: fUser.password_hash,
-              created_at: fUser.created_at || Date.now()
-            };
-          } catch (e) {
-            console.error('Error caching Firestore user to SQLite:', e);
+          if (fUser && fUser.id && fUser.password_hash) {
+            try {
+              db.prepare('INSERT OR REPLACE INTO users (id, email, username, password_hash, created_at) VALUES (?, ?, ?, ?, ?)').run(
+                fUser.id,
+                fUser.email || loginInput,
+                fUser.username || null,
+                fUser.password_hash,
+                fUser.created_at || Date.now()
+              );
+              userRow = {
+                id: fUser.id,
+                email: fUser.email || loginInput,
+                username: fUser.username || null,
+                password_hash: fUser.password_hash,
+                created_at: fUser.created_at || Date.now()
+              };
+            } catch (e) {
+              console.error('Error caching Firestore user to SQLite:', e);
+            }
+          }
+        } catch (fErr: any) {
+          if (fErr.status === 429 || fErr.code === 'RESOURCE_EXHAUSTED' || (fErr.message && fErr.message.toLowerCase().includes('quota'))) {
+            return res.status(429).json({
+              error: 'Firebase-databasens dagliga läskvot (50 000 anrop/dygn) har uppnåtts för idag. Ditt konto och all data är säkert sparade i Firebase! Inloggningen är pausad tills kvoten nollställs imorgon, eller tills databasen uppgraderas till Blaze i Firebase Console.',
+              code: 'RESOURCE_EXHAUSTED',
+              message: fErr.message,
+              upgradeUrl: getFirestoreQuotaUpgradeUrl()
+            });
           }
         }
       }
@@ -1667,6 +1712,14 @@ async function startServer() {
         }
       });
     } catch (error: any) {
+      if (error.status === 429 || error.code === 'RESOURCE_EXHAUSTED' || (error.message && error.message.toLowerCase().includes('quota'))) {
+        return res.status(429).json({
+          error: 'Firebase-databasens dagliga läskvot (50 000 anrop/dygn) har uppnåtts för idag. Ditt konto och all data är säkert sparade i Firebase! Inloggningen är pausad tills kvoten nollställs imorgon, eller tills databasen uppgraderas till Blaze i Firebase Console.',
+          code: 'RESOURCE_EXHAUSTED',
+          message: error.message,
+          upgradeUrl: getFirestoreQuotaUpgradeUrl()
+        });
+      }
       console.error('Google login endpoint error:', error);
       res.status(500).json({ error: 'Inloggning med Google misslyckades: ' + (error.message || error) });
     }
@@ -2554,15 +2607,23 @@ async function startServer() {
         }
 
         // Fallback: fetch from Firestore if not found or corrupted in SQLite
-        let fDoc = await getFirestoreDoc(`app_docs/shared_leaderboards_${id}`);
-        if (!fDoc) {
-          fDoc = await getFirestoreDoc(`shared_leaderboards/${id}`);
-        }
+        let fDoc = null;
+        let quotaExceeded = false;
+        try {
+          fDoc = await getFirestoreDoc(`app_docs/shared_leaderboards_${id}`);
+          if (!fDoc) {
+            fDoc = await getFirestoreDoc(`shared_leaderboards/${id}`);
+          }
 
-        // Retry once if Firestore is warming up or transient delay occurs
-        if (!fDoc) {
-          await new Promise(r => setTimeout(r, 600));
-          fDoc = await getFirestoreDoc(`app_docs/shared_leaderboards_${id}`) || await getFirestoreDoc(`shared_leaderboards/${id}`);
+          // Retry once if Firestore is warming up or transient delay occurs
+          if (!fDoc) {
+            await new Promise(r => setTimeout(r, 600));
+            fDoc = await getFirestoreDoc(`app_docs/shared_leaderboards_${id}`) || await getFirestoreDoc(`shared_leaderboards/${id}`);
+          }
+        } catch (fErr: any) {
+          if (fErr.status === 429 || fErr.code === 'RESOURCE_EXHAUSTED' || (fErr.message && fErr.message.toLowerCase().includes('quota'))) {
+            quotaExceeded = true;
+          }
         }
 
         if (fDoc) {
@@ -2589,8 +2650,25 @@ async function startServer() {
           }
         }
 
+        if (quotaExceeded) {
+          return res.status(429).json({
+            error: 'Quota exceeded',
+            message: "Quota exceeded for quota metric 'Free daily read units per project (free tier database)'",
+            status: 'RESOURCE_EXHAUSTED',
+            upgradeUrl: getFirestoreQuotaUpgradeUrl()
+          });
+        }
+
         return res.status(404).json({ error: 'Not found' });
       } catch (e: any) {
+        if (e.status === 429 || e.code === 'RESOURCE_EXHAUSTED') {
+          return res.status(429).json({
+            error: 'Quota exceeded',
+            message: "Quota exceeded for quota metric 'Free daily read units per project (free tier database)'",
+            status: 'RESOURCE_EXHAUSTED',
+            upgradeUrl: getFirestoreQuotaUpgradeUrl()
+          });
+        }
         console.error('Error fetching shared leaderboard:', e);
         res.status(500).json({ error: 'Failed to fetch shared leaderboard' });
       }
@@ -2624,10 +2702,27 @@ async function startServer() {
 
       const isForce = req.query.force === 'true' || req.query.refresh === 'true';
       let row: any = db.prepare('SELECT data, updatedAt FROM users_data WHERE userId = ? AND segment = ?').get(userId, segment);
+      let quotaExceeded = false;
       
-      // In firestore_only mode, hybrid mode (if stale), or if force refresh requested, query Firestore
-      if (dbModeConfig.mode === 'firestore_only' || isForce || !row || (dbModeConfig.mode === 'hybrid' && (!row.updatedAt || Date.now() - row.updatedAt > 5000))) {
-        const fDoc = await getFirestoreDoc(`app_docs/users_${userId}_data_${segment}`);
+      // If we have cached local data in SQLite and this is not a forced refresh, return it immediately to avoid eating Firestore read quota!
+      if (row && !isForce && dbModeConfig.mode !== 'firestore_only') {
+        try {
+          return res.json(typeof row.data === 'string' ? JSON.parse(row.data) : row.data);
+        } catch (parseErr) {
+          console.warn('Failed to parse cached SQLite user data, falling back to remote:', parseErr);
+        }
+      }
+
+      // Query Firestore only if cache miss (!row), forced refresh (isForce), or in firestore_only mode
+      if (dbModeConfig.mode === 'firestore_only' || isForce || !row) {
+        let fDoc: any = null;
+        try {
+          fDoc = await getFirestoreDoc(`app_docs/users_${userId}_data_${segment}`);
+        } catch (fErr: any) {
+          if (fErr.status === 429 || fErr.code === 'RESOURCE_EXHAUSTED' || (fErr.message && fErr.message.toLowerCase().includes('quota'))) {
+            quotaExceeded = true;
+          }
+        }
         if (fDoc && fDoc.data) {
           const remoteUpdatedAt = Number(fDoc.updatedAt) || 0;
           const localUpdatedAt = Number(row?.updatedAt) || 0;
@@ -2641,10 +2736,26 @@ async function startServer() {
             return res.json(typeof fDoc.data === 'string' ? JSON.parse(fDoc.data) : fDoc.data);
           }
         } else if (!row) {
+          if (quotaExceeded) {
+            return res.status(429).json({
+              error: 'Quota exceeded',
+              message: "Quota exceeded for quota metric 'Free daily read units per project (free tier database)'",
+              status: 'RESOURCE_EXHAUSTED',
+              upgradeUrl: getFirestoreQuotaUpgradeUrl()
+            });
+          }
           return res.status(404).json({ error: 'Not found' });
         }
       }
       if (!row) {
+        if (quotaExceeded) {
+          return res.status(429).json({
+            error: 'Quota exceeded',
+            message: "Quota exceeded for quota metric 'Free daily read units per project (free tier database)'",
+            status: 'RESOURCE_EXHAUSTED',
+            upgradeUrl: getFirestoreQuotaUpgradeUrl()
+          });
+        }
         return res.status(404).json({ error: 'Not found' });
       }
       res.json(JSON.parse(row.data));
@@ -2665,10 +2776,27 @@ async function startServer() {
 
         const isForce = req.query.force === 'true' || req.query.refresh === 'true';
         let row: any = db.prepare('SELECT data, updatedAt FROM clubs_data WHERE clubId = ? AND teamId = ? AND segment = ?').get(clubId, teamId, segment);
+        let quotaExceeded = false;
         
-        // In firestore_only mode, hybrid mode (if stale), or if force refresh requested, query Firestore
-        if (dbModeConfig.mode === 'firestore_only' || isForce || !row || (dbModeConfig.mode === 'hybrid' && (!row.updatedAt || Date.now() - row.updatedAt > 5000))) {
-          const fDoc = await getFirestoreDoc(`app_docs/clubs_${clubId}_${teamId}_${segment}`);
+        // If we have cached local data in SQLite and this is not a forced refresh, return it immediately to avoid eating Firestore read quota!
+        if (row && !isForce && dbModeConfig.mode !== 'firestore_only') {
+          try {
+            return res.json(typeof row.data === 'string' ? JSON.parse(row.data) : row.data);
+          } catch (parseErr) {
+            console.warn('Failed to parse cached SQLite clubs data, falling back to remote:', parseErr);
+          }
+        }
+
+        // Query Firestore only if cache miss (!row), forced refresh (isForce), or in firestore_only mode
+        if (dbModeConfig.mode === 'firestore_only' || isForce || !row) {
+          let fDoc: any = null;
+          try {
+            fDoc = await getFirestoreDoc(`app_docs/clubs_${clubId}_${teamId}_${segment}`);
+          } catch (fErr: any) {
+            if (fErr.status === 429 || fErr.code === 'RESOURCE_EXHAUSTED' || (fErr.message && fErr.message.toLowerCase().includes('quota'))) {
+              quotaExceeded = true;
+            }
+          }
           if (fDoc && fDoc.data) {
             const remoteUpdatedAt = Number(fDoc.updatedAt) || 0;
             const localUpdatedAt = Number(row?.updatedAt) || 0;
@@ -2682,31 +2810,79 @@ async function startServer() {
               return res.json(typeof fDoc.data === 'string' ? JSON.parse(fDoc.data) : fDoc.data);
             }
           } else if (!row) {
+            if (quotaExceeded) {
+              return res.status(429).json({
+                error: 'Quota exceeded',
+                message: "Quota exceeded for quota metric 'Free daily read units per project (free tier database)'",
+                status: 'RESOURCE_EXHAUSTED',
+                upgradeUrl: getFirestoreQuotaUpgradeUrl()
+              });
+            }
             return res.status(404).json({ error: 'Not found' });
           }
         }
         if (!row) {
+          if (quotaExceeded) {
+            return res.status(429).json({
+              error: 'Quota exceeded',
+              message: "Quota exceeded for quota metric 'Free daily read units per project (free tier database)'",
+              status: 'RESOURCE_EXHAUSTED',
+              upgradeUrl: getFirestoreQuotaUpgradeUrl()
+            });
+          }
           return res.status(404).json({ error: 'Not found' });
         }
         res.json(JSON.parse(row.data));
       } catch (e: any) {
+        if (e.status === 429 || e.code === 'RESOURCE_EXHAUSTED') {
+          return res.status(429).json({
+            error: 'Quota exceeded',
+            message: "Quota exceeded for quota metric 'Free daily read units per project (free tier database)'",
+            status: 'RESOURCE_EXHAUSTED',
+            upgradeUrl: getFirestoreQuotaUpgradeUrl()
+          });
+        }
         console.error('Error fetching club data:', e);
         res.status(500).json({ error: 'Failed to fetch club data' });
       }
     } else if (pathStr.startsWith('admins/')) {
       try {
         let row: any = db.prepare('SELECT data FROM system_docs WHERE path = ?').get(pathStr);
+        let quotaExceeded = false;
         if (!row) {
-          const fDoc = await getFirestoreDoc(`app_docs/admins_${encodeURIComponent(pathStr)}`);
+          let fDoc: any = null;
+          try {
+            fDoc = await getFirestoreDoc(`app_docs/admins_${encodeURIComponent(pathStr)}`);
+          } catch (fErr: any) {
+            if (fErr.status === 429 || fErr.code === 'RESOURCE_EXHAUSTED') {
+              quotaExceeded = true;
+            }
+          }
           if (fDoc && fDoc.data) {
             const rawData = typeof fDoc.data === 'string' ? fDoc.data : JSON.stringify(fDoc.data);
             db.prepare('INSERT OR REPLACE INTO system_docs (path, data, updatedAt) VALUES (?, ?, ?)').run(pathStr, rawData, Date.now());
             return res.json(typeof fDoc.data === 'string' ? JSON.parse(fDoc.data) : fDoc.data);
           }
+          if (quotaExceeded) {
+            return res.status(429).json({
+              error: 'Quota exceeded',
+              message: "Quota exceeded for quota metric 'Free daily read units per project (free tier database)'",
+              status: 'RESOURCE_EXHAUSTED',
+              upgradeUrl: getFirestoreQuotaUpgradeUrl()
+            });
+          }
           return res.status(404).json({ error: 'Not found' });
         }
         res.json(JSON.parse(row.data));
       } catch (e: any) {
+        if (e.status === 429 || e.code === 'RESOURCE_EXHAUSTED') {
+          return res.status(429).json({
+            error: 'Quota exceeded',
+            message: "Quota exceeded for quota metric 'Free daily read units per project (free tier database)'",
+            status: 'RESOURCE_EXHAUSTED',
+            upgradeUrl: getFirestoreQuotaUpgradeUrl()
+          });
+        }
         console.error('Error fetching admin doc:', e);
         res.status(500).json({ error: 'Failed to fetch admin doc' });
       }
@@ -2782,7 +2958,8 @@ async function startServer() {
           ON CONFLICT(userId, segment) DO UPDATE SET data = excluded.data, updatedAt = excluded.updatedAt
         `).run(userId, segment, serializedData, updateTimestamp);
 
-        await setFirestoreDoc(`app_docs/users_${userId}_data_${segment}`, { data: serializedData, updatedAt: updateTimestamp })
+        // Replicate to Firestore in background without delaying client sync response
+        setFirestoreDoc(`app_docs/users_${userId}_data_${segment}`, { data: serializedData, updatedAt: updateTimestamp })
           .catch(e => console.error('Firestore user data sync error:', e));
 
         res.json({ success: true, updatedAt: updateTimestamp });
@@ -2813,7 +2990,8 @@ async function startServer() {
           ON CONFLICT(clubId, teamId, segment) DO UPDATE SET data = excluded.data, updatedAt = excluded.updatedAt
         `).run(clubId, teamId, segment, serializedData, updateTimestamp);
 
-        await setFirestoreDoc(`app_docs/clubs_${clubId}_${teamId}_${segment}`, { data: serializedData, updatedAt: updateTimestamp })
+        // Replicate to Firestore in background without delaying client sync response
+        setFirestoreDoc(`app_docs/clubs_${clubId}_${teamId}_${segment}`, { data: serializedData, updatedAt: updateTimestamp })
           .catch(e => console.error('Firestore club data sync error:', e));
 
         res.json({ success: true, updatedAt: updateTimestamp });
@@ -3101,21 +3279,27 @@ async function startServer() {
     }
 
     const doFetch = async (targetUrl: string) => {
+      // Append random query param to bypass remote proxy/CDN caches
+      const parsedUrl = new URL(targetUrl);
+      parsedUrl.searchParams.set('_nocache', Date.now().toString());
+
       return await axios({
         method: 'get',
-        url: targetUrl,
-        timeout: 12000,
+        url: parsedUrl.toString(),
+        timeout: 15000,
         responseType: 'text',
         maxRedirects: 10,
         headers: {
           'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-          'Accept': 'text/calendar, text/plain, */*'
+          'Accept': 'text/calendar, text/plain, */*',
+          'Cache-Control': 'no-cache, no-store, must-revalidate',
+          'Pragma': 'no-cache'
         }
       });
     };
 
     try {
-      console.log(`[Calendar Proxy] Fetching: ${fetchUrl}`);
+      console.log(`[Calendar Proxy] Fetching fresh calendar from: ${fetchUrl}`);
       let response;
       try {
         response = await doFetch(fetchUrl);
@@ -3131,7 +3315,10 @@ async function startServer() {
 
       res.setHeader('Content-Type', 'text/calendar; charset=utf-8');
       res.setHeader('Access-Control-Allow-Origin', '*');
-      res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+      res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0');
+      res.setHeader('Pragma', 'no-cache');
+      res.setHeader('Expires', '0');
+      res.setHeader('Surrogate-Control', 'no-store');
       res.send(response.data);
     } catch (error: any) {
       console.error(`[Calendar Proxy] Error fetching ${fetchUrl}:`, error.message);

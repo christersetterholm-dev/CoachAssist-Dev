@@ -417,7 +417,50 @@ export default function LineupBuilder({
     const guests = linkedSession?.guestPlayers || [];
     return [...baseSquad, ...guests];
   }, [squad, linkedSession]);
-  const [players, setPlayers] = useState<LineupPlayer[]>(lineup?.players || []);
+
+  const sanitizeLineupPlayers = useCallback((playerList: LineupPlayer[], squadList: SquadPlayer[]): LineupPlayer[] => {
+    if (!Array.isArray(playerList)) return [];
+    const seenPlayerIds = new Set<string>();
+    const startersList: LineupPlayer[] = [];
+    const subsList: LineupPlayer[] = [];
+
+    for (const p of playerList) {
+      if (!p || !p.playerId) continue;
+      // Must exist in active squad
+      if (!squadList.some(s => s.id === p.playerId)) continue;
+      // Must be unique squad player
+      if (seenPlayerIds.has(p.playerId)) continue;
+      seenPlayerIds.add(p.playerId);
+
+      if (p.isSubstitute) {
+        subsList.push({ ...p, isSubstitute: true });
+      } else {
+        startersList.push({ ...p, isSubstitute: false });
+      }
+    }
+
+    // Keep bench substitutes capped at max 7 to respect the bench capacity
+    const cappedSubs = subsList.slice(0, 7);
+    return [...startersList, ...cappedSubs];
+  }, []);
+
+  const getValidSubsCount = useCallback((playerList: LineupPlayer[], excludeIdOrPlayerId?: string): number => {
+    const seenPlayerIds = new Set<string>();
+    let count = 0;
+    for (const p of playerList) {
+      if (!p || !p.isSubstitute) continue;
+      if (excludeIdOrPlayerId && (p.id === excludeIdOrPlayerId || p.playerId === excludeIdOrPlayerId)) continue;
+      if (!squadPlayers.some(s => s.id === p.playerId)) continue;
+      if (seenPlayerIds.has(p.playerId)) continue;
+      seenPlayerIds.add(p.playerId);
+      count++;
+    }
+    return count;
+  }, [squadPlayers]);
+
+  const [players, setPlayers] = useState<LineupPlayer[]>(() => {
+    return sanitizeLineupPlayers(lineup?.players || [], squadPlayers);
+  });
   const [playerScale, setPlayerScale] = useState(lineup?.playerScale || 1);
   const [nameTagStyle, setNameTagStyle] = useState<'light' | 'dark'>(lineup?.nameTagStyle || 'light');
   const [nameDisplayMode, setNameDisplayMode] = useState<'first' | 'last' | 'full' | 'initials' | 'firstLastInitial' | 'initialLastName'>(lineup?.nameDisplayMode || 'first');
@@ -952,6 +995,7 @@ export default function LineupBuilder({
   }, [lineup?.id, onSelectLineup, players]);
 
   const fieldRef = useRef<HTMLDivElement>(null);
+  const benchRef = useRef<HTMLDivElement>(null);
   const exportRef = useRef<HTMLDivElement>(null);
 
   // Tactical Board Handlers
@@ -1414,7 +1458,18 @@ export default function LineupBuilder({
         }
         
         const targetId = info.hoveredId;
-        const isDroppedOnBench = (orientation === 'landscape' ? (rawVY > 95 && rawVX >= -10 && rawVX <= 110) : (rawY > 98 && rawX >= -10 && rawX <= 110));
+        let isDroppedOnBench = (orientation === 'landscape' ? (rawVY > 95 && rawVX >= -10 && rawVX <= 110) : (rawY > 98 && rawX >= -10 && rawX <= 110));
+        if (!isDroppedOnBench && benchRef.current) {
+          const bRect = benchRef.current.getBoundingClientRect();
+          if (
+            e.clientX >= bRect.left - 20 &&
+            e.clientX <= bRect.right + 20 &&
+            e.clientY >= bRect.top - 20 &&
+            e.clientY <= bRect.bottom + 30
+          ) {
+            isDroppedOnBench = true;
+          }
+        }
         
         if (targetId) {
           // --- SWAP LOGIC ---
@@ -1445,8 +1500,8 @@ export default function LineupBuilder({
           // --- DROP ON BENCH WITH SLOT INSERTION ---
           pushHistory();
           setActivePlayers((prev: LineupPlayer[]) => {
-            const alreadySubs = prev.filter(lp => lp.isSubstitute && lp.id !== draggingId);
-            if (alreadySubs.length >= 7) {
+            const currentSubCount = getValidSubsCount(prev, draggingId);
+            if (currentSubCount >= 7) {
               alert("Du kan inte ha mer än 7 avbytare på bänken.");
               return prev;
             }
@@ -1454,11 +1509,22 @@ export default function LineupBuilder({
             const dPlayer = prev.find(p => p.id === draggingId);
             if (!dPlayer) return prev;
 
-            const startersList = prev.filter(p => !p.isSubstitute && p.id !== draggingId);
-            const otherSubs = prev.filter(p => p.isSubstitute && p.id !== draggingId);
+            const startersList = prev.filter(p => !p.isSubstitute && p.id !== draggingId && p.playerId !== dPlayer.playerId);
+            const seenSubPlayerIds = new Set<string>();
+            const otherSubs = prev.filter(p => {
+              if (!p.isSubstitute) return false;
+              if (p.id === draggingId || p.playerId === dPlayer.playerId) return false;
+              if (!squadPlayers.some(s => s.id === p.playerId)) return false;
+              if (seenSubPlayerIds.has(p.playerId)) return false;
+              seenSubPlayerIds.add(p.playerId);
+              return true;
+            });
 
             // Determine target slot (0 to 6)
-            const dropSlotIndex = Math.min(6, Math.max(0, Math.floor((orientation === 'landscape' ? rawVX : rawX) / (100 / 7))));
+            const bRect = benchRef.current?.getBoundingClientRect();
+            const dropSlotIndex = bRect && bRect.width > 0
+              ? Math.min(6, Math.max(0, Math.floor(((e.clientX - bRect.left) / bRect.width) * 7)))
+              : Math.min(6, Math.max(0, Math.floor((orientation === 'landscape' ? rawVX : rawX) / (100 / 7))));
 
             const updatedSubs = [...otherSubs];
             updatedSubs.splice(dropSlotIndex, 0, { ...dPlayer, isSubstitute: true, isHolding: false });
@@ -1475,8 +1541,8 @@ export default function LineupBuilder({
         } else {
           pushHistory();
           setActivePlayers((prev: LineupPlayer[]) => {
-            const alreadySubs = prev.filter(lp => lp.isSubstitute && lp.id !== draggingId);
-            if (alreadySubs.length >= 7) {
+            const currentSubCount = getValidSubsCount(prev, draggingId);
+            if (currentSubCount >= 7) {
               alert("Du kan inte ha mer än 7 avbytare på bänken.");
               return prev;
             }
@@ -1529,8 +1595,8 @@ export default function LineupBuilder({
       setLineupName(lineup.matchTitle || '');
       setTeamName(lineup.teamName || '');
       setTempSessionId(lineup.sessionId);
-      const deduplicated = Array.from(new Map((lineup.players || []).map(p => [p.id, p])).values());
-      setPlayers(deduplicated);
+      const sanitized = sanitizeLineupPlayers(lineup.players || [], squadPlayers);
+      setPlayers(sanitized);
       setPlayerScale(lineup.playerScale ?? 1.0);
       setNameTagStyle(lineup.nameTagStyle || 'light');
       setNameDisplayMode(lineup.nameDisplayMode || 'full');
@@ -1553,11 +1619,11 @@ export default function LineupBuilder({
       setShowOpponents(lineup.tacticalBoard?.showOpponents ?? true);
       setOpponentColor(lineup.tacticalBoard?.opponentColor || '#ef4444');
       const savedTacticalPlayers = lineup.tacticalBoard?.players || [];
-      setTacticalPlayers(
-        savedTacticalPlayers.length > 0 
-          ? savedTacticalPlayers.map(p => ({ ...p }))
-          : (lineup.players || []).map(p => ({ ...p }))
+      const sanitizedTactical = sanitizeLineupPlayers(
+        savedTacticalPlayers.length > 0 ? savedTacticalPlayers : (lineup.players || []),
+        squadPlayers
       );
+      setTacticalPlayers(sanitizedTactical);
 
       currentIdRef.current = lineup.id;
       lastPushedDateRef.current = lineup.date || Date.now();
@@ -1583,8 +1649,8 @@ export default function LineupBuilder({
     setLineupName(prev => (prev !== lineup.matchTitle ? (lineup.matchTitle || '') : prev));
     setTeamName(prev => (prev !== (lineup.teamName || '') ? (lineup.teamName || '') : prev));
     setPlayers(prev => {
-      const deduplicated = Array.from(new Map((lineup.players || []).map(p => [p.id, p])).values());
-      if (JSON.stringify(prev) !== JSON.stringify(deduplicated)) return deduplicated;
+      const sanitized = sanitizeLineupPlayers(lineup.players || [], squadPlayers);
+      if (JSON.stringify(prev) !== JSON.stringify(sanitized)) return sanitized;
       return prev;
     });
     setPlayerScale(prev => (prev !== lineup.playerScale ? (lineup.playerScale || 1) : prev));
@@ -1675,7 +1741,26 @@ export default function LineupBuilder({
     if (lineup.date) {
       lastPushedDateRef.current = lineup.date;
     }
-  }, [lineup, hasUnsavedChanges, draggingId]);
+  }, [lineup, hasUnsavedChanges, draggingId, squadPlayers, sanitizeLineupPlayers]);
+
+  // Keep players in sync and clean when squad players list changes (e.g. deleted players or attendance changes)
+  useEffect(() => {
+    if (squadPlayers.length === 0) return;
+    setPlayers(prev => {
+      const sanitized = sanitizeLineupPlayers(prev, squadPlayers);
+      if (sanitized.length !== prev.length || JSON.stringify(sanitized) !== JSON.stringify(prev)) {
+        return sanitized;
+      }
+      return prev;
+    });
+    setTacticalPlayers(prev => {
+      const sanitized = sanitizeLineupPlayers(prev, squadPlayers);
+      if (sanitized.length !== prev.length || JSON.stringify(sanitized) !== JSON.stringify(prev)) {
+        return sanitized;
+      }
+      return prev;
+    });
+  }, [squadPlayers, sanitizeLineupPlayers]);
 
   // Separate effect to handle "Reset" when unsaved changes was set to false by auto-save
   useEffect(() => {
@@ -2318,9 +2403,9 @@ export default function LineupBuilder({
   const togglePlayerInLineup = (playerId: string, isSubstitute: boolean) => {
     const existingPlayer = activePlayers.find(p => p.playerId === playerId);
     
-    if (isSubstitute) {
-      const alreadySubs = activePlayers.filter(p => p.isSubstitute && p.playerId !== playerId);
-      if (alreadySubs.length >= 7) {
+    if (isSubstitute && (!existingPlayer || !existingPlayer.isSubstitute)) {
+      const alreadySubsCount = getValidSubsCount(activePlayers, playerId);
+      if (alreadySubsCount >= 7) {
         alert("Du kan inte ha mer än 7 avbytare på bänken.");
         return;
       }
@@ -2354,8 +2439,8 @@ export default function LineupBuilder({
   const toggleSubstitute = (id: string) => {
     const p = activePlayers.find(player => player.id === id);
     if (p && !p.isSubstitute) {
-      const alreadySubs = activePlayers.filter(lp => lp.isSubstitute);
-      if (alreadySubs.length >= 7) {
+      const alreadySubsCount = getValidSubsCount(activePlayers, p.playerId);
+      if (alreadySubsCount >= 7) {
         alert("Du kan inte ha mer än 7 avbytare på bänken.");
         return;
       }
@@ -3639,129 +3724,135 @@ export default function LineupBuilder({
           {/* New Dynamic Bench/Dugout Area (Outside Pitch) */}
           {!isFieldMaximized && (
             <div 
-              className="mt-0 px-3 py-1 sm:px-6 sm:py-1 rounded-none sm:rounded-2xl border-x-0 sm:border border-zinc-200/60 dark:border-zinc-600/80 bg-zinc-100/95 dark:bg-zinc-700/90 backdrop-blur-sm shadow-md transition-all mx-auto select-none"
+              ref={benchRef}
+              className="mt-0 px-1.5 py-1.5 sm:px-3 sm:py-2 rounded-none sm:rounded-2xl border-x-0 sm:border border-zinc-200/60 dark:border-zinc-600/80 bg-zinc-100/95 dark:bg-zinc-700/90 backdrop-blur-sm shadow-md transition-all mx-auto select-none overflow-x-auto scrollbar-none"
               style={{
                 width: orientation === 'landscape' 
                   ? `min(96vw, 1024px, calc((100vh - 160px) * ${R}))` 
                   : `min(100%, 680px, calc((100dvh - 200px) * ${invR}))`,
               }}
             >
-              <div className="flex flex-wrap items-center justify-center gap-2 sm:gap-3 w-full">
-                {subs.length === 0 ? (
-                  <p className="text-[11px] text-zinc-400 dark:text-zinc-500 font-bold italic py-3 text-center w-full uppercase tracking-wider">
-                    Inga avbytare valda (dra hit spelare för att bänka)
-                  </p>
-                ) : (
-                  subs.map((p) => {
-                    const sp = getSquadPlayer(p.playerId);
-                    if (!sp) return null;
-                    const isDragging = draggingId === p.id;
+              {(() => {
+                const benchScale = subs.length >= 7 ? playerScale * 0.92 : playerScale;
+                return (
+                  <div className={`flex flex-nowrap items-center justify-center ${subs.length >= 7 ? 'gap-0.5 xs:gap-1 sm:gap-2' : 'gap-1.5 sm:gap-2.5 md:gap-4'} min-w-full w-fit mx-auto px-0.5 sm:px-1`}>
+                    {subs.length === 0 ? (
+                      <p className="text-[11px] text-zinc-400 dark:text-zinc-500 font-bold italic py-3 text-center w-full uppercase tracking-wider">
+                        Inga avbytare valda (dra hit spelare för att bänka)
+                      </p>
+                    ) : (
+                      subs.map((p) => {
+                        const sp = getSquadPlayer(p.playerId);
+                        if (!sp) return null;
+                        const isDragging = draggingId === p.id;
 
-                    return (
-                      <div 
-                        key={p.id}
-                        className={`flex flex-col items-center justify-start relative group transition-all duration-300 touch-none select-none ${isDragging ? 'opacity-20 scale-90' : 'opacity-100'}`}
-                      >
-                        <div
-                          className={`rounded-full border-2 bg-zinc-100 dark:bg-zinc-800 transition-all cursor-grab active:cursor-grabbing hover:scale-105 relative touch-none select-none ${
-                            isEditMode ? 'border-indigo-500 ring-4 ring-indigo-500/20' : 'border-white'
-                          }`}
-                          style={{ 
-                            width: `${3.2 * playerScale}rem`, 
-                            height: `${3.2 * playerScale}rem`,
-                          }}
-                          onPointerDown={(e) => {
-                            e.stopPropagation();
-                            if (!isEditMode) {
-                              pushHistory();
-                              setDraggingId(p.id);
-                              const rect = e.currentTarget.getBoundingClientRect();
-                              const fieldRect = document.querySelector('.football-pitch')?.getBoundingClientRect();
-                              if (fieldRect) {
-                                const x = ((rect.left + rect.width / 2 - fieldRect.left) / fieldRect.width) * 100;
-                                const y = ((rect.top + rect.height / 2 - fieldRect.top) / fieldRect.height) * 100;
-                                setDragPos({ x, y });
-                              }
-                            }
-                          }}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            if (isEditMode) {
-                              setSelectedForEdit(p.id);
-                            }
-                          }}
-                        >
-                          <div
-                            className="rounded-full overflow-hidden w-full h-full flex items-center justify-center"
-                            style={{
-                              display: showPhoto ? 'flex' : 'none',
-                            }}
+                        return (
+                          <div 
+                            key={p.id}
+                            className={`shrink-0 flex flex-col items-center justify-start relative group transition-all duration-300 touch-none select-none ${subs.length >= 7 ? 'px-0 xs:px-0.5' : 'px-0.5 sm:px-1'} ${isDragging ? 'opacity-20 scale-90' : 'opacity-100'}`}
                           >
-                            {sp.photoUrl ? (
-                              <CachedImage 
-                                src={sp.photoUrl} 
-                                alt={sp.name} 
-                                className="w-full h-full object-cover pointer-events-none" 
-                                decoding="async"
-                              />
-                            ) : (
-                              <div className="w-full h-full bg-gradient-to-br from-blue-900 to-indigo-950 flex items-center justify-center text-white/50">
-                                <User size={20 * playerScale} />
+                            <div
+                              className={`rounded-full border-2 bg-zinc-100 dark:bg-zinc-800 transition-all cursor-grab active:cursor-grabbing hover:scale-105 relative touch-none select-none ${
+                                isEditMode ? 'border-indigo-500 ring-4 ring-indigo-500/20' : 'border-white'
+                              }`}
+                              style={{ 
+                                width: `${3.5 * benchScale}rem`, 
+                                height: `${3.5 * benchScale}rem`,
+                              }}
+                              onPointerDown={(e) => {
+                                e.stopPropagation();
+                                if (!isEditMode) {
+                                  pushHistory();
+                                  setDraggingId(p.id);
+                                  const rect = e.currentTarget.getBoundingClientRect();
+                                  const fieldRect = document.querySelector('.football-pitch')?.getBoundingClientRect();
+                                  if (fieldRect) {
+                                    const x = ((rect.left + rect.width / 2 - fieldRect.left) / fieldRect.width) * 100;
+                                    const y = ((rect.top + rect.height / 2 - fieldRect.top) / fieldRect.height) * 100;
+                                    setDragPos({ x, y });
+                                  }
+                                }
+                              }}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                if (isEditMode) {
+                                  setSelectedForEdit(p.id);
+                                }
+                              }}
+                            >
+                              <div
+                                className="rounded-full overflow-hidden w-full h-full flex items-center justify-center"
+                                style={{
+                                  display: showPhoto ? 'flex' : 'none',
+                                }}
+                              >
+                                {sp.photoUrl ? (
+                                  <CachedImage 
+                                    src={sp.photoUrl} 
+                                    alt={sp.name} 
+                                    className="w-full h-full object-cover pointer-events-none" 
+                                    decoding="async"
+                                  />
+                                ) : (
+                                  <div className="w-full h-full bg-gradient-to-br from-blue-900 to-indigo-950 flex items-center justify-center text-white/50">
+                                    <User size={24 * benchScale} />
+                                  </div>
+                                )}
+                              </div>
+
+                              {(!showPhoto && (!sp.number || !showNumber)) && (
+                                <div className="rounded-full overflow-hidden w-full h-full bg-gradient-to-br from-blue-900 to-indigo-950 flex items-center justify-center text-white/50">
+                                  <User size={24 * benchScale} />
+                                </div>
+                              )}
+
+                              {/* Number badge on bench player */}
+                              {sp.number && showNumber && (
+                                <div 
+                                  className="absolute bg-zinc-900 text-white rounded-full flex items-center justify-center font-black border-2 border-white shadow-md z-10"
+                                  style={{
+                                    width: showPhoto ? `${1.5 * benchScale}rem` : `${3.5 * benchScale}rem`,
+                                    height: showPhoto ? `${1.5 * benchScale}rem` : `${3.5 * benchScale}rem`,
+                                    fontSize: showPhoto ? `${0.6 * benchScale}rem` : `${1.5 * benchScale}rem`,
+                                    bottom: showPhoto ? 0 : 'auto',
+                                    right: showPhoto ? 0 : 'auto',
+                                    top: !showPhoto ? '50%' : 'auto',
+                                    left: !showPhoto ? '50%' : 'auto',
+                                    transform: !showPhoto ? 'translate(-50%, -50%)' : 'none',
+                                    position: showPhoto ? 'absolute' : 'relative',
+                                    background: showPhoto ? undefined : 'linear-gradient(to bottom right, #1e3a8a, #1e1b4b)',
+                                  }}
+                                >
+                                  {sp.number}
+                                </div>
+                              )}
+                            </div>
+
+                            {/* Player Name below the circle */}
+                            {showName && (
+                              <div 
+                                className={`mt-1 font-bold text-center tracking-tight leading-tight w-full ${subs.length >= 7 ? 'max-w-[58px] sm:max-w-[76px]' : 'max-w-[76px] sm:max-w-[90px]'} px-0.5`}
+                                style={{
+                                  fontSize: `${(subs.length >= 7 ? 0.56 : 0.6) * benchScale}rem`,
+                                }}
+                              >
+                                {(() => {
+                                  const displayName = getVisibleName(sp.name);
+                                  const useSingleLine = ['initials', 'firstLastInitial', 'initialLastName'].includes(nameDisplayMode);
+                                  const parts = useSingleLine ? [displayName] : displayName.split(' ');
+                                  return parts.map((part, i) => (
+                                    <div key={i} className="truncate whitespace-nowrap text-zinc-800 dark:text-zinc-200 text-center w-full">{part}</div>
+                                  ));
+                                })()}
                               </div>
                             )}
                           </div>
-
-                          {(!showPhoto && (!sp.number || !showNumber)) && (
-                            <div className="rounded-full overflow-hidden w-full h-full bg-gradient-to-br from-blue-900 to-indigo-950 flex items-center justify-center text-white/50">
-                              <User size={20 * playerScale} />
-                            </div>
-                          )}
-
-                          {/* Number badge on bench player */}
-                          {sp.number && showNumber && (
-                            <div 
-                              className="absolute bg-zinc-900 text-white rounded-full flex items-center justify-center font-black border-2 border-white shadow-md z-10"
-                              style={{
-                                width: showPhoto ? `${1.2 * playerScale}rem` : `${3.2 * playerScale}rem`,
-                                height: showPhoto ? `${1.2 * playerScale}rem` : `${3.2 * playerScale}rem`,
-                                fontSize: showPhoto ? `${0.5 * playerScale}rem` : `${1.2 * playerScale}rem`,
-                                bottom: showPhoto ? -4 : 'auto',
-                                right: showPhoto ? -4 : 'auto',
-                                top: !showPhoto ? '50%' : 'auto',
-                                left: !showPhoto ? '50%' : 'auto',
-                                transform: !showPhoto ? 'translate(-50%, -50%)' : 'none',
-                                position: showPhoto ? 'absolute' : 'relative',
-                                background: showPhoto ? undefined : 'linear-gradient(to bottom right, #1e3a8a, #1e1b4b)',
-                              }}
-                            >
-                              {sp.number}
-                            </div>
-                          )}
-                        </div>
-
-                        {/* Player Name below the circle */}
-                        {showName && (
-                          <div 
-                            className="mt-1.5 font-bold text-center tracking-tight leading-tight max-w-[80px] truncate"
-                            style={{
-                              fontSize: `${0.55 * playerScale}rem`,
-                            }}
-                          >
-                            {(() => {
-                              const displayName = getVisibleName(sp.name);
-                              const useSingleLine = ['initials', 'firstLastInitial', 'initialLastName'].includes(nameDisplayMode);
-                              const parts = useSingleLine ? [displayName] : displayName.split(' ');
-                              return parts.map((part, i) => (
-                                <div key={i} className="truncate whitespace-nowrap text-zinc-800 dark:text-zinc-300">{part}</div>
-                              ));
-                            })()}
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })
-                )}
-              </div>
+                        );
+                      })
+                    )}
+                  </div>
+                );
+              })()}
             </div>
           )}
 
@@ -5479,7 +5570,50 @@ export default function LineupBuilder({
                         <button
                           onClick={async () => {
                             try {
-                              await onManualSync();
+                              if (hasUnsavedChanges && lineup) {
+                                const pushTime = Date.now();
+                                lastPushedDateRef.current = pushTime;
+                                const pushState: Lineup = {
+                                  ...lineup,
+                                  matchTitle: lineupName,
+                                  teamName,
+                                  players,
+                                  playerScale,
+                                  nameTagStyle,
+                                  nameDisplayMode,
+                                  showNameBackground,
+                                  nameBackgroundType,
+                                  showPhoto,
+                                  showName,
+                                  showNumber,
+                                  teamLogoUrl,
+                                  pitchType,
+                                  orientation,
+                                  attackDirection,
+                                  formation: currentFormation,
+                                  notes: {
+                                    team: { text: teamNotes, media: teamMedia },
+                                    opponent: { text: opponentNotes, media: opponentMedia }
+                                  },
+                                  tacticalBoard: {
+                                    drawings: tacticalDrawings,
+                                    footballPos,
+                                    footballScale,
+                                    opponents,
+                                    showOpponents,
+                                    opponentColor,
+                                    players: tacticalPlayers
+                                  },
+                                  date: pushTime
+                                };
+                                onUpdateLineup(pushState);
+                                setHasUnsavedChanges(false);
+                              }
+                              if (onManualPush) {
+                                await onManualPush();
+                              } else if (onManualSync) {
+                                await onManualSync();
+                              }
                             } catch (err) {
                               console.error("Manual sync failed:", err);
                             }
@@ -6583,23 +6717,34 @@ export default function LineupBuilder({
                             onClick={() => {
                               const attendingIds = linkedSession.attendance || [];
                               const existingPlayerIds = new Set(players.map(p => p.playerId));
+                              const currentSubsCount = getValidSubsCount(players);
+                              const availableSlots = Math.max(0, 7 - currentSubsCount);
                               const newPlayersToAdd: LineupPlayer[] = [];
+                              let skippedCount = 0;
                               
                               attendingIds.forEach(id => {
-                                if (!existingPlayerIds.has(id)) {
-                                  newPlayersToAdd.push({
-                                    id: `sub_${Date.now()}_${Math.random().toString(36).substring(7)}`,
-                                    playerId: id,
-                                    x: 50,
-                                    y: 50,
-                                    isSubstitute: true,
-                                  });
+                                if (!existingPlayerIds.has(id) && squadPlayers.some(s => s.id === id)) {
+                                  if (newPlayersToAdd.length < availableSlots) {
+                                    newPlayersToAdd.push({
+                                      id: `sub_${Date.now()}_${Math.random().toString(36).substring(7)}`,
+                                      playerId: id,
+                                      x: 50,
+                                      y: 50,
+                                      isSubstitute: true,
+                                    });
+                                  } else {
+                                    skippedCount++;
+                                  }
                                 }
                               });
 
                               if (newPlayersToAdd.length > 0) {
                                 setPlayers(prev => [...prev, ...newPlayersToAdd]);
                                 setHasUnsavedChanges(true);
+                              }
+
+                              if (skippedCount > 0) {
+                                alert(`Lade till ${newPlayersToAdd.length} spelare på bänken. ${skippedCount} spelare fick inte plats då bänken har max 7 avbytare.`);
                               }
                             }}
                             className="px-2.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-black text-[10px] uppercase tracking-wider transition-all shadow-xs shrink-0 cursor-pointer active:scale-95 flex items-center gap-1.5"

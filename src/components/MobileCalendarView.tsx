@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
-import { Calendar, Clock, MapPin, Search, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, ExternalLink, RefreshCw, Trophy, HelpCircle, FileText, CheckCircle, ArrowRight, Plus, Trash2, EyeOff } from 'lucide-react';
+import { Calendar, Clock, MapPin, Search, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, ExternalLink, RefreshCw, Trophy, HelpCircle, FileText, CheckCircle, ArrowRight, Plus, Trash2, EyeOff, X } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { TrainingSession, SquadPlayer } from '../types';
 
@@ -75,6 +75,11 @@ interface MobileCalendarViewProps {
   onDeleteSession?: (id: string) => void;
   user?: any;
   userRoles?: string[];
+  syncMessage?: string | null;
+  onDismissSyncMessage?: () => void;
+  lastSyncedAt?: number;
+  icsUrl?: string;
+  onOpenSettings?: () => void;
 }
 
 export default function MobileCalendarView({
@@ -90,7 +95,12 @@ export default function MobileCalendarView({
   deletedSessionsCount = 0,
   onDeleteSession,
   user: _user,
-  userRoles: _userRoles
+  userRoles: _userRoles,
+  syncMessage,
+  onDismissSyncMessage,
+  lastSyncedAt,
+  icsUrl: _icsUrl,
+  onOpenSettings: _onOpenSettings
 }: MobileCalendarViewProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [activeFilter, setActiveFilter] = useState<'all' | 'match' | 'training' | 'other'>('all');
@@ -517,14 +527,58 @@ export default function MobileCalendarView({
                   onSync();
                 }}
                 disabled={isSyncing}
-                className="p-2 rounded-xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 text-zinc-500 hover:text-indigo-600 dark:text-zinc-400 dark:hover:text-indigo-400 transition-all cursor-pointer flex items-center justify-center shadow-sm disabled:opacity-50"
-                title="Hämta senaste händelserna från extern kalender"
+                className={`p-2 rounded-xl border transition-all cursor-pointer flex items-center justify-center shadow-sm disabled:opacity-50 ${
+                  isSyncing
+                    ? 'bg-indigo-50 border-indigo-300 text-indigo-600 dark:bg-indigo-950/50 dark:border-indigo-800'
+                    : 'bg-white dark:bg-zinc-900 border-zinc-200 dark:border-zinc-800 text-zinc-500 hover:text-indigo-600 dark:text-zinc-400 dark:hover:text-indigo-400'
+                }`}
+                title={
+                  lastSyncedAt
+                    ? `Hämta senaste händelserna från laget.se (Senast synkad: ${new Date(lastSyncedAt).toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' })})`
+                    : 'Hämta senaste händelserna från laget.se'
+                }
               >
-                <RefreshCw size={14} className={isSyncing ? 'animate-spin' : ''} />
+                <RefreshCw size={14} className={isSyncing ? 'animate-spin text-indigo-600 dark:text-indigo-400' : ''} />
               </button>
             )}
           </div>
         </div>
+
+        {/* Calendar Sync Status / Notification Banner */}
+        <AnimatePresence>
+          {(isSyncing || syncMessage) && (
+            <motion.div
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: 'auto' }}
+              exit={{ opacity: 0, height: 0 }}
+              className="overflow-hidden"
+            >
+              <div className={`p-3 rounded-2xl text-xs font-semibold border flex items-center justify-between gap-2 shadow-sm ${
+                isSyncing
+                  ? 'bg-indigo-50 dark:bg-indigo-950/30 text-indigo-700 dark:text-indigo-300 border-indigo-200 dark:border-indigo-800/50'
+                  : syncMessage?.toLowerCase().includes('fel')
+                    ? 'bg-rose-50 dark:bg-rose-950/30 text-rose-700 dark:text-rose-300 border-rose-200 dark:border-rose-800/50'
+                    : 'bg-emerald-50 dark:bg-emerald-950/30 text-emerald-800 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800/50'
+              }`}>
+                <div className="flex items-center gap-2 min-w-0">
+                  <RefreshCw size={14} className={isSyncing ? 'animate-spin shrink-0 text-indigo-500' : 'shrink-0'} />
+                  <span className="truncate">
+                    {isSyncing ? 'Synkroniserar med laget.se...' : syncMessage}
+                  </span>
+                </div>
+                {onDismissSyncMessage && !isSyncing && (
+                  <button
+                    type="button"
+                    onClick={onDismissSyncMessage}
+                    className="p-1 hover:bg-black/5 dark:hover:bg-white/10 rounded-lg transition-colors shrink-0 cursor-pointer"
+                  >
+                    <X size={13} />
+                  </button>
+                )}
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         {/* Collapsible search bar */}
         <AnimatePresence initial={false}>

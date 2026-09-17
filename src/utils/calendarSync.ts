@@ -32,7 +32,13 @@ export async function syncTeamCalendar(
   }
 
   try {
-    const response = await fetch(getApiUrl(`/api/fetch-calendar?url=${encodeURIComponent(icsUrl)}`));
+    const cacheBuster = `&_t=${Date.now()}`;
+    const response = await fetch(getApiUrl(`/api/fetch-calendar?url=${encodeURIComponent(icsUrl)}${cacheBuster}`), {
+      headers: {
+        'Cache-Control': 'no-cache, no-store, must-revalidate',
+        'Pragma': 'no-cache'
+      }
+    });
     if (!response.ok) {
       throw new Error(`Kunde inte hämta kalendern (Status ${response.status})`);
     }
@@ -149,6 +155,11 @@ export async function syncTeamCalendar(
           updated.externalId = ev.externalId;
           changed = true;
         }
+        if (ev.category && (!updated.category || updated.category !== ev.category)) {
+          updated.category = ev.category;
+          updated.type = ev.category;
+          changed = true;
+        }
 
         if (changed) {
           updated.updatedAt = Date.now();
@@ -165,6 +176,7 @@ export async function syncTeamCalendar(
         };
 
         const now = Date.now();
+        const sessionCategory = ev.category || (ev.title.toLowerCase().includes('match') ? 'match' : 'training');
         const newSession: TrainingSession = {
           id: `session_${Math.random().toString(36).substring(2, 9)}_${now}`,
           externalId: ev.externalId,
@@ -174,6 +186,8 @@ export async function syncTeamCalendar(
           endTime: ev.endTime || calculateEndTime(ev.startTime, 90),
           location: ev.location || '',
           description: ev.description || '',
+          category: sessionCategory,
+          type: sessionCategory,
           isCompleted: false,
           attendance: [],
           moments: [],

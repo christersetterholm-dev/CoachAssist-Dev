@@ -771,8 +771,10 @@ export default function TrainingManager({
     prevShowSettingsRef.current = showSettings;
   }, [settings, showSettings]);
 
+  const effectiveIcsUrl = settings?.icsUrl || 'webcal://cal.laget.se/KSKSeniorer.ics';
+
   const handleSyncCalendar = async (customUrl?: string, isSilent = false) => {
-    const urlToUse = customUrl !== undefined ? customUrl : settings?.icsUrl;
+    const urlToUse = customUrl !== undefined ? customUrl : effectiveIcsUrl;
     if (!urlToUse) {
       if (!isSilent) {
         alert("Ange en kalenderlänk (webcal/ics) under Inställningar eller Admingränssnittet först.");
@@ -795,7 +797,9 @@ export default function TrainingManager({
           ...(settings || { defaultStartTime: '18:00' }),
           icsUrl: urlToUse,
           lastSyncedAt: result.lastSyncedAt,
-          lastSyncCount: result.addedCount + result.updatedCount + result.removedCount
+          lastSyncCount: result.addedCount + result.updatedCount + result.removedCount,
+          lastSyncStatus: 'success',
+          lastSyncMessage: result.message
         };
         onUpdateSettings?.(updatedSettings);
 
@@ -820,17 +824,47 @@ export default function TrainingManager({
     }
   };
 
-  const prevIcsUrlRef = React.useRef(settings?.icsUrl);
+  const prevIcsUrlRef = React.useRef(effectiveIcsUrl);
   React.useEffect(() => {
-    if (settings?.icsUrl !== prevIcsUrlRef.current) {
+    if (effectiveIcsUrl !== prevIcsUrlRef.current) {
       setHasAutoSynced(false);
-      prevIcsUrlRef.current = settings?.icsUrl;
+      prevIcsUrlRef.current = effectiveIcsUrl;
     }
-    if (settings?.icsUrl && !hasAutoSynced && isCloudDataLoaded) {
+    if (effectiveIcsUrl && !hasAutoSynced && isCloudDataLoaded) {
       setHasAutoSynced(true);
-      handleSyncCalendar(settings.icsUrl, true);
+      handleSyncCalendar(effectiveIcsUrl, true);
     }
-  }, [settings?.icsUrl, hasAutoSynced, isCloudDataLoaded]);
+  }, [effectiveIcsUrl, hasAutoSynced, isCloudDataLoaded]);
+
+  // Periodic and tab-focus refresh (every 15 min or when user re-focuses tab after 10+ min)
+  React.useEffect(() => {
+    const handleFocus = () => {
+      if (document.visibilityState === 'visible' && effectiveIcsUrl && isCloudDataLoaded) {
+        const lastSync = settings?.lastSyncedAt || 0;
+        if (Date.now() - lastSync > 10 * 60 * 1000) {
+          handleSyncCalendar(effectiveIcsUrl, true);
+        }
+      }
+    };
+
+    window.addEventListener('focus', handleFocus);
+    document.addEventListener('visibilitychange', handleFocus);
+
+    const interval = setInterval(() => {
+      if (effectiveIcsUrl && isCloudDataLoaded) {
+        const lastSync = settings?.lastSyncedAt || 0;
+        if (Date.now() - lastSync > 15 * 60 * 1000) {
+          handleSyncCalendar(effectiveIcsUrl, true);
+        }
+      }
+    }, 15 * 60 * 1000);
+
+    return () => {
+      window.removeEventListener('focus', handleFocus);
+      document.removeEventListener('visibilitychange', handleFocus);
+      clearInterval(interval);
+    };
+  }, [effectiveIcsUrl, isCloudDataLoaded, settings?.lastSyncedAt]);
 
   const calculateEndTime = (start: string, duration: number) => {
     const [h, m] = start.split(':').map(Number);
@@ -1017,12 +1051,17 @@ export default function TrainingManager({
           onSync={async () => {
             await handleSyncCalendar(undefined, false);
           }}
-          hasSyncUrl={!!settings?.icsUrl}
+          hasSyncUrl={!!effectiveIcsUrl}
           onNewSession={onNewSession}
           onOpenTrash={() => setShowTrashModal(true)}
           onOpenSeriesCreator={() => setShowSeriesModal(true)}
           user={user}
           userRoles={userRoles}
+          syncMessage={syncMessage}
+          onDismissSyncMessage={() => setSyncMessage(null)}
+          lastSyncedAt={settings?.lastSyncedAt}
+          icsUrl={effectiveIcsUrl}
+          onOpenSettings={() => setShowSettings(true)}
         />
       ) : (
         <div className="px-4 sm:px-0">

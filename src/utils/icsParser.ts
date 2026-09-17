@@ -8,6 +8,7 @@ export interface ParsedIcsEvent {
   location?: string;
   status?: string;
   isCancelled?: boolean;
+  category?: 'training' | 'match' | 'other';
 }
 
 export function parseIcsCalendar(icsData: string): ParsedIcsEvent[] {
@@ -27,6 +28,7 @@ export function parseIcsCalendar(icsData: string): ParsedIcsEvent[] {
     description?: string;
     location?: string;
     status?: string;
+    rawCategory?: string;
   } | null = null;
   
   // Helper to parse ICS date-times
@@ -91,7 +93,7 @@ export function parseIcsCalendar(icsData: string): ParsedIcsEvent[] {
       currentEvent = {};
     } else if (trimmed === 'END:VEVENT') {
       if (currentEvent) {
-        const { externalId, title, dtStartRaw, dtEndRaw, description, location, status } = currentEvent;
+        const { externalId, title, dtStartRaw, dtEndRaw, description, location, status, rawCategory } = currentEvent;
         if (dtStartRaw) {
           const startInfo = parseDateTime(dtStartRaw);
           const endInfo = dtEndRaw ? parseDateTime(dtEndRaw) : null;
@@ -101,6 +103,34 @@ export function parseIcsCalendar(icsData: string): ParsedIcsEvent[] {
             let finalTitle = title?.trim() || 'Träningspass';
             if (isCancelled && !finalTitle.toUpperCase().startsWith('[INSTÄLLT]')) {
               finalTitle = `[INSTÄLLT] ${finalTitle}`;
+            }
+
+            // Determine category from CATEGORIES or title
+            let determinedCategory: 'training' | 'match' | 'other' = 'training';
+            const catLower = (rawCategory || '').toLowerCase();
+            const titleLower = finalTitle.toLowerCase();
+
+            if (
+              catLower.includes('match') ||
+              titleLower.includes('match') ||
+              titleLower.includes(' vs ') ||
+              titleLower.includes(' mot ') ||
+              titleLower.includes('seriematch') ||
+              titleLower.includes('cup') ||
+              titleLower.includes('kval') ||
+              titleLower.includes('träningsmatch')
+            ) {
+              determinedCategory = 'match';
+            } else if (
+              catLower.includes('trän') ||
+              catLower.includes('training') ||
+              titleLower.includes('träning') ||
+              titleLower.includes('fys') ||
+              titleLower.includes('pass')
+            ) {
+              determinedCategory = 'training';
+            } else {
+              determinedCategory = 'other';
             }
 
             // Fallback deterministic externalId if feed lacks a unique UID
@@ -116,7 +146,8 @@ export function parseIcsCalendar(icsData: string): ParsedIcsEvent[] {
               location: location || '',
               description: description || '',
               status,
-              isCancelled
+              isCancelled,
+              category: determinedCategory
             });
           }
         }
@@ -135,6 +166,8 @@ export function parseIcsCalendar(icsData: string): ParsedIcsEvent[] {
         currentEvent.externalId = valuePart.trim();
       } else if (key === 'STATUS') {
         currentEvent.status = valuePart.trim().toUpperCase();
+      } else if (key === 'CATEGORIES' || key === 'CATEGORY') {
+        currentEvent.rawCategory = valuePart.trim();
       } else if (key === 'SUMMARY') {
         currentEvent.title = valuePart
           .replace(/\\,/g, ',')

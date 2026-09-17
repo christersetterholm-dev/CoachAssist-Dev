@@ -147,6 +147,8 @@ export interface TrainingSettings {
   icsUrl?: string;
   lastSyncedAt?: number;
   lastSyncCount?: number;
+  lastSyncStatus?: 'success' | 'error';
+  lastSyncMessage?: string;
 }
 
 export interface CoachData {

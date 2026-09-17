@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo } from 'react';
+import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { RotateCcw, Trophy, ArrowLeft, Check, Sun, Moon, Timer as TimerIcon, Edit2, Zap, Rocket, Users, LayoutDashboard, Unlock, LogIn, LogOut, User as UserIcon, ShieldCheck, Cloud, Globe, AlertTriangle, Calendar, Settings, RefreshCw, Bell, Building2, Shirt, VibrateOff } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { SquadPlayer, Exercise, Team, PointsConfig, Period, PeriodStandings, Lineup, TrainingSession, TrainingSettings, CoachData, BankExercise, SessionMoment, UserProfile, ClubMember, ClubTeam, Club } from './types';
@@ -44,7 +44,8 @@ const INITIAL_DATA: CoachData = {
   pinnedFormationIds: ['4-2-3-1', '4-4-2', '4-3-3'],
   trainingSettings: {
     defaultStartTime: '18:00',
-    defaultDuration: 90
+    defaultDuration: 90,
+    icsUrl: 'webcal://cal.laget.se/KSKSeniorer.ics'
   },
   exerciseBank: [],
   exerciseBankCategories: []
@@ -505,6 +506,27 @@ export default function App() {
   const sessionActionCountRef = useRef(0);
   const pendingCloudUpdateRef = useRef<{ lineups: Lineup[], activeLineupId: string | null } | null>(null);
   const [isSyncing, setIsSyncing] = useState(false);
+  const isSyncingRef = useRef(false);
+  const syncSafetyTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  const setSyncingStatus = useCallback((val: boolean) => {
+    isSyncingRef.current = val;
+    setIsSyncing(val);
+    if (syncSafetyTimeoutRef.current) {
+      clearTimeout(syncSafetyTimeoutRef.current);
+      syncSafetyTimeoutRef.current = null;
+    }
+    if (val) {
+      // Hard safety timer: after 12 seconds, if sync is still active, reset it automatically
+      syncSafetyTimeoutRef.current = setTimeout(() => {
+        if (isSyncingRef.current) {
+          console.warn("App: Global sync safety timeout triggered. Resetting isSyncing.");
+          isSyncingRef.current = false;
+          setIsSyncing(false);
+        }
+      }, 12000);
+    }
+  }, []);
 
   // Sync sessionActionCount to its ref for use in onSnapshot
   useEffect(() => {
@@ -1193,24 +1215,97 @@ export default function App() {
     return () => unsubscribe();
   }, [user?.uid]);
 
-  // Helper to fetch all segmented cloud docs to merge into local state
-  const pullLatestData = async () => {
-    if (!user || !isProfileLoaded) return;
+  // Internal helper to push all dirty data segments cleanly without toggling isSyncing
+  const pushDirtySegments = async (forcePushAll = false) => {
+    if (!user) return;
+    const now = Date.now();
+    const lastUpdatedBy = sessionIdRef.current;
 
-    // If local unsaved edits exist (sessionActionCount > 0), 
-    // first flush them to the cloud so they are not lost before pulling!
-    if (sessionActionCount > 0) {
-      console.log("App: Local unsaved changes exist (sessionActionCount > 0). Flushing local changes to cloud first...");
-      try {
-        await handleManualPush();
-      } catch (pushErr) {
-        console.warn("App: Could not flush local edits before pull:", pushErr);
-      }
+    const currentSynced = lastCloudDataRef.current || INITIAL_DATA;
+    const nowSquadDirty = JSON.stringify(currentSynced.squad) !== JSON.stringify(squad);
+    const nowSessionsDirty = JSON.stringify(currentSynced.sessions) !== JSON.stringify(sessions) || JSON.stringify(currentSynced.deletedSessions) !== JSON.stringify(deletedSessions);
+    const nowExercisesDirty = JSON.stringify(currentSynced.exercises) !== JSON.stringify(exercises) || JSON.stringify(currentSynced.exerciseBank) !== JSON.stringify(exerciseBank) || JSON.stringify(currentSynced.exerciseBankCategories) !== JSON.stringify(exerciseBankCategories);
+    const nowLineupsDirty = JSON.stringify(currentSynced.lineups) !== JSON.stringify(lineups) || currentSynced.activeLineupId !== activeLineupId;
+    const nowPeriodsDirty = JSON.stringify(currentSynced.periods) !== JSON.stringify(periods) || currentSynced.currentPeriodId !== currentPeriodId;
+    const nowSettingsDirty = currentSynced.teamUrl !== teamUrl || currentSynced.adminUrl !== adminUrl || currentSynced.seriesUrl !== seriesUrl || JSON.stringify(currentSynced.customFormations) !== JSON.stringify(customFormations) || JSON.stringify(currentSynced.pinnedFormationIds) !== JSON.stringify(pinnedFormationIds) || JSON.stringify(currentSynced.trainingSettings) !== JSON.stringify(trainingSettings) || currentSynced.activeExerciseId !== activeExerciseId;
+
+    const writePromises = [];
+    const { docSquadRef, docSessionsRef, docExercisesRef, docLineupsRef, docPeriodsRef, docSettingsRef } = getDocRefs(user, userProfile);
+
+    const shouldForce = forcePushAll || (sessionActionCountRef.current > 0 && !nowSquadDirty && !nowSessionsDirty && !nowExercisesDirty && !nowLineupsDirty && !nowPeriodsDirty && !nowSettingsDirty);
+
+    if (nowSquadDirty || shouldForce) {
+      writePromises.push(setDoc(docSquadRef, { squad, updatedAt: now, lastUpdatedBy }));
+    }
+    if (nowSessionsDirty || shouldForce) {
+      writePromises.push(setDoc(docSessionsRef, { sessions, deletedSessions, updatedAt: now, lastUpdatedBy }));
+    }
+    if (nowExercisesDirty || shouldForce) {
+      writePromises.push(setDoc(docExercisesRef, { exercises, exerciseBank, exerciseBankCategories, updatedAt: now, lastUpdatedBy }));
+    }
+    if (nowLineupsDirty || shouldForce) {
+      writePromises.push(setDoc(docLineupsRef, { lineups, activeLineupId, updatedAt: now, lastUpdatedBy }));
+    }
+    if (nowPeriodsDirty || shouldForce) {
+      writePromises.push(setDoc(docPeriodsRef, { periods, currentPeriodId, updatedAt: now, lastUpdatedBy }));
+    }
+    if (nowSettingsDirty || shouldForce) {
+      writePromises.push(setDoc(docSettingsRef, { teamUrl, adminUrl, seriesUrl, customFormations, pinnedFormationIds, trainingSettings, activeExerciseId, updatedAt: now, lastUpdatedBy }));
     }
 
+    if (writePromises.length === 0) {
+      console.log("App: No dirty data segments to push.");
+      setSessionActionCount(0);
+      return;
+    }
+
+    await Promise.all(writePromises);
+    lastSyncedAtRef.current = now;
+    syncUserIdRef.current = user.uid;
+    lastCloudDataRef.current = {
+      squad,
+      exercises,
+      sessions,
+      deletedSessions,
+      lineups,
+      activeLineupId,
+      periods,
+      currentPeriodId,
+      activeExerciseId,
+      teamUrl,
+      adminUrl,
+      seriesUrl,
+      customFormations,
+      pinnedFormationIds,
+      trainingSettings,
+      exerciseBank,
+      exerciseBankCategories
+    };
+    setSessionActionCount(0);
+    setPrefixedItem('last_local_sync_at', now.toString(), user);
+    setIsQuotaExceeded(false);
+    setSyncError(null);
+    console.log("App: Push successful for segments:", writePromises.length);
+  };
+
+  // Helper to fetch all segmented cloud docs to merge into local state
+  const pullLatestData = async () => {
+    if (!user || !isProfileLoaded || isSyncingRef.current) return;
+    setSyncingStatus(true);
+
     try {
+      // If local unsaved edits exist (sessionActionCount > 0), 
+      // first flush them to the cloud so they are not lost before pulling!
+      if (sessionActionCountRef.current > 0) {
+        console.log("App: Local unsaved changes exist (sessionActionCount > 0). Flushing local changes to cloud first...");
+        try {
+          await pushDirtySegments(true);
+        } catch (pushErr) {
+          console.warn("App: Could not flush local edits before pull:", pushErr);
+        }
+      }
+
       console.log("App: Manually pulling segmented data from cloud with forceRefresh...");
-      setIsSyncing(true);
       const { docSquadRef, docSessionsRef, docExercisesRef, docLineupsRef, docPeriodsRef, docSettingsRef } = getDocRefs(user, userProfile);
 
       const [squadSnap, sessionsSnap, exercisesSnap, lineupsSnap, periodsSnap, settingsSnap] = await Promise.all([
@@ -1288,7 +1383,7 @@ export default function App() {
       }
       handleFirestoreError(err, OperationType.GET, `users/${user.uid}/data/*`);
     } finally {
-      setIsSyncing(false);
+      setSyncingStatus(false);
     }
   };
 
@@ -1654,8 +1749,9 @@ export default function App() {
 
   // Push Local Actions to Cloud with dynamic debounce and granular dirty tracking
   useEffect(() => {
-    if (view === 'exercise') {
-      // Skip auto-sync while actively in competition view
+    if (view === 'exercise' || activeExerciseId !== null) {
+      // Skip auto-sync while actively in competition / exercise view or while an exercise is actively running.
+      // Point updates and live timer changes stay responsive locally and will only sync to Firebase when the moment is finished or exited!
       return;
     }
 
@@ -1663,82 +1759,18 @@ export default function App() {
       if (syncUserIdRef.current && syncUserIdRef.current !== user.uid) return;
       syncUserIdRef.current = user.uid;
 
-      const debounceDelay = 2000; // Fast 2s debounce to reliably save all changes 2 seconds after user finishes editing
+      const debounceDelay = 4000; // 4s debounce so typing/planning changes don't send excessive rapid requests to cloud
 
       const syncData = async () => {
-        if (!user || (syncUserIdRef.current && syncUserIdRef.current !== user.uid) || isSyncing) return;
+        if (!user || (syncUserIdRef.current && syncUserIdRef.current !== user.uid) || isSyncingRef.current) return;
 
-        const capturedActionCount = sessionActionCount;
-
-        // Re-evaluate dirty states at sync time
-        const currentSynced = lastCloudDataRef.current;
-        const nowSquadDirty = !currentSynced || JSON.stringify(currentSynced.squad) !== JSON.stringify(squad);
-        const nowSessionsDirty = !currentSynced || JSON.stringify(currentSynced.sessions) !== JSON.stringify(sessions) || JSON.stringify(currentSynced.deletedSessions) !== JSON.stringify(deletedSessions);
-        const nowExercisesDirty = !currentSynced || JSON.stringify(currentSynced.exercises) !== JSON.stringify(exercises) || JSON.stringify(currentSynced.exerciseBank) !== JSON.stringify(exerciseBank) || JSON.stringify(currentSynced.exerciseBankCategories) !== JSON.stringify(exerciseBankCategories);
-        const nowLineupsDirty = !currentSynced || JSON.stringify(currentSynced.lineups) !== JSON.stringify(lineups) || currentSynced.activeLineupId !== activeLineupId;
-        const nowPeriodsDirty = !currentSynced || JSON.stringify(currentSynced.periods) !== JSON.stringify(periods) || currentSynced.currentPeriodId !== currentPeriodId;
-        const nowSettingsDirty = !currentSynced || currentSynced.teamUrl !== teamUrl || currentSynced.adminUrl !== adminUrl || currentSynced.seriesUrl !== seriesUrl || JSON.stringify(currentSynced.customFormations) !== JSON.stringify(customFormations) || JSON.stringify(currentSynced.pinnedFormationIds) !== JSON.stringify(pinnedFormationIds) || JSON.stringify(currentSynced.trainingSettings) !== JSON.stringify(trainingSettings) || currentSynced.activeExerciseId !== activeExerciseId;
-
-        const writePromises = [];
-        const now = Date.now();
-        const lastUpdatedBy = sessionIdRef.current;
-        const { docSquadRef, docSessionsRef, docExercisesRef, docLineupsRef, docPeriodsRef, docSettingsRef } = getDocRefs(user, userProfile);
-
-        if (nowSquadDirty) {
-          writePromises.push(setDoc(docSquadRef, { squad, updatedAt: now, lastUpdatedBy }));
-        }
-        if (nowSessionsDirty) {
-          writePromises.push(setDoc(docSessionsRef, { sessions, deletedSessions, updatedAt: now, lastUpdatedBy }));
-        }
-        if (nowExercisesDirty) {
-          writePromises.push(setDoc(docExercisesRef, { exercises, exerciseBank, exerciseBankCategories, updatedAt: now, lastUpdatedBy }));
-        }
-        if (nowLineupsDirty) {
-          writePromises.push(setDoc(docLineupsRef, { lineups, activeLineupId, updatedAt: now, lastUpdatedBy }));
-        }
-        if (nowPeriodsDirty) {
-          writePromises.push(setDoc(docPeriodsRef, { periods, currentPeriodId, updatedAt: now, lastUpdatedBy }));
-        }
-        if (nowSettingsDirty) {
-          writePromises.push(setDoc(docSettingsRef, { teamUrl, adminUrl, seriesUrl, customFormations, pinnedFormationIds, trainingSettings, activeExerciseId, updatedAt: now, lastUpdatedBy }));
-        }
-
-        if (writePromises.length === 0) {
-          console.log("App: No dirty segments to sync, skipping push.");
-          setSessionActionCount(prev => Math.max(0, prev - capturedActionCount));
-          return;
-        }
-
-        console.log(`App: Syncing ${writePromises.length} dirty segments to cloud. Debounce used: ${debounceDelay}ms`);
-        setIsSyncing(true);
+        console.log(`App: Auto-syncing dirty segments to cloud. Debounce used: ${debounceDelay}ms`);
+        setSyncingStatus(true);
 
         try {
-          await Promise.all(writePromises);
-          lastSyncedAtRef.current = now;
-          lastCloudDataRef.current = {
-            squad,
-            exercises,
-            sessions,
-            deletedSessions,
-            lineups,
-            activeLineupId,
-            periods,
-            currentPeriodId,
-            activeExerciseId,
-            teamUrl,
-            adminUrl,
-            seriesUrl,
-            customFormations,
-            pinnedFormationIds,
-            trainingSettings,
-            exerciseBank,
-            exerciseBankCategories
-          };
-          setSessionActionCount(prev => Math.max(0, prev - capturedActionCount));
-          setIsQuotaExceeded(false);
-          setSyncError(null);
+          await pushDirtySegments();
         } catch (error) {
-          console.error("App: Segmented push failed", error);
+          console.error("App: Auto-sync push failed", error);
           if (isQuotaError(error)) {
             setIsQuotaExceeded(true);
             setSessionActionCount(0);
@@ -1747,7 +1779,7 @@ export default function App() {
           }
           handleFirestoreError(error, OperationType.WRITE, `users/${user.uid}/data/*`);
         } finally {
-          setIsSyncing(false);
+          setSyncingStatus(false);
         }
       };
 
@@ -2713,90 +2745,22 @@ export default function App() {
   };
 
   const handleManualPush = async () => {
-    if (!user || isSyncing) return;
-    setIsSyncing(true);
-    const now = Date.now();
-    const lastUpdatedBy = sessionIdRef.current;
-    
-    const currentSynced = lastCloudDataRef.current || INITIAL_DATA;
-    const nowSquadDirty = JSON.stringify(currentSynced.squad) !== JSON.stringify(squad);
-    const nowSessionsDirty = JSON.stringify(currentSynced.sessions) !== JSON.stringify(sessions) || JSON.stringify(currentSynced.deletedSessions) !== JSON.stringify(deletedSessions);
-    const nowExercisesDirty = JSON.stringify(currentSynced.exercises) !== JSON.stringify(exercises) || JSON.stringify(currentSynced.exerciseBank) !== JSON.stringify(exerciseBank) || JSON.stringify(currentSynced.exerciseBankCategories) !== JSON.stringify(exerciseBankCategories);
-    const nowLineupsDirty = JSON.stringify(currentSynced.lineups) !== JSON.stringify(lineups) || currentSynced.activeLineupId !== activeLineupId;
-    const nowPeriodsDirty = JSON.stringify(currentSynced.periods) !== JSON.stringify(periods) || currentSynced.currentPeriodId !== currentPeriodId;
-    const nowSettingsDirty = currentSynced.teamUrl !== teamUrl || currentSynced.adminUrl !== adminUrl || currentSynced.seriesUrl !== seriesUrl || JSON.stringify(currentSynced.customFormations) !== JSON.stringify(customFormations) || JSON.stringify(currentSynced.pinnedFormationIds) !== JSON.stringify(pinnedFormationIds) || JSON.stringify(currentSynced.trainingSettings) !== JSON.stringify(trainingSettings) || currentSynced.activeExerciseId !== activeExerciseId;
-
-    const writePromises = [];
-    const { docSquadRef, docSessionsRef, docExercisesRef, docLineupsRef, docPeriodsRef, docSettingsRef } = getDocRefs(user, userProfile);
-
-    if (nowSquadDirty) {
-      writePromises.push(setDoc(docSquadRef, { squad, updatedAt: now, lastUpdatedBy }));
-    }
-    if (nowSessionsDirty) {
-      writePromises.push(setDoc(docSessionsRef, { sessions, deletedSessions, updatedAt: now, lastUpdatedBy }));
-    }
-    if (nowExercisesDirty) {
-      writePromises.push(setDoc(docExercisesRef, { exercises, exerciseBank, exerciseBankCategories, updatedAt: now, lastUpdatedBy }));
-    }
-    if (nowLineupsDirty) {
-      writePromises.push(setDoc(docLineupsRef, { lineups, activeLineupId, updatedAt: now, lastUpdatedBy }));
-    }
-    if (nowPeriodsDirty) {
-      writePromises.push(setDoc(docPeriodsRef, { periods, currentPeriodId, updatedAt: now, lastUpdatedBy }));
-    }
-    if (nowSettingsDirty) {
-      writePromises.push(setDoc(docSettingsRef, { teamUrl, adminUrl, seriesUrl, customFormations, pinnedFormationIds, trainingSettings, activeExerciseId, updatedAt: now, lastUpdatedBy }));
-    }
-
-    if (writePromises.length === 0) {
-      console.log("App: No dirty data segments to push.");
-      setSessionActionCount(0);
-      setIsSyncing(false);
-      return;
-    }
+    if (!user || isSyncingRef.current) return;
+    setSyncingStatus(true);
 
     try {
-      await Promise.all(writePromises);
-      lastSyncedAtRef.current = now;
-      syncUserIdRef.current = user.uid;
-      lastCloudDataRef.current = {
-        squad,
-        exercises,
-        sessions,
-        deletedSessions,
-        lineups,
-        activeLineupId,
-        periods,
-        currentPeriodId,
-        activeExerciseId,
-        teamUrl,
-        adminUrl,
-        seriesUrl,
-        customFormations,
-        pinnedFormationIds,
-        trainingSettings,
-        exerciseBank,
-        exerciseBankCategories
-      };
-      setSessionActionCount(0); // Reset after manual push
-      setPrefixedItem('last_local_sync_at', now.toString(), user);
-      setIsQuotaExceeded(false); // Reset status on success
-      setSyncError(null); // Reset sync error on success
-      console.log("App: Manual push successful");
+      await pushDirtySegments();
+      console.log("App: Manual push completed successfully");
     } catch (error: any) {
       console.error("App: Manual push failed", error);
       if (isQuotaError(error)) {
         setIsQuotaExceeded(true);
       } else {
         setSyncError(error?.message || "Synkronisering misslyckades");
-        let errorMsg = "Synkronisering misslyckades.";
-        if (error?.code === 'permission-denied') errorMsg += " Behörighet saknas.";
-        else errorMsg += " Kontrollera din internetanslutning.";
-        alert(errorMsg);
       }
       handleFirestoreError(error, OperationType.WRITE, `users/${user.uid}/data/*`);
     } finally {
-      setIsSyncing(false);
+      setSyncingStatus(false);
     }
   };
 
@@ -3146,20 +3110,30 @@ export default function App() {
       )}
 
       {isQuotaExceeded && (
-        <div className="bg-amber-500 text-white px-4 py-2.5 text-center text-xs font-bold leading-normal flex items-center justify-center gap-2 relative z-50 animate-fade-in print:hidden border-b border-amber-600">
-          <AlertTriangle size={14} className="shrink-0" />
+        <div className="bg-amber-600 text-white px-4 py-3 text-center text-xs font-semibold leading-normal flex flex-wrap items-center justify-center gap-2 relative z-50 animate-fade-in print:hidden border-b border-amber-700 shadow-md">
+          <AlertTriangle size={16} className="shrink-0 text-amber-200 animate-pulse" />
           <span>
-            Synkning tillfälligt pausad (molndatabasens dygnsgräns är nådd). Allt sparas säkert lokalt i webbläsaren!
+            <strong>Obs:</strong> Molndatabasens dagliga gratiskvot i Firebase (50 000 anrop) har nåtts för idag. <strong>All din data, alla lag och konton är säkert sparade i Firebase</strong> och inte raderade! Kvoten nollställs automatiskt nästa dygn.
           </span>
-          <button
-            onClick={() => {
-              setIsQuotaExceeded(false);
-              setSessionActionCount(1); // Triggers backup push
-            }}
-            className="underline hover:no-underline font-black cursor-pointer ml-2 px-2 py-0.5 bg-white/10 hover:bg-white/20 rounded transition-all"
-          >
-            Försök igen
-          </button>
+          <div className="flex items-center gap-2 ml-1">
+            <a
+              href="https://console.firebase.google.com/project/tuned-life-pmvz5/firestore/databases/ai-studio-remixcoachassist-3ac8f9c7-729f-4797-87b6-4c498370756c/data?openUpgradeDialog=true"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="px-2.5 py-1 bg-white text-amber-900 hover:bg-amber-50 font-bold rounded text-[11px] uppercase tracking-wide transition-all shadow-sm"
+            >
+              Uppgradera i Firebase &rarr;
+            </a>
+            <button
+              onClick={() => {
+                setIsQuotaExceeded(false);
+                setSessionActionCount(1);
+              }}
+              className="underline hover:no-underline font-medium cursor-pointer px-2 py-0.5 bg-black/20 hover:bg-black/30 rounded transition-all text-white text-[11px]"
+            >
+              Försök igen
+            </button>
+          </div>
         </div>
       )}
 
@@ -3711,10 +3685,66 @@ export default function App() {
                 }`}
               >
               {(() => {
-                const exerciseSession = activeExercise.sessionId ? sessions.find(s => s.id === activeExercise.sessionId) : null;
+                const exerciseSession = (activeSessionId ? sessions.find(s => s.id === activeSessionId && s.moments?.some(m => m.exerciseId === activeExercise.id)) : null)
+                  || (activeExercise.sessionId ? sessions.find(s => s.id === activeExercise.sessionId) : null)
+                  || sessions.find(s => s.moments && s.moments.some(m => m.exerciseId === activeExercise.id))
+                  || (activeSessionId ? sessions.find(s => s.id === activeSessionId) : null)
+                  || null;
+
                 const guestsForExercise = exerciseSession?.guestPlayers || [];
                 const combinedExerciseSquad = [...squad, ...guestsForExercise];
                 const jokers = Array.from(new Set(activeExercise.jokerPlayerIds || []));
+
+                // Find linked moment and calculate start/end time and duration
+                let momentSchedule: { duration: number; timeRange: string; sessionTitle?: string } | null = null;
+                if (exerciseSession && exerciseSession.moments && exerciseSession.moments.length > 0) {
+                  let momentIndex = exerciseSession.moments.findIndex(m => m.exerciseId === activeExercise.id);
+                  if (momentIndex === -1) {
+                    momentIndex = exerciseSession.moments.findIndex(m =>
+                      m.name && activeExercise.name && (
+                        m.name.trim().toLowerCase() === activeExercise.name.trim().toLowerCase() ||
+                        activeExercise.name.trim().toLowerCase().startsWith(m.name.trim().toLowerCase())
+                      )
+                    );
+                  }
+
+                  if (momentIndex !== -1) {
+                    const moment = exerciseSession.moments[momentIndex];
+                    const duration = Number(moment.duration) || 0;
+                    let startTimeStr = '';
+                    let endTimeStr = '';
+
+                    if (exerciseSession.startTime) {
+                      let currentMinutes = 0;
+                      const [startH, startM] = exerciseSession.startTime.split(':').map(Number);
+                      if (!isNaN(startH) && !isNaN(startM)) {
+                        const startDate = exerciseSession.date ? new Date(exerciseSession.date) : new Date();
+                        startDate.setHours(startH, startM, 0, 0);
+
+                        for (let i = 0; i < exerciseSession.moments.length; i++) {
+                          const m = exerciseSession.moments[i];
+                          const mDur = Number(m.duration) || 0;
+                          if (i === momentIndex) {
+                            const momentStart = new Date(startDate.getTime() + currentMinutes * 60000);
+                            const momentEnd = new Date(momentStart.getTime() + mDur * 60000);
+                            startTimeStr = momentStart.toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' });
+                            endTimeStr = momentEnd.toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' });
+                            break;
+                          }
+                          currentMinutes += mDur;
+                        }
+                      }
+                    }
+
+                    if (duration > 0 || (startTimeStr && endTimeStr)) {
+                      momentSchedule = {
+                        duration,
+                        timeRange: (startTimeStr && endTimeStr) ? `${startTimeStr}–${endTimeStr}` : '',
+                        sessionTitle: exerciseSession.title
+                      };
+                    }
+                  }
+                }
                 
                 return (
                   <div className={`shrink-0 flex flex-col items-center transition-all duration-300 ${
@@ -3722,10 +3752,26 @@ export default function App() {
                   }`}>
                     {/* Tävlingsmomentets namn i väldigt liten tunn stil precis under toppmenyn (döljs när timern är igång så bara timer & poäng syns) */}
                     {!isTimerRunning && (
-                      <div className="text-center px-4 -mt-0.5 mb-0.5 select-none transition-opacity duration-300">
-                        <span className="text-[11px] sm:text-xs font-light tracking-wider text-zinc-400 dark:text-zinc-500">
+                      <div className="text-center px-4 -mt-0.5 mb-0.5 select-none transition-opacity duration-300 flex items-center justify-center gap-1.5 flex-nowrap overflow-hidden text-ellipsis whitespace-nowrap">
+                        <span className="text-[11px] sm:text-xs font-semibold tracking-wide text-zinc-700 dark:text-zinc-200 truncate">
                           {activeExercise.name}
                         </span>
+                        {momentSchedule && (
+                          <span 
+                            className="text-[10px] sm:text-[11px] font-medium tracking-wide text-zinc-600 dark:text-zinc-300 shrink-0 inline-flex items-center gap-1.5"
+                            title={`Pass: ${momentSchedule.sessionTitle || 'Träningspass'}${momentSchedule.duration ? ` • Längd: ${momentSchedule.duration} min` : ''}${momentSchedule.timeRange ? ` • Tid: ${momentSchedule.timeRange}` : ''}`}
+                          >
+                            <span className="text-zinc-400 dark:text-zinc-500 select-none">•</span>
+                            {momentSchedule.duration > 0 && (
+                              <span className="font-semibold text-zinc-800 dark:text-zinc-100">{momentSchedule.duration} min</span>
+                            )}
+                            {momentSchedule.timeRange && (
+                              <span className="text-zinc-600 dark:text-zinc-400 font-medium">
+                                ({momentSchedule.timeRange})
+                              </span>
+                            )}
+                          </span>
+                        )}
                       </div>
                     )}
 

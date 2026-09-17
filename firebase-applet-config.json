@@ -7,5 +7,6 @@
   "storageBucket": "tuned-life-pmvz5.firebasestorage.app",
   "messagingSenderId": "977076448383",
   "measurementId": "",
-  "oAuthClientId": "977076448383-4ecbh5mnjimh9u7hr1ga1p1ov62i65pj.apps.googleusercontent.com"
+  "oAuthClientId": "977076448383-4ecbh5mnjimh9u7hr1ga1p1ov62i65pj.apps.googleusercontent.com",
+  "recaptchaSiteKey": ""
 }

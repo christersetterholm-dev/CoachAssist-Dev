@@ -578,6 +578,18 @@ export const signInWithGoogle = async (_forceSelect = false): Promise<User> => {
         const resData = await response.json();
 
         if (!response.ok) {
+          if (response.status === 429 || resData.code === 'RESOURCE_EXHAUSTED' || (resData.error && resData.error.toLowerCase().includes('kvot'))) {
+            const upUrl = resData.upgradeUrl || 'https://console.firebase.google.com/project/tuned-life-pmvz5/firestore/databases/ai-studio-remixcoachassist-3ac8f9c7-729f-4797-87b6-4c498370756c/data?openUpgradeDialog=true';
+            errorDiv.innerHTML = `
+              <div class="space-y-1">
+                <p class="font-bold text-amber-300">Firebase dygnsgräns nådd (50 000 läsningar)</p>
+                <p class="text-xs text-amber-100">${resData.error || 'Dina konton och data är säkra i molnet, men inloggningen är tillfälligt pausad tills kvoten nollställs imorgon.'}</p>
+                <a href="${upUrl}" target="_blank" rel="noopener noreferrer" class="inline-block mt-1 text-xs text-amber-200 underline hover:text-white">Öppna Firebase Console för uppgradering &rarr;</a>
+              </div>
+            `;
+            errorDiv.classList.remove('hidden');
+            return;
+          }
           throw new Error(resData.error || 'Åtgärden misslyckades');
         }
 
@@ -653,6 +665,21 @@ const initializeSession = async () => {
 };
 initializeSession();
 
+// Helper for safe fetch with timeout to prevent hung promises
+const fetchWithTimeout = async (url: string, options: RequestInit = {}, timeoutMs = 12000): Promise<Response> => {
+  const controller = new AbortController();
+  const id = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(url, {
+      ...options,
+      signal: options.signal || controller.signal
+    });
+    return res;
+  } finally {
+    clearTimeout(id);
+  }
+};
+
 // Firestore Client-Side Emulation
 export const doc = (_dbObj: any, ...parts: string[]) => {
   return { path: parts.join('/') };
@@ -677,11 +704,19 @@ export const getDoc = async (docRef: { path: string }, options?: { forceRefresh?
   }
 
   try {
-    const res = await fetch(getApiUrl(`/api/docs?${queryParams.toString()}`), {
+    const res = await fetchWithTimeout(getApiUrl(`/api/docs?${queryParams.toString()}`), {
       headers
-    });
+    }, 12000);
 
     if (!res.ok) {
+      if (res.status === 429) {
+        const errData = await res.json().catch(() => ({}));
+        const quotaErr: any = new Error(errData.message || errData.error || "Quota exceeded for quota metric 'Free daily read units per project (free tier database)'");
+        quotaErr.code = 'resource-exhausted';
+        quotaErr.status = 429;
+        quotaErr.upgradeUrl = errData.upgradeUrl;
+        throw quotaErr;
+      }
       if (res.status === 404 || res.status === 401 || res.status === 403) {
         return { exists: () => false, data: () => null };
       }
@@ -693,7 +728,10 @@ export const getDoc = async (docRef: { path: string }, options?: { forceRefresh?
       exists: () => true,
       data: () => data
     };
-  } catch (err) {
+  } catch (err: any) {
+    if (err.status === 429 || err.code === 'resource-exhausted' || (err.message && err.message.toLowerCase().includes('quota'))) {
+      throw err;
+    }
     console.warn(`[getDoc] Could not load doc ${docRef.path}:`, err);
     return { exists: () => false, data: () => null };
   }
@@ -708,14 +746,15 @@ export const setDoc = async (docRef: { path: string }, data: any, _options?: { m
     headers['Authorization'] = `Bearer ${token}`;
   }
 
-  const res = await fetch(getApiUrl(`/api/docs?path=${encodeURIComponent(docRef.path)}`), {
+  const res = await fetchWithTimeout(getApiUrl(`/api/docs?path=${encodeURIComponent(docRef.path)}`), {
     method: 'POST',
     headers,
     body: JSON.stringify({ data })
-  });
+  }, 12000);
 
   if (!res.ok) {
-    throw new Error('Failed to save doc');
+    const errBody = await res.json().catch(() => ({}));
+    throw new Error(errBody.error || `Failed to save doc (${res.status})`);
   }
 };
 
@@ -726,10 +765,10 @@ export const deleteDoc = async (docRef: { path: string }) => {
     headers['Authorization'] = `Bearer ${token}`;
   }
 
-  const res = await fetch(getApiUrl(`/api/docs?path=${encodeURIComponent(docRef.path)}`), {
+  const res = await fetchWithTimeout(getApiUrl(`/api/docs?path=${encodeURIComponent(docRef.path)}`), {
     method: 'DELETE',
     headers
-  });
+  }, 12000);
 
   if (!res.ok && res.status !== 404) {
     throw new Error('Failed to delete doc');
@@ -748,9 +787,9 @@ export const getDocs = async (collectionRef: { path: string }) => {
   }
 
   try {
-    const res = await fetch(getApiUrl(`/api/docs?path=${encodeURIComponent(collectionRef.path)}`), {
+    const res = await fetchWithTimeout(getApiUrl(`/api/docs?path=${encodeURIComponent(collectionRef.path)}`), {
       headers
-    });
+    }, 12000);
 
     if (!res.ok) {
       return { docs: [], size: 0, empty: true, forEach: () => {} };
@@ -779,11 +818,13 @@ export const getDocs = async (collectionRef: { path: string }) => {
 // Simulated Firestore Live Polling Listener (onSnapshot)
 export const onSnapshot = (docRef: { path: string }, callback: (snapshot: any) => void, _errorCallback?: (error: any) => void) => {
   let isStopped = false;
+  let intervalId: any = null;
   
   const poll = async () => {
     if (isStopped) return;
+    if (typeof document !== 'undefined' && document.hidden) return; // Skip if tab is hidden
     try {
-      const snap = await getDoc(docRef, { forceRefresh: true });
+      const snap = await getDoc(docRef, { forceRefresh: false });
       if (!isStopped) {
         callback({
           exists: () => snap.exists(),
@@ -791,20 +832,27 @@ export const onSnapshot = (docRef: { path: string }, callback: (snapshot: any) =
           metadata: { hasPendingWrites: false }
         });
       }
-    } catch (e) {
-      console.error("Error polling snapshot for " + docRef.path, e);
+    } catch (e: any) {
+      console.warn("Snapshot polling notice for " + docRef.path + ":", e?.message || e);
       if (_errorCallback) {
         _errorCallback(e);
+      }
+      // If quota exceeded, don't spam polling
+      const msg = (e?.message || String(e)).toLowerCase();
+      if (e?.code === 'resource-exhausted' || msg.includes('quota')) {
+        clearInterval(intervalId);
+        // Retry gently in 5 minutes
+        intervalId = setInterval(poll, 300000);
       }
     }
   };
   
   poll();
-  const interval = setInterval(poll, 8000);
+  intervalId = setInterval(poll, 60000); // 60 seconds interval instead of 8 seconds
   
   return () => {
     isStopped = true;
-    clearInterval(interval);
+    if (intervalId) clearInterval(intervalId);
   };
 };
 
