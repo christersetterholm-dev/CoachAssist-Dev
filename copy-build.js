@@ -40,13 +40,9 @@ function copyRecursiveSync(src, dest, skipIndexHtml = false) {
 
 console.log('Copying build output from dist to public and root directory for direct Apache/Passenger static hosting...');
 if (fs.existsSync(srcDir)) {
-  // 1. Copy to public/ (keep index.html here for static preview / hosting)
-  copyRecursiveSync(srcDir, destDir, false);
+  // 1. Copy to public/ (skip index.html so Vite dev server uses root index.html)
+  copyRecursiveSync(srcDir, destDir, true);
   console.log('Successfully copied all assets to public/!');
-  
-  // 2. Copy to application root (so Apache can serve assets directly from /assets, but skip index.html to avoid breaking source)
-  copyRecursiveSync(srcDir, __dirname, true);
-  console.log('Successfully copied all assets to application root (skipping index.html)!');
 } else {
   console.error('dist/ folder not found. Make sure vite build ran successfully.');
 }

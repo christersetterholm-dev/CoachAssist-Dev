@@ -3506,26 +3506,32 @@ async function startServer() {
   // --- VITE AND SPA SERVING ---
 
   if (!isProduction) {
-    // In dev mode, handle root GET html requests to inject custom app name into index.html
-    app.get(['/', '/index.html'], (req, res, next) => {
-      const accept = req.headers.accept || '';
-      if (req.method === 'GET' && accept.includes('text/html')) {
-        const rootIndex = path.join(process.cwd(), 'index.html');
-        if (fs.existsSync(rootIndex)) {
-          let html = fs.readFileSync(rootIndex, 'utf-8');
-          html = injectPwaMetaToHtml(html);
-          res.setHeader('Content-Type', 'text/html; charset=utf-8');
-          return res.send(html);
-        }
-      }
-      next();
-    });
-
     const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: 'spa',
     });
+
+    // In dev mode, handle root GET html requests to inject custom app name into index.html WITH Vite transforms
+    app.get(['/', '/index.html'], async (req, res, next) => {
+      const accept = req.headers.accept || '';
+      if (req.method === 'GET' && accept.includes('text/html')) {
+        try {
+          const rootIndex = path.join(process.cwd(), 'index.html');
+          if (fs.existsSync(rootIndex)) {
+            let html = fs.readFileSync(rootIndex, 'utf-8');
+            html = injectPwaMetaToHtml(html);
+            html = await vite.transformIndexHtml(req.originalUrl || '/', html);
+            res.setHeader('Content-Type', 'text/html; charset=utf-8');
+            return res.send(html);
+          }
+        } catch (e) {
+          return next(e);
+        }
+      }
+      next();
+    });
+
     app.use(vite.middlewares);
   } else {
     const distPath = _dirname;

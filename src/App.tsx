@@ -802,6 +802,7 @@ export default function App() {
 
   // Track if the exercise timer is currently running
   const [isTimerRunning, setIsTimerRunning] = useState<boolean>(false);
+  const [draggedPlayerId, setDraggedPlayerId] = useState<string | null>(null);
 
   useEffect(() => {
     if (view !== 'exercise' || !activeExerciseId) {
@@ -3232,8 +3233,6 @@ export default function App() {
     });
     setSessionActionCount(prev => prev + 1);
   };
-
-  const [draggedPlayerId, setDraggedPlayerId] = useState<string | null>(null);
 
   const sortedScores = activeExercise ? Array.from(new Set(activeExercise.teams.map(t => t.score))).sort((a: number, b: number) => b - a) : [];
 
