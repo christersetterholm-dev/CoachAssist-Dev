@@ -2,6 +2,7 @@ import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { Calendar, Clock, MapPin, Search, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, ExternalLink, RefreshCw, Trophy, HelpCircle, FileText, CheckCircle, ArrowRight, Plus, Trash2, EyeOff, X } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { TrainingSession, SquadPlayer } from '../types';
+import { categorizeSession } from '../utils/sessionCategory';
 
 const SWEDISH_WEEKDAYS = ['Sön', 'Mån', 'Tis', 'Ons', 'Tor', 'Fre', 'Lör'];
 
@@ -80,6 +81,8 @@ interface MobileCalendarViewProps {
   lastSyncedAt?: number;
   icsUrl?: string;
   onOpenSettings?: () => void;
+  currentMonth?: Date;
+  onMonthChange?: (month: Date) => void;
 }
 
 export default function MobileCalendarView({
@@ -100,7 +103,9 @@ export default function MobileCalendarView({
   onDismissSyncMessage,
   lastSyncedAt,
   icsUrl: _icsUrl,
-  onOpenSettings: _onOpenSettings
+  onOpenSettings: _onOpenSettings,
+  currentMonth: propCurrentMonth,
+  onMonthChange
 }: MobileCalendarViewProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [activeFilter, setActiveFilter] = useState<'all' | 'match' | 'training' | 'other'>('all');
@@ -133,16 +138,22 @@ export default function MobileCalendarView({
       // Ignore
     }
   }, [viewMode]);
-  const [currentMonth, setCurrentMonth] = useState(() => {
+  const [internalMonth, setInternalMonth] = useState<Date>(() => {
+    if (propCurrentMonth) return propCurrentMonth;
     const now = new Date();
-    const futureEvents = sessions.filter(s => !s.isIgnored && s.date >= now.getTime());
-    if (futureEvents.length > 0) {
-      const sorted = [...futureEvents].sort((a, b) => a.date - b.date);
-      const nearestDate = new Date(sorted[0].date);
-      return new Date(nearestDate.getFullYear(), nearestDate.getMonth(), 1);
-    }
     return new Date(now.getFullYear(), now.getMonth(), 1);
   });
+
+  const currentMonth = propCurrentMonth || internalMonth;
+
+  const handleMonthChange = (newMonth: Date) => {
+    if (onMonthChange) {
+      onMonthChange(newMonth);
+    } else {
+      setInternalMonth(newMonth);
+    }
+    setExpandedEventId(null);
+  };
   const [expandedEventId, setExpandedEventId] = useState<string | null>(null);
   const [showPlanMenu, setShowPlanMenu] = useState(false);
   const planMenuRef = useRef<HTMLDivElement>(null);
@@ -160,49 +171,16 @@ export default function MobileCalendarView({
   }, []);
 
   const handlePrevMonth = () => {
-    setCurrentMonth(prev => new Date(prev.getFullYear(), prev.getMonth() - 1, 1));
-    setExpandedEventId(null);
+    handleMonthChange(new Date(currentMonth.getFullYear(), currentMonth.getMonth() - 1, 1));
   };
 
   const handleNextMonth = () => {
-    setCurrentMonth(prev => new Date(prev.getFullYear(), prev.getMonth() + 1, 1));
-    setExpandedEventId(null);
+    handleMonthChange(new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 1));
   };
 
   const handleResetToToday = () => {
     const now = new Date();
-    setCurrentMonth(new Date(now.getFullYear(), now.getMonth(), 1));
-    setExpandedEventId(null);
-  };
-
-  // Helper to categorize sessions based on title and metadata
-  const categorizeSession = (session: TrainingSession): 'match' | 'training' | 'other' => {
-    const title = (session.title || '').trim().toLowerCase();
-    if (!title) {
-      return 'training';
-    }
-    if (
-      title.includes('match') || 
-      title.includes('vs') || 
-      title.includes('mot') || 
-      title.includes('seriematch') || 
-      title.includes('cup') || 
-      title.includes('kval') || 
-      title.includes('träningsmatch')
-    ) {
-      return 'match';
-    }
-    if (
-      title.includes('träning') || 
-      title.includes('pass') || 
-      title.includes('fys') || 
-      title.includes('praktik') || 
-      title.includes('istid') || 
-      title.includes('poolspel')
-    ) {
-      return 'training';
-    }
-    return 'other';
+    handleMonthChange(new Date(now.getFullYear(), now.getMonth(), 1));
   };
 
   // Filter and sort sessions

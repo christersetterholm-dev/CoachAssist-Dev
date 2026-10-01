@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { 
   CheckCircle2, 
   AlertTriangle, 
@@ -18,17 +18,23 @@ import {
   UserCheck,
   ExternalLink,
   Clipboard,
+  ClipboardPaste,
+  ClipboardCheck,
   UserPlus,
   CheckCheck,
   RotateCcw,
   Trash2,
   Trophy,
   ArrowRight,
+  ChevronDown,
+  ChevronUp,
   X
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { TrainingSession, SquadPlayer, RsvpStatus, PlayerRsvp, SessionRsvpConfig, UserProfile } from '../types';
 import { CachedImage } from './CachedImage';
+import { findSquadMatch } from '../lib/teamUtils';
+import { isMatchSession } from '../utils/sessionCategory';
 
 interface SessionRsvpViewProps {
   session: TrainingSession;
@@ -52,19 +58,22 @@ function isValidPlayerName(name: string): boolean {
     return false;
   }
 
-  // 2. Exact match check for common status words or phrases
+  // 2. Exact match check for common noise words, status labels or copy-paste artifacts
   const blockedExact = [
-    'ja', 'nej', 'kanske', 'deltar', 'deltar ej', 'ej svarat', 'anmäld', 'reserv',
-    'kommentar', 'svara', 'obesvarad', 'status', 'tid', 'plats', 'anmäld', 'avanmäld',
-    'gäst', 'gästspelare', 'provspelare', 'ledare', 'tränare', 'spelare', 'ej svarat',
+    'ja', 'nej', 'kanske', 'deltar', 'deltar ej', 'ej svarat', 'anmäld', 'anmälda', 'reserv',
+    'kommentar', 'svara', 'obesvarad', 'obesvarade', 'status', 'tid', 'plats', 'avanmäld', 'avanmälda',
+    'gäst', 'gästspelare', 'provspelare', 'ledare', 'tränare', 'spelare', 'ej svarat', 'har inte svarat',
     'nej tack', 'skjuts', 'bil', 'bilar', 'platser', 'lediga', 'ja tack', 'platser kvar',
-    'platser lediga', 'förare', 'plats kvar', 'kör ej', 'kör', 'vill ha skjuts'
+    'platser lediga', 'förare', 'plats kvar', 'kör ej', 'kör', 'vill ha skjuts',
+    'den', 'det', 'de', 'och', 'av', 'att', 'inbjudna', 'kallade', 'kallad',
+    'deltagare', 'deltagit', 'datum', 'svar', 'svarat', 'svarade ej', 'inte svarat',
+    'ingen', 'alla', 'samling', 'match', 'träning', 'information'
   ];
   if (blockedExact.includes(lower)) {
     return false;
   }
 
-  // 3. Regular Expression patterns for status/driving/tickets etc.
+  // 3. Regular Expression patterns for status/driving/dates/times
   if (/\b\d+\s*(platser|plats|lediga|bilar|bil|skolkort|st|stycken)\b/i.test(lower)) {
     return false;
   }
@@ -73,6 +82,11 @@ function isValidPlayerName(name: string): boolean {
     return false;
   }
   if (lower.includes('platser') && (lower.includes('kvar') || lower.includes('lediga'))) {
+    return false;
+  }
+
+  // Reject date fragments like "den 24 maj", "24 aug", "18:00"
+  if (/^(den\s+)?\d{1,2}[\s./-](jan|feb|mar|apr|maj|jun|jul|aug|sep|okt|nov|dec|\d{1,2})/i.test(lower)) {
     return false;
   }
 
@@ -94,6 +108,38 @@ export const SessionRsvpView: React.FC<SessionRsvpViewProps> = ({
 }) => {
   const [filter, setFilter] = useState<'all' | 'present' | 'attending' | 'partial' | 'declined' | 'unanswered' | 'guests'>('all');
   const [searchQuery, setSearchQuery] = useState('');
+  const isMatch = useMemo(() => isMatchSession(session), [session]);
+
+  // Collapsible boxes states (persisted in localStorage for convenience)
+  const [isMatchBannerCollapsed, setIsMatchBannerCollapsed] = useState<boolean>(() => {
+    return localStorage.getItem('session_rsvp_match_banner_collapsed') === 'true';
+  });
+  const [isMyRsvpCollapsed, setIsMyRsvpCollapsed] = useState<boolean>(() => {
+    return localStorage.getItem('session_rsvp_myrsvp_collapsed') === 'true';
+  });
+  const [isToolsCollapsed, setIsToolsCollapsed] = useState<boolean>(() => {
+    return localStorage.getItem('session_rsvp_tools_collapsed') === 'true';
+  });
+  const [isInviteCollapsed, setIsInviteCollapsed] = useState<boolean>(() => {
+    return localStorage.getItem('session_rsvp_invite_collapsed') === 'true';
+  });
+
+  const areAllBoxesCollapsed = isMyRsvpCollapsed && isToolsCollapsed && (!session.rsvpConfig || isInviteCollapsed) && (!isMatch || isMatchBannerCollapsed);
+  const handleToggleAllBoxes = () => {
+    const next = !areAllBoxesCollapsed;
+    setIsMyRsvpCollapsed(next);
+    setIsToolsCollapsed(next);
+    setIsInviteCollapsed(next);
+    setIsMatchBannerCollapsed(next);
+    localStorage.setItem('session_rsvp_myrsvp_collapsed', String(next));
+    localStorage.setItem('session_rsvp_tools_collapsed', String(next));
+    localStorage.setItem('session_rsvp_invite_collapsed', String(next));
+    localStorage.setItem('session_rsvp_match_banner_collapsed', String(next));
+  };
+
+  const [showConfirmClearRsvps, setShowConfirmClearRsvps] = useState(false);
+  const [showConfirmClearAttendance, setShowConfirmClearAttendance] = useState(false);
+
   const [showInviteModal, setShowInviteModal] = useState(false);
   const [showAdminModal, setShowAdminModal] = useState(false);
   const [showPasteModal, setShowPasteModal] = useState(false);
@@ -120,6 +166,46 @@ export const SessionRsvpView: React.FC<SessionRsvpViewProps> = ({
 
   // Form states for paste mode
   const [pasteValue, setPasteValue] = useState<string>('');
+  const pasteTextareaRef = useRef<HTMLTextAreaElement>(null);
+  const [clipboardStatus, setClipboardStatus] = useState<'idle' | 'pasted' | 'failed'>('idle');
+
+  // Smoothly and reliably focus the textarea when the modal opens on both mobile and desktop
+  useEffect(() => {
+    if (showPasteModal) {
+      setClipboardStatus('idle');
+      const timer = setTimeout(() => {
+        if (pasteTextareaRef.current) {
+          pasteTextareaRef.current.focus();
+          const len = pasteTextareaRef.current.value.length;
+          pasteTextareaRef.current.setSelectionRange(len, len);
+        }
+      }, 70);
+      return () => clearTimeout(timer);
+    }
+  }, [showPasteModal]);
+
+  const handlePasteFromClipboard = async () => {
+    try {
+      if (navigator?.clipboard?.readText) {
+        const text = await navigator.clipboard.readText();
+        if (text && text.trim()) {
+          setPasteValue(text);
+          setClipboardStatus('pasted');
+          setTimeout(() => setClipboardStatus('idle'), 2500);
+          if (pasteTextareaRef.current) {
+            pasteTextareaRef.current.focus();
+          }
+          return;
+        }
+      }
+    } catch (err) {
+      console.warn('Clipboard readText failed or was blocked by browser:', err);
+      setClipboardStatus('failed');
+      setTimeout(() => setClipboardStatus('idle'), 3000);
+    }
+    // Fallback: focus textarea so user can paste via Cmd+V / Ctrl+V or long-press
+    pasteTextareaRef.current?.focus();
+  };
 
   // Form states for adding guest player
   const [guestName, setGuestName] = useState<string>('');
@@ -230,80 +316,6 @@ export const SessionRsvpView: React.FC<SessionRsvpViewProps> = ({
     return { attending, partial, declined, unanswered, total: safeSquad.length, presentCount };
   }, [safeSquad, rsvps, attendance]);
 
-  const playerStats = useMemo(() => {
-    const playersList = allMembers.filter(p => p.role !== 'leader');
-    
-    let attending = 0;
-    let partial = 0;
-    let declined = 0;
-    let unanswered = 0;
-    let present = 0;
-
-    playersList.forEach(p => {
-      const rsvp = rsvps[p.id];
-      if (!rsvp) {
-        unanswered++;
-      } else if (rsvp.status === 'attending') {
-        attending++;
-      } else if (rsvp.status === 'partial') {
-        partial++;
-      } else if (rsvp.status === 'declined') {
-        declined++;
-      }
-
-      if (attendance.includes(p.id)) {
-        present++;
-      }
-    });
-
-    return {
-      total: playersList.length,
-      attending,
-      partial,
-      declined,
-      unanswered,
-      present,
-      coming: attending + partial
-    };
-  }, [allMembers, rsvps, attendance]);
-
-  const leaderStats = useMemo(() => {
-    const leadersList = allMembers.filter(p => p.role === 'leader');
-    
-    let attending = 0;
-    let partial = 0;
-    let declined = 0;
-    let unanswered = 0;
-    let present = 0;
-
-    leadersList.forEach(p => {
-      const rsvp = rsvps[p.id];
-      if (!rsvp) {
-        unanswered++;
-      } else if (rsvp.status === 'attending') {
-        attending++;
-      } else if (rsvp.status === 'partial') {
-        partial++;
-      } else if (rsvp.status === 'declined') {
-        declined++;
-      }
-
-      if (attendance.includes(p.id)) {
-        present++;
-      }
-    });
-
-    return {
-      total: leadersList.length,
-      attending,
-      partial,
-      declined,
-      unanswered,
-      present,
-      coming: attending + partial
-    };
-  }, [allMembers, rsvps, attendance]);
-
   // Toggle individual presence
   const handleTogglePresence = (id: string) => {
     if (!id) return;
@@ -362,7 +374,22 @@ export const SessionRsvpView: React.FC<SessionRsvpViewProps> = ({
       attendance: [],
       updatedAt: Date.now()
     });
+    setShowConfirmClearAttendance(false);
     setSavedToast('Närvarolistan har rensats.');
+    setTimeout(() => setSavedToast(null), 3000);
+  };
+
+  // Clear all RSVPs / registrations
+  const handleClearRsvps = () => {
+    onUpdateSession({
+      ...session,
+      rsvps: {},
+      updatedAt: Date.now()
+    });
+    setMyStatus(null);
+    setMyComment('');
+    setShowConfirmClearRsvps(false);
+    setSavedToast('Alla anmälningar har rensats för detta pass.');
     setTimeout(() => setSavedToast(null), 3000);
   };
 
@@ -497,34 +524,58 @@ export const SessionRsvpView: React.FC<SessionRsvpViewProps> = ({
     });
   };
 
-  // Paste list parsing - Imports RSVPs (Anmälningar) & Comments, does NOT touch physical attendance (Närvaro)
+  // Paste list parsing - Imports RSVPs (Anmälningar) & Comments, does NOT touch physical attendance unless pasteAlsoMarkPresent is checked
   const handlePaste = () => {
     const lines = pasteValue.split(/[\n;]/);
     
-    const newRsvps: Record<string, PlayerRsvp> = { ...(session.rsvps || {}) };
+    // Matched responses from paste: targetPlayerId -> { status, comment }
+    const matchedRsvps: Record<string, { status: RsvpStatus | 'unanswered'; comment?: string }> = {};
     let newGuestPlayers = [...guestPlayers];
     const coachName = user?.displayName || user?.email || 'Tränare';
+
+    // Sticky section state (for lists organized under headers like "Deltar (18)", "Deltar ej (3)", "Ej svarat (5)")
+    let currentSectionStatus: RsvpStatus | 'unanswered' = 'attending';
 
     lines.forEach(line => {
       let trimmed = line.trim();
       if (!trimmed) return;
+
+      // Check if line is purely a section header (e.g. "Deltar (18)", "Deltar ej (3)", "Ej svarat (5)", "Kommer (15)")
+      const cleanHeaderTest = trimmed.replace(/\([^)]*\)/g, '').replace(/\d+/g, '').replace(/[-:–—\t]/g, '').trim().toLowerCase();
+      
+      if (/^(deltar ej|kommer inte|kommer ej|nej|kan inte|kan ej|avanmäld|avanmälda|frånvarande|sjuk|bortrest)$/i.test(cleanHeaderTest)) {
+        currentSectionStatus = 'declined';
+        return;
+      } else if (/^(deltar|kommer|ja|kan delta|anmäld|anmälda|kallade som deltar)$/i.test(cleanHeaderTest)) {
+        currentSectionStatus = 'attending';
+        return;
+      } else if (/^(ej svarat|har inte svarat|obesvarad|obesvarade|svar saknas|svarade ej|inte svarat)$/i.test(cleanHeaderTest)) {
+        currentSectionStatus = 'unanswered';
+        return;
+      } else if (/^(delvis|kanske|osäker|osäkra)$/i.test(cleanHeaderTest)) {
+        currentSectionStatus = 'partial';
+        return;
+      }
 
       let extractedComment: string | undefined = undefined;
 
       // 1. Check for comment inside parentheses, e.g. "Haythem Noor Deltar (Kommer 10 min sent)"
       const parenMatch = trimmed.match(/\(([^)]+)\)/);
       if (parenMatch) {
-        extractedComment = parenMatch[1].trim();
-        // Remove parenthesized string from the line for name & status detection
+        const insideParen = parenMatch[1].trim();
+        // If parentheses just contains a count like (18) or (1), ignore as comment
+        if (!/^\d+$/.test(insideParen)) {
+          extractedComment = insideParen;
+        }
         trimmed = trimmed.replace(/\([^)]+\)/, '').trim();
       }
 
-      let detectedStatus: RsvpStatus | 'unanswered' | null = null;
+      let detectedStatus: RsvpStatus | 'unanswered' = currentSectionStatus;
       let nameOnly = trimmed;
 
       const lowerLine = trimmed.toLowerCase();
 
-      // Detect status keywords in Swedish
+      // Detect explicit inline status keywords in Swedish
       if (/\b(deltar ej|deltar inte|kan ej|kan inte|kommer ej|kommer inte|nej|ej med|avanmäld|frånvarande|sjuk|bortrest)\b/i.test(lowerLine)) {
         detectedStatus = 'declined';
         nameOnly = trimmed.replace(/\b(deltar ej|deltar inte|kan ej|kan inte|kommer ej|kommer inte|nej|ej med|avanmäld|frånvarande|sjuk|bortrest)\b/gi, '').trim();
@@ -534,12 +585,9 @@ export const SessionRsvpView: React.FC<SessionRsvpViewProps> = ({
       } else if (/\b(delvis|kanske|osäker)\b/i.test(lowerLine)) {
         detectedStatus = 'partial';
         nameOnly = trimmed.replace(/\b(delvis|kanske|osäker)\b/gi, '').trim();
-      } else if (/\b(ej svarat|obesvarad|svar saknas|svarade ej)\b/i.test(lowerLine)) {
+      } else if (/\b(ej svarat|har inte svarat|obesvarad|svar saknas|svarade ej|inte svarat)\b/i.test(lowerLine)) {
         detectedStatus = 'unanswered';
-        nameOnly = trimmed.replace(/\b(ej svarat|obesvarad|svar saknas|svarade ej)\b/gi, '').trim();
-      } else {
-        // Default if just a name in RSVP list without status keyword
-        detectedStatus = 'attending';
+        nameOnly = trimmed.replace(/\b(ej svarat|har inte svarat|obesvarad|svar saknas|svarade ej|inte svarat)\b/gi, '').trim();
       }
 
       // 2. If no parenthesized comment, check for trailing text separated by dash/colon
@@ -556,31 +604,18 @@ export const SessionRsvpView: React.FC<SessionRsvpViewProps> = ({
 
       if (!nameOnly || !isValidPlayerName(nameOnly)) return;
 
-      // Find player in squad
-      const foundInSquad = safeSquad.find(p => 
-        p && p.name && (p.name.toLowerCase().trim() === nameOnly.toLowerCase().trim() ||
-        p.name.toLowerCase().includes(nameOnly.toLowerCase()) || 
-        nameOnly.toLowerCase().includes(p.name.toLowerCase()))
-      );
-
+      // Find player in squad using robust findSquadMatch
+      const foundInSquad = findSquadMatch(nameOnly, safeSquad);
       const targetPlayerId = foundInSquad?.id;
 
       if (targetPlayerId) {
-        if (detectedStatus === 'unanswered') {
-          delete newRsvps[targetPlayerId];
-        } else if (detectedStatus) {
-          const existingComment = session.rsvps?.[targetPlayerId]?.comment;
-          const finalComment = extractedComment || existingComment;
-
-          newRsvps[targetPlayerId] = {
-            status: detectedStatus,
-            comment: finalComment,
-            updatedAt: Date.now(),
-            updatedBy: `Importerad (${coachName})`
-          };
-        }
+        const existingComment = session.rsvps?.[targetPlayerId]?.comment;
+        matchedRsvps[targetPlayerId] = {
+          status: detectedStatus,
+          comment: extractedComment || existingComment
+        };
       } else {
-        // Guest player logic
+        // Guest player logic - only if attending/partial and not already in squad/guests
         const foundInGuests = newGuestPlayers.find(p => p && p.name && p.name.toLowerCase().trim() === nameOnly.toLowerCase().trim());
         if (!foundInGuests && (detectedStatus === 'attending' || detectedStatus === 'partial')) {
           const guest: SquadPlayer = {
@@ -592,14 +627,35 @@ export const SessionRsvpView: React.FC<SessionRsvpViewProps> = ({
       }
     });
 
-    let newAttendance = [...attendance];
+    // "Det ska bara vara spelare som jag klistrar in som ska anmälas."
+    // Construct newRsvps containing ONLY the responses parsed from this paste
+    const newRsvps: Record<string, PlayerRsvp> = {};
+    for (const [pid, data] of Object.entries(matchedRsvps)) {
+      if (data.status !== 'unanswered') {
+        newRsvps[pid] = {
+          status: data.status,
+          comment: data.comment,
+          updatedAt: Date.now(),
+          updatedBy: `Importerad (${coachName})`
+        };
+      }
+    }
+
+    let newAttendance: string[] = [];
     if (pasteAlsoMarkPresent) {
+      // ONLY mark players as attending who were in the paste as attending or partial
       const attendingIds = Object.entries(newRsvps)
         .filter(([_, r]) => r && (r.status === 'attending' || r.status === 'partial'))
         .map(([pid]) => pid);
       
       const newGuestAttendingIds = newGuestPlayers.map(g => g.id);
-      newAttendance = Array.from(new Set([...newAttendance, ...attendingIds, ...newGuestAttendingIds]));
+      newAttendance = Array.from(new Set([...attendingIds, ...newGuestAttendingIds]));
+    } else {
+      // Keep existing attendance, minus any players who were matched as declined
+      const declinedIds = Object.entries(matchedRsvps)
+        .filter(([_, r]) => r.status === 'declined')
+        .map(([pid]) => pid);
+      newAttendance = attendance.filter(id => !declinedIds.includes(id));
     }
 
     onUpdateSession({
@@ -675,391 +731,351 @@ export const SessionRsvpView: React.FC<SessionRsvpViewProps> = ({
         </div>
       )}
 
-      {/* Match Lineup CTA Banner if onOpenLineup is available */}
-      {onOpenLineup && (
-        <div className="bg-gradient-to-r from-indigo-900 via-indigo-800 to-indigo-950 text-white p-4 sm:p-5 rounded-3xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 shadow-sm border border-indigo-700/60">
-          <div className="flex items-center gap-3.5">
-            <div className="w-11 h-11 rounded-2xl bg-white/10 flex items-center justify-center shrink-0 border border-white/15">
-              <Trophy size={22} className="text-amber-400" />
-            </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <span className="text-[10px] font-black uppercase tracking-wider bg-indigo-500/40 text-indigo-200 px-2 py-0.5 rounded-md">Matchaktivitet</span>
-                <span className="text-xs font-bold text-indigo-200">{stats.attending} anmälda spelare</span>
+      {/* Global toggle for collapsing/expanding all boxes */}
+      <div className="flex items-center justify-between gap-2 pt-0.5">
+        <span className="text-[11px] font-bold text-zinc-500 dark:text-zinc-400">
+          {areAllBoxesCollapsed ? 'Boxarna är hopfällda för snabb närvarovy' : 'Klicka på valfri box för att fälla ihop den'}
+        </span>
+        <button
+          type="button"
+          onClick={handleToggleAllBoxes}
+          className="text-[11px] font-black uppercase tracking-wider text-indigo-600 dark:text-indigo-400 hover:text-indigo-800 dark:hover:text-indigo-300 flex items-center gap-1.5 cursor-pointer bg-white dark:bg-zinc-900 hover:bg-zinc-50 dark:hover:bg-zinc-800 border border-zinc-200 dark:border-zinc-800 px-3 py-1.5 rounded-xl shadow-xs transition-all active:scale-95 shrink-0"
+          title={areAllBoxesCollapsed ? 'Fäll ut alla boxar' : 'Fäll ihop alla boxar'}
+        >
+          {areAllBoxesCollapsed ? <ChevronDown size={14} /> : <ChevronUp size={14} />}
+          <span>{areAllBoxesCollapsed ? 'Fäll ut alla boxar' : 'Fäll ihop alla boxar'}</span>
+        </button>
+      </div>
+
+      {/* Match Lineup CTA Banner if onOpenLineup is available and activity is a match */}
+      {isMatch && onOpenLineup && (
+        <div className="bg-gradient-to-r from-indigo-900 via-indigo-800 to-indigo-950 text-white rounded-3xl shadow-sm border border-indigo-700/60 overflow-hidden transition-all">
+          <div 
+            onClick={() => {
+              setIsMatchBannerCollapsed(prev => {
+                const next = !prev;
+                localStorage.setItem('session_rsvp_match_banner_collapsed', String(next));
+                return next;
+              });
+            }}
+            className="p-4 sm:p-5 flex items-center justify-between cursor-pointer select-none hover:bg-white/5 transition-colors"
+          >
+            <div className="flex items-center gap-3.5 min-w-0">
+              <div className="w-10 h-10 rounded-2xl bg-white/10 flex items-center justify-center shrink-0 border border-white/15">
+                <Trophy size={20} className="text-amber-400" />
               </div>
-              <p className="text-sm font-black text-white mt-0.5">Skapa eller öppna laguppställning med anmälda spelare</p>
+              <div className="min-w-0">
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] font-black uppercase tracking-wider bg-indigo-500/40 text-indigo-200 px-2 py-0.5 rounded-md">Matchaktivitet</span>
+                  <span className="text-xs font-bold text-indigo-200">{stats.attending} anmälda spelare</span>
+                </div>
+                <p className="text-xs sm:text-sm font-black text-white mt-0.5 truncate">Skapa eller öppna laguppställning med anmälda spelare</p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2.5 shrink-0">
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onOpenLineup(session);
+                }}
+                className="px-3.5 py-2 bg-white hover:bg-indigo-50 text-indigo-950 rounded-xl font-black text-xs uppercase tracking-wider flex items-center gap-1.5 shadow-md transition-all active:scale-95 cursor-pointer"
+              >
+                <Users size={14} className="text-indigo-600" />
+                <span className="hidden sm:inline">Öppna</span>
+                <ArrowRight size={14} />
+              </button>
+              <div className="p-1 text-indigo-300 hover:text-white">
+                {isMatchBannerCollapsed ? <ChevronDown size={18} /> : <ChevronUp size={18} />}
+              </div>
             </div>
           </div>
-          <button
-            type="button"
-            onClick={() => onOpenLineup(session)}
-            className="px-4 py-2.5 bg-white hover:bg-indigo-50 text-indigo-950 rounded-xl font-black text-xs uppercase tracking-wider flex items-center gap-2 shadow-md transition-all active:scale-95 cursor-pointer shrink-0"
-          >
-            <Users size={14} className="text-indigo-600" />
-            <span>Öppna laguppställning</span>
-            <ArrowRight size={14} />
-          </button>
+          <AnimatePresence initial={false}>
+            {!isMatchBannerCollapsed && (
+              <motion.div
+                key="match-banner-content"
+                initial={{ height: 0, opacity: 0 }}
+                animate={{ height: 'auto', opacity: 1 }}
+                exit={{ height: 0, opacity: 0 }}
+                transition={{ duration: 0.2 }}
+                className="overflow-hidden"
+              >
+                <div className="px-5 pb-4 pt-1 border-t border-indigo-700/50 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs text-indigo-200">
+                  <p>
+                    {stats.attending > 0 
+                      ? `${stats.attending} spelare har anmält att de kan delta. Klicka för att gå till laguppställningen och planera startelva och avbytare.`
+                      : 'Inga anmälda spelare än. Du kan ändå förbereda laguppställningen och taktiktavlan inför matchen.'}
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => onOpenLineup(session)}
+                    className="px-4 py-2 bg-indigo-500 hover:bg-indigo-400 text-white rounded-xl font-black text-xs uppercase tracking-wider flex items-center gap-2 shrink-0 transition-all cursor-pointer self-start sm:self-auto"
+                  >
+                    <span>Hantera uppställning</span>
+                    <ArrowRight size={14} />
+                  </button>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
         </div>
       )}
 
-      {/* Detailed Attendance & Registration Breakdown */}
-      <div className="p-5 rounded-3xl bg-white dark:bg-zinc-900 border border-zinc-150 dark:border-zinc-800 shadow-sm space-y-4">
-        <div className="flex items-center justify-between border-b border-zinc-100 dark:border-zinc-800 pb-3">
-          <div className="flex items-center gap-2">
-            <UserCheck className="text-indigo-600 dark:text-indigo-400" size={18} />
-            <h3 className="font-extrabold text-sm text-zinc-900 dark:text-white uppercase tracking-wider">
-              Närvaro- & Anmälningsöversikt
-            </h3>
-          </div>
-          <span className="text-[10px] bg-indigo-50 dark:bg-indigo-950 text-indigo-650 dark:text-indigo-400 font-extrabold px-2 py-0.5 rounded-full uppercase tracking-wider">
-            Summering
-          </span>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          {/* Spelare Section */}
-          <div className="space-y-3">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <div className="p-1.5 rounded-lg bg-indigo-50 dark:bg-indigo-950/40 text-indigo-600 dark:text-indigo-400">
-                  <Users size={16} />
-                </div>
-                <span className="font-black text-sm text-zinc-800 dark:text-zinc-200">Spelare</span>
-              </div>
-              <div className="text-right">
-                <span className="text-xs text-zinc-500 dark:text-zinc-400">Totalt i truppen: </span>
-                <span className="font-extrabold text-sm text-zinc-900 dark:text-white">{playerStats.total}</span>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-4 bg-zinc-50 dark:bg-zinc-950/40 p-3 rounded-2xl border border-zinc-100 dark:border-zinc-800/60">
-              <div>
-                <span className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-wider mb-0.5">Anmälda (Kan delta)</span>
-                <div className="flex items-baseline gap-1">
-                  <span className="text-xl font-black text-emerald-600 dark:text-emerald-450">{playerStats.coming}</span>
-                  <span className="text-[10px] text-zinc-500 dark:text-zinc-400 font-bold">st</span>
-                </div>
-              </div>
-              <div>
-                <span className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-wider mb-0.5">Deltar (Närvarande)</span>
-                <div className="flex items-baseline gap-1">
-                  <span className="text-xl font-black text-indigo-600 dark:text-indigo-400">{playerStats.present}</span>
-                  <span className="text-[10px] text-zinc-500 dark:text-zinc-400 font-bold">av {playerStats.total}</span>
-                </div>
-              </div>
-            </div>
-
-            {/* Visual Attendance Progress Bar */}
-            <div className="space-y-1">
-              <div className="flex justify-between text-[10px] font-bold text-zinc-500 dark:text-zinc-400">
-                <span>Deltagande: {playerStats.total > 0 ? Math.round((playerStats.present / playerStats.total) * 100) : 0}%</span>
-                <span>Anmälda: {playerStats.total > 0 ? Math.round((playerStats.coming / playerStats.total) * 100) : 0}%</span>
-              </div>
-              <div className="relative w-full h-2 bg-zinc-100 dark:bg-zinc-800 rounded-full overflow-hidden">
-                {/* Anmälda bar (bg-emerald-500/30) */}
-                <div 
-                  className="absolute top-0 left-0 h-full bg-emerald-500/30 dark:bg-emerald-450/25 rounded-full transition-all"
-                  style={{ width: `${playerStats.total > 0 ? (playerStats.coming / playerStats.total) * 100 : 0}%` }}
-                />
-                {/* Present bar (bg-indigo-600) */}
-                <div 
-                  className="absolute top-0 left-0 h-full bg-indigo-600 dark:bg-indigo-500 rounded-full transition-all"
-                  style={{ width: `${playerStats.total > 0 ? (playerStats.present / playerStats.total) * 100 : 0}%` }}
-                />
-              </div>
-            </div>
-          </div>
-
-          {/* Ledare/Tränare Section */}
-          <div className="space-y-3">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <div className="p-1.5 rounded-lg bg-amber-50 dark:bg-amber-950/40 text-amber-600 dark:text-amber-400">
-                  <ShieldCheck size={16} />
-                </div>
-                <span className="font-black text-sm text-zinc-800 dark:text-zinc-200">Tränare & Ledare</span>
-              </div>
-              <div className="text-right">
-                <span className="text-xs text-zinc-500 dark:text-zinc-400">Totalt i truppen: </span>
-                <span className="font-extrabold text-sm text-zinc-900 dark:text-white">{leaderStats.total}</span>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-4 bg-zinc-50 dark:bg-zinc-950/40 p-3 rounded-2xl border border-zinc-100 dark:border-zinc-800/60">
-              <div>
-                <span className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-wider mb-0.5">Anmälda (Kan delta)</span>
-                <div className="flex items-baseline gap-1">
-                  <span className="text-xl font-black text-emerald-600 dark:text-emerald-450">{leaderStats.coming}</span>
-                  <span className="text-[10px] text-zinc-500 dark:text-zinc-400 font-bold">st</span>
-                </div>
-              </div>
-              <div>
-                <span className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-wider mb-0.5">Deltar (Närvarande)</span>
-                <div className="flex items-baseline gap-1">
-                  <span className="text-xl font-black text-indigo-600 dark:text-indigo-400">{leaderStats.present}</span>
-                  <span className="text-[10px] text-zinc-500 dark:text-zinc-400 font-bold">av {leaderStats.total}</span>
-                </div>
-              </div>
-            </div>
-
-            {/* Visual Attendance Progress Bar for Leaders */}
-            <div className="space-y-1">
-              <div className="flex justify-between text-[10px] font-bold text-zinc-500 dark:text-zinc-400">
-                <span>Deltagande: {leaderStats.total > 0 ? Math.round((leaderStats.present / leaderStats.total) * 100) : 0}%</span>
-                <span>Anmälda: {leaderStats.total > 0 ? Math.round((leaderStats.coming / leaderStats.total) * 100) : 0}%</span>
-              </div>
-              <div className="relative w-full h-2 bg-zinc-100 dark:bg-zinc-800 rounded-full overflow-hidden">
-                {/* Anmälda bar (bg-emerald-500/30) */}
-                <div 
-                  className="absolute top-0 left-0 h-full bg-emerald-500/30 dark:bg-emerald-450/25 rounded-full transition-all"
-                  style={{ width: `${leaderStats.total > 0 ? (leaderStats.coming / leaderStats.total) * 100 : 0}%` }}
-                />
-                {/* Present bar (bg-indigo-600) */}
-                <div 
-                  className="absolute top-0 left-0 h-full bg-indigo-600 dark:bg-indigo-500 rounded-full transition-all"
-                  style={{ width: `${leaderStats.total > 0 ? (leaderStats.present / leaderStats.total) * 100 : 0}%` }}
-                />
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Top Stats Overview Cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <button
-          onClick={() => setFilter(filter === 'present' ? 'all' : 'present')}
-          className={`p-4 rounded-2xl border transition-all text-left flex flex-col justify-between ${
-            filter === 'present'
-              ? 'bg-indigo-600 text-white border-indigo-700 shadow-md scale-[1.02]'
-              : 'bg-indigo-50/50 dark:bg-indigo-950/20 border-indigo-200 dark:border-indigo-800/40 text-indigo-950 dark:text-indigo-300 hover:border-indigo-300'
-          }`}
-        >
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-black uppercase tracking-wider opacity-80">Närvarande</span>
-            <Users size={18} className="shrink-0" />
-          </div>
-          <div className="mt-3 flex items-baseline gap-1.5">
-            <span className="text-2xl sm:text-3xl font-black">{stats.presentCount}</span>
-            <span className="text-xs font-bold opacity-75">av {allMembers.length}</span>
-          </div>
-        </button>
-
-        <button
-          onClick={() => setFilter(filter === 'attending' ? 'all' : 'attending')}
-          className={`p-4 rounded-2xl border transition-all text-left flex flex-col justify-between ${
-            filter === 'attending'
-              ? 'bg-emerald-500 text-white border-emerald-600 shadow-md scale-[1.02]'
-              : 'bg-emerald-50/50 dark:bg-emerald-950/20 border-emerald-200 dark:border-emerald-800/40 text-emerald-900 dark:text-emerald-300 hover:border-emerald-300'
-          }`}
-        >
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-black uppercase tracking-wider opacity-80">Anmäld: Kan delta</span>
-            <CheckCircle2 size={18} className="shrink-0" />
-          </div>
-          <div className="mt-3 flex items-baseline gap-1.5">
-            <span className="text-2xl sm:text-3xl font-black">{stats.attending}</span>
-            <span className="text-xs font-bold opacity-75">av {stats.total}</span>
-          </div>
-        </button>
-
-        <button
-          onClick={() => setFilter(filter === 'partial' ? 'all' : 'partial')}
-          className={`p-4 rounded-2xl border transition-all text-left flex flex-col justify-between ${
-            filter === 'partial'
-              ? 'bg-amber-500 text-white border-amber-600 shadow-md scale-[1.02]'
-              : 'bg-amber-50/50 dark:bg-amber-950/20 border-amber-200 dark:border-amber-800/40 text-amber-900 dark:text-amber-300 hover:border-amber-300'
-          }`}
-        >
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-black uppercase tracking-wider opacity-80">Kan delta delvis</span>
-            <AlertTriangle size={18} className="shrink-0" />
-          </div>
-          <div className="mt-3 flex items-baseline gap-1.5">
-            <span className="text-2xl sm:text-3xl font-black">{stats.partial}</span>
-            <span className="text-xs font-bold opacity-75">av {stats.total}</span>
-          </div>
-        </button>
-
-        <button
-          onClick={() => setFilter(filter === 'declined' ? 'all' : 'declined')}
-          className={`p-4 rounded-2xl border transition-all text-left flex flex-col justify-between ${
-            filter === 'declined'
-              ? 'bg-rose-500 text-white border-rose-600 shadow-md scale-[1.02]'
-              : 'bg-rose-50/50 dark:bg-rose-950/20 border-rose-200 dark:border-rose-800/40 text-rose-900 dark:text-rose-300 hover:border-rose-300'
-          }`}
-        >
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-black uppercase tracking-wider opacity-80">Kan inte delta</span>
-            <XCircle size={18} className="shrink-0" />
-          </div>
-          <div className="mt-3 flex items-baseline gap-1.5">
-            <span className="text-2xl sm:text-3xl font-black">{stats.declined}</span>
-            <span className="text-xs font-bold opacity-75">av {stats.total}</span>
-          </div>
-        </button>
-      </div>
-
       {/* Invitation Info Banner if invitation exists */}
       {session.rsvpConfig && (
-        <div className="p-4 rounded-2xl bg-indigo-50/80 dark:bg-indigo-950/40 border border-indigo-200 dark:border-indigo-800/60 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-indigo-950 dark:text-indigo-200">
-          <div className="space-y-1">
+        <div className="rounded-2xl bg-indigo-50/80 dark:bg-indigo-950/40 border border-indigo-200 dark:border-indigo-800/60 overflow-hidden text-indigo-950 dark:text-indigo-200">
+          <div 
+            onClick={() => {
+              setIsInviteCollapsed(prev => {
+                const next = !prev;
+                localStorage.setItem('session_rsvp_invite_collapsed', String(next));
+                return next;
+              });
+            }}
+            className="p-4 flex items-center justify-between cursor-pointer select-none hover:bg-indigo-100/50 dark:hover:bg-indigo-900/30 transition-colors"
+          >
             <div className="flex items-center gap-2 font-black text-xs uppercase tracking-wider text-indigo-600 dark:text-indigo-400">
               <Bell size={14} />
               <span>Inbjudan utskickad</span>
-              {session.rsvpConfig.invitedAt && (
-                <span className="text-[10px] font-normal text-zinc-500 dark:text-zinc-400">
-                  ({new Date(session.rsvpConfig.invitedAt).toLocaleDateString('sv-SE', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })})
+              {session.rsvpConfig.deadline && isInviteCollapsed && (
+                <span className="text-[11px] font-bold text-zinc-600 dark:text-zinc-300 ml-2 hidden sm:inline">
+                  (Sista svar: {new Date(session.rsvpConfig.deadline).toLocaleString('sv-SE', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })})
                 </span>
               )}
             </div>
-            {session.rsvpConfig.notes && (
-              <p className="text-xs font-bold italic text-zinc-700 dark:text-zinc-300">
-                "{session.rsvpConfig.notes}"
-              </p>
-            )}
-          </div>
-          {session.rsvpConfig.deadline && (
-            <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white dark:bg-zinc-900 border border-indigo-200 dark:border-indigo-800 text-xs font-black text-indigo-700 dark:text-indigo-300 shrink-0">
-              <Clock size={14} />
-              <span>Sista svar: {new Date(session.rsvpConfig.deadline).toLocaleString('sv-SE', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</span>
+            <div className="flex items-center gap-2">
+              {session.rsvpConfig.deadline && !isInviteCollapsed && (
+                <div className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-white dark:bg-zinc-900 border border-indigo-200 dark:border-indigo-800 text-xs font-black text-indigo-700 dark:text-indigo-300 shrink-0">
+                  <Clock size={13} />
+                  <span>Sista svar: {new Date(session.rsvpConfig.deadline).toLocaleString('sv-SE', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</span>
+                </div>
+              )}
+              <div className="p-1 text-indigo-400">
+                {isInviteCollapsed ? <ChevronDown size={16} /> : <ChevronUp size={16} />}
+              </div>
             </div>
-          )}
+          </div>
+
+          <AnimatePresence initial={false}>
+            {!isInviteCollapsed && (
+              <motion.div
+                key="invite-content"
+                initial={{ height: 0, opacity: 0 }}
+                animate={{ height: 'auto', opacity: 1 }}
+                exit={{ height: 0, opacity: 0 }}
+                transition={{ duration: 0.2 }}
+                className="overflow-hidden"
+              >
+                <div className="px-4 pb-4 pt-1 border-t border-indigo-200/50 dark:border-indigo-800/40 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div className="space-y-1">
+                    {session.rsvpConfig.invitedAt && (
+                      <span className="text-[10px] font-normal text-zinc-500 dark:text-zinc-400">
+                        Skickad {new Date(session.rsvpConfig.invitedAt).toLocaleDateString('sv-SE', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
+                      </span>
+                    )}
+                    {session.rsvpConfig.notes && (
+                      <p className="text-xs font-bold italic text-zinc-700 dark:text-zinc-300">
+                        "{session.rsvpConfig.notes}"
+                      </p>
+                    )}
+                  </div>
+                  {session.rsvpConfig.deadline && (
+                    <div className="sm:hidden flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white dark:bg-zinc-900 border border-indigo-200 dark:border-indigo-800 text-xs font-black text-indigo-700 dark:text-indigo-300 shrink-0">
+                      <Clock size={14} />
+                      <span>Sista svar: {new Date(session.rsvpConfig.deadline).toLocaleString('sv-SE', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</span>
+                    </div>
+                  )}
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
         </div>
       )}
 
       {/* Logged in Player's Own RSVP Form */}
       {safeSquad.length > 0 && (
-        <div className="p-5 sm:p-6 rounded-3xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 shadow-sm space-y-4">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-zinc-100 dark:border-zinc-800 pb-4">
-            <div>
-              <h3 className="text-base font-black text-zinc-900 dark:text-white uppercase tracking-tight flex items-center gap-2">
-                <UserCheck size={18} className="text-indigo-600 dark:text-indigo-400" />
+        <div className="rounded-3xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 shadow-sm overflow-hidden transition-all">
+          <div 
+            onClick={() => {
+              setIsMyRsvpCollapsed(prev => {
+                const next = !prev;
+                localStorage.setItem('session_rsvp_myrsvp_collapsed', String(next));
+                return next;
+              });
+            }}
+            className="p-4 sm:p-5 flex items-center justify-between cursor-pointer select-none hover:bg-zinc-50/60 dark:hover:bg-zinc-800/30 transition-colors"
+          >
+            <div className="flex items-center gap-2.5 min-w-0">
+              <UserCheck size={18} className="text-indigo-600 dark:text-indigo-400 shrink-0" />
+              <h3 className="text-sm font-black text-zinc-900 dark:text-white uppercase tracking-tight truncate">
                 Din anmälan för detta pass
               </h3>
-              <p className="text-xs text-zinc-500 dark:text-zinc-400 font-medium">
-                Välj om du kan delta, kan delta delvis eller är förhindrad.
-              </p>
-            </div>
-
-            {/* Quick selector if user wants to change which player profile is being used */}
-            {safeSquad.length > 1 && (
-              <div className="flex items-center gap-2">
-                <span className="text-xs font-bold text-zinc-400">Profil:</span>
-                <select
-                  value={matchedPlayer?.id || ''}
-                  onChange={(e) => setSelectedPlayerId(e.target.value)}
-                  className="bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-xl px-3 py-1.5 text-xs font-bold text-zinc-800 dark:text-zinc-200 outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer"
-                >
-                  {safeSquad.map(p => (
-                    <option key={p.id} value={p.id}>{p.name} {p.number ? `(#${p.number})` : ''}</option>
-                  ))}
-                </select>
-              </div>
-            )}
-          </div>
-
-          <form onSubmit={handleSaveMyRsvp} className="space-y-4">
-            {/* 3 Large Action Choice Buttons */}
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-              <button
-                type="button"
-                onClick={() => setMyStatus(myStatus === 'attending' ? null : 'attending')}
-                className={`p-4 rounded-2xl border text-left transition-all flex items-center gap-3.5 cursor-pointer ${
-                  myStatus === 'attending'
-                    ? 'bg-emerald-600 text-white border-emerald-500 shadow-md ring-2 ring-emerald-400/50'
-                    : 'bg-zinc-50 dark:bg-zinc-800/60 border-zinc-200 dark:border-zinc-700/80 text-zinc-700 dark:text-zinc-300 hover:border-emerald-400'
-                }`}
-              >
-                <div className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 ${
-                  myStatus === 'attending' ? 'bg-white/20 text-white' : 'bg-emerald-100 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400'
+              {isMyRsvpCollapsed && myStatus && (
+                <span className={`text-[10px] font-black uppercase px-2 py-0.5 rounded-md ml-2 flex items-center gap-1 shrink-0 ${
+                  myStatus === 'attending' 
+                    ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800' 
+                    : myStatus === 'partial' 
+                    ? 'bg-amber-50 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300 border border-amber-200 dark:border-amber-800' 
+                    : 'bg-rose-50 text-rose-700 dark:bg-rose-950/60 dark:text-rose-300 border border-rose-200 dark:border-rose-800'
                 }`}>
-                  <CheckCircle2 size={20} />
-                </div>
-                <div>
-                  <p className="font-black text-xs uppercase tracking-wider">Kan delta</p>
-                  <p className={`text-[11px] font-medium ${myStatus === 'attending' ? 'text-emerald-100' : 'text-zinc-500'}`}>Jag kommer på passet</p>
-                </div>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setMyStatus(myStatus === 'partial' ? null : 'partial')}
-                className={`p-4 rounded-2xl border text-left transition-all flex items-center gap-3.5 cursor-pointer ${
-                  myStatus === 'partial'
-                    ? 'bg-amber-600 text-white border-amber-500 shadow-md ring-2 ring-amber-400/50'
-                    : 'bg-zinc-50 dark:bg-zinc-800/60 border-zinc-200 dark:border-zinc-700/80 text-zinc-700 dark:text-zinc-300 hover:border-amber-400'
-                }`}
-              >
-                <div className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 ${
-                  myStatus === 'partial' ? 'bg-white/20 text-white' : 'bg-amber-100 dark:bg-amber-950/60 text-amber-600 dark:text-amber-400'
-                }`}>
-                  <AlertTriangle size={20} />
-                </div>
-                <div>
-                  <p className="font-black text-xs uppercase tracking-wider">Kan delta delvis</p>
-                  <p className={`text-[11px] font-medium ${myStatus === 'partial' ? 'text-amber-100' : 'text-zinc-500'}`}>T.ex. skada eller sen ankomst</p>
-                </div>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setMyStatus(myStatus === 'declined' ? null : 'declined')}
-                className={`p-4 rounded-2xl border text-left transition-all flex items-center gap-3.5 cursor-pointer ${
-                  myStatus === 'declined'
-                    ? 'bg-rose-600 text-white border-rose-500 shadow-md ring-2 ring-rose-400/50'
-                    : 'bg-zinc-50 dark:bg-zinc-800/60 border-zinc-200 dark:border-zinc-700/80 text-zinc-700 dark:text-zinc-300 hover:border-rose-400'
-                }`}
-              >
-                <div className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 ${
-                  myStatus === 'declined' ? 'bg-white/20 text-white' : 'bg-rose-100 dark:bg-rose-950/60 text-rose-600 dark:text-rose-400'
-                }`}>
-                  <XCircle size={20} />
-                </div>
-                <div>
-                  <p className="font-black text-xs uppercase tracking-wider">Kan inte delta</p>
-                  <p className={`text-[11px] font-medium ${myStatus === 'declined' ? 'text-rose-100' : 'text-zinc-500'}`}>Kan tyvärr inte komma</p>
-                </div>
-              </button>
-            </div>
-
-            {/* Comment box */}
-            <div>
-              <label className="block text-xs font-bold text-zinc-500 dark:text-zinc-400 mb-1.5">
-                Kommentar till tränaren (valfritt):
-              </label>
-              <input
-                type="text"
-                value={myComment}
-                onChange={(e) => setMyComment(e.target.value)}
-                placeholder="T.ex. 'Känning i knäet, kör 30 min' eller 'Kommer 18:30 pga jobb'..."
-                className="w-full bg-zinc-50 dark:bg-zinc-800/70 border border-zinc-200 dark:border-zinc-700 rounded-xl px-4 py-2.5 text-xs font-bold text-zinc-900 dark:text-white placeholder-zinc-400 outline-none focus:ring-2 focus:ring-indigo-500"
-              />
-            </div>
-
-            <div className="flex items-center justify-between pt-1">
-              {matchedPlayer && (
-                <span className="text-xs font-bold text-zinc-400">
-                  Anmäler: <strong className="text-zinc-800 dark:text-zinc-200">{matchedPlayer.name}</strong>
+                  {myStatus === 'attending' && <CheckCircle2 size={12} />}
+                  {myStatus === 'partial' && <AlertTriangle size={12} />}
+                  {myStatus === 'declined' && <XCircle size={12} />}
+                  <span>{myStatus === 'attending' ? 'Kan delta' : myStatus === 'partial' ? 'Delvis' : 'Kan inte delta'}</span>
                 </span>
               )}
-              <button
-                type="submit"
-                disabled={myStatus === null && !session.rsvps?.[matchedPlayer?.id || '']}
-                className="px-6 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 text-white font-black text-xs uppercase tracking-wider shadow-md transition-all flex items-center gap-2 cursor-pointer ml-auto"
-              >
-                <Check size={16} />
-                <span>{myStatus !== null ? 'Spara anmälan' : 'Rensa anmälan'}</span>
-              </button>
             </div>
-          </form>
+
+            <div className="flex items-center gap-2 shrink-0">
+              {/* Quick selector if user wants to change which player profile is being used */}
+              {safeSquad.length > 1 && (
+                <div className="flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
+                  <span className="text-xs font-bold text-zinc-400 hidden sm:inline">Profil:</span>
+                  <select
+                    value={matchedPlayer?.id || ''}
+                    onChange={(e) => setSelectedPlayerId(e.target.value)}
+                    className="bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-xl px-2.5 py-1 text-xs font-bold text-zinc-800 dark:text-zinc-200 outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer"
+                  >
+                    {safeSquad.map(p => (
+                      <option key={p.id} value={p.id}>{p.name} {p.number ? `(#${p.number})` : ''}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+              <div className="p-1 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200">
+                {isMyRsvpCollapsed ? <ChevronDown size={18} /> : <ChevronUp size={18} />}
+              </div>
+            </div>
+          </div>
+
+          <AnimatePresence initial={false}>
+            {!isMyRsvpCollapsed && (
+              <motion.div
+                key="myrsvp-content"
+                initial={{ height: 0, opacity: 0 }}
+                animate={{ height: 'auto', opacity: 1 }}
+                exit={{ height: 0, opacity: 0 }}
+                transition={{ duration: 0.2 }}
+                className="overflow-hidden"
+              >
+                <div className="px-5 pb-5 pt-1 border-t border-zinc-100 dark:border-zinc-800 space-y-4">
+                  <p className="text-xs text-zinc-500 dark:text-zinc-400 font-medium pt-1">
+                    Välj om du kan delta, kan delta delvis eller är förhindrad.
+                  </p>
+                  <form onSubmit={handleSaveMyRsvp} className="space-y-4">
+                    {/* 3 Large Action Choice Buttons */}
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                      <button
+                        type="button"
+                        onClick={() => setMyStatus(myStatus === 'attending' ? null : 'attending')}
+                        className={`p-4 rounded-2xl border text-left transition-all flex items-center gap-3.5 cursor-pointer ${
+                          myStatus === 'attending'
+                            ? 'bg-emerald-600 text-white border-emerald-500 shadow-md ring-2 ring-emerald-400/50'
+                            : 'bg-zinc-50 dark:bg-zinc-800/60 border-zinc-200 dark:border-zinc-700/80 text-zinc-700 dark:text-zinc-300 hover:border-emerald-400'
+                        }`}
+                      >
+                        <div className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 ${
+                          myStatus === 'attending' ? 'bg-white/20 text-white' : 'bg-emerald-100 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400'
+                        }`}>
+                          <CheckCircle2 size={20} />
+                        </div>
+                        <div>
+                          <p className="font-black text-xs uppercase tracking-wider">Kan delta</p>
+                          <p className={`text-[11px] font-medium ${myStatus === 'attending' ? 'text-emerald-100' : 'text-zinc-500'}`}>Jag kommer på passet</p>
+                        </div>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setMyStatus(myStatus === 'partial' ? null : 'partial')}
+                        className={`p-4 rounded-2xl border text-left transition-all flex items-center gap-3.5 cursor-pointer ${
+                          myStatus === 'partial'
+                            ? 'bg-amber-600 text-white border-amber-500 shadow-md ring-2 ring-amber-400/50'
+                            : 'bg-zinc-50 dark:bg-zinc-800/60 border-zinc-200 dark:border-zinc-700/80 text-zinc-700 dark:text-zinc-300 hover:border-amber-400'
+                        }`}
+                      >
+                        <div className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 ${
+                          myStatus === 'partial' ? 'bg-white/20 text-white' : 'bg-amber-100 dark:bg-amber-950/60 text-amber-600 dark:text-amber-400'
+                        }`}>
+                          <AlertTriangle size={20} />
+                        </div>
+                        <div>
+                          <p className="font-black text-xs uppercase tracking-wider">Kan delta delvis</p>
+                          <p className={`text-[11px] font-medium ${myStatus === 'partial' ? 'text-amber-100' : 'text-zinc-500'}`}>T.ex. skada eller sen ankomst</p>
+                        </div>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setMyStatus(myStatus === 'declined' ? null : 'declined')}
+                        className={`p-4 rounded-2xl border text-left transition-all flex items-center gap-3.5 cursor-pointer ${
+                          myStatus === 'declined'
+                            ? 'bg-rose-600 text-white border-rose-500 shadow-md ring-2 ring-rose-400/50'
+                            : 'bg-zinc-50 dark:bg-zinc-800/60 border-zinc-200 dark:border-zinc-700/80 text-zinc-700 dark:text-zinc-300 hover:border-rose-400'
+                        }`}
+                      >
+                        <div className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 ${
+                          myStatus === 'declined' ? 'bg-white/20 text-white' : 'bg-rose-100 dark:bg-rose-950/60 text-rose-600 dark:text-rose-400'
+                        }`}>
+                          <XCircle size={20} />
+                        </div>
+                        <div>
+                          <p className="font-black text-xs uppercase tracking-wider">Kan inte delta</p>
+                          <p className={`text-[11px] font-medium ${myStatus === 'declined' ? 'text-rose-100' : 'text-zinc-500'}`}>Kan tyvärr inte komma</p>
+                        </div>
+                      </button>
+                    </div>
+
+                    {/* Comment box */}
+                    <div>
+                      <label className="block text-xs font-bold text-zinc-500 dark:text-zinc-400 mb-1.5">
+                        Kommentar till tränaren (valfritt):
+                      </label>
+                      <input
+                        type="text"
+                        value={myComment}
+                        onChange={(e) => setMyComment(e.target.value)}
+                        placeholder="T.ex. 'Känning i knäet, kör 30 min' eller 'Kommer 18:30 pga jobb'..."
+                        className="w-full bg-zinc-50 dark:bg-zinc-800/70 border border-zinc-200 dark:border-zinc-700 rounded-xl px-4 py-2.5 text-xs font-bold text-zinc-900 dark:text-white placeholder-zinc-400 outline-none focus:ring-2 focus:ring-indigo-500"
+                      />
+                    </div>
+
+                    <div className="flex items-center justify-between pt-1">
+                      {matchedPlayer && (
+                        <span className="text-xs font-bold text-zinc-400">
+                          Anmäler: <strong className="text-zinc-800 dark:text-zinc-200">{matchedPlayer.name}</strong>
+                        </span>
+                      )}
+                      <button
+                        type="submit"
+                        disabled={myStatus === null && !session.rsvps?.[matchedPlayer?.id || '']}
+                        className="px-6 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 text-white font-black text-xs uppercase tracking-wider shadow-md transition-all flex items-center gap-2 cursor-pointer ml-auto"
+                      >
+                        <Check size={16} />
+                        <span>{myStatus !== null ? 'Spara anmälan' : 'Rensa anmälan'}</span>
+                      </button>
+                    </div>
+                  </form>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
         </div>
       )}
 
       {/* Admin / Coach Action Toolbar */}
       {isCoachOrAdmin && (
-        <div className="p-4 sm:p-5 rounded-3xl bg-zinc-100/90 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 space-y-3 shadow-sm">
-          <div className="flex items-center justify-between border-b border-zinc-200 dark:border-zinc-800 pb-3">
+        <div className="rounded-3xl bg-zinc-100/90 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 shadow-sm overflow-hidden transition-all">
+          <div 
+            onClick={() => {
+              setIsToolsCollapsed(prev => {
+                const next = !prev;
+                localStorage.setItem('session_rsvp_tools_collapsed', String(next));
+                return next;
+              });
+            }}
+            className="p-4 sm:p-5 flex items-center justify-between cursor-pointer select-none hover:bg-zinc-200/50 dark:hover:bg-zinc-800/40 transition-colors"
+          >
             <div className="flex items-center gap-2">
               <ShieldCheck size={18} className="text-indigo-600 dark:text-indigo-400" />
               <span className="text-xs font-black uppercase tracking-wider text-zinc-900 dark:text-zinc-100">
@@ -1067,80 +1083,158 @@ export const SessionRsvpView: React.FC<SessionRsvpViewProps> = ({
               </span>
             </div>
 
-            <div className="flex items-center gap-2 text-xs font-bold text-zinc-600 dark:text-zinc-300">
-              <span>{attendance.length} närvarande</span>
+            <div className="flex items-center gap-2.5">
+              <span className="text-xs font-bold text-zinc-600 dark:text-zinc-300">
+                {attendance.length} närvarande
+              </span>
+              <div className="p-1 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200">
+                {isToolsCollapsed ? <ChevronDown size={18} /> : <ChevronUp size={18} />}
+              </div>
             </div>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2">
-            {targetAdminUrl && (
-              <a
-                href={targetAdminUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="px-3 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-black text-xs flex items-center gap-1.5 shadow-sm transition-all"
+          <AnimatePresence initial={false}>
+            {!isToolsCollapsed && (
+              <motion.div
+                key="tools-content"
+                initial={{ height: 0, opacity: 0 }}
+                animate={{ height: 'auto', opacity: 1 }}
+                exit={{ height: 0, opacity: 0 }}
+                transition={{ duration: 0.2 }}
+                className="overflow-hidden"
               >
-                <ExternalLink size={14} />
-                <span>Öppna adminsida</span>
-              </a>
+                <div className="px-4 sm:px-5 pb-5 pt-1 border-t border-zinc-200/60 dark:border-zinc-800/80">
+                  <div className="flex flex-wrap items-center gap-2 pt-2">
+                    {targetAdminUrl && (
+                      <a
+                        href={targetAdminUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="px-3 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-black text-xs flex items-center gap-1.5 shadow-sm transition-all"
+                      >
+                        <ExternalLink size={14} />
+                        <span>Öppna adminsida</span>
+                      </a>
+                    )}
+
+                    <button
+                      onClick={() => setShowPasteModal(true)}
+                      className="px-3 py-2 rounded-xl bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 hover:border-indigo-500 dark:hover:border-indigo-400 text-zinc-800 dark:text-zinc-100 font-bold text-xs flex items-center gap-1.5 shadow-sm transition-all cursor-pointer hover:bg-zinc-50 dark:hover:bg-zinc-700"
+                    >
+                      <Clipboard size={14} className="text-indigo-600 dark:text-indigo-400" />
+                      <span>Klistra in lista</span>
+                    </button>
+
+                    <button
+                      onClick={() => setShowGuestModal(true)}
+                      className="px-3 py-2 rounded-xl bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 hover:border-indigo-500 dark:hover:border-indigo-400 text-zinc-800 dark:text-zinc-100 font-bold text-xs flex items-center gap-1.5 shadow-sm transition-all cursor-pointer hover:bg-zinc-50 dark:hover:bg-zinc-700"
+                    >
+                      <UserPlus size={14} className="text-indigo-600 dark:text-indigo-400" />
+                      <span>+ Provspelare</span>
+                    </button>
+
+                    <button
+                      onClick={handleMarkAllRsvpdAsPresent}
+                      className="px-3 py-2 rounded-xl bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 hover:border-emerald-500 text-emerald-700 dark:text-emerald-400 font-bold text-xs flex items-center gap-1.5 shadow-sm transition-all cursor-pointer hover:bg-emerald-50 dark:hover:bg-emerald-950/40"
+                    >
+                      <CheckCheck size={14} />
+                      <span>Markera alla anmälda som närvarande</span>
+                    </button>
+
+                    <button
+                      onClick={handleMarkAllPresent}
+                      className="px-3 py-2 rounded-xl bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 hover:border-emerald-500 text-emerald-700 dark:text-emerald-400 font-bold text-xs flex items-center gap-1.5 shadow-sm transition-all cursor-pointer hover:bg-emerald-50 dark:hover:bg-emerald-950/40"
+                    >
+                      <CheckCheck size={14} />
+                      <span>Markera alla närvarande</span>
+                    </button>
+
+                    {showConfirmClearAttendance ? (
+                      <div className="flex items-center gap-1.5 bg-rose-50 dark:bg-rose-950/60 p-1 rounded-xl border border-rose-300 dark:border-rose-700">
+                        <span className="text-[11px] font-bold text-rose-700 dark:text-rose-300 px-1">Rensa närvaro?</span>
+                        <button
+                          type="button"
+                          onClick={handleClearAttendance}
+                          className="px-2.5 py-1 bg-rose-600 hover:bg-rose-700 text-white font-black text-xs rounded-lg transition-all cursor-pointer shadow-xs"
+                        >
+                          Ja, rensa
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setShowConfirmClearAttendance(false)}
+                          className="px-2 py-1 bg-zinc-200 dark:bg-zinc-700 text-zinc-700 dark:text-zinc-200 font-bold text-xs rounded-lg hover:bg-zinc-300 transition-all cursor-pointer"
+                        >
+                          Avbryt
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowConfirmClearAttendance(true);
+                          setShowConfirmClearRsvps(false);
+                        }}
+                        className="px-3 py-2 rounded-xl bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 hover:border-rose-500 text-rose-600 dark:text-rose-400 font-bold text-xs flex items-center gap-1.5 shadow-sm transition-all cursor-pointer hover:bg-rose-50 dark:hover:bg-rose-950/40"
+                        title="Rensa all registrerad fysisk närvaro för detta pass"
+                      >
+                        <RotateCcw size={14} />
+                        <span>Rensa närvaro</span>
+                      </button>
+                    )}
+
+                    {showConfirmClearRsvps ? (
+                      <div className="flex items-center gap-1.5 bg-rose-50 dark:bg-rose-950/60 p-1 rounded-xl border border-rose-300 dark:border-rose-700">
+                        <span className="text-[11px] font-bold text-rose-700 dark:text-rose-300 px-1">Rensa alla anmälningar?</span>
+                        <button
+                          type="button"
+                          onClick={handleClearRsvps}
+                          className="px-2.5 py-1 bg-rose-600 hover:bg-rose-700 text-white font-black text-xs rounded-lg transition-all cursor-pointer shadow-xs"
+                        >
+                          Ja, rensa
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setShowConfirmClearRsvps(false)}
+                          className="px-2 py-1 bg-zinc-200 dark:bg-zinc-700 text-zinc-700 dark:text-zinc-200 font-bold text-xs rounded-lg hover:bg-zinc-300 transition-all cursor-pointer"
+                        >
+                          Avbryt
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowConfirmClearRsvps(true);
+                          setShowConfirmClearAttendance(false);
+                        }}
+                        className="px-3 py-2 rounded-xl bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 hover:border-rose-500 text-rose-600 dark:text-rose-400 font-bold text-xs flex items-center gap-1.5 shadow-sm transition-all cursor-pointer hover:bg-rose-50 dark:hover:bg-rose-950/40"
+                        title="Rensa alla anmälningar (svarsstatus och kommentarer) för detta pass"
+                      >
+                        <RotateCcw size={14} />
+                        <span>Rensa anmälan</span>
+                      </button>
+                    )}
+
+                    <button
+                      onClick={() => setShowInviteModal(true)}
+                      className="px-3 py-2 rounded-xl bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 hover:border-indigo-500 dark:hover:border-indigo-400 text-zinc-800 dark:text-zinc-100 font-bold text-xs flex items-center gap-1.5 shadow-sm transition-all cursor-pointer hover:bg-zinc-50 dark:hover:bg-zinc-700"
+                    >
+                      <Send size={14} className="text-indigo-600 dark:text-indigo-400" />
+                      <span>Skicka kallelse</span>
+                    </button>
+
+                    <button
+                      onClick={() => setShowAdminModal(true)}
+                      className="px-3 py-2 rounded-xl bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 hover:border-indigo-500 dark:hover:border-indigo-400 text-zinc-800 dark:text-zinc-100 font-bold text-xs flex items-center gap-1.5 shadow-sm transition-all cursor-pointer hover:bg-zinc-50 dark:hover:bg-zinc-700"
+                    >
+                      <Plus size={14} className="text-indigo-600 dark:text-indigo-400" />
+                      <span>Anmäl för spelare</span>
+                    </button>
+                  </div>
+                </div>
+              </motion.div>
             )}
-
-            <button
-              onClick={() => setShowPasteModal(true)}
-              className="px-3 py-2 rounded-xl bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 hover:border-indigo-500 dark:hover:border-indigo-400 text-zinc-800 dark:text-zinc-100 font-bold text-xs flex items-center gap-1.5 shadow-sm transition-all cursor-pointer hover:bg-zinc-50 dark:hover:bg-zinc-700"
-            >
-              <Clipboard size={14} className="text-indigo-600 dark:text-indigo-400" />
-              <span>Klistra in lista</span>
-            </button>
-
-            <button
-              onClick={() => setShowGuestModal(true)}
-              className="px-3 py-2 rounded-xl bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 hover:border-indigo-500 dark:hover:border-indigo-400 text-zinc-800 dark:text-zinc-100 font-bold text-xs flex items-center gap-1.5 shadow-sm transition-all cursor-pointer hover:bg-zinc-50 dark:hover:bg-zinc-700"
-            >
-              <UserPlus size={14} className="text-indigo-600 dark:text-indigo-400" />
-              <span>+ Provspelare</span>
-            </button>
-
-            <button
-              onClick={handleMarkAllRsvpdAsPresent}
-              className="px-3 py-2 rounded-xl bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 hover:border-emerald-500 text-emerald-700 dark:text-emerald-400 font-bold text-xs flex items-center gap-1.5 shadow-sm transition-all cursor-pointer hover:bg-emerald-50 dark:hover:bg-emerald-950/40"
-            >
-              <CheckCheck size={14} />
-              <span>Markera alla anmälda som närvarande</span>
-            </button>
-
-            <button
-              onClick={handleMarkAllPresent}
-              className="px-3 py-2 rounded-xl bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 hover:border-emerald-500 text-emerald-700 dark:text-emerald-400 font-bold text-xs flex items-center gap-1.5 shadow-sm transition-all cursor-pointer hover:bg-emerald-50 dark:hover:bg-emerald-950/40"
-            >
-              <CheckCheck size={14} />
-              <span>Markera alla närvarande</span>
-            </button>
-
-            <button
-              onClick={handleClearAttendance}
-              className="px-3 py-2 rounded-xl bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 hover:border-rose-500 text-rose-600 dark:text-rose-400 font-bold text-xs flex items-center gap-1.5 shadow-sm transition-all cursor-pointer hover:bg-rose-50 dark:hover:bg-rose-950/40"
-            >
-              <RotateCcw size={14} />
-              <span>Rensa närvaro</span>
-            </button>
-
-            <button
-              onClick={() => setShowInviteModal(true)}
-              className="px-3 py-2 rounded-xl bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 hover:border-indigo-500 dark:hover:border-indigo-400 text-zinc-800 dark:text-zinc-100 font-bold text-xs flex items-center gap-1.5 shadow-sm transition-all cursor-pointer hover:bg-zinc-50 dark:hover:bg-zinc-700"
-            >
-              <Send size={14} className="text-indigo-600 dark:text-indigo-400" />
-              <span>Skicka kallelse</span>
-            </button>
-
-            <button
-              onClick={() => setShowAdminModal(true)}
-              className="px-3 py-2 rounded-xl bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 hover:border-indigo-500 dark:hover:border-indigo-400 text-zinc-800 dark:text-zinc-100 font-bold text-xs flex items-center gap-1.5 shadow-sm transition-all cursor-pointer hover:bg-zinc-50 dark:hover:bg-zinc-700"
-            >
-              <Plus size={14} className="text-indigo-600 dark:text-indigo-400" />
-              <span>Anmäl för spelare</span>
-            </button>
-          </div>
+          </AnimatePresence>
         </div>
       )}
 
@@ -1461,9 +1555,10 @@ export const SessionRsvpView: React.FC<SessionRsvpViewProps> = ({
             onClick={() => setShowPasteModal(false)}
           >
             <motion.div
-              initial={{ scale: 0.95, opacity: 0 }}
+              initial={{ scale: 0.98, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.95, opacity: 0 }}
+              exit={{ scale: 0.98, opacity: 0 }}
+              transition={{ duration: 0.15 }}
               className="bg-white dark:bg-zinc-900 rounded-3xl p-6 sm:p-8 max-w-lg w-full shadow-2xl border border-zinc-200 dark:border-zinc-800 space-y-5"
               onClick={(e) => e.stopPropagation()}
             >
@@ -1484,24 +1579,77 @@ export const SessionRsvpView: React.FC<SessionRsvpViewProps> = ({
                 <button
                   type="button"
                   onClick={() => setShowPasteModal(false)}
-                  className="p-1.5 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800"
+                  className="p-1.5 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 cursor-pointer"
                 >
                   <X size={18} />
                 </button>
               </div>
 
               <div className="space-y-3">
-                <p className="text-xs text-zinc-600 dark:text-zinc-300 font-medium leading-relaxed">
-                  Klistra in text med spelarnamn, status (t.ex. <em>Deltar</em>, <em>Deltar ej</em>) och ev. kommentarer (t.ex. i parentes eller efter bindestreck). Appen matchar automatiskt mot truppen.
-                </p>
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <p className="text-xs text-zinc-600 dark:text-zinc-300 font-medium leading-relaxed">
+                    Klistra in text med spelarnamn, status (t.ex. <em>Deltar</em>, <em>Deltar ej</em>) och ev. kommentarer.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={handlePasteFromClipboard}
+                    className="self-start sm:self-auto shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/60 dark:hover:bg-indigo-900/80 text-indigo-700 dark:text-indigo-300 text-xs font-bold transition-all border border-indigo-200 dark:border-indigo-800/80 cursor-pointer shadow-xs active:scale-95"
+                    title="Klistra in direkt från enhetens urklipp med 1 tryck"
+                  >
+                    {clipboardStatus === 'pasted' ? (
+                      <>
+                        <ClipboardCheck size={14} className="text-emerald-600 dark:text-emerald-400" />
+                        <span className="text-emerald-700 dark:text-emerald-300 font-bold">Inklistrat!</span>
+                      </>
+                    ) : (
+                      <>
+                        <ClipboardPaste size={14} />
+                        <span>Klistra in från urklipp</span>
+                      </>
+                    )}
+                  </button>
+                </div>
 
-                <textarea
-                  rows={6}
-                  value={pasteValue}
-                  onChange={(e) => setPasteValue(e.target.value)}
-                  placeholder={`Klistra in anmälningar här, t.ex:\n\nHaythem Noor Deltar (Kommer 10 min sent)\nCornelis Setterholm - Deltar ej - Bortrest\nErik Johansson Deltar`}
-                  className="w-full bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-2xl p-4 text-xs font-bold text-zinc-900 dark:text-white outline-none focus:ring-2 focus:ring-indigo-500 placeholder-zinc-400 font-mono"
-                />
+                <div className="relative">
+                  <textarea
+                    ref={pasteTextareaRef}
+                    autoFocus
+                    autoComplete="off"
+                    autoCorrect="off"
+                    spellCheck={false}
+                    rows={6}
+                    value={pasteValue}
+                    onChange={(e) => setPasteValue(e.target.value)}
+                    onPaste={(e) => {
+                      // Immediate capture safeguard in case virtual keyboard input lag occurs
+                      const pasted = e.clipboardData?.getData('text');
+                      if (pasted && !pasteValue) {
+                        setPasteValue(pasted);
+                      }
+                    }}
+                    placeholder={`Klistra in anmälningar här, t.ex:\n\nHaythem Noor Deltar (Kommer 10 min sent)\nCornelis Setterholm - Deltar ej - Bortrest\nErik Johansson Deltar`}
+                    className="w-full bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-2xl p-4 text-xs font-bold text-zinc-900 dark:text-white outline-none focus:ring-2 focus:ring-indigo-500 placeholder-zinc-400 font-mono"
+                  />
+                  {pasteValue && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setPasteValue('');
+                        pasteTextareaRef.current?.focus();
+                      }}
+                      className="absolute top-3 right-3 px-2 py-1 rounded-lg bg-zinc-200/80 hover:bg-zinc-300 dark:bg-zinc-700/80 dark:hover:bg-zinc-600 text-zinc-600 dark:text-zinc-300 text-[11px] font-bold transition-all cursor-pointer"
+                      title="Rensa text"
+                    >
+                      Rensa
+                    </button>
+                  )}
+                </div>
+
+                {clipboardStatus === 'failed' && (
+                  <p className="text-[11px] text-amber-600 dark:text-amber-400 font-medium">
+                    Kunde inte läsa urklipp automatiskt (behörighet saknas). Klicka i rutan ovan och välj Klistra in (eller Cmd+V / Ctrl+V).
+                  </p>
+                )}
 
                 <label className="flex items-center gap-2.5 p-3 rounded-xl bg-indigo-50/60 dark:bg-indigo-950/40 border border-indigo-100 dark:border-indigo-800/60 cursor-pointer">
                   <input

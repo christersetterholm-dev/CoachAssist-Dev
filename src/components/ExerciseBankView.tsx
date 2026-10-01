@@ -44,10 +44,27 @@ const getExerciseCategories = (ex: BankExercise): string[] => {
   return [];
 };
 
-const getExerciseImages = (ex: BankExercise): string[] => {
-  if (ex.imageUrls && ex.imageUrls.length > 0) return ex.imageUrls;
-  if (ex.imageUrl) return [ex.imageUrl];
-  return [];
+const getExerciseImages = (ex: any): string[] => {
+  if (!ex) return [];
+  const list: string[] = [];
+  if (Array.isArray(ex.imageUrls)) {
+    for (const u of ex.imageUrls) {
+      if (typeof u === 'string' && u.trim() && !list.includes(u.trim())) list.push(u.trim());
+    }
+  }
+  if (typeof ex.imageUrl === 'string' && ex.imageUrl.trim() && !list.includes(ex.imageUrl.trim())) {
+    list.push(ex.imageUrl.trim());
+  }
+  if (typeof ex.image === 'string' && ex.image.trim() && !list.includes(ex.image.trim())) {
+    list.push(ex.image.trim());
+  }
+  if (typeof ex.photoUrl === 'string' && ex.photoUrl.trim() && !list.includes(ex.photoUrl.trim())) {
+    list.push(ex.photoUrl.trim());
+  }
+  if (typeof ex.mediaUrl === 'string' && ex.mediaUrl.trim() && !list.includes(ex.mediaUrl.trim())) {
+    list.push(ex.mediaUrl.trim());
+  }
+  return list;
 };
 
 export default function ExerciseBankView({
@@ -108,16 +125,21 @@ export default function ExerciseBankView({
   const handleSelectTargetSession = (targetSession: TrainingSession) => {
     if (!onUpdateSession) return;
 
-    const newMoments = exercisesToAddToSession.map((ex, idx) => ({
-      id: `moment-${Date.now()}-${Math.random().toString(36).slice(2, 6)}-${ex.id.slice(-4)}-${idx}`,
-      name: ex.name,
-      duration: ex.duration || 15,
-      description: ex.description,
-      imageUrl: ex.imageUrl,
-      imageUrls: ex.imageUrls || (ex.imageUrl ? [ex.imageUrl] : undefined),
-      externalLink: ex.externalLink,
-      bankExerciseId: ex.id,
-    }));
+    const newMoments = exercisesToAddToSession.map((ex, idx) => {
+      const images = getExerciseImages(ex);
+      const primaryImage = images[0] || undefined;
+      return {
+        id: `moment-${Date.now()}-${Math.random().toString(36).slice(2, 6)}-${ex.id.slice(-4)}-${idx}`,
+        name: ex.name,
+        duration: ex.duration || 15,
+        description: ex.description,
+        imageUrl: primaryImage,
+        imageUrls: images.length > 0 ? images : undefined,
+        externalLink: ex.externalLink,
+        bankExerciseId: ex.id,
+        tacticalBoards: ex.tacticalBoards ? JSON.parse(JSON.stringify(ex.tacticalBoards)) : undefined,
+      };
+    });
 
     onUpdateSession({
       ...targetSession,
@@ -447,44 +469,48 @@ export default function ExerciseBankView({
                   </div>
 
                   {/* Thumbnail */}
-                  {ex.imageUrl && (
-                    <div 
-                      onClick={() => {
-                        const images = getExerciseImages(ex);
-                        if (images.length > 0) {
-                          setViewingImageInfo({ urls: images, index: 0 });
-                        }
-                      }}
-                      className="w-full h-36 relative overflow-hidden bg-zinc-100 dark:bg-zinc-900 border-b border-zinc-100 dark:border-zinc-750 cursor-zoom-in group/thumb"
-                    >
-                      <img
-                        src={ex.imageUrl}
-                        alt={ex.name}
-                        referrerPolicy="no-referrer"
-                        className="w-full h-full object-cover transition-transform duration-500 group-hover/thumb:scale-[1.03]"
-                      />
-                      {getExerciseImages(ex).length > 1 && (
-                        <div className="absolute bottom-3 right-3 bg-zinc-950/70 border border-white/10 text-white text-[10px] font-black px-2 py-1 rounded-lg backdrop-blur-md flex items-center gap-1 shadow-sm z-10">
-                          <ImageIcon size={11} className="text-zinc-300" />
-                          <span>1 / {getExerciseImages(ex).length}</span>
+                  {(() => {
+                    const cardImages = getExerciseImages(ex);
+                    const cardThumb = cardImages[0];
+                    if (!cardThumb) return null;
+                    return (
+                      <div 
+                        onClick={() => {
+                          if (cardImages.length > 0) {
+                            setViewingImageInfo({ urls: cardImages, index: 0 });
+                          }
+                        }}
+                        className="w-full h-36 relative overflow-hidden bg-zinc-100 dark:bg-zinc-900 border-b border-zinc-100 dark:border-zinc-750 cursor-zoom-in group/thumb"
+                      >
+                        <img
+                          src={cardThumb}
+                          alt={ex.name}
+                          referrerPolicy="no-referrer"
+                          className="w-full h-full object-cover transition-transform duration-500 group-hover/thumb:scale-[1.03]"
+                        />
+                        {cardImages.length > 1 && (
+                          <div className="absolute bottom-3 right-3 bg-zinc-950/70 border border-white/10 text-white text-[10px] font-black px-2 py-1 rounded-lg backdrop-blur-md flex items-center gap-1 shadow-sm z-10">
+                            <ImageIcon size={11} className="text-zinc-300" />
+                            <span>1 / {cardImages.length}</span>
+                          </div>
+                        )}
+                        <div className="absolute top-3 left-3 flex flex-wrap gap-1 max-w-[70%] pointer-events-none">
+                          {getExerciseCategories(ex).map(cat => (
+                            <span key={cat} className="bg-zinc-900/80 backdrop-blur-sm text-white px-2 py-0.5 rounded-md text-[9px] font-black uppercase tracking-wider">
+                              {cat}
+                            </span>
+                          ))}
                         </div>
-                      )}
-                      <div className="absolute top-3 left-3 flex flex-wrap gap-1 max-w-[70%] pointer-events-none">
-                        {getExerciseCategories(ex).map(cat => (
-                          <span key={cat} className="bg-zinc-900/80 backdrop-blur-sm text-white px-2 py-0.5 rounded-md text-[9px] font-black uppercase tracking-wider">
-                            {cat}
-                          </span>
-                        ))}
                       </div>
-                    </div>
-                  )}
+                    );
+                  })()}
 
                   {/* Content */}
                   <div className="p-5 flex-1 flex flex-col">
-                    {!ex.imageUrl && (
+                    {getExerciseImages(ex).length === 0 && (
                       <div className="flex flex-wrap gap-1 mb-2.5 max-w-[85%]">
                         {getExerciseCategories(ex).map(cat => (
-                          <span key={cat} className="bg-zinc-100 dark:bg-zinc-900 text-zinc-650 dark:text-zinc-450 px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider border border-zinc-200/35 dark:border-zinc-800/80">
+                          <span key={cat} className="bg-zinc-100 dark:bg-zinc-900 text-zinc-650 dark:text-zinc-455 px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider border border-zinc-200/35 dark:border-zinc-800/80">
                             {cat}
                           </span>
                         ))}

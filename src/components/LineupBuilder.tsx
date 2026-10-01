@@ -4,9 +4,11 @@ import { motion, AnimatePresence, useDragControls } from 'motion/react';
 import { SquadPlayer, Lineup, LineupPlayer, FormationVariant, FormationPosition, TacticalSavedBoard, TrainingSession } from '../types';
 import { User as FirebaseUser } from 'firebase/auth';
 import { CachedImage } from './CachedImage';
-import { Plus, Minus, X, Trash2, Image as ImageIcon, User, Save, Settings, ClipboardList, Camera, Check, Edit2, Undo2, Redo2, Maximize2, Minimize2, Copy, Trophy, Upload, Pencil, ArrowUpRight, Eraser, RotateCcw, Trash, Shirt, Pin, PinOff, Smartphone, Monitor, ChevronDown, ChevronUp, RefreshCw, GripVertical, Footprints, Archive, ArchiveRestore, Layout, Eye, EyeOff, Target, Play, Move, Route, Type, FolderOpen, Cloud, CloudOff, Bookmark, Network, UserCheck, Link, Unlink, Calendar } from 'lucide-react';
+import { Plus, Minus, X, Trash2, Image as ImageIcon, User, Save, Settings, ClipboardList, ClipboardPaste, ClipboardCheck, Camera, Check, Edit2, Undo2, Redo2, Maximize2, Minimize2, Copy, Trophy, Upload, Pencil, ArrowUpRight, Eraser, RotateCcw, Trash, Shirt, Pin, PinOff, Smartphone, Monitor, ChevronDown, ChevronUp, RefreshCw, GripVertical, Footprints, Archive, ArchiveRestore, Layout, Eye, EyeOff, Target, Play, Move, Route, Type, FolderOpen, Cloud, CloudOff, Bookmark, Network, UserCheck, Link, Unlink, Calendar } from 'lucide-react';
 
 import { FORMATION_TEMPLATES } from '../lib/formations';
+import { findSquadMatch } from '../lib/teamUtils';
+import { isMatchSession } from '../utils/sessionCategory';
 import { Reorder } from 'motion/react';
 import ColorPicker from './ColorPicker';
 import ImageCropper from './ImageCropper';
@@ -470,6 +472,40 @@ export default function LineupBuilder({
   const [showName, setShowName] = useState(lineup?.showName ?? true);
   const [showImport, setShowImport] = useState(false);
   const [pastedText, setPastedText] = useState('');
+  const lineupImportTextareaRef = useRef<HTMLTextAreaElement>(null);
+  const [lineupClipboardStatus, setLineupClipboardStatus] = useState<'idle' | 'pasted' | 'failed'>('idle');
+
+  useEffect(() => {
+    if (showImport) {
+      setLineupClipboardStatus('idle');
+      const timer = setTimeout(() => {
+        lineupImportTextareaRef.current?.focus();
+        const len = lineupImportTextareaRef.current?.value.length || 0;
+        lineupImportTextareaRef.current?.setSelectionRange(len, len);
+      }, 70);
+      return () => clearTimeout(timer);
+    }
+  }, [showImport]);
+
+  const handleLineupPasteClipboard = async () => {
+    try {
+      if (navigator?.clipboard?.readText) {
+        const text = await navigator.clipboard.readText();
+        if (text && text.trim()) {
+          setPastedText(text);
+          setLineupClipboardStatus('pasted');
+          setTimeout(() => setLineupClipboardStatus('idle'), 2500);
+          lineupImportTextareaRef.current?.focus();
+          return;
+        }
+      }
+    } catch (err) {
+      console.warn('Clipboard readText failed or was blocked by browser:', err);
+      setLineupClipboardStatus('failed');
+      setTimeout(() => setLineupClipboardStatus('idle'), 3000);
+    }
+    lineupImportTextareaRef.current?.focus();
+  };
   const [importResult, setImportResult] = useState<{ found: string[], missing: string[] } | null>(null);
   const [showNumber, setShowNumber] = useState(lineup?.showNumber ?? true);
   const [teamLogoUrl, setTeamLogoUrl] = useState(lineup?.teamLogoUrl || '');
@@ -810,6 +846,27 @@ export default function LineupBuilder({
   const lastPushedDateRef = useRef<number>(lineup?.date || 0);
   const history = lineupHistories[currentId] || [];
   const future = lineupFutures[currentId] || [];
+
+  const onUpdateLineupRef = useRef(onUpdateLineup);
+  onUpdateLineupRef.current = onUpdateLineup;
+  const currentStateRef = useRef<Lineup | null>(null);
+  const hasUnsavedChangesRef = useRef(hasUnsavedChanges);
+  hasUnsavedChangesRef.current = hasUnsavedChanges;
+
+  // Dedicated unmount flush: ensure NO edits or new lineups are ever lost when leaving the Lineup view!
+  useEffect(() => {
+    return () => {
+      if (hasUnsavedChangesRef.current && currentStateRef.current) {
+        const pushTime = Date.now();
+        lastPushedDateRef.current = pushTime;
+        onUpdateLineupRef.current({
+          ...currentStateRef.current,
+          date: pushTime,
+          updatedAt: pushTime
+        });
+      }
+    };
+  }, []);
 
   // Undo/Redo history (lineupHistories / lineupFutures) is kept strictly local in the component's state
   // to avoid sending massive history lists of snapshots back and forth to Firestore on every interactive change.
@@ -1841,6 +1898,8 @@ export default function LineupBuilder({
       }
     };
 
+    currentStateRef.current = currentState;
+
     // Skip if current local state is identical to what we got from props
     // This prevents the "ping-pong" effect when receiving remote updates
     const remoteTactical = {
@@ -1900,21 +1959,22 @@ export default function LineupBuilder({
       lastPushedDateRef.current = pushTime;
       onUpdateLineup({
         ...currentState,
-        date: pushTime // Set new date only when actually pushing changes
+        date: pushTime,
+        updatedAt: pushTime
       });
       setHasUnsavedChanges(false);
     }, 400); // Reduced from 800ms to 400ms for extra fast auto-save
     
     return () => {
       clearTimeout(timeout);
-      // Flush changes ONLY when unmounting or switching to a different lineup
-      // to avoid triggering parent updates on every single micro-render/drag step.
-      if (hasUnsavedChanges && (!lineup || lineup.id !== currentIdRef.current)) {
+      // Flush changes when switching to a different lineup or unmounting
+      if (hasUnsavedChangesRef.current && currentStateRef.current && (!lineup || lineup.id !== currentIdRef.current)) {
         const pushTime = Date.now();
         lastPushedDateRef.current = pushTime;
-        onUpdateLineup({
-          ...currentState,
-          date: pushTime
+        onUpdateLineupRef.current({
+          ...currentStateRef.current,
+          date: pushTime,
+          updatedAt: pushTime
         });
         setHasUnsavedChanges(false);
       }
@@ -2337,56 +2397,73 @@ export default function LineupBuilder({
   const handleImportPlayers = () => {
     if (!pastedText.trim()) return;
 
-    const excludedWords = ['deltar ej', 'deltar', 'ej svarat', 'anmäld', 'reserv'];
-    const lines = pastedText.split(/[\n,;]/);
-    const namesToFind = lines
-      .map(line => {
-        let cleanName = line.trim();
-        excludedWords.forEach(word => {
-          const regex = new RegExp(word, 'gi');
-          cleanName = cleanName.replace(regex, '');
-        });
-        return cleanName.trim();
-      })
-      .filter(name => name.length > 2); // Ignore very short strings
-
+    const lines = pastedText.split(/[\n;]/);
     const foundNames: string[] = [];
     const missingNames: string[] = [];
     const newPlayers: LineupPlayer[] = [...players];
     let changed = false;
 
-    namesToFind.forEach(name => {
-      // Try exact match first
-      let match = squadPlayers.find(s => s.name.toLowerCase() === name.toLowerCase());
-      
-      // Try partial match if no exact match
-      if (!match) {
-        match = squadPlayers.find(s => 
-          s.name.toLowerCase().includes(name.toLowerCase()) || 
-          name.toLowerCase().includes(s.name.toLowerCase())
-        );
+    // Track sticky section status for lists organized under headers (e.g. "Deltar (15)", "Deltar ej (3)")
+    let currentSectionStatus: 'attending' | 'declined' | 'unanswered' = 'attending';
+
+    lines.forEach(rawLine => {
+      let line = rawLine.trim();
+      if (!line) return;
+
+      // Check section headers
+      const cleanHeaderTest = line.replace(/\([^)]*\)/g, '').replace(/\d+/g, '').replace(/[-:–—\t]/g, '').trim().toLowerCase();
+      if (/^(deltar ej|kommer inte|kommer ej|nej|kan inte|kan ej|avanmäld|avanmälda|frånvarande|sjuk|bortrest)$/i.test(cleanHeaderTest)) {
+        currentSectionStatus = 'declined';
+        return;
+      } else if (/^(deltar|kommer|ja|kan delta|anmäld|anmälda|kallade som deltar)$/i.test(cleanHeaderTest)) {
+        currentSectionStatus = 'attending';
+        return;
+      } else if (/^(ej svarat|har inte svarat|obesvarad|obesvarade|svar saknas|svarade ej|inte svarat)$/i.test(cleanHeaderTest)) {
+        currentSectionStatus = 'unanswered';
+        return;
       }
 
+      // Check inline status
+      let isAttending = currentSectionStatus === 'attending';
+      const lower = line.toLowerCase();
+      if (/\b(deltar ej|deltar inte|kan ej|kan inte|kommer ej|kommer inte|nej|ej med|avanmäld|frånvarande|sjuk|bortrest|ej svarat|har inte svarat|obesvarad)\b/i.test(lower)) {
+        isAttending = false;
+        return; // Explicitly not attending or unanswered, do not add to lineup!
+      } else if (/\b(deltar|kommer|ja|kan delta|anmäld)\b/i.test(lower)) {
+        isAttending = true;
+      }
+
+      if (!isAttending) return;
+
+      // Clean status words, numbers and parentheses from line to get name
+      let cleanName = line
+        .replace(/\([^)]*\)/g, '')
+        .replace(/\b(deltar|kommer|ja|kan delta|anmäld|reserv)\b/gi, '')
+        .trim();
+
+      const match = findSquadMatch(cleanName, squadPlayers);
+
       if (match) {
-        foundNames.push(match.name);
-        const alreadyInLineup = newPlayers.find(p => p.playerId === match!.id);
-        if (!alreadyInLineup) {
-          newPlayers.push({
-            id: crypto.randomUUID(),
-            playerId: match.id,
-            x: 50,
-            y: 50,
-            isSubstitute: false
-          });
-          changed = true;
-        } else if (alreadyInLineup.isSubstitute) {
-          // If already on bench, move to pitch
-          alreadyInLineup.isSubstitute = false;
-          alreadyInLineup.y = 50;
-          changed = true;
+        if (!foundNames.includes(match.name)) {
+          foundNames.push(match.name);
+          const alreadyInLineup = newPlayers.find(p => p.playerId === match.id);
+          if (!alreadyInLineup) {
+            newPlayers.push({
+              id: crypto.randomUUID(),
+              playerId: match.id,
+              x: 50,
+              y: 50,
+              isSubstitute: false
+            });
+            changed = true;
+          } else if (alreadyInLineup.isSubstitute) {
+            alreadyInLineup.isSubstitute = false;
+            alreadyInLineup.y = 50;
+            changed = true;
+          }
         }
-      } else {
-        missingNames.push(name);
+      } else if (cleanName.length > 2) {
+        missingNames.push(cleanName);
       }
     });
 
@@ -5857,7 +5934,7 @@ export default function LineupBuilder({
                         >
                           <option value="">Fristående (ej kopplad till match i kalendern)</option>
                           {sessions && sessions.map(s => {
-                            const isMatch = s.type === 'match' || s.type === 'cup';
+                            const isMatch = isMatchSession(s);
                             const dateStr = s.date ? new Date(s.date).toLocaleDateString('sv-SE', { day: 'numeric', month: 'short' }) : '';
                             return (
                               <option key={s.id} value={s.id}>
@@ -6926,18 +7003,70 @@ export default function LineupBuilder({
                 </>
               ) : (
                 <div className="flex-1 overflow-y-auto min-h-0 pr-1.5 my-2 custom-scrollbar space-y-4">
-                  <div className="bg-indigo-50 dark:bg-indigo-900/20 p-4 rounded-2xl border border-indigo-100 dark:border-indigo-800/50">
-                    <p className="text-xs text-indigo-700 dark:text-indigo-300 font-medium leading-relaxed">
-                      Klistra in en lista med namn (t.ex. från kallelse). Vi matchar dem mot truppen och lägger till dem på planen. Ord som "Deltar" filtreras bort automatiskt.
-                    </p>
+                  <div className="bg-indigo-50 dark:bg-indigo-900/20 p-4 rounded-2xl border border-indigo-100 dark:border-indigo-800/50 space-y-2">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                      <p className="text-xs text-indigo-700 dark:text-indigo-300 font-medium leading-relaxed">
+                        Klistra in en lista med namn (t.ex. från kallelse). Vi matchar dem mot truppen och lägger till dem på planen.
+                      </p>
+                      <button
+                        type="button"
+                        onClick={handleLineupPasteClipboard}
+                        className="self-start sm:self-auto shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-indigo-100 hover:bg-indigo-200 dark:bg-indigo-950/80 dark:hover:bg-indigo-900 text-indigo-800 dark:text-indigo-200 text-xs font-bold transition-all border border-indigo-200 dark:border-indigo-800 cursor-pointer shadow-xs active:scale-95"
+                        title="Klistra in direkt från enhetens urklipp med 1 tryck"
+                      >
+                        {lineupClipboardStatus === 'pasted' ? (
+                          <>
+                            <ClipboardCheck size={14} className="text-emerald-600 dark:text-emerald-400" />
+                            <span className="text-emerald-700 dark:text-emerald-300 font-bold">Inklistrat!</span>
+                          </>
+                        ) : (
+                          <>
+                            <ClipboardPaste size={14} />
+                            <span>Klistra in från urklipp</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
                   </div>
                   
-                  <textarea
-                    value={pastedText}
-                    onChange={(e) => setPastedText(e.target.value)}
-                    placeholder="Klistra in namn här..."
-                    className="w-full h-32 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-2xl p-3 sm:p-4 text-sm focus:ring-2 focus:ring-indigo-500 outline-none resize-none"
-                  />
+                  <div className="relative">
+                    <textarea
+                      ref={lineupImportTextareaRef}
+                      autoFocus
+                      autoComplete="off"
+                      autoCorrect="off"
+                      spellCheck={false}
+                      value={pastedText}
+                      onChange={(e) => setPastedText(e.target.value)}
+                      onPaste={(e) => {
+                        const pasted = e.clipboardData?.getData('text');
+                        if (pasted && !pastedText) {
+                          setPastedText(pasted);
+                        }
+                      }}
+                      placeholder="Klistra in namn här..."
+                      className="w-full h-32 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-2xl p-3 sm:p-4 text-sm focus:ring-2 focus:ring-indigo-500 outline-none resize-none"
+                    />
+                    {pastedText && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setPastedText('');
+                          lineupImportTextareaRef.current?.focus();
+                        }}
+                        className="absolute top-3 right-3 px-2 py-1 rounded-lg bg-zinc-200/80 hover:bg-zinc-300 dark:bg-zinc-700/80 dark:hover:bg-zinc-600 text-zinc-600 dark:text-zinc-300 text-[11px] font-bold transition-all cursor-pointer"
+                        title="Rensa text"
+                      >
+                        Rensa
+                      </button>
+                    )}
+                  </div>
+
+                  {lineupClipboardStatus === 'failed' && (
+                    <p className="text-[11px] text-amber-600 dark:text-amber-400 font-medium">
+                      Kunde inte läsa urklipp automatiskt. Klicka i rutan ovan och välj Klistra in (Cmd+V / Ctrl+V).
+                    </p>
+                  )}
 
                   {importResult && (
                     <div className="space-y-2">

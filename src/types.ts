@@ -400,3 +400,30 @@ export interface PendingUserRequest {
   status: 'pending' | 'approved' | 'rejected';
 }
 
+/**
+ * Robustly extracts all valid image URLs from an exercise or moment object,
+ * checking imageUrls, imageUrl, image, photoUrl, and mediaUrl.
+ */
+export function getExerciseImages(item: any): string[] {
+  if (!item) return [];
+  const list: string[] = [];
+  if (Array.isArray(item.imageUrls)) {
+    for (const u of item.imageUrls) {
+      if (typeof u === 'string' && u.trim() && !list.includes(u.trim())) list.push(u.trim());
+    }
+  }
+  if (typeof item.imageUrl === 'string' && item.imageUrl.trim() && !list.includes(item.imageUrl.trim())) {
+    list.push(item.imageUrl.trim());
+  }
+  if (typeof item.image === 'string' && item.image.trim() && !list.includes(item.image.trim())) {
+    list.push(item.image.trim());
+  }
+  if (typeof item.photoUrl === 'string' && item.photoUrl.trim() && !list.includes(item.photoUrl.trim())) {
+    list.push(item.photoUrl.trim());
+  }
+  if (typeof item.mediaUrl === 'string' && item.mediaUrl.trim() && !list.includes(item.mediaUrl.trim())) {
+    list.push(item.mediaUrl.trim());
+  }
+  return list;
+}
+

@@ -1,7 +1,7 @@
 import { useState, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { X, Copy, Download, Upload, Check, Calendar, ListChecks, Info, Search, AlertCircle, FileText, ChevronRight, ExternalLink } from 'lucide-react';
-import { TrainingSession, SessionMoment } from '../types';
+import { TrainingSession, SessionMoment, getExerciseImages } from '../types';
 
 const DEFAULT_CATEGORIES = [
   'Uppvärmning',
@@ -166,31 +166,42 @@ export default function MomentCopyModal({
       const selectedBankExercises = exerciseBank.filter(ex => importSelectedBankIds.has(ex.id));
       if (selectedBankExercises.length === 0) return;
 
-      copiedMoments = selectedBankExercises.map(ex => ({
-        id: `moment-${Date.now()}-${Math.random().toString(36).slice(2, 6)}-${ex.id.slice(-4)}`,
-        name: ex.name,
-        duration: ex.duration || 15,
-        description: ex.description,
-        imageUrl: ex.imageUrl,
-        imageUrls: ex.imageUrl ? [ex.imageUrl] : undefined,
-        externalLink: ex.externalLink,
-        bankExerciseId: ex.id,
-      }));
+      copiedMoments = selectedBankExercises.map(ex => {
+        const images = getExerciseImages(ex);
+        const primaryImage = images[0] || undefined;
+        return {
+          id: `moment-${Date.now()}-${Math.random().toString(36).slice(2, 6)}-${ex.id.slice(-4)}`,
+          name: ex.name,
+          duration: ex.duration || 15,
+          description: ex.description,
+          imageUrl: primaryImage,
+          imageUrls: images.length > 0 ? images : undefined,
+          externalLink: ex.externalLink,
+          bankExerciseId: ex.id,
+          tacticalBoards: ex.tacticalBoards ? JSON.parse(JSON.stringify(ex.tacticalBoards)) : undefined,
+        };
+      });
     } else {
       if (!sourceSession) return;
       const selectedMoments = sourceSession.moments.filter(m => importSelectedMomentIds.has(m.id));
       if (selectedMoments.length === 0) return;
 
       // Create copies: Strip competition settings (exerciseId) & assign new unique IDs
-      copiedMoments = selectedMoments.map(m => ({
-        id: `moment-${Date.now()}-${Math.random().toString(36).slice(2, 6)}-${m.id.slice(-4)}`,
-        name: m.name,
-        duration: m.duration,
-        description: m.description,
-        imageUrl: m.imageUrl,
-        imageUrls: m.imageUrls ? [...m.imageUrls] : undefined,
-        externalLink: m.externalLink,
-      }));
+      copiedMoments = selectedMoments.map(m => {
+        const images = getExerciseImages(m);
+        const primaryImage = images[0] || undefined;
+        return {
+          id: `moment-${Date.now()}-${Math.random().toString(36).slice(2, 6)}-${m.id.slice(-4)}`,
+          name: m.name,
+          duration: m.duration,
+          description: m.description,
+          imageUrl: primaryImage,
+          imageUrls: images.length > 0 ? images : undefined,
+          externalLink: m.externalLink,
+          bankExerciseId: m.bankExerciseId,
+          tacticalBoards: m.tacticalBoards ? JSON.parse(JSON.stringify(m.tacticalBoards)) : undefined,
+        };
+      });
     }
 
     if (copiedMoments.length === 0) return;
@@ -219,15 +230,23 @@ export default function MomentCopyModal({
     allSessions.forEach(session => {
       if (exportTargetSessionIds.has(session.id)) {
         // Deep copy selected moments
-        const copiedMoments: SessionMoment[] = selectedMoments.map(m => ({
-          id: `moment-${Date.now()}-${Math.random().toString(36).slice(2, 6)}-${m.id.slice(-4)}`,
-          name: m.name,
-          duration: m.duration,
-          description: m.description,
-          imageUrl: m.imageUrl,
-          imageUrls: m.imageUrls ? [...m.imageUrls] : undefined,
-          externalLink: m.externalLink,
-        }));
+        const copiedMoments: SessionMoment[] = selectedMoments.map(m => {
+          const images = (m.imageUrls && m.imageUrls.length > 0)
+            ? m.imageUrls.filter(Boolean)
+            : (m.imageUrl ? [m.imageUrl] : []);
+          const primaryImage = images[0] || undefined;
+          return {
+            id: `moment-${Date.now()}-${Math.random().toString(36).slice(2, 6)}-${m.id.slice(-4)}`,
+            name: m.name,
+            duration: m.duration,
+            description: m.description,
+            imageUrl: primaryImage,
+            imageUrls: images.length > 0 ? images : undefined,
+            externalLink: m.externalLink,
+            bankExerciseId: m.bankExerciseId,
+            tacticalBoards: m.tacticalBoards ? JSON.parse(JSON.stringify(m.tacticalBoards)) : undefined,
+          };
+        });
 
         onUpdateSession({
           ...session,
@@ -501,8 +520,18 @@ export default function MomentCopyModal({
                                       </div>
                                     </div>
                                     <div className="min-w-0">
-                                      <h4 className="text-sm font-black text-zinc-900 dark:text-white truncate">
-                                        {ex.name}
+                                      <h4 className="text-sm font-black text-zinc-900 dark:text-white truncate flex items-center gap-1.5">
+                                        <span className="truncate">{ex.name}</span>
+                                        {((ex.imageUrls && ex.imageUrls.length > 0) || ex.imageUrl) && (
+                                          <span className="shrink-0 text-[10px] text-zinc-400 dark:text-zinc-500" title="Innehåller bild">
+                                            📷
+                                          </span>
+                                        )}
+                                        {ex.externalLink && (
+                                          <span className="shrink-0 text-[10px] text-zinc-400 dark:text-zinc-500" title="Innehåller videolänk">
+                                            🔗
+                                          </span>
+                                        )}
                                       </h4>
                                       <span className="text-[10px] font-black uppercase tracking-wider text-zinc-400 block truncate">
                                         {(ex.categories && ex.categories.length > 0 ? ex.categories.join(', ') : (ex.category || 'Teknik'))} • {ex.duration || 15} min
@@ -525,16 +554,20 @@ export default function MomentCopyModal({
 
                         {previewExercise ? (
                           <div className="bg-zinc-50 dark:bg-zinc-950/25 border border-zinc-200/50 dark:border-zinc-805 rounded-2xl p-5 space-y-4 animate-in fade-in duration-200">
-                            {previewExercise.imageUrl && (
-                              <div className="w-full h-32 rounded-xl overflow-hidden bg-zinc-100 dark:bg-zinc-900 border border-zinc-200/20">
-                                <img
-                                  src={previewExercise.imageUrl}
-                                  alt={previewExercise.name}
-                                  referrerPolicy="no-referrer"
-                                  className="w-full h-full object-cover"
-                                />
-                              </div>
-                            )}
+                            {(() => {
+                              const previewImg = previewExercise.imageUrl || (previewExercise.imageUrls && previewExercise.imageUrls[0]);
+                              if (!previewImg) return null;
+                              return (
+                                <div className="w-full h-32 rounded-xl overflow-hidden bg-zinc-100 dark:bg-zinc-900 border border-zinc-200/20">
+                                  <img
+                                    src={previewImg}
+                                    alt={previewExercise.name}
+                                    referrerPolicy="no-referrer"
+                                    className="w-full h-full object-cover"
+                                  />
+                                </div>
+                              );
+                            })()}
                             <div>
                               <span className="bg-indigo-50 dark:bg-indigo-950/40 text-indigo-650 dark:text-indigo-400 border border-indigo-100 dark:border-indigo-900/30 px-2 py-0.5 rounded text-[10px] uppercase font-black tracking-wider">
                                 {previewExercise.categories && previewExercise.categories.length > 0 ? previewExercise.categories.join(' • ') : (previewExercise.category || 'Teknik')}

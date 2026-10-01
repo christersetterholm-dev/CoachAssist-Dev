@@ -24,6 +24,7 @@ import ClubAdminDashboard from './components/ClubAdminDashboard';
 import VersionFooter from './components/VersionFooter';
 import { OnboardingModal } from './components/OnboardingModal';
 import { PendingRequestsModal } from './components/PendingRequestsModal';
+import { ShakeProtectionModal, QuickShakeModal } from './components/ShakeProtectionModal';
 
 type View = 'training' | 'setup' | 'exercise' | 'squad' | 'leaderboard' | 'profile' | 'lineup' | 'teampage' | 'clubadmin';
 
@@ -100,6 +101,195 @@ const deduplicateById = <T extends { id: string }>(arr: T[] | undefined | null):
     seen.add(item.id);
     return true;
   });
+};
+
+const normalizeExerciseBank = (arr: any[] | undefined | null): BankExercise[] => {
+  if (!arr || !Array.isArray(arr)) return [];
+  return arr.map(ex => {
+    if (!ex) return ex;
+    const list: string[] = [];
+    if (Array.isArray(ex.imageUrls)) {
+      for (const u of ex.imageUrls) {
+        if (typeof u === 'string' && u.trim() && !list.includes(u.trim())) list.push(u.trim());
+      }
+    }
+    if (typeof ex.imageUrl === 'string' && ex.imageUrl.trim() && !list.includes(ex.imageUrl.trim())) {
+      list.push(ex.imageUrl.trim());
+    }
+    if (typeof ex.image === 'string' && ex.image.trim() && !list.includes(ex.image.trim())) {
+      list.push(ex.image.trim());
+    }
+    if (typeof ex.photoUrl === 'string' && ex.photoUrl.trim() && !list.includes(ex.photoUrl.trim())) {
+      list.push(ex.photoUrl.trim());
+    }
+    if (typeof ex.mediaUrl === 'string' && ex.mediaUrl.trim() && !list.includes(ex.mediaUrl.trim())) {
+      list.push(ex.mediaUrl.trim());
+    }
+    const primaryImg = list[0] || undefined;
+    return {
+      ...ex,
+      imageUrl: primaryImg,
+      imageUrls: list.length > 0 ? list : undefined
+    };
+  });
+};
+
+const normalizeSessionMoments = (sessions: any[] | undefined | null, bank: BankExercise[] = []): TrainingSession[] => {
+  if (!sessions || !Array.isArray(sessions)) return [];
+  return sessions.map(sess => {
+    if (!sess || !Array.isArray(sess.moments)) return sess;
+    const updatedMoments = sess.moments.map((m: any) => {
+      if (!m) return m;
+      const list: string[] = [];
+      if (Array.isArray(m.imageUrls)) {
+        for (const u of m.imageUrls) {
+          if (typeof u === 'string' && u.trim() && !list.includes(u.trim())) list.push(u.trim());
+        }
+      }
+      if (typeof m.imageUrl === 'string' && m.imageUrl.trim() && !list.includes(m.imageUrl.trim())) {
+        list.push(m.imageUrl.trim());
+      }
+      if (typeof m.image === 'string' && m.image.trim() && !list.includes(m.image.trim())) {
+        list.push(m.image.trim());
+      }
+      if (typeof m.photoUrl === 'string' && m.photoUrl.trim() && !list.includes(m.photoUrl.trim())) {
+        list.push(m.photoUrl.trim());
+      }
+      if (typeof m.mediaUrl === 'string' && m.mediaUrl.trim() && !list.includes(m.mediaUrl.trim())) {
+        list.push(m.mediaUrl.trim());
+      }
+
+      // If moment has no image but is linked to an exercise in the bank, recover image from bank!
+      if (list.length === 0 && (m.bankExerciseId || m.name)) {
+        const bankMatch = bank.find(b => (m.bankExerciseId && b.id === m.bankExerciseId) || (m.name && b.name?.trim().toLowerCase() === m.name?.trim().toLowerCase()));
+        if (bankMatch) {
+          const bankImages = (bankMatch.imageUrls && bankMatch.imageUrls.length > 0)
+            ? bankMatch.imageUrls
+            : (bankMatch.imageUrl ? [bankMatch.imageUrl] : []);
+          for (const u of bankImages) {
+            if (typeof u === 'string' && u.trim() && !list.includes(u.trim())) list.push(u.trim());
+          }
+        }
+      }
+
+      const primaryImg = list[0] || undefined;
+      return {
+        ...m,
+        imageUrl: primaryImg,
+        imageUrls: list.length > 0 ? list : undefined
+      };
+    });
+    return {
+      ...sess,
+      moments: updatedMoments
+    };
+  });
+};
+
+const mergeLineups = (remoteLineups: Lineup[] = [], localLineups: Lineup[] = []): Lineup[] => {
+  const map = new Map<string, Lineup>();
+  for (const l of remoteLineups) {
+    if (l && l.id) map.set(l.id, l);
+  }
+  for (const l of localLineups) {
+    if (!l || !l.id) continue;
+    const existing = map.get(l.id);
+    if (!existing) {
+      // Local lineup doesn't exist in remote (created/copied locally or offline) -> KEEP IT!
+      map.set(l.id, l);
+    } else {
+      const localTime = Math.max(l.updatedAt || 0, l.date || 0);
+      const remoteTime = Math.max(existing.updatedAt || 0, existing.date || 0);
+      if (localTime >= remoteTime) {
+        map.set(l.id, l);
+      }
+    }
+  }
+  return Array.from(map.values());
+};
+
+const mergeExercises = (remoteExercises: Exercise[] = [], localExercises: Exercise[] = []): Exercise[] => {
+  const map = new Map<string, Exercise>();
+  for (const e of remoteExercises) {
+    if (e && e.id) map.set(e.id, e);
+  }
+  for (const e of localExercises) {
+    if (!e || !e.id) continue;
+    const existing = map.get(e.id);
+    if (!existing) {
+      // Local exercise doesn't exist in remote (created/copied locally or offline) -> KEEP IT!
+      map.set(e.id, e);
+    } else {
+      const localTime = Math.max(e.updatedAt || 0, e.date || 0, (e as any).createdAt || 0);
+      const remoteTime = Math.max(existing.updatedAt || 0, existing.date || 0, (existing as any).createdAt || 0);
+      if (localTime >= remoteTime) {
+        map.set(e.id, e);
+      }
+    }
+  }
+  return Array.from(map.values());
+};
+
+const mergeSessions = (remoteSessions: TrainingSession[] = [], localSessions: TrainingSession[] = []): TrainingSession[] => {
+  const map = new Map<string, TrainingSession>();
+  for (const s of remoteSessions) {
+    if (s && s.id) map.set(s.id, s);
+  }
+  for (const s of localSessions) {
+    if (!s || !s.id) continue;
+    const existing = map.get(s.id);
+    if (!existing) {
+      // Local session doesn't exist in remote (created locally or offline) -> KEEP IT!
+      map.set(s.id, s);
+    } else {
+      const localTime = Math.max(s.updatedAt || 0, s.date || 0, (s as any).createdAt || 0);
+      const remoteTime = Math.max(existing.updatedAt || 0, existing.date || 0, (existing as any).createdAt || 0);
+      if (localTime >= remoteTime) {
+        map.set(s.id, s);
+      } else {
+        // Remote is newer overall, but preserve any locally added/edited moments or exercise links
+        const momentMap = new Map<string, SessionMoment>();
+        for (const m of existing.moments || []) {
+          if (m && m.id) momentMap.set(m.id, m);
+        }
+        for (const m of s.moments || []) {
+          if (!m || !m.id) continue;
+          const exM = momentMap.get(m.id);
+          if (!exM) {
+            momentMap.set(m.id, m);
+          } else if (m.exerciseId && !exM.exerciseId) {
+            momentMap.set(m.id, { ...exM, exerciseId: m.exerciseId });
+          }
+        }
+        map.set(s.id, {
+          ...existing,
+          moments: Array.from(momentMap.values())
+        });
+      }
+    }
+  }
+  return Array.from(map.values());
+};
+
+const mergeExerciseBank = (remoteBank: BankExercise[] = [], localBank: BankExercise[] = []): BankExercise[] => {
+  const map = new Map<string, BankExercise>();
+  for (const b of remoteBank) {
+    if (b && b.id) map.set(b.id, b);
+  }
+  for (const b of localBank) {
+    if (!b || !b.id) continue;
+    const existing = map.get(b.id);
+    if (!existing) {
+      map.set(b.id, b);
+    } else {
+      const localTime = Math.max((b as any).updatedAt || 0, b.createdAt || 0);
+      const remoteTime = Math.max((existing as any).updatedAt || 0, existing.createdAt || 0);
+      if (localTime >= remoteTime) {
+        map.set(b.id, b);
+      }
+    }
+  }
+  return Array.from(map.values());
 };
 
 const getPrefixedItem = (key: string, currentUser: any) => {
@@ -378,6 +568,8 @@ export default function App() {
     exerciseBank = [],
     exerciseBankCategories = []
   } = (data || INITIAL_DATA);
+  const latestDataRef = useRef<CoachData>(data);
+  latestDataRef.current = data;
   const [sessionActionCount, setSessionActionCount] = useState(0);
   const [linkToMomentId, setLinkToMomentId] = useState<string | null>(null);
   const [prefilledName, setPrefilledName] = useState<string | null>(null);
@@ -464,6 +656,36 @@ export default function App() {
     });
   };
   const [trainingTab, setTrainingTab] = useState<'completed' | 'exercises' | 'calendar_view' | 'bank'>('calendar_view');
+  const [calendarMonth, setCalendarMonth] = useState<Date>(() => {
+    const now = new Date();
+    const currentMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    try {
+      const saved = sessionStorage.getItem('coach_calendar_session_month');
+      const timestampStr = sessionStorage.getItem('coach_calendar_session_timestamp');
+      if (saved && timestampStr) {
+        const timestamp = Number(timestampStr);
+        // If the user actively switched month during this session within the last 2 hours:
+        if (Date.now() - timestamp < 2 * 60 * 60 * 1000) {
+          const [y, m] = saved.split('-').map(Number);
+          if (!isNaN(y) && !isNaN(m) && m >= 1 && m <= 12) {
+            return new Date(y, m - 1, 1);
+          }
+        }
+      }
+    } catch (e) {}
+    return currentMonth;
+  });
+
+  const handleCalendarMonthChange = (newMonth: Date) => {
+    setCalendarMonth(newMonth);
+    try {
+      const y = newMonth.getFullYear();
+      const m = newMonth.getMonth() + 1;
+      sessionStorage.setItem('coach_calendar_session_month', `${y}-${m}`);
+      sessionStorage.setItem('coach_calendar_session_timestamp', String(Date.now()));
+    } catch (e) {}
+  };
+
   const [openTrainingSettings, setOpenTrainingSettings] = useState(false);
   const [isLineupMaximized, setIsLineupMaximized] = useState(false);
 
@@ -534,19 +756,25 @@ export default function App() {
     if (sessionActionCount === 0 && pendingCloudUpdateRef.current) {
       const { lineups: newLineups, activeLineupId: newActiveLineupId } = pendingCloudUpdateRef.current;
       pendingCloudUpdateRef.current = null;
-      console.log("App: Applying queued real-time lineups update from cloud now that local edits are idle.");
+      console.log("App: Applying queued real-time lineups update merged with local state.");
       setData(prev => {
-        if (JSON.stringify(prev.lineups) === JSON.stringify(newLineups) && prev.activeLineupId === newActiveLineupId) {
+        const merged = mergeLineups(newLineups, prev.lineups);
+        const nextActiveId = prev.activeLineupId || newActiveLineupId || (merged[0]?.id || null);
+        if (JSON.stringify(prev.lineups) === JSON.stringify(merged) && prev.activeLineupId === nextActiveId) {
           return prev;
         }
         const updated = {
           ...prev,
-          lineups: newLineups,
-          activeLineupId: newActiveLineupId
+          lineups: merged,
+          activeLineupId: nextActiveId
         };
+        try {
+          setPrefixedItem('football_lineups', JSON.stringify(merged), user);
+          setPrefixedItem('active_lineup_id', nextActiveId || '', user);
+        } catch (e) {}
         if (lastCloudDataRef.current) {
-          lastCloudDataRef.current.lineups = newLineups;
-          lastCloudDataRef.current.activeLineupId = newActiveLineupId;
+          lastCloudDataRef.current.lineups = merged;
+          lastCloudDataRef.current.activeLineupId = nextActiveId;
         }
         return updated;
       });
@@ -569,6 +797,8 @@ export default function App() {
       return false;
     }
   });
+  const [isQuickShakeModalOpen, setIsQuickShakeModalOpen] = useState<boolean>(false);
+  const [isShakeInfoModalOpen, setIsShakeInfoModalOpen] = useState<boolean>(false);
 
   // Track if the exercise timer is currently running
   const [isTimerRunning, setIsTimerRunning] = useState<boolean>(false);
@@ -582,12 +812,26 @@ export default function App() {
   useEffect(() => {
     const onInput = (e: Event) => {
       const target = e.target as HTMLElement | null;
-      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || (target as any).isContentEditable)) {
-        hasTypedInSessionRef.current = true;
-        setHasTypedInSession(true);
-        try {
-          sessionStorage.setItem('coach_has_typed', 'true');
-        } catch (err) {}
+      if (target) {
+        if (target.tagName === 'TEXTAREA' || (target as any).isContentEditable) {
+          hasTypedInSessionRef.current = true;
+          setHasTypedInSession(true);
+          try {
+            sessionStorage.setItem('coach_has_typed', 'true');
+          } catch (err) {}
+          return;
+        }
+        if (target.tagName === 'INPUT') {
+          const type = ((target as HTMLInputElement).type || 'text').toLowerCase();
+          const textTypes = ['text', 'search', 'email', 'password', 'tel', 'url', 'number'];
+          if (textTypes.includes(type)) {
+            hasTypedInSessionRef.current = true;
+            setHasTypedInSession(true);
+            try {
+              sessionStorage.setItem('coach_has_typed', 'true');
+            } catch (err) {}
+          }
+        }
       }
     };
     window.addEventListener('input', onInput, true);
@@ -599,41 +843,32 @@ export default function App() {
     if (document.activeElement instanceof HTMLElement) {
       document.activeElement.blur();
     }
-
-    const hasTyped = hasTypedInSessionRef.current || (typeof sessionStorage !== 'undefined' && sessionStorage.getItem('coach_has_typed') === 'true');
-
-    // Persist active exercise id immediately in state and local storage
-    const updated = { ...data, activeExerciseId: id };
-    setData(updated);
+    document.querySelectorAll('input, textarea').forEach(el => (el as HTMLElement).blur());
     try {
-      setPrefixedItem('active_exercise_id', id, user);
-      sessionStorage.setItem('coach_active_exercise_id', id);
-      setPrefixedItem('football_squad', JSON.stringify(squad), user);
-      setPrefixedItem('football_sessions', JSON.stringify(sessions), user);
-      setPrefixedItem('football_exercises', JSON.stringify(exercises), user);
-      setPrefixedItem('data', JSON.stringify(updated), user);
+      window.getSelection()?.removeAllRanges();
     } catch (e) {}
 
-    if (hasTyped) {
-      // User has typed during this document session (e.g. in training purpose, notes, or titles),
-      // which registers actions in Apple WebKit's NSUndoManager.
-      // Automatically execute the shake-protection refresh so WebKit's undo stack is 100% clean
-      // to prevent the iOS "Ångra" dialog from ever appearing when moving/running with the phone!
-      try {
-        sessionStorage.removeItem('coach_has_typed');
-        hasTypedInSessionRef.current = false;
-        setHasTypedInSession(false);
-        const url = new URL(window.location.href);
-        url.searchParams.set('view', 'exercise');
-        url.searchParams.set('ex', id);
-        window.location.replace(url.toString());
-        return;
-      } catch (err) {
-        console.error('Seamless auto shake-protection reload fallback:', err);
-      }
-    }
+    // Safely clear typing indicator without destructive reload
+    hasTypedInSessionRef.current = false;
+    setHasTypedInSession(false);
+    try {
+      sessionStorage.removeItem('coach_has_typed');
+    } catch (e) {}
 
-    // If no text was typed, no reload is needed at all
+    // Persist active exercise id immediately in state and local storage using latest functional state
+    setData(prev => {
+      const updated = { ...prev, activeExerciseId: id };
+      try {
+        setPrefixedItem('active_exercise_id', id, user);
+        sessionStorage.setItem('coach_active_exercise_id', id);
+        setPrefixedItem('football_squad', JSON.stringify(prev.squad), user);
+        setPrefixedItem('football_sessions', JSON.stringify(prev.sessions), user);
+        setPrefixedItem('football_exercises', JSON.stringify(prev.exercises), user);
+        setPrefixedItem('data', JSON.stringify(updated), user);
+      } catch (e) {}
+      return updated;
+    });
+
     try {
       const url = new URL(window.location.href);
       url.searchParams.set('view', 'exercise');
@@ -643,34 +878,64 @@ export default function App() {
 
     setView('exercise');
     setSessionActionCount(prev => prev + 1);
+
+    // Immediate background push to cloud so Firestore and SQLite are always in sync
+    setTimeout(() => {
+      pushDirtySegments(true).catch(err => console.warn('App: Background push on select exercise:', err));
+    }, 50);
   };
 
-  const handleResetShakeProtection = () => {
+  const handleSafeShakeReload = async () => {
     try {
       sessionStorage.removeItem('coach_has_typed');
       hasTypedInSessionRef.current = false;
       setHasTypedInSession(false);
-      const exId = activeExerciseId || effectiveActiveExerciseId;
-      if (exId) {
-        sessionStorage.setItem('coach_active_exercise_id', exId);
-        setPrefixedItem('active_exercise_id', exId, user);
-      }
-      const currentData = { ...data, activeExerciseId: exId || null };
-      setPrefixedItem('data', JSON.stringify(currentData), user);
-      setPrefixedItem('football_squad', JSON.stringify(squad), user);
-      setPrefixedItem('football_sessions', JSON.stringify(sessions), user);
-      setPrefixedItem('football_exercises', JSON.stringify(exercises), user);
 
+      if (document.activeElement instanceof HTMLElement) {
+        document.activeElement.blur();
+      }
+      document.querySelectorAll('input, textarea').forEach(el => (el as HTMLElement).blur());
+      try {
+        window.getSelection()?.removeAllRanges();
+      } catch (e) {}
+
+      // Flush local state cleanly before reload
+      setData(prev => {
+        try {
+          setPrefixedItem('football_squad', JSON.stringify(prev.squad), user);
+          setPrefixedItem('football_sessions', JSON.stringify(prev.sessions), user);
+          setPrefixedItem('football_exercises', JSON.stringify(prev.exercises), user);
+          if (prev.activeExerciseId) {
+            setPrefixedItem('active_exercise_id', prev.activeExerciseId, user);
+            sessionStorage.setItem('coach_active_exercise_id', prev.activeExerciseId);
+          }
+          setPrefixedItem('data', JSON.stringify(prev), user);
+        } catch (e) {}
+        return prev;
+      });
+
+      // Best effort immediate cloud push
+      try {
+        await pushDirtySegments(true);
+      } catch (e) {
+        console.warn('App: Cloud push before shake reload:', e);
+      }
+
+      // Safe reload directly into the current exercise or view
       const url = new URL(window.location.href);
-      url.searchParams.set('view', 'exercise');
-      if (exId) {
-        url.searchParams.set('ex', exId);
+      if (view === 'exercise' && activeExerciseId) {
+        url.searchParams.set('view', 'exercise');
+        url.searchParams.set('ex', activeExerciseId);
       }
       window.location.replace(url.toString());
     } catch (err) {
-      console.error("Failed to reset shake protection:", err);
+      console.error("Failed to execute safe shake reload:", err);
       window.location.reload();
     }
+  };
+
+  const handleResetShakeProtection = () => {
+    setIsQuickShakeModalOpen(true);
   };
 
   // Notification Scheduler for Training Moments & iOS Shake to Undo Protection
@@ -691,8 +956,12 @@ export default function App() {
     const handleUndo = (e: any) => {
       // iOS triggers 'beforeinput' with inputType 'historyUndo' or 'historyRedo' when shaking
       if (e.inputType === 'historyUndo' || e.inputType === 'historyRedo') {
-        e.preventDefault();
-        e.stopPropagation();
+        const active = document.activeElement as HTMLElement | null;
+        const isEditingText = active && (active.tagName === 'TEXTAREA' || (active.tagName === 'INPUT' && !['button', 'submit', 'checkbox', 'radio'].includes((active as HTMLInputElement).type)));
+        if (!isEditingText) {
+          e.preventDefault();
+          e.stopPropagation();
+        }
       }
     };
 
@@ -808,7 +1077,7 @@ export default function App() {
       const newState: CoachData = {
         squad: deduplicatedSquad,
         exercises: savedExercises ? deduplicateById(JSON.parse(savedExercises)) : [],
-        sessions: savedSessions ? deduplicateById(JSON.parse(savedSessions)) : [],
+        sessions: savedSessions ? normalizeSessionMoments(deduplicateById(JSON.parse(savedSessions))) : [],
         deletedSessions: savedDeletedSessions ? deduplicateById(JSON.parse(savedDeletedSessions)) : [],
         lineups: savedLineups ? deduplicateById(JSON.parse(savedLineups)) : [],
         activeLineupId: savedActiveLineupId || null,
@@ -821,7 +1090,7 @@ export default function App() {
         customFormations: savedCustomFormations ? deduplicateById(JSON.parse(savedCustomFormations)) : [],
         pinnedFormationIds: getPrefixedItem('pinned_formations', user) ? JSON.parse(getPrefixedItem('pinned_formations', user)!) : ['4-2-3-1', '4-4-2', '4-3-3'],
         trainingSettings: savedSettings ? JSON.parse(savedSettings) : INITIAL_DATA.trainingSettings,
-        exerciseBank: savedExerciseBank ? deduplicateById(JSON.parse(savedExerciseBank)) : [],
+        exerciseBank: savedExerciseBank ? normalizeExerciseBank(deduplicateById(JSON.parse(savedExerciseBank))) : [],
         exerciseBankCategories: savedExerciseBankCategories ? JSON.parse(savedExerciseBankCategories) : []
       };
 
@@ -1216,18 +1485,42 @@ export default function App() {
   }, [user?.uid]);
 
   // Internal helper to push all dirty data segments cleanly without toggling isSyncing
-  const pushDirtySegments = async (forcePushAll = false) => {
+  const pushDirtySegments = async (forcePushAll = false, overrideData?: Partial<CoachData>) => {
     if (!user) return;
     const now = Date.now();
     const lastUpdatedBy = sessionIdRef.current;
 
+    const effectiveData: CoachData = {
+      ...(latestDataRef.current || data),
+      ...(overrideData || {})
+    };
+    const {
+      squad: pushSquad,
+      exercises: pushExercises,
+      sessions: pushSessions,
+      deletedSessions: pushDeletedSessions,
+      lineups: pushLineups,
+      activeLineupId: pushActiveLineupId,
+      periods: pushPeriods,
+      currentPeriodId: pushCurrentPeriodId,
+      teamUrl: pushTeamUrl,
+      adminUrl: pushAdminUrl,
+      seriesUrl: pushSeriesUrl,
+      customFormations: pushCustomFormations,
+      pinnedFormationIds: pushPinnedFormationIds,
+      trainingSettings: pushTrainingSettings,
+      activeExerciseId: pushActiveExerciseId,
+      exerciseBank: pushExerciseBank,
+      exerciseBankCategories: pushExerciseBankCategories
+    } = effectiveData;
+
     const currentSynced = lastCloudDataRef.current || INITIAL_DATA;
-    const nowSquadDirty = JSON.stringify(currentSynced.squad) !== JSON.stringify(squad);
-    const nowSessionsDirty = JSON.stringify(currentSynced.sessions) !== JSON.stringify(sessions) || JSON.stringify(currentSynced.deletedSessions) !== JSON.stringify(deletedSessions);
-    const nowExercisesDirty = JSON.stringify(currentSynced.exercises) !== JSON.stringify(exercises) || JSON.stringify(currentSynced.exerciseBank) !== JSON.stringify(exerciseBank) || JSON.stringify(currentSynced.exerciseBankCategories) !== JSON.stringify(exerciseBankCategories);
-    const nowLineupsDirty = JSON.stringify(currentSynced.lineups) !== JSON.stringify(lineups) || currentSynced.activeLineupId !== activeLineupId;
-    const nowPeriodsDirty = JSON.stringify(currentSynced.periods) !== JSON.stringify(periods) || currentSynced.currentPeriodId !== currentPeriodId;
-    const nowSettingsDirty = currentSynced.teamUrl !== teamUrl || currentSynced.adminUrl !== adminUrl || currentSynced.seriesUrl !== seriesUrl || JSON.stringify(currentSynced.customFormations) !== JSON.stringify(customFormations) || JSON.stringify(currentSynced.pinnedFormationIds) !== JSON.stringify(pinnedFormationIds) || JSON.stringify(currentSynced.trainingSettings) !== JSON.stringify(trainingSettings) || currentSynced.activeExerciseId !== activeExerciseId;
+    const nowSquadDirty = JSON.stringify(currentSynced.squad) !== JSON.stringify(pushSquad);
+    const nowSessionsDirty = JSON.stringify(currentSynced.sessions) !== JSON.stringify(pushSessions) || JSON.stringify(currentSynced.deletedSessions) !== JSON.stringify(pushDeletedSessions);
+    const nowExercisesDirty = JSON.stringify(currentSynced.exercises) !== JSON.stringify(pushExercises) || JSON.stringify(currentSynced.exerciseBank) !== JSON.stringify(pushExerciseBank) || JSON.stringify(currentSynced.exerciseBankCategories) !== JSON.stringify(pushExerciseBankCategories);
+    const nowLineupsDirty = JSON.stringify(currentSynced.lineups) !== JSON.stringify(pushLineups) || currentSynced.activeLineupId !== pushActiveLineupId;
+    const nowPeriodsDirty = JSON.stringify(currentSynced.periods) !== JSON.stringify(pushPeriods) || currentSynced.currentPeriodId !== pushCurrentPeriodId;
+    const nowSettingsDirty = currentSynced.teamUrl !== pushTeamUrl || currentSynced.adminUrl !== pushAdminUrl || currentSynced.seriesUrl !== pushSeriesUrl || JSON.stringify(currentSynced.customFormations) !== JSON.stringify(pushCustomFormations) || JSON.stringify(currentSynced.pinnedFormationIds) !== JSON.stringify(pushPinnedFormationIds) || JSON.stringify(currentSynced.trainingSettings) !== JSON.stringify(pushTrainingSettings) || currentSynced.activeExerciseId !== pushActiveExerciseId;
 
     const writePromises = [];
     const { docSquadRef, docSessionsRef, docExercisesRef, docLineupsRef, docPeriodsRef, docSettingsRef } = getDocRefs(user, userProfile);
@@ -1235,22 +1528,22 @@ export default function App() {
     const shouldForce = forcePushAll || (sessionActionCountRef.current > 0 && !nowSquadDirty && !nowSessionsDirty && !nowExercisesDirty && !nowLineupsDirty && !nowPeriodsDirty && !nowSettingsDirty);
 
     if (nowSquadDirty || shouldForce) {
-      writePromises.push(setDoc(docSquadRef, { squad, updatedAt: now, lastUpdatedBy }));
+      writePromises.push(setDoc(docSquadRef, { squad: pushSquad, updatedAt: now, lastUpdatedBy }));
     }
     if (nowSessionsDirty || shouldForce) {
-      writePromises.push(setDoc(docSessionsRef, { sessions, deletedSessions, updatedAt: now, lastUpdatedBy }));
+      writePromises.push(setDoc(docSessionsRef, { sessions: pushSessions, deletedSessions: pushDeletedSessions, updatedAt: now, lastUpdatedBy }));
     }
     if (nowExercisesDirty || shouldForce) {
-      writePromises.push(setDoc(docExercisesRef, { exercises, exerciseBank, exerciseBankCategories, updatedAt: now, lastUpdatedBy }));
+      writePromises.push(setDoc(docExercisesRef, { exercises: pushExercises, exerciseBank: pushExerciseBank, exerciseBankCategories: pushExerciseBankCategories, updatedAt: now, lastUpdatedBy }));
     }
     if (nowLineupsDirty || shouldForce) {
-      writePromises.push(setDoc(docLineupsRef, { lineups, activeLineupId, updatedAt: now, lastUpdatedBy }));
+      writePromises.push(setDoc(docLineupsRef, { lineups: pushLineups, activeLineupId: pushActiveLineupId, updatedAt: now, lastUpdatedBy }));
     }
     if (nowPeriodsDirty || shouldForce) {
-      writePromises.push(setDoc(docPeriodsRef, { periods, currentPeriodId, updatedAt: now, lastUpdatedBy }));
+      writePromises.push(setDoc(docPeriodsRef, { periods: pushPeriods, currentPeriodId: pushCurrentPeriodId, updatedAt: now, lastUpdatedBy }));
     }
     if (nowSettingsDirty || shouldForce) {
-      writePromises.push(setDoc(docSettingsRef, { teamUrl, adminUrl, seriesUrl, customFormations, pinnedFormationIds, trainingSettings, activeExerciseId, updatedAt: now, lastUpdatedBy }));
+      writePromises.push(setDoc(docSettingsRef, { teamUrl: pushTeamUrl, adminUrl: pushAdminUrl, seriesUrl: pushSeriesUrl, customFormations: pushCustomFormations, pinnedFormationIds: pushPinnedFormationIds, trainingSettings: pushTrainingSettings, activeExerciseId: pushActiveExerciseId, updatedAt: now, lastUpdatedBy }));
     }
 
     if (writePromises.length === 0) {
@@ -1263,23 +1556,23 @@ export default function App() {
     lastSyncedAtRef.current = now;
     syncUserIdRef.current = user.uid;
     lastCloudDataRef.current = {
-      squad,
-      exercises,
-      sessions,
-      deletedSessions,
-      lineups,
-      activeLineupId,
-      periods,
-      currentPeriodId,
-      activeExerciseId,
-      teamUrl,
-      adminUrl,
-      seriesUrl,
-      customFormations,
-      pinnedFormationIds,
-      trainingSettings,
-      exerciseBank,
-      exerciseBankCategories
+      squad: pushSquad,
+      exercises: pushExercises,
+      sessions: pushSessions,
+      deletedSessions: pushDeletedSessions,
+      lineups: pushLineups,
+      activeLineupId: pushActiveLineupId,
+      periods: pushPeriods,
+      currentPeriodId: pushCurrentPeriodId,
+      activeExerciseId: pushActiveExerciseId,
+      teamUrl: pushTeamUrl,
+      adminUrl: pushAdminUrl,
+      seriesUrl: pushSeriesUrl,
+      customFormations: pushCustomFormations,
+      pinnedFormationIds: pushPinnedFormationIds,
+      trainingSettings: pushTrainingSettings,
+      exerciseBank: pushExerciseBank,
+      exerciseBankCategories: pushExerciseBankCategories
     };
     setSessionActionCount(0);
     setPrefixedItem('last_local_sync_at', now.toString(), user);
@@ -1336,15 +1629,33 @@ export default function App() {
       const localLineups = lineups.length > 0 ? lineups : (savedLineups ? JSON.parse(savedLineups) : []);
       const localPeriods = periods.length > 0 ? periods : (savedPeriods ? JSON.parse(savedPeriods) : []);
 
+      const remoteLineups = lineupsSnap.exists() ? (lineupsSnap.data().lineups || []) : [];
+      const mergedLineups = deduplicateById(mergeLineups(remoteLineups, localLineups));
+      const targetActiveLineupId = activeLineupId || (lineupsSnap.exists() ? (lineupsSnap.data().activeLineupId || null) : null) || (mergedLineups[0]?.id || null);
+
+      const remoteExercises = exercisesSnap.exists() ? (exercisesSnap.data().exercises || []) : [];
+      const mergedExercises = deduplicateById(mergeExercises(remoteExercises, localExercises));
+
+      const remoteSessions = sessionsSnap.exists() ? (sessionsSnap.data().sessions || []) : [];
+      const mergedSessions = normalizeSessionMoments(deduplicateById(mergeSessions(remoteSessions, localSessions)));
+
+      const remoteBank = exercisesSnap.exists() ? (exercisesSnap.data().exerciseBank || []) : [];
+      const mergedBank = normalizeExerciseBank(deduplicateById(mergeExerciseBank(remoteBank, localExerciseBank)));
+
+      const targetActiveExerciseId = activeExerciseId 
+        || (typeof window !== 'undefined' ? sessionStorage.getItem('coach_active_exercise_id') : null)
+        || getPrefixedItem('active_exercise_id', user) 
+        || (settingsSnap.exists() ? (settingsSnap.data().activeExerciseId || null) : null);
+
       const updatedState: CoachData = {
         squad: squadSnap.exists() ? deduplicateById(squadSnap.data().squad || []) : deduplicateById(localSquad),
-        sessions: sessionsSnap.exists() ? deduplicateById(sessionsSnap.data().sessions || []) : deduplicateById(localSessions),
+        sessions: mergedSessions,
         deletedSessions: sessionsSnap.exists() ? deduplicateById(sessionsSnap.data().deletedSessions || []) : deduplicateById(localDeletedSessions),
-        exercises: exercisesSnap.exists() ? deduplicateById(exercisesSnap.data().exercises || []) : deduplicateById(localExercises),
-        exerciseBank: exercisesSnap.exists() ? deduplicateById(exercisesSnap.data().exerciseBank || []) : deduplicateById(localExerciseBank),
+        exercises: mergedExercises,
+        exerciseBank: mergedBank,
         exerciseBankCategories: exercisesSnap.exists() ? (exercisesSnap.data().exerciseBankCategories || []) : localExerciseBankCategories,
-        lineups: lineupsSnap.exists() ? deduplicateById(lineupsSnap.data().lineups || []) : deduplicateById(localLineups),
-        activeLineupId: lineupsSnap.exists() ? (lineupsSnap.data().activeLineupId || null) : activeLineupId,
+        lineups: mergedLineups,
+        activeLineupId: targetActiveLineupId,
         periods: periodsSnap.exists() ? deduplicateById(periodsSnap.data().periods || []) : deduplicateById(localPeriods),
         currentPeriodId: periodsSnap.exists() ? (periodsSnap.data().currentPeriodId || null) : currentPeriodId,
         teamUrl: settingsSnap.exists() ? (settingsSnap.data().teamUrl || '') : teamUrl,
@@ -1353,7 +1664,7 @@ export default function App() {
         customFormations: settingsSnap.exists() ? deduplicateById(settingsSnap.data().customFormations || []) : customFormations,
         pinnedFormationIds: settingsSnap.exists() ? (settingsSnap.data().pinnedFormationIds || ['4-2-3-1', '4-4-2', '4-3-3']) : pinnedFormationIds,
         trainingSettings: settingsSnap.exists() ? (settingsSnap.data().trainingSettings || INITIAL_DATA.trainingSettings) : trainingSettings,
-        activeExerciseId: settingsSnap.exists() ? (settingsSnap.data().activeExerciseId || null) : activeExerciseId,
+        activeExerciseId: targetActiveExerciseId,
       };
 
       if (userProfile.activeClubId && userProfile.activeTeamId) {
@@ -1373,6 +1684,26 @@ export default function App() {
       setSessionActionCount(0);
       setIsQuotaExceeded(false);
       setSyncError(null);
+
+      try {
+        setPrefixedItem('football_exercises', JSON.stringify(mergedExercises), user);
+        setPrefixedItem('football_sessions', JSON.stringify(mergedSessions), user);
+        setPrefixedItem('football_lineups', JSON.stringify(mergedLineups), user);
+        if (targetActiveExerciseId) {
+          setPrefixedItem('active_exercise_id', targetActiveExerciseId, user);
+          sessionStorage.setItem('coach_active_exercise_id', targetActiveExerciseId);
+        }
+      } catch (e) {}
+
+      const hasUnsyncedLocalExercises = mergedExercises.some(me => !remoteExercises.some(re => re.id === me.id));
+      const hasUnsyncedLocalSessions = mergedSessions.some(ms => !remoteSessions.some(rs => rs.id === ms.id));
+      if (hasUnsyncedLocalExercises || hasUnsyncedLocalSessions) {
+        console.log("App: Preserved local unsynced exercises/sessions during pull. Triggering follow-up push.");
+        setTimeout(() => {
+          pushDirtySegments(true).catch(e => console.warn("App: Follow-up push after pull failed:", e));
+        }, 150);
+      }
+
       console.log("App: Segmented manual sync successful!");
     } catch (err) {
       console.error("App: Segmented manual sync failed", err);
@@ -1482,15 +1813,41 @@ export default function App() {
               exerciseBankCategories: []
             };
           } else {
+            const savedClubLineups = getPrefixedItem('football_lineups', user);
+            const cachedClubLineups = savedClubLineups ? deduplicateById<Lineup>(JSON.parse(savedClubLineups)) : [];
+            const remoteClubLineups = lineupsSnap.exists() ? (lineupsSnap.data().lineups || []) : [];
+            const mergedClubLineups = deduplicateById(mergeLineups(remoteClubLineups, cachedClubLineups));
+            const clubActiveId = (lineupsSnap.exists() ? (lineupsSnap.data().activeLineupId || null) : null) || (mergedClubLineups[0]?.id || null);
+
+            const savedClubExercises = getPrefixedItem('football_exercises', user);
+            const cachedClubExercises = savedClubExercises ? deduplicateById<Exercise>(JSON.parse(savedClubExercises)) : [];
+            const remoteClubExercises = exercisesSnap.exists() ? (exercisesSnap.data().exercises || []) : [];
+            const mergedClubExercises = deduplicateById(mergeExercises(remoteClubExercises, cachedClubExercises));
+
+            const savedClubSessions = getPrefixedItem('football_sessions', user);
+            const cachedClubSessions = savedClubSessions ? deduplicateById<TrainingSession>(JSON.parse(savedClubSessions)) : [];
+            const remoteClubSessions = sessionsSnap.exists() ? (sessionsSnap.data().sessions || []) : [];
+            const mergedClubSessions = normalizeSessionMoments(deduplicateById(mergeSessions(remoteClubSessions, cachedClubSessions)));
+
+            const savedClubBank = getPrefixedItem('football_exercise_bank', user);
+            const cachedClubBank = savedClubBank ? deduplicateById<BankExercise>(JSON.parse(savedClubBank)) : [];
+            const remoteClubBank = exercisesSnap.exists() ? (exercisesSnap.data().exerciseBank || []) : [];
+            const mergedClubBank = normalizeExerciseBank(deduplicateById(mergeExerciseBank(remoteClubBank, cachedClubBank)));
+
+            const clubActiveExerciseId = new URLSearchParams(window.location.search).get('ex') 
+              || sessionStorage.getItem('coach_active_exercise_id') 
+              || getPrefixedItem('active_exercise_id', user) 
+              || (settingsSnap.exists() ? (settingsSnap.data().activeExerciseId || null) : null);
+
             loadedState = {
               squad: squadSnap.exists() ? deduplicateById(squadSnap.data().squad || []) : [],
-              sessions: sessionsSnap.exists() ? deduplicateById(sessionsSnap.data().sessions || []) : [],
+              sessions: mergedClubSessions,
               deletedSessions: sessionsSnap.exists() ? deduplicateById(sessionsSnap.data().deletedSessions || []) : [],
-              exercises: exercisesSnap.exists() ? deduplicateById(exercisesSnap.data().exercises || []) : [],
-              exerciseBank: exercisesSnap.exists() ? deduplicateById(exercisesSnap.data().exerciseBank || []) : [],
+              exercises: mergedClubExercises,
+              exerciseBank: mergedClubBank,
               exerciseBankCategories: exercisesSnap.exists() ? (exercisesSnap.data().exerciseBankCategories || []) : [],
-              lineups: lineupsSnap.exists() ? deduplicateById(lineupsSnap.data().lineups || []) : [],
-              activeLineupId: lineupsSnap.exists() ? (lineupsSnap.data().activeLineupId || null) : null,
+              lineups: mergedClubLineups,
+              activeLineupId: clubActiveId,
               periods: periodsSnap.exists() ? deduplicateById(periodsSnap.data().periods || []) : [],
               currentPeriodId: periodsSnap.exists() ? (periodsSnap.data().currentPeriodId || null) : null,
               teamUrl: settingsSnap.exists() ? (settingsSnap.data().teamUrl || '') : '',
@@ -1499,7 +1856,7 @@ export default function App() {
               customFormations: settingsSnap.exists() ? deduplicateById(settingsSnap.data().customFormations || []) : [],
               pinnedFormationIds: settingsSnap.exists() ? (settingsSnap.data().pinnedFormationIds || ['4-2-3-1', '4-4-2', '4-3-3']) : ['4-2-3-1', '4-4-2', '4-3-3'],
               trainingSettings: settingsSnap.exists() ? (settingsSnap.data().trainingSettings || INITIAL_DATA.trainingSettings) : INITIAL_DATA.trainingSettings,
-              activeExerciseId: new URLSearchParams(window.location.search).get('ex') || sessionStorage.getItem('coach_active_exercise_id') || getPrefixedItem('active_exercise_id', user) || (settingsSnap.exists() ? (settingsSnap.data().activeExerciseId || null) : null),
+              activeExerciseId: clubActiveExerciseId,
             };
           }
 
@@ -1623,15 +1980,33 @@ export default function App() {
               }
             }
           } else {
+            const remoteLineups = lineupsSnap.exists() ? (lineupsSnap.data().lineups || []) : [];
+            const mergedLineups = deduplicateById(mergeLineups(remoteLineups, cachedLineups));
+            const targetActiveLineupId = (lineupsSnap.exists() ? (lineupsSnap.data().activeLineupId || null) : null) || (savedActiveLineupId || null) || (cachedLineups[0]?.id || null);
+
+            const remoteExercises = exercisesSnap.exists() ? (exercisesSnap.data().exercises || []) : [];
+            const mergedExercises = deduplicateById(mergeExercises(remoteExercises, cachedExercises));
+
+            const remoteSessions = sessionsSnap.exists() ? (sessionsSnap.data().sessions || []) : [];
+            const mergedSessions = normalizeSessionMoments(deduplicateById(mergeSessions(remoteSessions, cachedSessions)));
+
+            const remoteBank = exercisesSnap.exists() ? (exercisesSnap.data().exerciseBank || []) : [];
+            const mergedBank = normalizeExerciseBank(deduplicateById(mergeExerciseBank(remoteBank, cachedExerciseBank)));
+
+            const targetActiveExerciseId = new URLSearchParams(window.location.search).get('ex') 
+              || sessionStorage.getItem('coach_active_exercise_id') 
+              || savedActiveExerciseId 
+              || (settingsSnap.exists() ? (settingsSnap.data().activeExerciseId || null) : null);
+
             loadedState = {
               squad: squadSnap.exists() ? deduplicateById(squadSnap.data().squad || []) : cachedSquad,
-              sessions: sessionsSnap.exists() ? deduplicateById(sessionsSnap.data().sessions || []) : cachedSessions,
+              sessions: mergedSessions,
               deletedSessions: sessionsSnap.exists() ? deduplicateById(sessionsSnap.data().deletedSessions || []) : cachedDeletedSessions,
-              exercises: exercisesSnap.exists() ? deduplicateById(exercisesSnap.data().exercises || []) : cachedExercises,
-              exerciseBank: exercisesSnap.exists() ? deduplicateById(exercisesSnap.data().exerciseBank || []) : cachedExerciseBank,
+              exercises: mergedExercises,
+              exerciseBank: mergedBank,
               exerciseBankCategories: exercisesSnap.exists() ? (exercisesSnap.data().exerciseBankCategories || []) : cachedExerciseBankCategories,
-              lineups: lineupsSnap.exists() ? deduplicateById(lineupsSnap.data().lineups || []) : cachedLineups,
-              activeLineupId: lineupsSnap.exists() ? (lineupsSnap.data().activeLineupId || null) : (savedActiveLineupId || null),
+              lineups: mergedLineups,
+              activeLineupId: targetActiveLineupId,
               periods: periodsSnap.exists() ? deduplicateById(periodsSnap.data().periods || []) : cachedPeriods,
               currentPeriodId: periodsSnap.exists() ? (periodsSnap.data().currentPeriodId || null) : (savedCurrentPeriodId || null),
               teamUrl: settingsSnap.exists() ? (settingsSnap.data().teamUrl || '') : (savedTeamUrl || ''),
@@ -1640,7 +2015,7 @@ export default function App() {
               customFormations: settingsSnap.exists() ? deduplicateById(settingsSnap.data().customFormations || []) : cachedCustomFormations,
               pinnedFormationIds: settingsSnap.exists() ? (settingsSnap.data().pinnedFormationIds || ['4-2-3-1', '4-4-2', '4-3-3']) : cachedPinnedFormations,
               trainingSettings: settingsSnap.exists() ? (settingsSnap.data().trainingSettings || INITIAL_DATA.trainingSettings) : cachedSettings,
-              activeExerciseId: new URLSearchParams(window.location.search).get('ex') || sessionStorage.getItem('coach_active_exercise_id') || (settingsSnap.exists() ? (settingsSnap.data().activeExerciseId || null) : (savedActiveExerciseId || null)),
+              activeExerciseId: targetActiveExerciseId,
             };
           }
         }
@@ -1666,6 +2041,27 @@ export default function App() {
           localStorage.setItem('last_local_user_id', user.uid);
           setHasPulledFromCloud(true);
           setIsInitialSyncDone(true);
+
+          try {
+            setPrefixedItem('football_exercises', JSON.stringify(loadedState.exercises), user);
+            setPrefixedItem('football_sessions', JSON.stringify(loadedState.sessions), user);
+            setPrefixedItem('football_lineups', JSON.stringify(loadedState.lineups), user);
+            if (loadedState.activeExerciseId) {
+              setPrefixedItem('active_exercise_id', loadedState.activeExerciseId, user);
+              sessionStorage.setItem('coach_active_exercise_id', loadedState.activeExerciseId);
+            }
+          } catch (e) {}
+
+          const remoteExercises = exercisesSnap.exists() ? (exercisesSnap.data().exercises || []) : [];
+          const remoteSessions = sessionsSnap.exists() ? (sessionsSnap.data().sessions || []) : [];
+          const hasUnsyncedExercises = loadedState.exercises.some(le => !remoteExercises.some(re => re.id === le.id));
+          const hasUnsyncedSessions = loadedState.sessions.some(ls => !remoteSessions.some(rs => rs.id === ls.id));
+          if (hasUnsyncedExercises || hasUnsyncedSessions) {
+            console.log("App: Preserved local exercises/sessions on initial load that are not in cloud yet. Syncing to cloud...");
+            setTimeout(() => {
+              pushDirtySegments(true).catch(e => console.warn("App: Initial sync push failed:", e));
+            }, 300);
+          }
         }
 
         // Subscribe to real-time lineups updates
@@ -1700,18 +2096,24 @@ export default function App() {
             }
 
             setData(prev => {
-              if (JSON.stringify(prev.lineups) === JSON.stringify(newLineups) && prev.activeLineupId === newActiveLineupId) {
+              const merged = mergeLineups(newLineups, prev.lineups);
+              const nextActiveId = prev.activeLineupId || newActiveLineupId || (merged[0]?.id || null);
+              if (JSON.stringify(prev.lineups) === JSON.stringify(merged) && prev.activeLineupId === nextActiveId) {
                 return prev;
               }
-              console.log("App: Real-time update of lineups applied from cloud");
+              console.log("App: Real-time update of lineups merged from cloud");
               const updated = {
                 ...prev,
-                lineups: newLineups,
-                activeLineupId: newActiveLineupId
+                lineups: merged,
+                activeLineupId: nextActiveId
               };
+              try {
+                setPrefixedItem('football_lineups', JSON.stringify(merged), user);
+                setPrefixedItem('active_lineup_id', nextActiveId || '', user);
+              } catch (e) {}
               if (lastCloudDataRef.current) {
-                lastCloudDataRef.current.lineups = newLineups;
-                lastCloudDataRef.current.activeLineupId = newActiveLineupId;
+                lastCloudDataRef.current.lineups = merged;
+                lastCloudDataRef.current.activeLineupId = nextActiveId;
               }
               return updated;
             });
@@ -1749,9 +2151,8 @@ export default function App() {
 
   // Push Local Actions to Cloud with dynamic debounce and granular dirty tracking
   useEffect(() => {
-    if (view === 'exercise' || activeExerciseId !== null) {
-      // Skip auto-sync while actively in competition / exercise view or while an exercise is actively running.
-      // Point updates and live timer changes stay responsive locally and will only sync to Firebase when the moment is finished or exited!
+    if (isTimerRunning) {
+      // Pause automatic background push only while the timer is actively ticking down
       return;
     }
 
@@ -1969,24 +2370,54 @@ export default function App() {
     
     const nextActiveExerciseId = shouldStart !== false ? newExercise.id : previousActiveExerciseId;
 
-    setData(prev => ({
-      ...prev,
-      exercises: [newExercise, ...prev.exercises],
-      activeLineupId: activeLineupId,
-      activeExerciseId: nextActiveExerciseId,
-      sessions: (linkToMomentId && activeSessionId) 
+    setData(prev => {
+      const updatedExercises = [newExercise, ...prev.exercises];
+      const updatedSessions = (linkToMomentId && activeSessionId) 
         ? prev.sessions.map(s => s.id === activeSessionId 
             ? { ...s, moments: s.moments.map(m => m.id === linkToMomentId ? { ...m, exerciseId: newExercise.id } : m), updatedAt: Date.now() } 
             : s)
-        : prev.sessions
-    }));
+        : prev.sessions;
+
+      const updated = {
+        ...prev,
+        exercises: updatedExercises,
+        activeLineupId: activeLineupId,
+        activeExerciseId: nextActiveExerciseId,
+        sessions: updatedSessions
+      };
+
+      try {
+        setPrefixedItem('football_exercises', JSON.stringify(updatedExercises), user);
+        setPrefixedItem('football_sessions', JSON.stringify(updatedSessions), user);
+        if (nextActiveExerciseId) {
+          setPrefixedItem('active_exercise_id', nextActiveExerciseId, user);
+          sessionStorage.setItem('coach_active_exercise_id', nextActiveExerciseId);
+        }
+        setPrefixedItem('data', JSON.stringify(updated), user);
+      } catch (e) {}
+
+      return updated;
+    });
     setSessionActionCount(prev => prev + 1);
     
     setLinkToMomentId(null);
     setPrefilledName(null);
     setPreviousActiveExerciseId(undefined);
 
-    if (editReturnView) {
+    pushDirtySegments(true, {
+      exercises: [newExercise, ...exercises],
+      activeExerciseId: nextActiveExerciseId,
+      sessions: (linkToMomentId && activeSessionId) 
+        ? sessions.map(s => s.id === activeSessionId 
+            ? { ...s, moments: s.moments.map(m => m.id === linkToMomentId ? { ...m, exerciseId: newExercise.id } : m), updatedAt: Date.now() } 
+            : s)
+        : sessions
+    }).catch(err => console.warn('App: Immediate push on start exercise:', err));
+
+    if (shouldStart !== false) {
+      handleSelectExercise(newExercise.id);
+      setEditReturnView(null);
+    } else if (editReturnView) {
       setView(editReturnView);
       setEditReturnView(null);
     } else if (resolvedSessionId) {
@@ -1994,11 +2425,7 @@ export default function App() {
       setView('training');
     } else {
       setActiveSessionId(null);
-      if (shouldStart !== false) {
-        handleSelectExercise(newExercise.id);
-      } else {
-        setView('training');
-      }
+      setView('training');
     }
   };
 
@@ -2021,47 +2448,65 @@ export default function App() {
     
     setData(prev => {
       const nextActiveId = previousActiveExerciseId !== undefined ? previousActiveExerciseId : prev.activeExerciseId;
-      return {
+      const updatedExercises = prev.exercises.map(e => {
+        if (e.id !== prev.activeExerciseId) return e;
+        
+        const updatedTeams = teams.map(t => {
+          const existingTeam = e.teams.find(et => et.id === t.id);
+          return {
+            ...t,
+            playerIds: t.playerIds || [],
+            score: existingTeam ? existingTeam.score : 0
+          };
+        });
+
+        return {
+          ...e,
+          name,
+          icon,
+          teams: updatedTeams,
+          sortByScore,
+          showTimer,
+          defaultTimerMinutes,
+          defaultTimerSeconds,
+          jokerPlayerIds,
+          pointsConfig,
+          updatedAt: Date.now(),
+          periodId: periodId || e.periodId,
+          sessionId: sessionId || (activeSessionId || e.sessionId),
+          includeLeaders
+        };
+      });
+
+      const updatedSessions = linkToMomentId && activeSessionId 
+        ? prev.sessions.map(s => s.id === activeSessionId 
+            ? { ...s, moments: s.moments.map(m => m.id === linkToMomentId ? { ...m, exerciseId: (prev.activeExerciseId || '') } : m), updatedAt: Date.now() } 
+            : s)
+        : prev.sessions;
+
+      const updated = {
         ...prev,
         activeExerciseId: nextActiveId,
-        exercises: prev.exercises.map(e => {
-          if (e.id !== prev.activeExerciseId) return e;
-          
-          const updatedTeams = teams.map(t => {
-            const existingTeam = e.teams.find(et => et.id === t.id);
-            return {
-              ...t,
-              playerIds: t.playerIds || [],
-              score: existingTeam ? existingTeam.score : 0
-            };
-          });
-
-          return {
-            ...e,
-            name,
-            icon,
-            teams: updatedTeams,
-            sortByScore,
-            showTimer,
-            defaultTimerMinutes,
-            defaultTimerSeconds,
-            jokerPlayerIds,
-            pointsConfig,
-            updatedAt: Date.now(),
-            periodId: periodId || e.periodId,
-            sessionId: sessionId || (activeSessionId || e.sessionId),
-            includeLeaders
-          };
-        }),
-        sessions: linkToMomentId && activeSessionId 
-          ? prev.sessions.map(s => s.id === activeSessionId 
-              ? { ...s, moments: s.moments.map(m => m.id === linkToMomentId ? { ...m, exerciseId: (prev.activeExerciseId || '') } : m), updatedAt: Date.now() } 
-              : s)
-          : prev.sessions
+        exercises: updatedExercises,
+        sessions: updatedSessions
       };
+
+      try {
+        setPrefixedItem('football_exercises', JSON.stringify(updatedExercises), user);
+        setPrefixedItem('football_sessions', JSON.stringify(updatedSessions), user);
+        if (nextActiveId) {
+          setPrefixedItem('active_exercise_id', nextActiveId, user);
+          sessionStorage.setItem('coach_active_exercise_id', nextActiveId);
+        }
+        setPrefixedItem('data', JSON.stringify(updated), user);
+      } catch (e) {}
+
+      return updated;
     });
     setSessionActionCount(prev => prev + 1);
     setIsEditingActiveExercise(false);
+
+    pushDirtySegments(true).catch(err => console.warn('App: Immediate push on save edited exercise:', err));
     
     // Determine where to go back
     const isEditingViewedExercise = activeExerciseId === (exercises.find(e => e.id === activeExerciseId)?.id);
@@ -2149,12 +2594,21 @@ export default function App() {
   };
 
   const updateLineup = (newLineup: Lineup) => {
-    // We always set sessionActionCount to 1 to trigger a sync when this is called,
-    // as it's debounced from the LineupBuilder side only when actual changes happen.
-    setData(prev => ({
-      ...prev,
-      lineups: prev.lineups.map(l => l.id === newLineup.id ? newLineup : l)
-    }));
+    setData(prev => {
+      const exists = prev.lineups.some(l => l.id === newLineup.id);
+      const newLineups = exists
+        ? prev.lineups.map(l => l.id === newLineup.id ? newLineup : l)
+        : [newLineup, ...prev.lineups];
+      try {
+        setPrefixedItem('football_lineups', JSON.stringify(newLineups), user);
+        setPrefixedItem('active_lineup_id', newLineup.id, user);
+      } catch (e) {}
+      return {
+        ...prev,
+        lineups: newLineups,
+        activeLineupId: newLineup.id
+      };
+    });
     setSessionActionCount(prev => prev + 1);
   };
 
@@ -2165,6 +2619,10 @@ export default function App() {
         ? prev.lineups.map(l => l.id === newLineup.id ? newLineup : l)
         : [newLineup, ...prev.lineups];
       
+      try {
+        setPrefixedItem('football_lineups', JSON.stringify(newLineups), user);
+        setPrefixedItem('active_lineup_id', newLineup.id, user);
+      } catch (e) {}
       return {
         ...prev,
         lineups: newLineups,
@@ -2175,11 +2633,19 @@ export default function App() {
   };
 
   const handleDeleteLineup = (id: string) => {
-    setData(prev => ({
-      ...prev,
-      lineups: prev.lineups.filter(l => l.id !== id),
-      activeLineupId: prev.activeLineupId === id ? null : prev.activeLineupId
-    }));
+    setData(prev => {
+      const newLineups = prev.lineups.filter(l => l.id !== id);
+      const nextActiveId = prev.activeLineupId === id ? (newLineups[0]?.id || null) : prev.activeLineupId;
+      try {
+        setPrefixedItem('football_lineups', JSON.stringify(newLineups), user);
+        setPrefixedItem('active_lineup_id', nextActiveId || '', user);
+      } catch (e) {}
+      return {
+        ...prev,
+        lineups: newLineups,
+        activeLineupId: nextActiveId
+      };
+    });
     setSessionActionCount(prev => prev + 1);
   };
 
@@ -2196,9 +2662,14 @@ export default function App() {
         createdAt: Date.now(),
         updatedAt: Date.now()
       };
+      const newLineups = [copied, ...prev.lineups];
+      try {
+        setPrefixedItem('football_lineups', JSON.stringify(newLineups), user);
+        setPrefixedItem('active_lineup_id', copied.id, user);
+      } catch (e) {}
       return {
         ...prev,
-        lineups: [copied, ...prev.lineups],
+        lineups: newLineups,
         activeLineupId: copied.id
       };
     });
@@ -2227,27 +2698,50 @@ export default function App() {
       createdAt: Date.now(),
       updatedAt: Date.now()
     };
-    setData(prev => ({
-      ...prev,
-      sessions: [newSession, ...(prev.sessions || [])]
-    }));
+    setData(prev => {
+      const updated = {
+        ...prev,
+        sessions: [newSession, ...(prev.sessions || [])]
+      };
+      try {
+        setPrefixedItem('football_sessions', JSON.stringify(updated.sessions), user);
+        setPrefixedItem('data', JSON.stringify(updated), user);
+      } catch (e) {}
+      return updated;
+    });
     setActiveSessionId(newSession.id);
     setSessionActionCount(prev => prev + 1);
   };
 
   const onAddSessionsBatch = (newSessions: TrainingSession[]) => {
-    setData(prev => ({
-      ...prev,
-      sessions: [...newSessions, ...(prev.sessions || [])]
-    }));
+    setData(prev => {
+      const updatedSessions = [...newSessions, ...(prev.sessions || [])];
+      const updated = {
+        ...prev,
+        sessions: updatedSessions
+      };
+      try {
+        setPrefixedItem('football_sessions', JSON.stringify(updatedSessions), user);
+        setPrefixedItem('data', JSON.stringify(updated), user);
+      } catch (e) {}
+      return updated;
+    });
     setSessionActionCount(prev => prev + 1);
   };
 
   const onUpdateSession = (updatedSession: TrainingSession) => {
-    setData(prev => ({
-      ...prev,
-      sessions: prev.sessions.map(s => s.id === updatedSession.id ? updatedSession : s)
-    }));
+    setData(prev => {
+      const updatedSessions = prev.sessions.map(s => s.id === updatedSession.id ? updatedSession : s);
+      const updated = {
+        ...prev,
+        sessions: updatedSessions
+      };
+      try {
+        setPrefixedItem('football_sessions', JSON.stringify(updatedSessions), user);
+        setPrefixedItem('data', JSON.stringify(updated), user);
+      } catch (e) {}
+      return updated;
+    });
     setSessionActionCount(prev => prev + 1);
   };
 
@@ -2304,18 +2798,37 @@ export default function App() {
 
   const saveMomentToBank = (moment: SessionMoment) => {
     const bankId = 'bank_' + Math.random().toString(36).substring(7);
+    const images: string[] = [];
+    if (moment.imageUrls && Array.isArray(moment.imageUrls)) {
+      moment.imageUrls.forEach(u => {
+        if (typeof u === 'string' && u.trim() && !images.includes(u.trim())) images.push(u.trim());
+      });
+    }
+    if (typeof moment.imageUrl === 'string' && moment.imageUrl.trim() && !images.includes(moment.imageUrl.trim())) {
+      images.unshift(moment.imageUrl.trim());
+    }
+    if (typeof (moment as any).image === 'string' && (moment as any).image.trim() && !images.includes((moment as any).image.trim())) {
+      images.push((moment as any).image.trim());
+    }
+    if (typeof (moment as any).photoUrl === 'string' && (moment as any).photoUrl.trim() && !images.includes((moment as any).photoUrl.trim())) {
+      images.push((moment as any).photoUrl.trim());
+    }
+    if (typeof (moment as any).mediaUrl === 'string' && (moment as any).mediaUrl.trim() && !images.includes((moment as any).mediaUrl.trim())) {
+      images.push((moment as any).mediaUrl.trim());
+    }
+    const primaryImg = images[0] || undefined;
     const newEx: BankExercise = {
       id: bankId,
       name: moment.name || 'Namnlös övning',
       duration: moment.duration || 15,
       description: moment.description,
-      imageUrl: moment.imageUrl,
-      imageUrls: moment.imageUrls,
+      imageUrl: primaryImg,
+      imageUrls: images.length > 0 ? images : undefined,
       externalLink: moment.externalLink,
       category: 'Annat',
       categories: ['Annat'],
       createdAt: Date.now(),
-      tacticalBoards: moment.tacticalBoards
+      tacticalBoards: moment.tacticalBoards ? JSON.parse(JSON.stringify(moment.tacticalBoards)) : undefined
     };
     setData(prev => ({
       ...prev,
@@ -2806,7 +3319,7 @@ export default function App() {
   };
 
   const isCoachOrAdmin = user ? (isRootAdmin || userRoles.includes('admin') || userRoles.includes('coach')) : true;
-  const activeLineup = lineups.find(l => l.id === activeLineupId) || null;
+  const activeLineup = lineups.find(l => l.id === activeLineupId) || (lineups.length > 0 ? lineups[0] : null);
   const publishedLineups = lineups.filter(l => l.isPublishedToPlayers && !l.isArchived);
   const effectiveActiveLineup = isCoachOrAdmin ? activeLineup : (publishedLineups.find(l => l.id === activeLineupId) || publishedLineups[0] || null);
   const canViewLineup = isCoachOrAdmin || !!trainingSettings?.showLineupsToPlayers;
@@ -2937,29 +3450,24 @@ export default function App() {
               {!sharedLeaderboardId && (
                 <>
                   {view === 'exercise' ? (
-                    hasTypedInSession ? (
-                      <button
-                        type="button"
-                        onClick={handleResetShakeProtection}
-                        className="relative w-10 h-10 flex items-center justify-center rounded-xl bg-amber-50 dark:bg-amber-950/40 text-amber-600 dark:text-amber-400 hover:bg-amber-100 dark:hover:bg-amber-900/50 transition-all border border-amber-300 dark:border-amber-700/60 shadow-sm active:scale-95 animate-pulse cursor-pointer"
-                        title="Varning: Text har skrivits under sessionen. Klicka här för att tömma iOS-skakminnet så att 'Ångra'-rutan inte visas när du rör dig!"
-                      >
-                        <VibrateOff size={19} />
+                    <button
+                      type="button"
+                      onClick={() => setIsQuickShakeModalOpen(true)}
+                      className={`relative w-10 h-10 flex items-center justify-center rounded-xl transition-all border shadow-sm active:scale-95 cursor-pointer ${
+                        hasTypedInSession
+                          ? 'bg-amber-50 dark:bg-amber-950/40 text-amber-600 dark:text-amber-400 hover:bg-amber-100 dark:hover:bg-amber-900/50 border-amber-300 dark:border-amber-700/60 animate-pulse'
+                          : 'bg-emerald-50 dark:bg-emerald-950/30 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-100 dark:hover:bg-emerald-900/40 border-emerald-200/80 dark:border-emerald-800/60'
+                      }`}
+                      title={hasTypedInSession ? "Varning: Text har skrivits. Klicka för att rensa skakminnet." : "Rensa skakminnet (iOS)"}
+                    >
+                      <VibrateOff size={19} />
+                      {hasTypedInSession && (
                         <span className="absolute -top-1 -right-1 flex h-3 w-3">
                           <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
                           <span className="relative inline-flex rounded-full h-3 w-3 bg-amber-500 border-2 border-white dark:border-zinc-900"></span>
                         </span>
-                      </button>
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={handleResetShakeProtection}
-                        className="w-10 h-10 flex items-center justify-center rounded-xl bg-emerald-50 dark:bg-emerald-950/30 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-100 dark:hover:bg-emerald-900/40 transition-all border border-emerald-200/80 dark:border-emerald-800/60 shadow-sm active:scale-95 cursor-pointer"
-                        title="Skaksäkert läge är aktivt (Ingen text i iOS-minnet). Klicka för att nollställa om du ändrat text."
-                      >
-                        <VibrateOff size={19} />
-                      </button>
-                    )
+                      )}
+                    </button>
                   ) : (
                     user && isInitialSyncDone && (
                       <button
@@ -3218,6 +3726,8 @@ export default function App() {
                   onRemoveBankExercise={removeBankExercise}
                   user={user}
                   userRoles={userRoles}
+                  calendarMonth={calendarMonth}
+                  onCalendarMonthChange={handleCalendarMonthChange}
                   onSelectExercise={handleSelectExercise} 
                   onDeleteExercise={(id) => {
                     setData(prev => ({
@@ -3460,6 +3970,7 @@ export default function App() {
                     isRootAdmin={isRootAdmin}
                     onProfileUpdated={handleProfileUpdated}
                     currentProfile={userProfile}
+                    onOpenShakeModal={() => setIsShakeInfoModalOpen(true)}
                   />
                   
                   {/* Stats Grid */}
@@ -4173,11 +4684,18 @@ export default function App() {
                   updatedAt: Date.now(),
                 };
 
-                setData(prev => ({
-                  ...prev,
-                  lineups: [newLineup, ...prev.lineups],
-                  activeLineupId: newLineup.id
-                }));
+                setData(prev => {
+                  const updatedLineups = [newLineup, ...prev.lineups];
+                  try {
+                    setPrefixedItem('football_lineups', JSON.stringify(updatedLineups), user);
+                    setPrefixedItem('active_lineup_id', newLineup.id, user);
+                  } catch (e) {}
+                  return {
+                    ...prev,
+                    lineups: updatedLineups,
+                    activeLineupId: newLineup.id
+                  };
+                });
 
                 onUpdateSession({
                   ...sess,
@@ -4313,6 +4831,21 @@ export default function App() {
         isOpen={isPendingRequestsModalOpen}
         onClose={() => setIsPendingRequestsModalOpen(false)}
         onRequestHandled={refreshPendingRequestsCount}
+      />
+
+      {/* Quick Shake Clear Modal (inside Exercise view - fast 1-click confirmation) */}
+      <QuickShakeModal
+        isOpen={isQuickShakeModalOpen}
+        onClose={() => setIsQuickShakeModalOpen(false)}
+        onConfirm={handleSafeShakeReload}
+      />
+
+      {/* Shake Protection Modal (iOS Shake to Undo guide & info in Profile & Settings) */}
+      <ShakeProtectionModal
+        isOpen={isShakeInfoModalOpen}
+        onClose={() => setIsShakeInfoModalOpen(false)}
+        onSafeReload={handleSafeShakeReload}
+        hasTypedInSession={hasTypedInSession}
       />
     </div>
   );

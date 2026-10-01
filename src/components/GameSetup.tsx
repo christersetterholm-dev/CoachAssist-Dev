@@ -1,8 +1,8 @@
-import React, { useState } from 'react';
-import { Plus, Minus, Trash2, Play, UserPlus, Trophy, X, Check, Calendar, Users, Medal, ChevronDown, ChevronUp, Save, ClipboardList, Wand2, RotateCcw, LayoutList, Clock, Copy } from 'lucide-react';
+import React, { useState, useRef, useEffect } from 'react';
+import { Plus, Minus, Trash2, Play, UserPlus, Trophy, X, Check, Calendar, Users, Medal, ChevronDown, ChevronUp, Save, ClipboardList, ClipboardPaste, ClipboardCheck, Wand2, RotateCcw, LayoutList, Clock, Copy } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { SquadPlayer, PRESET_COLORS, Exercise, Team, PointsConfig, TrainingSession } from '../types';
-import { sortPlayersByPosition } from '../lib/teamUtils';
+import { sortPlayersByPosition, findSquadMatch } from '../lib/teamUtils';
 import ColorPicker from './ColorPicker';
 
 interface GameSetupProps {
@@ -72,6 +72,40 @@ export default function GameSetup({
   const [showJokers, setShowJokers] = useState(false);
   const [showAttendanceInput, setShowAttendanceInput] = useState(false);
   const [attendanceText, setAttendanceText] = useState('');
+  const attendanceTextareaRef = useRef<HTMLTextAreaElement>(null);
+  const [setupClipboardStatus, setSetupClipboardStatus] = useState<'idle' | 'pasted' | 'failed'>('idle');
+
+  useEffect(() => {
+    if (showAttendanceInput) {
+      setSetupClipboardStatus('idle');
+      const timer = setTimeout(() => {
+        attendanceTextareaRef.current?.focus();
+        const len = attendanceTextareaRef.current?.value.length || 0;
+        attendanceTextareaRef.current?.setSelectionRange(len, len);
+      }, 70);
+      return () => clearTimeout(timer);
+    }
+  }, [showAttendanceInput]);
+
+  const handleSetupPasteClipboard = async () => {
+    try {
+      if (navigator?.clipboard?.readText) {
+        const text = await navigator.clipboard.readText();
+        if (text && text.trim()) {
+          setAttendanceText(text);
+          setSetupClipboardStatus('pasted');
+          setTimeout(() => setSetupClipboardStatus('idle'), 2500);
+          attendanceTextareaRef.current?.focus();
+          return;
+        }
+      }
+    } catch (err) {
+      console.warn('Clipboard readText failed or was blocked by browser:', err);
+      setSetupClipboardStatus('failed');
+      setTimeout(() => setSetupClipboardStatus('idle'), 3000);
+    }
+    attendanceTextareaRef.current?.focus();
+  };
   const [standaloneAttendance, setStandaloneAttendance] = useState<string[]>(
     (initialGame && initialGame.teams && !sessionAttendance) ? initialGame.teams.flatMap(t => t.playerIds) : []
   );
@@ -297,27 +331,45 @@ export default function GameSetup({
   const generateTeamsFromAttendance = () => {
     if (!attendanceText.trim()) return;
 
-    // 1. Parse names from text (split by newlines, commas, etc.)
-    const inputNames = attendanceText
-      .split(/[\n,;]/)
-      .map(name => name.trim().toLowerCase())
-      .filter(name => name.length > 0);
-
-    // 2. Match with squad
+    const lines = attendanceText.split(/[\n;]/);
     const attendingPlayers: SquadPlayer[] = [];
-    
-    combinedSquad.forEach(player => {
-      const playerNameLower = player.name.toLowerCase();
-      // Check for exact match or if the input name is part of the player name
-      const isAttending = inputNames.some(inputName => {
-        if (playerNameLower === inputName) return true;
-        // Handle cases like "First Last" vs "First"
-        if (playerNameLower.includes(inputName) && inputName.length > 2) return true;
-        return false;
-      });
+    let currentSectionStatus: 'attending' | 'declined' | 'unanswered' = 'attending';
 
-      if (isAttending) {
-        attendingPlayers.push(player);
+    lines.forEach(rawLine => {
+      let line = rawLine.trim();
+      if (!line) return;
+
+      const cleanHeaderTest = line.replace(/\([^)]*\)/g, '').replace(/\d+/g, '').replace(/[-:–—\t]/g, '').trim().toLowerCase();
+      if (/^(deltar ej|kommer inte|kommer ej|nej|kan inte|kan ej|avanmäld|avanmälda|frånvarande|sjuk|bortrest)$/i.test(cleanHeaderTest)) {
+        currentSectionStatus = 'declined';
+        return;
+      } else if (/^(deltar|kommer|ja|kan delta|anmäld|anmälda|kallade som deltar)$/i.test(cleanHeaderTest)) {
+        currentSectionStatus = 'attending';
+        return;
+      } else if (/^(ej svarat|har inte svarat|obesvarad|obesvarade|svar saknas|svarade ej|inte svarat)$/i.test(cleanHeaderTest)) {
+        currentSectionStatus = 'unanswered';
+        return;
+      }
+
+      let isAttending = currentSectionStatus === 'attending';
+      const lower = line.toLowerCase();
+      if (/\b(deltar ej|deltar inte|kan ej|kan inte|kommer ej|kommer inte|nej|ej med|avanmäld|frånvarande|sjuk|bortrest|ej svarat|har inte svarat|obesvarad)\b/i.test(lower)) {
+        isAttending = false;
+        return;
+      } else if (/\b(deltar|kommer|ja|kan delta|anmäld)\b/i.test(lower)) {
+        isAttending = true;
+      }
+
+      if (!isAttending) return;
+
+      let cleanName = line
+        .replace(/\([^)]*\)/g, '')
+        .replace(/\b(deltar|kommer|ja|kan delta|anmäld|reserv)\b/gi, '')
+        .trim();
+
+      const match = findSquadMatch(cleanName, combinedSquad);
+      if (match && !attendingPlayers.some(p => p.id === match.id)) {
+        attendingPlayers.push(match);
       }
     });
 
@@ -1188,21 +1240,75 @@ export default function GameSetup({
                     className="overflow-hidden"
                   >
                     <div className="bg-white dark:bg-zinc-950 p-4 rounded-2xl border border-zinc-200 dark:border-zinc-800 space-y-4">
-                      <p className="text-xs text-zinc-500 dark:text-zinc-400">
-                        Klistra in namnen på de spelare som är på plats (t.ex. från kallelsen). 
-                        Appen matchar namnen mot truppen och fördelar dem slumpmässigt i de {teams.length} lag du valt.
-                      </p>
-                      <textarea
-                        value={attendanceText}
-                        onChange={(e) => setAttendanceText(e.target.value)}
-                        placeholder="Klistra in namn här (separera med ny rad eller kommatecken)..."
-                        className="w-full h-32 px-4 py-3 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900 text-zinc-900 dark:text-white focus:ring-2 focus:ring-indigo-500 outline-none transition-all text-sm font-medium resize-none"
-                      />
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                        <p className="text-xs text-zinc-500 dark:text-zinc-400">
+                          Klistra in namnen på de spelare som är på plats (t.ex. från kallelsen). 
+                          Appen matchar namnen mot truppen och fördelar dem i de {teams.length} lag du valt.
+                        </p>
+                        <button
+                          type="button"
+                          onClick={handleSetupPasteClipboard}
+                          className="self-start sm:self-auto shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/60 dark:hover:bg-indigo-900/80 text-indigo-700 dark:text-indigo-300 text-xs font-bold transition-all border border-indigo-200 dark:border-indigo-800/80 cursor-pointer shadow-xs active:scale-95"
+                          title="Klistra in direkt från enhetens urklipp med 1 tryck"
+                        >
+                          {setupClipboardStatus === 'pasted' ? (
+                            <>
+                              <ClipboardCheck size={14} className="text-emerald-600 dark:text-emerald-400" />
+                              <span className="text-emerald-700 dark:text-emerald-300 font-bold">Inklistrat!</span>
+                            </>
+                          ) : (
+                            <>
+                              <ClipboardPaste size={14} />
+                              <span>Klistra in från urklipp</span>
+                            </>
+                          )}
+                        </button>
+                      </div>
+
+                      <div className="relative">
+                        <textarea
+                          ref={attendanceTextareaRef}
+                          autoFocus
+                          autoComplete="off"
+                          autoCorrect="off"
+                          spellCheck={false}
+                          value={attendanceText}
+                          onChange={(e) => setAttendanceText(e.target.value)}
+                          onPaste={(e) => {
+                            const pasted = e.clipboardData?.getData('text');
+                            if (pasted && !attendanceText) {
+                              setAttendanceText(pasted);
+                            }
+                          }}
+                          placeholder="Klistra in namn här (separera med ny rad eller kommatecken)..."
+                          className="w-full h-32 px-4 py-3 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900 text-zinc-900 dark:text-white focus:ring-2 focus:ring-indigo-500 outline-none transition-all text-sm font-medium resize-none"
+                        />
+                        {attendanceText && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setAttendanceText('');
+                              attendanceTextareaRef.current?.focus();
+                            }}
+                            className="absolute top-3 right-3 px-2 py-1 rounded-lg bg-zinc-200/80 hover:bg-zinc-300 dark:bg-zinc-700/80 dark:hover:bg-zinc-600 text-zinc-600 dark:text-zinc-300 text-[11px] font-bold transition-all cursor-pointer"
+                            title="Rensa text"
+                          >
+                            Rensa
+                          </button>
+                        )}
+                      </div>
+
+                      {setupClipboardStatus === 'failed' && (
+                        <p className="text-[11px] text-amber-600 dark:text-amber-400 font-medium">
+                          Kunde inte läsa urklipp automatiskt. Klicka i rutan ovan och välj Klistra in (Cmd+V / Ctrl+V).
+                        </p>
+                      )}
+
                       <button
                         type="button"
                         onClick={generateTeamsFromAttendance}
                         disabled={!attendanceText.trim()}
-                        className="w-full flex items-center justify-center gap-2 bg-indigo-600 text-white py-3 rounded-xl font-bold hover:bg-indigo-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                        className="w-full flex items-center justify-center gap-2 bg-indigo-600 text-white py-3 rounded-xl font-bold hover:bg-indigo-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
                       >
                         <Wand2 size={18} />
                         <span>Skapa lag automatiskt</span>

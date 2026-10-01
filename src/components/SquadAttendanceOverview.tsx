@@ -21,6 +21,7 @@ import {
 import { motion, AnimatePresence } from 'motion/react';
 import { SquadPlayer, TrainingSession } from '../types';
 import { CachedImage } from './CachedImage';
+import { isMatchSession } from '../utils/sessionCategory';
 
 interface SquadAttendanceOverviewProps {
   squad: SquadPlayer[];
@@ -51,12 +52,6 @@ function isPlayerPresentInSession(player: SquadPlayer, session: TrainingSession)
     }
     return false;
   });
-}
-
-function isMatchSession(session: TrainingSession): boolean {
-  const t = (session.type || session.category || '').toLowerCase();
-  const title = (session.title || '').toLowerCase();
-  return t === 'match' || t === 'cup' || title.includes('match') || title.includes('cup') || !!session.lineupId;
 }
 
 export default function SquadAttendanceOverview({ squad, sessions }: SquadAttendanceOverviewProps) {

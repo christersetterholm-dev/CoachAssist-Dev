@@ -1,12 +1,13 @@
 import React, { useState, useMemo, useRef, useEffect } from 'react';
-import { ArrowLeft, Trash2, GripVertical, Clock, Calendar, Check, ListTodo, Save, ChevronDown, ChevronUp, Play, PlusCircle, Users, X, Edit2, Image as ImageIcon, Link as LinkIcon, Youtube, ExternalLink, Maximize2, Upload, Loader2, FileText, Copy, Library, Download, ChevronRight, Layout, Bell, Eye, EyeOff, UserCheck } from 'lucide-react';
+import { ArrowLeft, Trash2, GripVertical, Clock, Calendar, Check, ListTodo, Save, ChevronDown, ChevronUp, Play, PlusCircle, Users, X, Edit2, Image as ImageIcon, Link as LinkIcon, Youtube, ExternalLink, Maximize2, Upload, Loader2, FileText, Copy, Library, Download, ChevronRight, Layout, Bell, Eye, EyeOff, UserCheck, Trophy, Dumbbell } from 'lucide-react';
 import { motion, AnimatePresence, Reorder, useDragControls } from 'motion/react';
 import { storage, ref, uploadBytesResumable, getDownloadURL } from '../lib/firebase';
-import { TrainingSession, SessionMoment, Exercise, SquadPlayer, UserProfile } from '../types';
+import { TrainingSession, SessionMoment, Exercise, SquadPlayer, UserProfile, getExerciseImages } from '../types';
 import TeamOverviewModal from './TeamOverviewModal';
 import MomentCopyModal from './MomentCopyModal';
 import TacticalBoardModal from './TacticalBoardModal';
 import { SessionRsvpView } from './SessionRsvpView';
+import { isMatchSession } from '../utils/sessionCategory';
 
 interface SessionEditorProps {
   session: TrainingSession;
@@ -106,6 +107,40 @@ function MomentItem({
     );
   }, [exerciseBank, moment.bankExerciseId, moment.name]);
 
+  const allMomentImages = useMemo(() => {
+    const list: string[] = [];
+    if (moment.imageUrls && Array.isArray(moment.imageUrls)) {
+      moment.imageUrls.forEach(u => {
+        if (typeof u === 'string' && u.trim() && !list.includes(u.trim())) {
+          list.push(u.trim());
+        }
+      });
+    }
+    if (typeof moment.imageUrl === 'string' && moment.imageUrl.trim() && !list.includes(moment.imageUrl.trim())) {
+      list.unshift(moment.imageUrl.trim());
+    }
+    if (typeof (moment as any).image === 'string' && (moment as any).image.trim() && !list.includes((moment as any).image.trim())) {
+      list.push((moment as any).image.trim());
+    }
+    if (typeof (moment as any).photoUrl === 'string' && (moment as any).photoUrl.trim() && !list.includes((moment as any).photoUrl.trim())) {
+      list.push((moment as any).photoUrl.trim());
+    }
+
+    // Fallback: If moment has no images of its own, check if linked bank exercise has images
+    if (list.length === 0 && bankExercise) {
+      const bankImgs = getExerciseImages(bankExercise);
+      for (const img of bankImgs) {
+        if (!list.includes(img)) list.push(img);
+      }
+    }
+
+    return list;
+  }, [moment.imageUrl, moment.imageUrls, (moment as any).image, (moment as any).photoUrl, bankExercise]);
+
+  const mediaCount = useMemo(() => {
+    return allMomentImages.length + (moment.externalLink?.trim() ? 1 : 0);
+  }, [allMomentImages.length, moment.externalLink]);
+
   const isSavedInBank = useMemo(() => {
     return !!bankExercise;
   }, [bankExercise]);
@@ -113,8 +148,10 @@ function MomentItem({
   const hasModifications = useMemo(() => {
     if (!bankExercise) return false;
     
-    const bankUrls = bankExercise.imageUrls || (bankExercise.imageUrl ? [bankExercise.imageUrl] : []);
-    const momentUrls = moment.imageUrls || (moment.imageUrl ? [moment.imageUrl] : []);
+    const bankUrls = (bankExercise.imageUrls && bankExercise.imageUrls.length > 0)
+      ? bankExercise.imageUrls.filter(Boolean)
+      : (bankExercise.imageUrl ? [bankExercise.imageUrl] : []);
+    const momentUrls = allMomentImages;
     const urlsDiffer = JSON.stringify([...bankUrls].sort()) !== JSON.stringify([...momentUrls].sort());
 
     return (
@@ -122,10 +159,9 @@ function MomentItem({
       (moment.duration || 15) !== (bankExercise.duration || 15) ||
       (moment.description || '').trim() !== (bankExercise.description || '').trim() ||
       (moment.externalLink || '').trim() !== (bankExercise.externalLink || '').trim() ||
-      (moment.imageUrl || '').trim() !== (bankExercise.imageUrl || '').trim() ||
       urlsDiffer
     );
-  }, [moment, bankExercise]);
+  }, [moment, bankExercise, allMomentImages]);
 
   useEffect(() => {
     const adjustHeight = () => {
@@ -204,11 +240,14 @@ function MomentItem({
       if (filteredResults.length > 0) {
         // Use the ref to get the absolute latest state of the moment before updating
         const latestMoment = momentRef.current;
-        const currentUrls = latestMoment.imageUrls || (latestMoment.imageUrl ? [latestMoment.imageUrl] : []);
+        const currentUrls = (latestMoment.imageUrls && latestMoment.imageUrls.length > 0)
+          ? latestMoment.imageUrls.filter(Boolean)
+          : (latestMoment.imageUrl ? [latestMoment.imageUrl] : []);
+        const combined = [...currentUrls, ...filteredResults];
         
         updateMoment(latestMoment.id, { 
-          imageUrls: [...currentUrls, ...filteredResults],
-          imageUrl: undefined // Always migrate to the array version
+          imageUrls: combined,
+          imageUrl: combined[0] || undefined
         });
       }
       
@@ -325,9 +364,9 @@ function MomentItem({
                 >
                   <ImageIcon size={14} />
                   <span>Media & Länkar</span>
-                  {(!showMediaInputs && ((moment.imageUrls?.length || 0) > 0 || moment.imageUrl || moment.externalLink)) && (
+                  {(!showMediaInputs && mediaCount > 0) && (
                     <span className="flex h-4 min-w-[1rem] px-1 items-center justify-center bg-indigo-500 text-white text-[8px] font-bold rounded-full shadow-sm">
-                      {((moment.imageUrls?.length || 0) + (moment.imageUrl ? 1 : 0) + (moment.externalLink ? 1 : 0))}
+                      {mediaCount}
                     </span>
                   )}
                   <ChevronDown size={14} className={`transition-transform ${showMediaInputs ? 'rotate-180' : ''}`} />
@@ -345,44 +384,31 @@ function MomentItem({
                         {/* Title & Count */}
                         <div className="flex items-center justify-between px-1">
                           <span className="text-[10px] font-black uppercase tracking-wider text-zinc-400">
-                            Övningsbilder ({(moment.imageUrls?.length || 0) + (moment.imageUrl ? 1 : 0)})
+                            Övningsbilder ({allMomentImages.length})
                           </span>
                         </div>
 
                         {/* Thumbnails if any */}
-                        {((moment.imageUrls && moment.imageUrls.length > 0) || moment.imageUrl) && (
+                        {allMomentImages.length > 0 && (
                           <div className="flex flex-wrap gap-2 p-2 bg-white dark:bg-zinc-900 rounded-xl border border-zinc-100 dark:border-zinc-800">
-                            {moment.imageUrl && (
-                              <div className="relative group w-16 h-16 rounded-lg overflow-hidden border border-zinc-200 dark:border-zinc-805 shadow-sm shrink-0 bg-white dark:bg-zinc-950">
-                                <img src={moment.imageUrl} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
-                                <button
-                                  type="button"
-                                  onClick={() => updateMoment(moment.id, { imageUrl: undefined })}
-                                  className="absolute top-1 right-1 p-1 bg-black/60 hover:bg-black/80 text-white rounded-full transition-colors opacity-90 group-hover:opacity-100"
-                                  title="Ta bort bild"
-                                >
-                                  <X size={10} />
-                                </button>
-                                <span className="absolute bottom-1 left-1 px-1 bg-indigo-600 text-white text-[8px] font-black uppercase rounded">
-                                  Huvudbild
-                                </span>
-                              </div>
-                            )}
-                            {moment.imageUrls?.map((url, idx) => (
+                            {allMomentImages.map((url, idx) => (
                               <div key={idx} className="relative group w-16 h-16 rounded-lg overflow-hidden border border-zinc-200 dark:border-zinc-805 shadow-sm shrink-0 bg-white dark:bg-zinc-950">
                                 <img src={url} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
                                 <button
                                   type="button"
                                   onClick={() => {
-                                    const newUrls = (moment.imageUrls || []).filter((_, i) => i !== idx);
-                                    updateMoment(moment.id, { imageUrls: newUrls });
+                                    const newUrls = allMomentImages.filter((_, i) => i !== idx);
+                                    updateMoment(moment.id, {
+                                      imageUrls: newUrls.length > 0 ? newUrls : undefined,
+                                      imageUrl: newUrls[0] || undefined
+                                    });
                                   }}
                                   className="absolute top-1 right-1 p-1 bg-black/60 hover:bg-black/80 text-white rounded-full transition-colors opacity-90 group-hover:opacity-100"
                                   title="Ta bort bild"
                                 >
                                   <X size={10} />
                                 </button>
-                                {!moment.imageUrl && idx === 0 && (
+                                {idx === 0 && (
                                   <span className="absolute bottom-1 left-1 px-1 bg-indigo-600 text-white text-[8px] font-black uppercase rounded">
                                     Huvudbild
                                   </span>
@@ -407,10 +433,10 @@ function MomentItem({
                                   if (e.key === 'Enter') {
                                     e.preventDefault();
                                     if (imageUrlInput.trim()) {
-                                      const currentUrls = moment.imageUrls || (moment.imageUrl ? [moment.imageUrl] : []);
+                                      const newUrls = [...allMomentImages, imageUrlInput.trim()];
                                       updateMoment(moment.id, {
-                                        imageUrls: [...currentUrls, imageUrlInput.trim()],
-                                        imageUrl: undefined
+                                        imageUrls: newUrls,
+                                        imageUrl: newUrls[0] || undefined
                                       });
                                       setImageUrlInput('');
                                     }
@@ -424,10 +450,10 @@ function MomentItem({
                                 type="button"
                                 onClick={() => {
                                   if (imageUrlInput.trim()) {
-                                    const currentUrls = moment.imageUrls || (moment.imageUrl ? [moment.imageUrl] : []);
+                                    const newUrls = [...allMomentImages, imageUrlInput.trim()];
                                     updateMoment(moment.id, {
-                                      imageUrls: [...currentUrls, imageUrlInput.trim()],
-                                      imageUrl: undefined
+                                      imageUrls: newUrls,
+                                      imageUrl: newUrls[0] || undefined
                                     });
                                     setImageUrlInput('');
                                   }
@@ -457,7 +483,7 @@ function MomentItem({
                               ) : (
                                 <Upload size={14} />
                               )}
-                              <span>{((moment.imageUrls?.length || 0) + (moment.imageUrl ? 1 : 0)) > 0 ? 'Fler' : 'Välj bilder'}</span>
+                              <span>{allMomentImages.length > 0 ? 'Fler' : 'Välj bilder'}</span>
                             </button>
                           </div>
                         </div>
@@ -507,35 +533,13 @@ function MomentItem({
                 </AnimatePresence>
               </div>
             ) : (
-              (moment.imageUrl || moment.imageUrls || moment.externalLink) && (
+              (allMomentImages.length > 0 || moment.externalLink) && (
                 <div className="flex flex-wrap gap-4">
-                  {moment.imageUrl && (
-                    <button
-                      onClick={() => {
-                        const urls = [moment.imageUrl!];
-                        if (moment.imageUrls) urls.push(...moment.imageUrls);
-                        onViewImage && onViewImage(urls, 0);
-                      }}
-                      className="relative group w-32 aspect-video bg-zinc-100 dark:bg-zinc-800 rounded-xl overflow-hidden border border-zinc-200 dark:border-zinc-700 shadow-sm hover:shadow-md transition-all active:scale-95"
-                    >
-                      <img 
-                        src={moment.imageUrl} 
-                        alt="Beskrivande bild"
-                        className="w-full h-full object-cover"
-                      />
-                      <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 flex items-center justify-center transition-all">
-                        <Maximize2 size={24} className="text-white opacity-0 group-hover:opacity-100 scale-75 group-hover:scale-100 transition-all" />
-                      </div>
-                    </button>
-                  )}
-
-                  {moment.imageUrls?.map((url, idx) => (
+                  {allMomentImages.map((url, idx) => (
                     <button
                       key={idx}
                       onClick={() => {
-                        const urls = moment.imageUrl ? [moment.imageUrl, ...moment.imageUrls!] : moment.imageUrls!;
-                        const index = moment.imageUrl ? idx + 1 : idx;
-                        onViewImage && onViewImage(urls, index);
+                        onViewImage && onViewImage(allMomentImages, idx);
                       }}
                       className="relative group w-32 aspect-video bg-zinc-100 dark:bg-zinc-800 rounded-xl overflow-hidden border border-zinc-200 dark:border-zinc-700 shadow-sm hover:shadow-md transition-all active:scale-95"
                     >
@@ -682,13 +686,15 @@ function MomentItem({
                                   if (!moment.bankExerciseId) {
                                     updateMoment(moment.id, { bankExerciseId: bankExercise.id });
                                   }
+                                  const momentImages = allMomentImages;
+                                  const primaryImg = momentImages[0] || undefined;
                                   onUpdateBankExercise(bankExercise.id, {
                                     name: moment.name,
                                     duration: moment.duration || 15,
                                     description: moment.description,
                                     externalLink: moment.externalLink,
-                                    imageUrl: moment.imageUrl,
-                                    imageUrls: moment.imageUrls || (moment.imageUrl ? [moment.imageUrl] : []),
+                                    imageUrl: primaryImg,
+                                    imageUrls: momentImages.length > 0 ? momentImages : undefined,
                                     tacticalBoards: moment.tacticalBoards,
                                   });
                                   setJustUpdatedBank(true);
@@ -706,14 +712,17 @@ function MomentItem({
                               type="button"
                               onClick={() => {
                                 if (bankExercise) {
+                                  const bankImages = getExerciseImages(bankExercise);
+                                  const primaryImg = bankImages[0] || undefined;
                                   updateMoment(moment.id, {
                                     name: bankExercise.name || '',
                                     duration: bankExercise.duration || 15,
                                     description: bankExercise.description || '',
                                     externalLink: bankExercise.externalLink || '',
-                                    imageUrl: bankExercise.imageUrl || '',
-                                    imageUrls: bankExercise.imageUrls || (bankExercise.imageUrl ? [bankExercise.imageUrl] : []),
+                                    imageUrl: primaryImg,
+                                    imageUrls: bankImages.length > 0 ? bankImages : undefined,
                                     bankExerciseId: bankExercise.id,
+                                    tacticalBoards: bankExercise.tacticalBoards ? JSON.parse(JSON.stringify(bankExercise.tacticalBoards)) : undefined,
                                   });
                                   setJustFetchedBank(true);
                                   setTimeout(() => setJustFetchedBank(false), 2000);
@@ -867,6 +876,9 @@ export default function SessionEditor({
   // Use a ref for the session to avoid stale closures in event handlers
   const sessionRef = useRef(session);
   sessionRef.current = session;
+
+  // Determine if this session is a match or training session (auto-detected from title and metadata)
+  const isMatch = useMemo(() => isMatchSession(session), [session]);
 
   const isCoachOrAdmin = useMemo(() => {
     if (!user) return true; // Offline or fallback mode
@@ -1191,6 +1203,39 @@ export default function SessionEditor({
               </span>
             </button>
 
+            {/* Filter / Typ av aktivitet: Träning eller Match */}
+            <button
+              type="button"
+              onClick={() => {
+                if (mode === 'plan' || isCoachOrAdmin) {
+                  const nextType = isMatch ? 'training' : 'match';
+                  onUpdate({
+                    ...session,
+                    type: nextType,
+                    category: nextType
+                  });
+                }
+              }}
+              className={`h-11 px-2.5 sm:px-3.5 rounded-xl border transition-all flex items-center justify-center gap-1.5 shrink-0 cursor-pointer ${
+                isMatch
+                  ? 'bg-emerald-50 dark:bg-emerald-950/40 border-emerald-300 dark:border-emerald-800 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100 dark:hover:bg-emerald-900/60'
+                  : 'bg-indigo-50 dark:bg-indigo-950/40 border-indigo-200 dark:border-indigo-800 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 dark:hover:bg-indigo-900/60'
+              }`}
+              title={`Aktivitetstyp: ${isMatch ? 'Match' : 'Träning'} (Klicka för att växla mellan Träning och Match)`}
+            >
+              {isMatch ? (
+                <>
+                  <Trophy size={14} className="text-amber-500 shrink-0" />
+                  <span className="text-[10px] sm:text-xs font-black uppercase tracking-tight">Match</span>
+                </>
+              ) : (
+                <>
+                  <Dumbbell size={14} className="text-indigo-600 dark:text-indigo-400 shrink-0" />
+                  <span className="text-[10px] sm:text-xs font-black uppercase tracking-tight">Träning</span>
+                </>
+              )}
+            </button>
+
             {isCoachOrAdmin && (
               <button
                 type="button"
@@ -1281,7 +1326,8 @@ export default function SessionEditor({
                 <span className="truncate">Närvaro ({session.attendance?.length || 0})</span>
               </button>
 
-              {onOpenLineup && (
+              {/* Laguppställning visas endast om aktiviteten är en match */}
+              {isMatch && onOpenLineup && (
                 <button
                   onClick={() => onOpenLineup(session)}
                   className="px-3.5 h-11 rounded-xl text-[10px] md:text-xs font-black uppercase tracking-tight border transition-all flex items-center justify-center gap-1.5 flex-1 sm:flex-initial cursor-pointer bg-white dark:bg-zinc-900 hover:bg-zinc-50 dark:hover:bg-zinc-800 text-zinc-600 dark:text-zinc-300 border-zinc-200 dark:border-zinc-800"
@@ -1327,7 +1373,7 @@ export default function SessionEditor({
                       type="button"
                       onClick={() => onUpdate({ ...session, type: 'training', category: 'training' })}
                       className={`py-2 rounded-lg text-xs font-black uppercase tracking-wider transition-all flex items-center justify-center gap-1.5 ${
-                        (session.type !== 'match' && session.category !== 'match')
+                        !isMatch
                           ? 'bg-white dark:bg-zinc-700 text-zinc-900 dark:text-white shadow-sm'
                           : 'text-zinc-500 hover:text-zinc-900 dark:text-zinc-400'
                       }`}
@@ -1338,7 +1384,7 @@ export default function SessionEditor({
                       type="button"
                       onClick={() => onUpdate({ ...session, type: 'match', category: 'match' })}
                       className={`py-2 rounded-lg text-xs font-black uppercase tracking-wider transition-all flex items-center justify-center gap-1.5 ${
-                        (session.type === 'match' || session.category === 'match')
+                        isMatch
                           ? 'bg-indigo-600 text-white shadow-sm'
                           : 'text-zinc-500 hover:text-zinc-900 dark:text-zinc-400'
                       }`}
@@ -1685,7 +1731,7 @@ export default function SessionEditor({
               userRoles={userRoles}
               userProfile={userProfile}
               adminUrl={adminUrl}
-              onOpenLineup={onOpenLineup ? () => onOpenLineup(session) : undefined}
+              onOpenLineup={isMatch && onOpenLineup ? () => onOpenLineup(session) : undefined}
             />
           )}
           

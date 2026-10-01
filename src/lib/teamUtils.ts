@@ -99,3 +99,82 @@ export function sortPlayersByPosition(playerIds: string[], squad: SquadPlayer[])
     return (playerA?.name || '').localeCompare(playerB?.name || '', 'sv');
   });
 }
+
+/**
+ * Robustly matches an input line or extracted name to a squad player.
+ * Prevents false positives like "den", "br", "ink" matching "Dennis Brink".
+ */
+export function findSquadMatch(rawName: string, squad: SquadPlayer[]): SquadPlayer | undefined {
+  if (!rawName || typeof rawName !== 'string') return undefined;
+  
+  // Clean punctuation, leading list markers like "1. ", "•", dashes, colons
+  let cleanInput = rawName
+    .replace(/^[\s\d+.:•\-*–—\t]+/, '')
+    .replace(/[\s.:•\-*–—\t]+$/, '')
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, ' ');
+
+  if (cleanInput.length < 2) return undefined;
+
+  // Block generic noise, dates or status terms from ever matching
+  const blockedExact = [
+    'den', 'det', 'de', 'och', 'av', 'att', 'inbjudna', 'kallade', 'kallad',
+    'anmälda', 'anmäld', 'deltagare', 'deltagit', 'deltar', 'deltar ej', 'ej svarat',
+    'datum', 'tid', 'plats', 'svar', 'svarat', 'har inte svarat', 'obesvarad',
+    'ingen', 'alla', 'samling', 'match', 'träning', 'information', 'spelare', 'ledare'
+  ];
+  if (blockedExact.includes(cleanInput)) return undefined;
+
+  // 1. Exact full name match (case-insensitive)
+  const exact = squad.find(p => p && p.name && p.name.trim().toLowerCase() === cleanInput);
+  if (exact) return exact;
+
+  // 2. Reversed name match: "Brink, Dennis" or "Brink Dennis" -> "Dennis Brink"
+  const commaParts = cleanInput.split(',').map(s => s.trim());
+  if (commaParts.length === 2) {
+    const reversed = `${commaParts[1]} ${commaParts[0]}`.trim();
+    const revMatch = squad.find(p => p && p.name && p.name.trim().toLowerCase() === reversed);
+    if (revMatch) return revMatch;
+  }
+
+  // 3. Multi-word match: all words of player name are present in input line
+  // e.g. "11 Dennis Brink (Back)" or "Dennis Brink Deltar"
+  const inputWords = cleanInput
+    .split(/[^a-zåäöéèüíóáñæø0-9]+/i)
+    .filter(w => w.length > 1 && !/^\d+$/.test(w));
+
+  if (inputWords.length >= 2) {
+    const matchBothWords = squad.find(p => {
+      if (!p || !p.name) return false;
+      const pWords = p.name.toLowerCase().split(/[^a-zåäöéèüíóáñæø0-9]+/i).filter(w => w.length > 1);
+      return pWords.length >= 2 && pWords.every(pw => cleanInput.includes(pw));
+    });
+    if (matchBothWords) return matchBothWords;
+  }
+
+  // 4. Single-word match (e.g. "Haythem"): ONLY if length >= 3 and unique in squad as a first or last name
+  if (inputWords.length === 1 && inputWords[0].length >= 3) {
+    const word = inputWords[0];
+    const matchingSquad = squad.filter(p => {
+      if (!p || !p.name) return false;
+      const pWords = p.name.toLowerCase().split(/[^a-zåäöéèüíóáñæø0-9]+/i).filter(Boolean);
+      return pWords.some(pw => pw === word);
+    });
+    if (matchingSquad.length === 1) {
+      return matchingSquad[0];
+    }
+  }
+
+  // 5. Line contains the full player name with word boundary (e.g. "Spelare: Dennis Brink är redo")
+  const containsFullPlayer = squad.find(p => {
+    if (!p || !p.name) return false;
+    const pName = p.name.trim().toLowerCase();
+    if (pName.length < 4) return false;
+    const regex = new RegExp(`(^|[^a-zåäöéèüíóáñæø])${pName}([^a-zåäöéèüíóáñæø]|$)`, 'i');
+    return regex.test(cleanInput);
+  });
+  if (containsFullPlayer) return containsFullPlayer;
+
+  return undefined;
+}

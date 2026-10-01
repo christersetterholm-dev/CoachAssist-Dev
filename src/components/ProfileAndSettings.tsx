@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { User, Phone, Fingerprint, Check, Save, AtSign, Lock, Key, Eye, EyeOff, ShieldCheck, AlertCircle, Landmark, Info, Link2, Unlink, Camera, Upload, Trash2, Loader2 } from 'lucide-react';
+import { User, Phone, Fingerprint, Check, Save, AtSign, Lock, Key, Eye, EyeOff, ShieldCheck, AlertCircle, Landmark, Info, Link2, Unlink, Camera, Upload, Trash2, Loader2, VibrateOff } from 'lucide-react';
 import { UserProfile, Club, ClubMetadata, ClubMember } from '../types';
 import { db, getApiUrl, auth, linkGoogleAccount, unlinkGoogleAccount, storage, ref, uploadBytes, getDownloadURL } from '../lib/firebase';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
@@ -11,6 +11,7 @@ interface ProfileAndSettingsProps {
   onProfileUpdated: (profile: UserProfile) => void;
   currentProfile: UserProfile;
   isRootAdmin?: boolean;
+  onOpenShakeModal?: () => void;
 }
 
 export default function ProfileAndSettings({
@@ -19,6 +20,7 @@ export default function ProfileAndSettings({
   onProfileUpdated,
   currentProfile,
   isRootAdmin = false,
+  onOpenShakeModal,
 }: ProfileAndSettingsProps) {
   const [profile, setProfile] = useState<UserProfile>({
     fullName: currentProfile.fullName || '',
@@ -1160,6 +1162,32 @@ export default function ProfileAndSettings({
             </div>
           )}
         </div>
+
+        {/* Shake Protection Info Card for Coaches */}
+        {onOpenShakeModal && (
+          <div className="bg-white dark:bg-zinc-900 rounded-3xl border border-zinc-150 dark:border-zinc-800 shadow-xl p-6 sm:p-8">
+            <div className="flex items-center gap-3.5 mb-3">
+              <div className="w-12 h-12 rounded-2xl bg-amber-50 dark:bg-amber-950/40 flex items-center justify-center text-amber-600 dark:text-amber-400">
+                <VibrateOff size={24} />
+              </div>
+              <div>
+                <h2 className="text-xl font-black text-zinc-900 dark:text-white tracking-tight">Skakskydd (iOS)</h2>
+                <p className="text-xs text-zinc-500 dark:text-zinc-400 font-medium">Undvik rutan "Ångra skriven text" på planen.</p>
+              </div>
+            </div>
+            <p className="text-xs text-zinc-600 dark:text-zinc-400 leading-relaxed mb-4">
+              När du rör dig eller springer med telefonen kan iPhone visa Apples systemfunktion "Skaka för att ångra". Se hur du stänger av den i iOS eller nollställer skrivminnet.
+            </p>
+            <button
+              type="button"
+              onClick={onOpenShakeModal}
+              className="w-full py-3 px-4 rounded-xl bg-zinc-900 hover:bg-zinc-800 dark:bg-white dark:hover:bg-zinc-100 text-white dark:text-zinc-900 font-black text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition-all cursor-pointer shadow-sm active:scale-[0.98]"
+            >
+              <VibrateOff size={15} />
+              <span>Öppna guide & verktyg</span>
+            </button>
+          </div>
+        )}
       </div>
 
       {imageToCrop && (

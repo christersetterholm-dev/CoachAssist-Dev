@@ -3,6 +3,7 @@ import { Calendar, Trophy, Clock, Trash2, Copy, History, ListTodo, FileText, X, 
 import { motion, AnimatePresence } from 'motion/react';
 import { Exercise, TrainingSession, TrainingSettings, BankExercise } from '../types';
 import { syncTeamCalendar } from '../utils/calendarSync';
+import { categorizeSession } from '../utils/sessionCategory';
 import GameList from './GameList';
 import TeamOverviewModal from './TeamOverviewModal';
 import MobileCalendarView from './MobileCalendarView';
@@ -49,6 +50,8 @@ interface TrainingManagerProps {
   onRemoveBankExercise?: (id: string) => void;
   user?: any;
   userRoles?: string[];
+  calendarMonth?: Date;
+  onCalendarMonthChange?: (month: Date) => void;
 }
 
 const isSessionPassed = (session: TrainingSession) => {
@@ -78,35 +81,6 @@ function getSessionDurationInMinutes(startTime?: string, endTime?: string): numb
   }
   return diff;
 }
-
-const categorizeSession = (session: TrainingSession): 'match' | 'training' | 'other' => {
-  const title = (session.title || '').trim().toLowerCase();
-  if (!title) {
-    return 'training';
-  }
-  if (
-    title.includes('match') || 
-    title.includes('vs') || 
-    title.includes('mot') || 
-    title.includes('seriematch') || 
-    title.includes('cup') || 
-    title.includes('kval') || 
-    title.includes('träningsmatch')
-  ) {
-    return 'match';
-  }
-  if (
-    title.includes('träning') || 
-    title.includes('pass') || 
-    title.includes('fys') || 
-    title.includes('praktik') || 
-    title.includes('istid') || 
-    title.includes('poolspel')
-  ) {
-    return 'training';
-  }
-  return 'other';
-};
 
 const getCatConfig = (category: 'match' | 'training' | 'other') => {
   const configs = {
@@ -594,7 +568,9 @@ export default function TrainingManager({
   userRoles,
   activeClubId,
   activeTeamId,
-  activeClubInfo
+  activeClubInfo,
+  calendarMonth,
+  onCalendarMonthChange
 }: TrainingManagerProps) {
   const [sessionToDelete, setSessionToDelete] = useState<string | null>(null);
   const [copiedOutboundCalFeed, setCopiedOutboundCalFeed] = useState(false);
@@ -1062,6 +1038,8 @@ export default function TrainingManager({
           lastSyncedAt={settings?.lastSyncedAt}
           icsUrl={effectiveIcsUrl}
           onOpenSettings={() => setShowSettings(true)}
+          currentMonth={calendarMonth}
+          onMonthChange={onCalendarMonthChange}
         />
       ) : (
         <div className="px-4 sm:px-0">
