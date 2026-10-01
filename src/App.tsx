@@ -585,7 +585,7 @@ export default function App() {
   // Sync PWA Custom App Name and Meta tags on app load
   useEffect(() => {
     fetch(getApiUrl('/api/pwa-icons'))
-      .then(r => r.json())
+      .then(r => (r.ok ? r.json() : null))
       .then(data => {
         if (data && data.appName) {
           const cleanName = data.appName.trim();

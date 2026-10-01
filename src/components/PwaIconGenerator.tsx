@@ -63,7 +63,7 @@ export default function PwaIconGenerator({ initialLogoUrl, clubName = 'CoachAssi
   // Fetch existing saved PWA metadata on mount
   useEffect(() => {
     fetch(getApiUrl('/api/pwa-icons'))
-      .then(res => res.json())
+      .then(res => (res.ok ? res.json() : null))
       .then(data => {
         if (data) {
           if (data.appName) {

@@ -3503,6 +3503,17 @@ async function startServer() {
   app.get('/api/calendar/:clubId/:teamId/events.ics', handleIcsFeed);
   app.get('/api/calendar/:clubId/events.ics', handleIcsFeed);
 
+  // Direct download route for the pre-built production zip bundle
+  app.get('/api/download-production-bundle', (_req, res) => {
+    const zipPath = path.resolve(process.cwd(), 'coachassist-production-bundle.zip');
+    if (fs.existsSync(zipPath)) {
+      res.setHeader('Content-Type', 'application/zip');
+      res.setHeader('Content-Disposition', 'attachment; filename="coachassist-production-bundle.zip"');
+      return fs.createReadStream(zipPath).pipe(res);
+    }
+    return res.status(404).send('Bundle not found');
+  });
+
   // --- VITE AND SPA SERVING ---
 
   if (!isProduction) {
@@ -3538,7 +3549,20 @@ async function startServer() {
     // Serve assets with absolute precision to prevent any rewrite or subfolder routing issues
     app.use('/assets', express.static(path.join(distPath, 'assets')));
     app.use(express.static(distPath));
-    app.get('*', (_req, res) => {
+    app.get('*', (req, res) => {
+      // If a script, stylesheet, or source file was requested but not found, DO NOT return index.html (text/html)!
+      if (
+        req.path.startsWith('/assets/') ||
+        req.path.startsWith('/src/') ||
+        req.path.endsWith('.js') ||
+        req.path.endsWith('.css') ||
+        req.path.endsWith('.mjs') ||
+        req.path.endsWith('.map') ||
+        req.path.endsWith('.tsx') ||
+        req.path.endsWith('.ts')
+      ) {
+        return res.status(404).type('text/plain').send('Asset not found');
+      }
       const indexPath = path.join(distPath, 'index.html');
       if (fs.existsSync(indexPath)) {
         let html = fs.readFileSync(indexPath, 'utf-8');

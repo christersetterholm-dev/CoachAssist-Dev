@@ -43,6 +43,14 @@ if (fs.existsSync(srcDir)) {
   // 1. Copy to public/ (skip index.html so Vite dev server uses root index.html)
   copyRecursiveSync(srcDir, destDir, true);
   console.log('Successfully copied all assets to public/!');
+
+  // 2. Also copy assets directly to root assets/ so Apache can find them immediately
+  const rootAssetsDir = path.join(__dirname, 'assets');
+  const distAssetsDir = path.join(srcDir, 'assets');
+  if (fs.existsSync(distAssetsDir)) {
+    copyRecursiveSync(distAssetsDir, rootAssetsDir, false);
+    console.log('Successfully copied all assets to root assets/ for Apache!');
+  }
 } else {
   console.error('dist/ folder not found. Make sure vite build ran successfully.');
 }

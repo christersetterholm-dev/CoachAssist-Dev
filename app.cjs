@@ -59,6 +59,7 @@ if (fs.existsSync(serverPath)) {
     const customEnv = {
       ...process.env,
       PATH: nodeBinDir + (process.platform === 'win32' ? ';' : ':') + (process.env.PATH || ''),
+      NODE_OPTIONS: ((process.env.NODE_OPTIONS || '') + ' --max-old-space-size=1536').trim(),
       RAYON_NUM_THREADS: '1',
       UV_THREADPOOL_SIZE: '1',
       ESBUILD_WORKERS: '1'
@@ -100,6 +101,12 @@ if (fs.existsSync(serverPath)) {
             console.error('Failed to touch tmp/restart.txt:', err);
             buildLog += `Failed to trigger automatic restart: ${err.message}\n`;
           }
+
+          // Allow the success response to be sent to the browser, then exit so Passenger starts the real server
+          setTimeout(() => {
+            console.log('Exiting builder process so Passenger spawns production server...');
+            process.exit(0);
+          }, 3000);
         } else {
           buildStatus = 'failed';
           buildError = `Build process exited with code ${code}`;

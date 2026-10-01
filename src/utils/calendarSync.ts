@@ -33,17 +33,49 @@ export async function syncTeamCalendar(
 
   try {
     const cacheBuster = `&_t=${Date.now()}`;
-    const response = await fetch(getApiUrl(`/api/fetch-calendar?url=${encodeURIComponent(icsUrl)}${cacheBuster}`), {
-      headers: {
-        'Cache-Control': 'no-cache, no-store, must-revalidate',
-        'Pragma': 'no-cache'
+    let icsData = '';
+
+    // First attempt: Call the backend /api/fetch-calendar proxy
+    let primarySuccess = false;
+    try {
+      const response = await fetch(getApiUrl(`/api/fetch-calendar?url=${encodeURIComponent(icsUrl)}${cacheBuster}`), {
+        headers: {
+          'Cache-Control': 'no-cache, no-store, must-revalidate',
+          'Pragma': 'no-cache'
+        }
+      });
+      if (response.ok) {
+        icsData = await response.text();
+        primarySuccess = true;
       }
-    });
-    if (!response.ok) {
-      throw new Error(`Kunde inte hämta kalendern (Status ${response.status})`);
+    } catch (e) {
+      // Backend unavailable or network error
     }
 
-    const icsData = await response.text();
+    // Second attempt: If backend returned 404 or failed, try public CORS proxies so calendar sync works even on static/offline hosts
+    if (!primarySuccess || !icsData) {
+      const cleanHttpUrl = icsUrl.trim().replace(/^webcal:\/\//i, 'https://');
+      try {
+        const fallback1 = await fetch(`https://corsproxy.io/?url=${encodeURIComponent(cleanHttpUrl)}`);
+        if (fallback1.ok) {
+          icsData = await fallback1.text();
+        } else {
+          throw new Error(`CorsProxy status: ${fallback1.status}`);
+        }
+      } catch (fb1Err) {
+        try {
+          const fallback2 = await fetch(`https://api.allorigins.win/raw?url=${encodeURIComponent(cleanHttpUrl)}`);
+          if (fallback2.ok) {
+            icsData = await fallback2.text();
+          } else {
+            throw new Error(`AllOrigins status: ${fallback2.status}`);
+          }
+        } catch (fb2Err) {
+          throw new Error('Kunde inte nå kalendern (varken via servern eller reservproxy). Kontrollera kalenderlänken.');
+        }
+      }
+    }
+
     const events = parseIcsCalendar(icsData);
 
     if (events.length === 0) {
