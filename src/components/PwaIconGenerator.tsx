@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Download, Upload, RefreshCw, Smartphone, Layers, Check, Copy, Sparkles, CheckCircle2, AlertCircle, UploadCloud } from 'lucide-react';
-import JSZip from 'jszip';
+import { createZipBlob, ZipFileInput } from '../utils/zipHelper';
 import { getApiUrl } from '../lib/firebase';
 
 interface PwaIconGeneratorProps {
@@ -223,14 +223,21 @@ export default function PwaIconGenerator({ initialLogoUrl, clubName = 'CoachAssi
     if (!logoImage) return;
     setIsGenerating(true);
     try {
-      const zip = new JSZip();
-      const iconsFolder = zip.folder('pwa-icons');
+      const zipFiles: ZipFileInput[] = [];
 
       for (const spec of ICON_SPECS) {
         const dataUrl = renderIconCanvas(spec.size, spec.purpose === 'maskable');
-        const base64Data = dataUrl.replace(/^data:image\/png;base64,/, '');
-        if (iconsFolder) {
-          iconsFolder.file(spec.fileName, base64Data, { base64: true });
+        if (dataUrl) {
+          const base64Data = dataUrl.replace(/^data:image\/png;base64,/, '');
+          const binaryStr = atob(base64Data);
+          const bytes = new Uint8Array(binaryStr.length);
+          for (let i = 0; i < binaryStr.length; i++) {
+            bytes[i] = binaryStr.charCodeAt(i);
+          }
+          zipFiles.push({
+            name: `pwa-icons/${spec.fileName}`,
+            data: bytes
+          });
         }
       }
 
@@ -250,7 +257,10 @@ export default function PwaIconGenerator({ initialLogoUrl, clubName = 'CoachAssi
           { src: '/icon-maskable-512x512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' }
         ]
       };
-      zip.file('manifest.webmanifest', JSON.stringify(manifestObj, null, 2));
+      zipFiles.push({
+        name: 'manifest.webmanifest',
+        data: JSON.stringify(manifestObj, null, 2)
+      });
 
       // Add HTML head tags guide
       const htmlInstructions = `<!-- Klistra in följande taggar i <head> på din index.html -->
@@ -264,9 +274,12 @@ export default function PwaIconGenerator({ initialLogoUrl, clubName = 'CoachAssi
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
 <meta name="apple-mobile-web-app-title" content="${appName}" />
 `;
-      zip.file('index-head-tags.html', htmlInstructions);
+      zipFiles.push({
+        name: 'index-head-tags.html',
+        data: htmlInstructions
+      });
 
-      const content = await zip.generateAsync({ type: 'blob' });
+      const content = createZipBlob(zipFiles);
       const url = URL.createObjectURL(content);
       const a = document.createElement('a');
       a.href = url;

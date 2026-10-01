@@ -28,7 +28,28 @@ if (fs.existsSync(serverPath)) {
     
     // Check if we need to run npm install first
     const hasVite = fs.existsSync(path.join(__dirname, 'node_modules', 'vite'));
-    const needsInstall = !hasVite;
+    let needsInstall = !hasVite;
+
+    // Check if all production dependencies exist in node_modules
+    if (!needsInstall) {
+      try {
+        const pkgPath = path.join(__dirname, 'package.json');
+        if (fs.existsSync(pkgPath)) {
+          const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
+          const deps = Object.keys(pkg.dependencies || {});
+          for (const dep of deps) {
+            if (!fs.existsSync(path.join(__dirname, 'node_modules', dep))) {
+              console.log(`Missing dependency in node_modules: ${dep}. Triggering npm install first...`);
+              buildLog += `Paketet "${dep}" saknas i node_modules. Kör npm install först...\n`;
+              needsInstall = true;
+              break;
+            }
+          }
+        }
+      } catch (e) {
+        console.warn('Could not verify dependencies in package.json:', e);
+      }
+    }
     
     buildLog = '';
     
