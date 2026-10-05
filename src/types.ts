@@ -18,6 +18,9 @@ export interface LineupPlayer {
   y: number; // 0-100 percent
   isSubstitute: boolean;
   isHolding?: boolean;
+  customNumber?: string;
+  customName?: string;
+  customRole?: string;
 }
 
 export interface Lineup {
@@ -58,8 +61,9 @@ export interface Lineup {
     drawings: any[];
     footballPos: { x: number, y: number } | null;
     footballScale?: number;
-    opponents: { id: string, x: number, y: number }[];
+    opponents: { id: string, x: number, y: number, number?: number | string, name?: string, role?: string }[];
     showOpponents: boolean;
+    showPositionDescriptions?: boolean;
     opponentColor?: string;
     players?: LineupPlayer[];
   };
@@ -71,13 +75,14 @@ export interface TacticalSavedBoard {
   name: string;
   createdAt: number;
   drawings: any[];
-  opponents: { id: string, x: number, y: number }[];
+  opponents: { id: string, x: number, y: number, number?: number | string, name?: string, role?: string }[];
   players: LineupPlayer[];
   footballPos: { x: number, y: number } | null;
   footballs?: { id: string, x: number, y: number }[];
   footballScale?: number;
   elementScale?: number;
   showOpponents: boolean;
+  showPositionDescriptions?: boolean;
   opponentColor?: string;
   pitchType?: string;
   pitchSize?: 'full' | 'half';

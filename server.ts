@@ -3,12 +3,440 @@ import axios from 'axios';
 import path from 'path';
 import fs from 'fs';
 import crypto from 'crypto';
-import Database from 'better-sqlite3';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import multer from 'multer';
 import nodemailer from 'nodemailer';
 import { fileURLToPath } from 'url';
+
+let Database: any = null;
+try {
+  const BetterSqlite = require('better-sqlite3');
+  // Crucial: Test that the native C++ binary actually exists and instantiates without error.
+  // In environments without C++ build tools (like cPanel shared hosting),
+  // require('better-sqlite3') succeeds, but instantiating a DB throws:
+  // "Error: Could not locate the bindings file."
+  const testDb = new BetterSqlite(':memory:');
+  testDb.close();
+  Database = BetterSqlite;
+  console.log('[SQLite] better-sqlite3 native addon loaded and verified successfully.');
+} catch (err: any) {
+  console.warn('[SQLite] better-sqlite3 native addon not usable (' + (err?.message || err) + '). Using zero-dependency persistent JSON database engine.');
+  Database = null;
+}
+
+// Zero-dependency file-backed JSON database engine for environments where native C++ SQLite bindings cannot run
+function createFallbackDatabase(dataDir: string): any {
+  const storageFilePath = path.join(dataDir, 'coachassist_db.json');
+
+  interface FallbackStore {
+    users: Record<string, any>;
+    users_data: Record<string, any>;
+    shared_leaderboards: Record<string, any>;
+    clubs_data: Record<string, any>;
+    system_docs: Record<string, any>;
+    password_resets: Record<string, any>;
+    uploaded_files: Record<string, any>;
+  }
+
+  let store: FallbackStore = {
+    users: {},
+    users_data: {},
+    shared_leaderboards: {},
+    clubs_data: {},
+    system_docs: {},
+    password_resets: {},
+    uploaded_files: {}
+  };
+
+  try {
+    if (fs.existsSync(storageFilePath)) {
+      const raw = fs.readFileSync(storageFilePath, 'utf8');
+      const parsed = JSON.parse(raw);
+      store = { ...store, ...parsed };
+      console.log(`[JSON DB] Loaded persistent storage from ${storageFilePath} (${Object.keys(store.users).length} users, ${Object.keys(store.system_docs).length} system docs)`);
+    }
+  } catch (err: any) {
+    console.warn(`[JSON DB] Warning reading ${storageFilePath}:`, err?.message || err);
+  }
+
+  let saveTimer: any = null;
+  const scheduleSave = () => {
+    if (saveTimer) clearTimeout(saveTimer);
+    saveTimer = setTimeout(() => {
+      try {
+        const tmpPath = `${storageFilePath}.tmp.${Date.now()}`;
+        fs.writeFileSync(tmpPath, JSON.stringify(store, null, 2), 'utf8');
+        fs.renameSync(tmpPath, storageFilePath);
+      } catch (err: any) {
+        console.error('[JSON DB] Error persisting storage to disk:', err?.message || err);
+      }
+    }, 100);
+  };
+
+  return {
+    pragma: (_cmd: string) => {},
+    exec: (_sql: string) => {},
+    transaction: (fn: any) => (...args: any[]) => fn(...args),
+    prepare: (sql: string) => {
+      const cleanSql = sql.replace(/\s+/g, ' ').trim();
+
+      return {
+        get: (...params: any[]) => {
+          // --- system_docs ---
+          if (cleanSql.includes('FROM system_docs')) {
+            let docPath = '';
+            if (cleanSql.includes("path = 'system/jwt_secret'")) docPath = 'system/jwt_secret';
+            else if (cleanSql.includes("path = 'system/db_config'")) docPath = 'system/db_config';
+            else docPath = String(params[0] || '');
+            const doc = store.system_docs[docPath];
+            if (!doc) return undefined;
+            if (cleanSql.startsWith('SELECT data FROM')) return { data: doc.data };
+            return doc;
+          }
+
+          // --- users ---
+          if (cleanSql.includes('FROM users')) {
+            const allUsers = Object.values(store.users);
+
+            if (cleanSql.includes('OR LOWER(username)')) {
+              const p0 = String(params[0] || '').toLowerCase().trim();
+              const p1 = String(params[1] || p0).toLowerCase().trim();
+              return allUsers.find(u =>
+                (u.email && u.email.toLowerCase() === p0) ||
+                (u.username && u.username.toLowerCase() === p1)
+              );
+            }
+
+            if (cleanSql.includes('LOWER(email) = ?')) {
+              const target = String(params[0] || '').toLowerCase().trim();
+              const user = allUsers.find(u => u.email && u.email.toLowerCase() === target);
+              if (!user) return undefined;
+              return { id: user.id, email: user.email };
+            }
+
+            if (cleanSql.includes('LOWER(username) = ?')) {
+              const target = String(params[0] || '').toLowerCase().trim();
+              const user = allUsers.find(u => u.username && u.username.toLowerCase() === target);
+              if (!user) return undefined;
+              return { id: user.id };
+            }
+
+            if (cleanSql.includes('google_id = ?') && !cleanSql.includes('id != ?')) {
+              const gid = String(params[0] || '');
+              return allUsers.find(u => u.google_id === gid);
+            }
+
+            if (cleanSql.includes('google_id = ? AND id != ?')) {
+              const [gid, notId] = params;
+              const user = allUsers.find(u => u.google_id === gid && u.id !== notId);
+              if (!user) return undefined;
+              return { id: user.id, email: user.email };
+            }
+
+            if (cleanSql.includes('email = ? AND id != ?')) {
+              const [email, notId] = params;
+              const target = String(email || '').toLowerCase().trim();
+              const user = allUsers.find(u => (u.email || '').toLowerCase() === target && u.id !== notId);
+              if (!user) return undefined;
+              return { id: user.id };
+            }
+
+            if (cleanSql.includes('email = ?')) {
+              const target = String(params[0] || '').toLowerCase().trim();
+              const user = allUsers.find(u => (u.email || '').toLowerCase() === target);
+              if (!user) return undefined;
+              return user;
+            }
+
+            if (cleanSql.includes('id = ?')) {
+              const id = String(params[0] || '');
+              return store.users[id];
+            }
+
+            return allUsers[0];
+          }
+
+          // --- users_data ---
+          if (cleanSql.includes('FROM users_data')) {
+            const [userId, segment] = params;
+            const key = `${userId}:::${segment}`;
+            const row = store.users_data[key];
+            if (!row) return undefined;
+            return { data: row.data, updatedAt: row.updatedAt };
+          }
+
+          // --- clubs_data ---
+          if (cleanSql.includes('FROM clubs_data')) {
+            const [clubId, teamId, segment] = params;
+            const key = `${clubId}:::${teamId}:::${segment}`;
+            const row = store.clubs_data[key];
+            if (!row) return undefined;
+            if (cleanSql.includes('SELECT data FROM')) return { data: row.data };
+            return { data: row.data, updatedAt: row.updatedAt };
+          }
+
+          // --- shared_leaderboards ---
+          if (cleanSql.includes('FROM shared_leaderboards')) {
+            const id = String(params[0] || '');
+            const row = store.shared_leaderboards[id];
+            if (!row) return undefined;
+            if (cleanSql.includes('SELECT data FROM')) return { data: row.data };
+            return row;
+          }
+
+          // --- uploaded_files ---
+          if (cleanSql.includes('FROM uploaded_files')) {
+            const filename = String(params[0] || '');
+            const file = store.uploaded_files[filename];
+            if (!file) return undefined;
+            return { mime_type: file.mime_type, data_base64: file.data_base64 };
+          }
+
+          // --- password_resets ---
+          if (cleanSql.includes('FROM password_resets')) {
+            const all = Object.values(store.password_resets);
+            if (cleanSql.includes('COUNT(*)')) {
+              const [email, createdAfter] = params;
+              const target = String(email || '').toLowerCase().trim();
+              const count = all.filter(r => (r.email || '').toLowerCase() === target && r.created_at > (createdAfter || 0)).length;
+              return { count };
+            }
+            const [email, expiresAfter] = params;
+            const target = String(email || '').toLowerCase().trim();
+            const valid = all.filter(r => (r.email || '').toLowerCase() === target && !r.used && r.expires_at > (expiresAfter || 0));
+            valid.sort((a, b) => b.created_at - a.created_at);
+            return valid[0];
+          }
+
+          return undefined;
+        },
+
+        all: (...params: any[]) => {
+          if (cleanSql.includes('FROM system_docs')) {
+            return Object.values(store.system_docs);
+          }
+          if (cleanSql.includes('FROM users_data')) {
+            return Object.values(store.users_data);
+          }
+          if (cleanSql.includes('FROM clubs_data')) {
+            return Object.values(store.clubs_data);
+          }
+          if (cleanSql.includes('FROM shared_leaderboards')) {
+            return Object.values(store.shared_leaderboards);
+          }
+          if (cleanSql.includes('FROM uploaded_files')) {
+            return Object.values(store.uploaded_files);
+          }
+          if (cleanSql.includes('FROM users')) {
+            return Object.values(store.users);
+          }
+          return [];
+        },
+
+        run: (...params: any[]) => {
+          // --- system_docs ---
+          if (cleanSql.includes('INTO system_docs')) {
+            let pathVal = '', dataVal = '', updatedVal = Date.now();
+            if (cleanSql.includes("'system/jwt_secret'")) {
+              pathVal = 'system/jwt_secret';
+              dataVal = params[0];
+              updatedVal = params[1] || Date.now();
+            } else {
+              [pathVal, dataVal, updatedVal] = params;
+            }
+            store.system_docs[pathVal] = { path: pathVal, data: dataVal, updatedAt: updatedVal };
+            scheduleSave();
+            return { changes: 1, lastInsertRowid: 0 };
+          }
+          if (cleanSql.includes('DELETE FROM system_docs')) {
+            const pathVal = String(params[0] || '');
+            delete store.system_docs[pathVal];
+            scheduleSave();
+            return { changes: 1, lastInsertRowid: 0 };
+          }
+
+          // --- users_data ---
+          if (cleanSql.includes('INTO users_data')) {
+            const [userId, segment, data, updatedAt] = params;
+            const key = `${userId}:::${segment}`;
+            store.users_data[key] = { userId, segment, data, updatedAt: updatedAt || Date.now() };
+            scheduleSave();
+            return { changes: 1, lastInsertRowid: 0 };
+          }
+
+          // --- clubs_data ---
+          if (cleanSql.includes('INTO clubs_data')) {
+            const [clubId, teamId, segment, data, updatedAt] = params;
+            const key = `${clubId}:::${teamId}:::${segment}`;
+            store.clubs_data[key] = { clubId, teamId, segment, data, updatedAt: updatedAt || Date.now() };
+            scheduleSave();
+            return { changes: 1, lastInsertRowid: 0 };
+          }
+
+          // --- shared_leaderboards ---
+          if (cleanSql.includes('INTO shared_leaderboards')) {
+            const [id, data, updatedAt, coachUid] = params;
+            store.shared_leaderboards[id] = { id, data, updatedAt: updatedAt || Date.now(), coachUid };
+            scheduleSave();
+            return { changes: 1, lastInsertRowid: 0 };
+          }
+
+          // --- uploaded_files ---
+          if (cleanSql.includes('INTO uploaded_files')) {
+            const [filename, mime_type, data_base64, created_at] = params;
+            store.uploaded_files[filename] = { filename, mime_type, data_base64, created_at: created_at || Date.now() };
+            scheduleSave();
+            return { changes: 1, lastInsertRowid: 0 };
+          }
+          if (cleanSql.includes('DELETE FROM uploaded_files')) {
+            const filename = String(params[0] || '');
+            delete store.uploaded_files[filename];
+            scheduleSave();
+            return { changes: 1, lastInsertRowid: 0 };
+          }
+
+          // --- password_resets ---
+          if (cleanSql.includes('INTO password_resets')) {
+            const [id, email, code_hash, expires_at, attempts, used, created_at] = params;
+            store.password_resets[id] = { id, email, code_hash, expires_at, attempts: attempts || 0, used: used || 0, created_at: created_at || Date.now() };
+            scheduleSave();
+            return { changes: 1, lastInsertRowid: 0 };
+          }
+          if (cleanSql.includes('UPDATE password_resets SET used = 1 WHERE email = ?')) {
+            const target = String(params[0] || '').toLowerCase().trim();
+            for (const r of Object.values(store.password_resets)) {
+              if ((r.email || '').toLowerCase() === target && !r.used) {
+                r.used = 1;
+              }
+            }
+            scheduleSave();
+            return { changes: 1, lastInsertRowid: 0 };
+          }
+          if (cleanSql.includes('UPDATE password_resets SET used = 1 WHERE id = ?')) {
+            const id = String(params[0] || '');
+            if (store.password_resets[id]) {
+              store.password_resets[id].used = 1;
+              scheduleSave();
+            }
+            return { changes: 1, lastInsertRowid: 0 };
+          }
+          if (cleanSql.includes('UPDATE password_resets SET attempts = attempts + 1')) {
+            const id = String(params[0] || '');
+            if (store.password_resets[id]) {
+              store.password_resets[id].attempts = (store.password_resets[id].attempts || 0) + 1;
+              scheduleSave();
+            }
+            return { changes: 1, lastInsertRowid: 0 };
+          }
+
+          // --- users ---
+          if (cleanSql.includes('INTO users')) {
+            let userObj: any = {};
+            if (cleanSql.includes('google_id')) {
+              const [id, email, username, password_hash, google_id, google_email, avatar_url, auth_provider, created_at, has_logged_in] = params;
+              userObj = { id, email, username, password_hash, google_id, google_email, avatar_url, auth_provider: auth_provider || 'local', created_at, has_logged_in: has_logged_in || 0 };
+            } else if (cleanSql.includes('temp_password')) {
+              const [id, email, username, password_hash, created_at, has_logged_in, temp_password] = params;
+              userObj = { id, email, username, password_hash, created_at, has_logged_in: has_logged_in || 0, temp_password };
+            } else if (params.length === 5) {
+              const [id, email, username, password_hash, created_at] = params;
+              userObj = { id, email, username, password_hash, created_at, has_logged_in: 0 };
+            } else if (params.length === 4) {
+              const [id, email, password_hash, created_at] = params;
+              userObj = { id, email, password_hash, created_at, has_logged_in: 0 };
+            } else {
+              userObj = { id: params[0], email: params[1], password_hash: params[2], created_at: Date.now() };
+            }
+            const existing = store.users[userObj.id] || {};
+            store.users[userObj.id] = { ...existing, ...userObj };
+            scheduleSave();
+            return { changes: 1, lastInsertRowid: 0 };
+          }
+
+          if (cleanSql.includes('UPDATE users')) {
+            if (cleanSql.includes('has_logged_in = 1, temp_password = NULL')) {
+              const id = String(params[0] || '');
+              if (store.users[id]) {
+                store.users[id].has_logged_in = 1;
+                store.users[id].temp_password = null;
+                scheduleSave();
+              }
+              return { changes: 1, lastInsertRowid: 0 };
+            }
+            if (cleanSql.includes('SET username = ?, password_hash = ?, temp_password = ? WHERE id = ?')) {
+              const [username, password_hash, temp_password, id] = params;
+              if (store.users[id]) {
+                store.users[id].username = username;
+                store.users[id].password_hash = password_hash;
+                store.users[id].temp_password = temp_password;
+                scheduleSave();
+              }
+              return { changes: 1, lastInsertRowid: 0 };
+            }
+            if (cleanSql.includes('SET email = ?, username = ?, password_hash = COALESCE(?, password_hash)')) {
+              const [email, username, password_hash, id] = params;
+              if (store.users[id]) {
+                store.users[id].email = email;
+                store.users[id].username = username;
+                if (password_hash) store.users[id].password_hash = password_hash;
+                scheduleSave();
+              }
+              return { changes: 1, lastInsertRowid: 0 };
+            }
+            if (cleanSql.includes('SET username = ? WHERE id = ?')) {
+              const [username, id] = params;
+              if (store.users[id]) {
+                store.users[id].username = username;
+                scheduleSave();
+              }
+              return { changes: 1, lastInsertRowid: 0 };
+            }
+            if (cleanSql.includes('SET email = ? WHERE id = ?')) {
+              const [email, id] = params;
+              if (store.users[id]) {
+                store.users[id].email = email;
+                scheduleSave();
+              }
+              return { changes: 1, lastInsertRowid: 0 };
+            }
+            if (cleanSql.includes('SET avatar_url = ? WHERE id = ?')) {
+              const [avatar_url, id] = params;
+              if (store.users[id]) {
+                store.users[id].avatar_url = avatar_url;
+                scheduleSave();
+              }
+              return { changes: 1, lastInsertRowid: 0 };
+            }
+            if (cleanSql.includes('SET google_id = ?, google_email = ?')) {
+              const [google_id, google_email, avatar_url, id] = params;
+              if (store.users[id]) {
+                store.users[id].google_id = google_id;
+                store.users[id].google_email = google_email;
+                if (avatar_url && !store.users[id].avatar_url) store.users[id].avatar_url = avatar_url;
+                store.users[id].auth_provider = 'google';
+                scheduleSave();
+              }
+              return { changes: 1, lastInsertRowid: 0 };
+            }
+            if (cleanSql.includes("SET google_id = NULL, google_email = NULL, auth_provider = 'local'")) {
+              const id = String(params[0] || '');
+              if (store.users[id]) {
+                store.users[id].google_id = null;
+                store.users[id].google_email = null;
+                store.users[id].auth_provider = 'local';
+                scheduleSave();
+              }
+              return { changes: 1, lastInsertRowid: 0 };
+            }
+          }
+
+          return { changes: 0, lastInsertRowid: 0 };
+        }
+      };
+    }
+  };
+}
 
 // Environment-safe way to define __dirname and __filename in both ESM (dev) and CJS (prod esbuild bundle)
 const _filename = typeof import.meta !== 'undefined' && import.meta.url
@@ -39,9 +467,14 @@ try {
   console.warn('[Server] Could not create UPLOADS_DIR:', e);
 }
 
-// Initialize SQLite database with self-healing recovery if malformed/corrupted
-function initDatabase(): InstanceType<typeof Database> {
-  const createSchema = (database: InstanceType<typeof Database>) => {
+// Initialize SQLite database or zero-dependency fallback
+function initDatabase(): any {
+  if (!Database) {
+    console.warn('[SQLite] better-sqlite3 native addon not available; starting zero-dependency file-backed JSON database engine.');
+    return createFallbackDatabase(DATA_DIR);
+  }
+
+  const createSchema = (database: any) => {
     database.exec(`
       CREATE TABLE IF NOT EXISTS users (
         id TEXT PRIMARY KEY,
@@ -133,21 +566,26 @@ function initDatabase(): InstanceType<typeof Database> {
     createSchema(database);
     return database;
   } catch (err: any) {
-    console.error('[SQLite Init] Database initialization failed (e.g. malformed DB):', err?.message || err);
-    if (fs.existsSync(DB_PATH)) {
-      try {
-        const corruptPath = `${DB_PATH}.corrupt.${Date.now()}`;
-        fs.renameSync(DB_PATH, corruptPath);
-        console.warn(`[SQLite Recovery] Moved corrupted database file to ${corruptPath}`);
-      } catch (e: any) {
-        console.error('[SQLite Recovery] Failed to rename corrupt database, removing file:', e?.message || e);
-        try { fs.unlinkSync(DB_PATH); } catch (_) {}
+    console.error('[SQLite Init] Database initialization failed (e.g. malformed DB or bindings issue):', err?.message || err);
+    try {
+      if (fs.existsSync(DB_PATH)) {
+        try {
+          const corruptPath = `${DB_PATH}.corrupt.${Date.now()}`;
+          fs.renameSync(DB_PATH, corruptPath);
+          console.warn(`[SQLite Recovery] Moved corrupted database file to ${corruptPath}`);
+        } catch (e: any) {
+          console.error('[SQLite Recovery] Failed to rename corrupt database, removing file:', e?.message || e);
+          try { fs.unlinkSync(DB_PATH); } catch (_) {}
+        }
       }
+      const freshDb = new Database(DB_PATH);
+      createSchema(freshDb);
+      console.log('[SQLite Recovery] Fresh SQLite database initialized successfully.');
+      return freshDb;
+    } catch (fallbackErr: any) {
+      console.warn('[SQLite Recovery] Could not recover SQLite (' + (fallbackErr?.message || fallbackErr) + '). Falling back safely to file-backed JSON database engine.');
+      return createFallbackDatabase(DATA_DIR);
     }
-    const freshDb = new Database(DB_PATH);
-    createSchema(freshDb);
-    console.log('[SQLite Recovery] Fresh SQLite database initialized successfully.');
-    return freshDb;
   }
 }
 
@@ -557,6 +995,7 @@ function applyCustomPwaIconsToDisk(iconsObj: { appName?: string; themeColor?: st
 }
 
 async function loadAndApplyPwaIconsFromFirestore() {
+  if (dbModeConfig.mode === 'local_sqlite') return;
   try {
     const docData = await getFirestoreDoc('app_docs/system_pwa_icons');
     if (docData && docData.files) {
@@ -575,6 +1014,12 @@ async function loadAndApplyPwaIconsFromFirestore() {
 }
 
 async function loadAndApplyDbConfigFromFirestore() {
+  // If explicitly configured for standalone local mode, do not contact Firestore
+  if (process.env.DATABASE_MODE === 'local_sqlite' || dbModeConfig.mode === 'local_sqlite') {
+    console.log(`[DB Config] Standalone local database mode active (${dbModeConfig.mode}); Firestore sync skipped.`);
+    return;
+  }
+
   try {
     const docData = await getFirestoreDoc('app_docs/system_db_config');
     if (docData && docData.data) {
@@ -759,58 +1204,10 @@ async function startServer() {
   app.use(express.json({ limit: '50mb' }));
   app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
-  // Static serving of uploaded images with CORS headers, SQLite & Cloud Firestore backup recovery
-  app.get('/uploads/:filename', async (req, res) => {
-    const filename = path.basename(req.params.filename);
-    const fullPath = path.join(UPLOADS_DIR, filename);
-
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
-    res.setHeader('Cache-Control', 'public, max-age=31536000');
-
-    if (fs.existsSync(fullPath)) {
-      return res.sendFile(fullPath);
-    }
-
-    try {
-      const row = db.prepare('SELECT mime_type, data_base64 FROM uploaded_files WHERE filename = ?').get(filename) as { mime_type: string; data_base64: string } | undefined;
-      if (row && row.data_base64) {
-        const buffer = Buffer.from(row.data_base64, 'base64');
-        try {
-          fs.writeFileSync(fullPath, buffer);
-        } catch (_) {}
-        res.setHeader('Content-Type', row.mime_type || 'image/jpeg');
-        return res.send(buffer);
-      }
-    } catch (err) {
-      console.error('Error fetching file from uploaded_files table:', err);
-    }
-
-    // Firestore Cloud Storage Backup Recovery (restores images across container restarts & new devices)
-    try {
-      const fDoc = await getFirestoreDoc(`server_uploads/${encodeURIComponent(filename)}`);
-      if (fDoc && fDoc.data_base64) {
-        const buffer = Buffer.from(fDoc.data_base64, 'base64');
-        const mimeType = fDoc.mime_type || 'image/jpeg';
-        try {
-          db.prepare(`
-            INSERT OR REPLACE INTO uploaded_files (filename, mime_type, data_base64, created_at)
-            VALUES (?, ?, ?, ?)
-          `).run(filename, mimeType, fDoc.data_base64, fDoc.created_at || Date.now());
-          fs.writeFileSync(fullPath, buffer);
-        } catch (_) {}
-        res.setHeader('Content-Type', mimeType);
-        return res.send(buffer);
-      }
-    } catch (err) {
-      console.error('Error fetching file from Firestore server_uploads:', err);
-    }
-
-    res.status(404).send('File not found');
-  });
-
+  // CORS and static middleware for /uploads
   app.use('/uploads', (req, res, next) => {
     res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
     next();
   }, express.static(UPLOADS_DIR));
 
@@ -824,9 +1221,19 @@ async function startServer() {
   // Get current DB Config and System Status
   app.get('/api/system/db-config', (_req, res) => {
     let dbSize = 0;
+    let actualDbPath = DB_PATH;
+    let dbEngine = Database ? 'sqlite' : 'json_store';
+
     try {
-      if (fs.existsSync(DB_PATH)) {
+      const jsonDbPath = path.join(DATA_DIR, 'coachassist_db.json');
+      if (fs.existsSync(DB_PATH) && fs.statSync(DB_PATH).size > 0) {
         dbSize = fs.statSync(DB_PATH).size;
+        actualDbPath = DB_PATH;
+        dbEngine = 'sqlite';
+      } else if (fs.existsSync(jsonDbPath)) {
+        dbSize = fs.statSync(jsonDbPath).size;
+        actualDbPath = jsonDbPath;
+        dbEngine = 'json_store';
       }
     } catch {}
 
@@ -840,8 +1247,9 @@ async function startServer() {
 
     res.json({
       mode: dbModeConfig.mode,
-      dbPath: DB_PATH,
+      dbPath: actualDbPath,
       dbSize,
+      dbEngine,
       isProduction,
       firestoreConfigured: !!baseUrl,
       firestoreProjectId: projId || null,
@@ -2882,8 +3290,28 @@ async function startServer() {
         console.error('Error fetching admin doc:', e);
         res.status(500).json({ error: 'Failed to fetch admin doc' });
       }
+    } else if (pathStr === 'pending_user_requests' || pathStr.startsWith('pending_user_requests/')) {
+      try {
+        let row: any = db.prepare('SELECT data FROM system_docs WHERE path = ?').get(pathStr);
+        if (row && row.data) {
+          const parsed = typeof row.data === 'string' ? JSON.parse(row.data) : row.data;
+          return res.json(parsed);
+        }
+        return res.json([]);
+      } catch (_) {
+        return res.json([]);
+      }
     } else {
-      res.status(400).json({ error: 'Invalid path' });
+      // General document lookup fallback
+      try {
+        let row: any = db.prepare('SELECT data FROM system_docs WHERE path = ?').get(pathStr);
+        if (row && row.data) {
+          return res.json(typeof row.data === 'string' ? JSON.parse(row.data) : row.data);
+        }
+        return res.status(404).json({ error: 'Not found' });
+      } catch (_) {
+        return res.status(404).json({ error: 'Not found' });
+      }
     }
   });
 
@@ -3019,122 +3447,169 @@ async function startServer() {
         res.status(500).json({ error: 'Failed to save admin doc' });
       }
     } else {
-      res.status(400).json({ error: 'Invalid path' });
+      // General document save fallback into system_docs
+      try {
+        const serializedData = typeof data === 'string' ? data : JSON.stringify(data);
+        db.prepare(`
+          INSERT INTO system_docs (path, data, updatedAt)
+          VALUES (?, ?, ?)
+          ON CONFLICT(path) DO UPDATE SET data = excluded.data, updatedAt = excluded.updatedAt
+        `).run(pathStr, serializedData, Date.now());
+
+        setFirestoreDoc(`app_docs/${encodeURIComponent(pathStr)}`, { data: serializedData, updatedAt: Date.now() })
+          .catch(e => console.error('Firestore doc sync error:', e));
+
+        res.json({ success: true });
+      } catch (e: any) {
+        console.error('Error saving doc:', e);
+        res.status(500).json({ error: 'Failed to save doc' });
+      }
+    }
+  });
+
+  // DELETE Document Data
+  app.delete('/api/docs', async (req, res) => {
+    const pathStr = req.query.path as string;
+    if (!pathStr) return res.status(400).send('Path is required');
+
+    try {
+      db.prepare('DELETE FROM system_docs WHERE path = ?').run(pathStr);
+      res.json({ success: true });
+    } catch (e: any) {
+      console.error('Error deleting doc:', e);
+      res.status(500).json({ error: 'Failed to delete doc' });
     }
   });
 
   // --- LOCAL FILE STORAGE ENDPOINTS ---
 
-  // Configure Multer for local uploads with randomized safe names
-  const storageConfig = multer.diskStorage({
-    destination: (_req, _file, cb) => {
-      cb(null, UPLOADS_DIR);
-    },
-    filename: (_req, file, cb) => {
-      const ext = path.extname(file.originalname) || '.jpg';
-      const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-      cb(null, 'photo_' + uniqueSuffix + ext);
-    }
-  });
+  // Configure Multer in-memory storage for 100% resilient uploads regardless of host disk permissions
   const upload = multer({ 
-    storage: storageConfig,
-    limits: { fileSize: 10 * 1024 * 1024 } // 10MB file size limit
+    storage: multer.memoryStorage(),
+    limits: { fileSize: 15 * 1024 * 1024 } // 15MB file size limit
   });
 
-  // Upload image with disk + SQLite database + Cloud Firestore persistence
+  // Upload image with in-memory buffer + local disk + SQLite database + Cloud Firestore persistence
   app.post('/api/upload', upload.any(), async (req, res) => {
     const files = req.files as Express.Multer.File[];
     if (!files || files.length === 0) {
-      return res.status(400).json({ error: 'No file uploaded' });
+      return res.status(400).json({ error: 'Ingen fil skickades med' });
     }
     const uploadedFile = files[0];
-    const filename = uploadedFile.filename;
+    const ext = path.extname(uploadedFile.originalname || '') || '.jpg';
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+    const filename = 'photo_' + uniqueSuffix + ext;
     const fileUrl = `/uploads/${filename}`;
 
     try {
-      let fileBuffer: Buffer | null = null;
-      if (uploadedFile.buffer) {
-        fileBuffer = uploadedFile.buffer;
-      } else if (uploadedFile.path && fs.existsSync(uploadedFile.path)) {
-        fileBuffer = fs.readFileSync(uploadedFile.path);
-      }
-
+      const fileBuffer = uploadedFile.buffer;
       if (fileBuffer) {
         const base64Data = fileBuffer.toString('base64');
         const mimeType = uploadedFile.mimetype || 'image/jpeg';
-        db.prepare(`
-          INSERT OR REPLACE INTO uploaded_files (filename, mime_type, data_base64, created_at)
-          VALUES (?, ?, ?, ?)
-        `).run(filename, mimeType, base64Data, Date.now());
 
-        // Await persistence to Cloud Firestore for guaranteed multi-device & container restart durability
+        // 1. Always persist to local SQLite/JSON database table `uploaded_files`
         try {
-          const synced = await setFirestoreDoc(`server_uploads/${encodeURIComponent(filename)}`, {
-            mime_type: mimeType,
-            data_base64: base64Data,
-            created_at: Date.now()
-          });
-          if (synced) {
-            console.log(`[Upload] Successfully synced upload ${filename} to Firestore server_uploads.`);
-          } else {
-            console.warn(`[Upload] Firestore sync returned false for ${filename}`);
+          db.prepare(`
+            INSERT OR REPLACE INTO uploaded_files (filename, mime_type, data_base64, created_at)
+            VALUES (?, ?, ?, ?)
+          `).run(filename, mimeType, base64Data, Date.now());
+        } catch (dbErr) {
+          console.error('[Upload] Error saving file to database table:', dbErr);
+        }
+
+        // 2. Persist to local disk folder `uploads` so Apache/Express can serve directly
+        try {
+          if (!fs.existsSync(UPLOADS_DIR)) {
+            fs.mkdirSync(UPLOADS_DIR, { recursive: true });
           }
-        } catch (fErr) {
-          console.error('[Upload] Failed to sync upload to Firestore:', fErr);
+          fs.writeFileSync(path.join(UPLOADS_DIR, filename), fileBuffer);
+        } catch (diskErr) {
+          console.warn('[Upload] Note: could not write file to disk (saved in DB):', diskErr);
+        }
+
+        // Also write to public/uploads if folder exists or is reachable
+        try {
+          const publicUploads = path.join(DATA_DIR, 'public', 'uploads');
+          if (fs.existsSync(path.join(DATA_DIR, 'public'))) {
+            if (!fs.existsSync(publicUploads)) fs.mkdirSync(publicUploads, { recursive: true });
+            fs.writeFileSync(path.join(publicUploads, filename), fileBuffer);
+          }
+        } catch (_) {}
+
+        // 3. Persist to Cloud Firestore only if not in standalone local_sqlite mode
+        if (dbModeConfig.mode !== 'local_sqlite') {
+          try {
+            setFirestoreDoc(`server_uploads/${encodeURIComponent(filename)}`, {
+              mime_type: mimeType,
+              data_base64: base64Data,
+              created_at: Date.now()
+            }).catch(fErr => console.warn('[Upload] Firestore sync error:', fErr));
+          } catch (_) {}
         }
       }
     } catch (err) {
-      console.error('Failed to save uploaded file into SQLite persistence:', err);
+      console.error('Failed to process uploaded file:', err);
     }
 
     res.json({ url: fileUrl });
   });
 
-  // Serving /uploads/:filename with 3-tier fallback (Disk -> SQLite -> Cloud Firestore)
+  // Serving /uploads/:filename with 3-tier fallback (Disk -> SQLite/JSON Database -> Cloud Firestore)
   app.get('/uploads/:filename', async (req, res) => {
     const filename = path.basename(req.params.filename);
     const fullPath = path.join(UPLOADS_DIR, filename);
+    const publicPath = path.join(DATA_DIR, 'public', 'uploads', filename);
+
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
 
     // 1. Check disk first
     if (fs.existsSync(fullPath)) {
-      return res.sendFile(fullPath, {
-        maxAge: '1y',
-        immutable: true
-      });
+      return res.sendFile(fullPath, { maxAge: '1y', immutable: true });
+    }
+    if (fs.existsSync(publicPath)) {
+      return res.sendFile(publicPath, { maxAge: '1y', immutable: true });
     }
 
     try {
-      // 2. Check SQLite uploaded_files table
+      // 2. Check local database (uploaded_files table in SQLite / JSON storage)
       const row: any = db.prepare('SELECT mime_type, data_base64 FROM uploaded_files WHERE filename = ?').get(filename);
       if (row && row.data_base64) {
         const buffer = Buffer.from(row.data_base64, 'base64');
-        // Cache back to disk asynchronously
-        fs.writeFile(fullPath, buffer, () => {});
+        // Cache back to disk asynchronously so next hit is a fast static file
+        try {
+          if (!fs.existsSync(UPLOADS_DIR)) fs.mkdirSync(UPLOADS_DIR, { recursive: true });
+          fs.writeFile(fullPath, buffer, () => {});
+        } catch (_) {}
+
         res.setHeader('Content-Type', row.mime_type || 'image/jpeg');
         res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
         return res.send(buffer);
       }
 
-      // 3. Fallback to Cloud Firestore server_uploads collection
-      const doc = await getFirestoreDoc(`server_uploads/${encodeURIComponent(filename)}`);
-      if (doc && doc.data_base64) {
-        const mimeType = doc.mime_type || 'image/jpeg';
-        const buffer = Buffer.from(doc.data_base64, 'base64');
+      // 3. Fallback to Cloud Firestore server_uploads collection (if not in local_sqlite mode)
+      if (dbModeConfig.mode !== 'local_sqlite') {
+        const doc = await getFirestoreDoc(`server_uploads/${encodeURIComponent(filename)}`);
+        if (doc && doc.data_base64) {
+          const mimeType = doc.mime_type || 'image/jpeg';
+          const buffer = Buffer.from(doc.data_base64, 'base64');
 
-        // Restore back to SQLite & Disk
-        try {
-          db.prepare(`
-            INSERT OR REPLACE INTO uploaded_files (filename, mime_type, data_base64, created_at)
-            VALUES (?, ?, ?, ?)
-          `).run(filename, mimeType, doc.data_base64, Date.now());
-          fs.writeFile(fullPath, buffer, () => {});
-        } catch (restoreErr) {
-          console.warn('[Upload Restore] Error restoring to SQLite/Disk:', restoreErr);
+          // Restore back to SQLite & Disk
+          try {
+            db.prepare(`
+              INSERT OR REPLACE INTO uploaded_files (filename, mime_type, data_base64, created_at)
+              VALUES (?, ?, ?, ?)
+            `).run(filename, mimeType, doc.data_base64, Date.now());
+            if (!fs.existsSync(UPLOADS_DIR)) fs.mkdirSync(UPLOADS_DIR, { recursive: true });
+            fs.writeFile(fullPath, buffer, () => {});
+          } catch (restoreErr) {
+            console.warn('[Upload Restore] Error restoring to SQLite/Disk:', restoreErr);
+          }
+
+          res.setHeader('Content-Type', mimeType);
+          res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+          return res.send(buffer);
         }
-
-        res.setHeader('Content-Type', mimeType);
-        res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
-        return res.send(buffer);
       }
     } catch (err) {
       console.error(`[Upload Fetch] Error retrieving /uploads/${filename}:`, err);
@@ -3512,6 +3987,17 @@ async function startServer() {
       return fs.createReadStream(zipPath).pipe(res);
     }
     return res.status(404).send('Bundle not found');
+  });
+
+  // Direct download route for compiled server.cjs
+  app.get('/api/download-server-cjs', (_req, res) => {
+    const serverPath = path.resolve(process.cwd(), 'dist', 'server.cjs');
+    if (fs.existsSync(serverPath)) {
+      res.setHeader('Content-Type', 'application/javascript');
+      res.setHeader('Content-Disposition', 'attachment; filename="server.cjs"');
+      return fs.createReadStream(serverPath).pipe(res);
+    }
+    return res.status(404).send('server.cjs not found');
   });
 
   // --- VITE AND SPA SERVING ---

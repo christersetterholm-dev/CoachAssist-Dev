@@ -51,6 +51,21 @@ if (fs.existsSync(srcDir)) {
     copyRecursiveSync(distAssetsDir, rootAssetsDir, false);
     console.log('Successfully copied all assets to root assets/ for Apache!');
   }
+
+  // 3. Copy to deploy/ folder so files are visible in AI Studio Code tree
+  const deployDir = path.join(__dirname, 'deploy');
+  if (!fs.existsSync(deployDir)) {
+    fs.mkdirSync(deployDir, { recursive: true });
+  }
+  const distServer = path.join(srcDir, 'server.cjs');
+  if (fs.existsSync(distServer)) {
+    fs.copyFileSync(distServer, path.join(deployDir, 'server.cjs'));
+  }
+  const distIndex = path.join(srcDir, 'index.html');
+  if (fs.existsSync(distIndex)) {
+    fs.copyFileSync(distIndex, path.join(deployDir, 'index.html'));
+  }
+  console.log('Successfully copied server.cjs and index.html to deploy/ folder!');
 } else {
   console.error('dist/ folder not found. Make sure vite build ran successfully.');
 }

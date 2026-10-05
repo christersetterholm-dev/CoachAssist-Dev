@@ -320,8 +320,8 @@ function MomentItem({
               {mode === 'plan' ? (
                 <div className="relative flex items-center">
                   <select
-                    value={moment.duration}
-                    onChange={(e) => updateMoment(moment.id, { duration: parseInt(e.target.value) || 0 })}
+                    value={Number(moment.duration) || 10}
+                    onChange={(e) => updateMoment(moment.id, { duration: Math.max(1, parseInt(e.target.value, 10) || 1) })}
                     className="appearance-none bg-transparent border-none p-0 pr-1 text-sm font-black text-zinc-900 dark:text-white focus:ring-0 text-center cursor-pointer min-w-[20px]"
                   >
                     {Array.from({ length: 120 }, (_, i) => i + 1).map(v => (
@@ -969,18 +969,21 @@ export default function SessionEditor({
       description: ''
     };
     
-    const newMoments = [...session.moments];
+    const currentSession = sessionRef.current;
+    const newMoments = [...currentSession.moments];
     if (typeof index === 'number') {
       newMoments.splice(index + 1, 0, newMoment);
     } else {
       newMoments.push(newMoment);
     }
 
-    onUpdate({
-      ...session,
+    const updated = {
+      ...currentSession,
       moments: newMoments,
       updatedAt: Date.now()
-    });
+    };
+    sessionRef.current = updated;
+    onUpdate(updated);
 
     if (typeof index !== 'number') {
       setTimeout(() => {
@@ -996,20 +999,24 @@ export default function SessionEditor({
 
   const updateMoment = (id: string, updates: Partial<SessionMoment>) => {
     const currentSession = sessionRef.current;
-    onUpdate({
+    const updated = {
       ...currentSession,
       moments: currentSession.moments.map(m => m.id === id ? { ...m, ...updates } : m),
       updatedAt: Date.now()
-    });
+    };
+    sessionRef.current = updated;
+    onUpdate(updated);
   };
 
   const removeMoment = (id: string) => {
     const currentSession = sessionRef.current;
-    onUpdate({
+    const updated = {
       ...currentSession,
       moments: currentSession.moments.filter(m => m.id !== id),
       updatedAt: Date.now()
-    });
+    };
+    sessionRef.current = updated;
+    onUpdate(updated);
   };
 
   const handleQuickAddGuest = (name: string) => {
@@ -1019,21 +1026,25 @@ export default function SessionEditor({
       name: name.trim(),
     };
 
-    onUpdate({
+    const updated = {
       ...currentSession,
       guestPlayers: [...(currentSession.guestPlayers || []), newGuest],
       attendance: [...(currentSession.attendance || []), newGuest.id],
       updatedAt: Date.now()
-    });
+    };
+    sessionRef.current = updated;
+    onUpdate(updated);
   };
 
   const handleReorder = (newMoments: SessionMoment[]) => {
     const currentSession = sessionRef.current;
-    onUpdate({
+    const updated = {
       ...currentSession,
       moments: newMoments,
       updatedAt: Date.now()
-    });
+    };
+    sessionRef.current = updated;
+    onUpdate(updated);
   };
 
   return (
@@ -1499,7 +1510,11 @@ export default function SessionEditor({
                           <textarea
                             ref={notesTextareaRef}
                             value={session.notes || ''}
-                            onChange={(e) => onUpdate({ ...session, notes: e.target.value, updatedAt: Date.now() })}
+                            onChange={(e) => {
+                              const updated = { ...sessionRef.current, notes: e.target.value, updatedAt: Date.now() };
+                              sessionRef.current = updated;
+                              onUpdate(updated);
+                            }}
                             placeholder="Skriv in mål, syfte eller anteckningar för träningen..."
                             className="w-full bg-zinc-50 dark:bg-zinc-950 border border-zinc-100 dark:border-zinc-800 rounded-2xl p-4 text-base text-zinc-600 dark:text-zinc-400 focus:ring-2 focus:ring-indigo-500 outline-none resize-none min-h-[120px] font-medium overflow-hidden"
                             rows={1}

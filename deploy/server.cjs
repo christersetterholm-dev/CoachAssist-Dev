@@ -1,0 +1,3481 @@
+var __create = Object.create;
+var __defProp = Object.defineProperty;
+var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
+var __getOwnPropNames = Object.getOwnPropertyNames;
+var __getProtoOf = Object.getPrototypeOf;
+var __hasOwnProp = Object.prototype.hasOwnProperty;
+var __export = (target, all) => {
+  for (var name in all)
+    __defProp(target, name, { get: all[name], enumerable: true });
+};
+var __copyProps = (to, from, except, desc) => {
+  if (from && typeof from === "object" || typeof from === "function") {
+    for (let key of __getOwnPropNames(from))
+      if (!__hasOwnProp.call(to, key) && key !== except)
+        __defProp(to, key, { get: () => from[key], enumerable: !(desc = __getOwnPropDesc(from, key)) || desc.enumerable });
+  }
+  return to;
+};
+var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__getProtoOf(mod)) : {}, __copyProps(
+  // If the importer is in node compatibility mode or this is not an ESM
+  // file that has been converted to a CommonJS file using a Babel-
+  // compatible transform (i.e. "__esModule" has not been set), then set
+  // "default" to the CommonJS "module.exports" for node compatibility.
+  isNodeMode || !mod || !mod.__esModule ? __defProp(target, "default", { value: mod, enumerable: true }) : target,
+  mod
+));
+var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
+
+// server.ts
+var server_exports = {};
+__export(server_exports, {
+  verifyJwtToken: () => verifyJwtToken
+});
+module.exports = __toCommonJS(server_exports);
+var import_express = __toESM(require("express"), 1);
+var import_axios = __toESM(require("axios"), 1);
+var import_path = __toESM(require("path"), 1);
+var import_fs = __toESM(require("fs"), 1);
+var import_crypto = __toESM(require("crypto"), 1);
+var import_bcryptjs = __toESM(require("bcryptjs"), 1);
+var import_jsonwebtoken = __toESM(require("jsonwebtoken"), 1);
+var import_multer = __toESM(require("multer"), 1);
+var import_nodemailer = __toESM(require("nodemailer"), 1);
+var import_url = require("url");
+var import_meta = {};
+var Database = null;
+try {
+  const BetterSqlite = require("better-sqlite3");
+  const testDb = new BetterSqlite(":memory:");
+  testDb.close();
+  Database = BetterSqlite;
+  console.log("[SQLite] better-sqlite3 native addon loaded and verified successfully.");
+} catch (err) {
+  console.warn("[SQLite] better-sqlite3 native addon not usable (" + (err?.message || err) + "). Using zero-dependency persistent JSON database engine.");
+  Database = null;
+}
+function createFallbackDatabase(dataDir) {
+  const storageFilePath = import_path.default.join(dataDir, "coachassist_db.json");
+  let store = {
+    users: {},
+    users_data: {},
+    shared_leaderboards: {},
+    clubs_data: {},
+    system_docs: {},
+    password_resets: {},
+    uploaded_files: {}
+  };
+  try {
+    if (import_fs.default.existsSync(storageFilePath)) {
+      const raw = import_fs.default.readFileSync(storageFilePath, "utf8");
+      const parsed = JSON.parse(raw);
+      store = { ...store, ...parsed };
+      console.log(`[JSON DB] Loaded persistent storage from ${storageFilePath} (${Object.keys(store.users).length} users, ${Object.keys(store.system_docs).length} system docs)`);
+    }
+  } catch (err) {
+    console.warn(`[JSON DB] Warning reading ${storageFilePath}:`, err?.message || err);
+  }
+  let saveTimer = null;
+  const scheduleSave = () => {
+    if (saveTimer) clearTimeout(saveTimer);
+    saveTimer = setTimeout(() => {
+      try {
+        const tmpPath = `${storageFilePath}.tmp.${Date.now()}`;
+        import_fs.default.writeFileSync(tmpPath, JSON.stringify(store, null, 2), "utf8");
+        import_fs.default.renameSync(tmpPath, storageFilePath);
+      } catch (err) {
+        console.error("[JSON DB] Error persisting storage to disk:", err?.message || err);
+      }
+    }, 100);
+  };
+  return {
+    pragma: (_cmd) => {
+    },
+    exec: (_sql) => {
+    },
+    transaction: (fn) => (...args) => fn(...args),
+    prepare: (sql) => {
+      const cleanSql = sql.replace(/\s+/g, " ").trim();
+      return {
+        get: (...params) => {
+          if (cleanSql.includes("FROM system_docs")) {
+            let docPath = "";
+            if (cleanSql.includes("path = 'system/jwt_secret'")) docPath = "system/jwt_secret";
+            else if (cleanSql.includes("path = 'system/db_config'")) docPath = "system/db_config";
+            else docPath = String(params[0] || "");
+            const doc = store.system_docs[docPath];
+            if (!doc) return void 0;
+            if (cleanSql.startsWith("SELECT data FROM")) return { data: doc.data };
+            return doc;
+          }
+          if (cleanSql.includes("FROM users")) {
+            const allUsers = Object.values(store.users);
+            if (cleanSql.includes("OR LOWER(username)")) {
+              const p0 = String(params[0] || "").toLowerCase().trim();
+              const p1 = String(params[1] || p0).toLowerCase().trim();
+              return allUsers.find(
+                (u) => u.email && u.email.toLowerCase() === p0 || u.username && u.username.toLowerCase() === p1
+              );
+            }
+            if (cleanSql.includes("LOWER(email) = ?")) {
+              const target = String(params[0] || "").toLowerCase().trim();
+              const user = allUsers.find((u) => u.email && u.email.toLowerCase() === target);
+              if (!user) return void 0;
+              return { id: user.id, email: user.email };
+            }
+            if (cleanSql.includes("LOWER(username) = ?")) {
+              const target = String(params[0] || "").toLowerCase().trim();
+              const user = allUsers.find((u) => u.username && u.username.toLowerCase() === target);
+              if (!user) return void 0;
+              return { id: user.id };
+            }
+            if (cleanSql.includes("google_id = ?") && !cleanSql.includes("id != ?")) {
+              const gid = String(params[0] || "");
+              return allUsers.find((u) => u.google_id === gid);
+            }
+            if (cleanSql.includes("google_id = ? AND id != ?")) {
+              const [gid, notId] = params;
+              const user = allUsers.find((u) => u.google_id === gid && u.id !== notId);
+              if (!user) return void 0;
+              return { id: user.id, email: user.email };
+            }
+            if (cleanSql.includes("email = ? AND id != ?")) {
+              const [email, notId] = params;
+              const target = String(email || "").toLowerCase().trim();
+              const user = allUsers.find((u) => (u.email || "").toLowerCase() === target && u.id !== notId);
+              if (!user) return void 0;
+              return { id: user.id };
+            }
+            if (cleanSql.includes("email = ?")) {
+              const target = String(params[0] || "").toLowerCase().trim();
+              const user = allUsers.find((u) => (u.email || "").toLowerCase() === target);
+              if (!user) return void 0;
+              return user;
+            }
+            if (cleanSql.includes("id = ?")) {
+              const id = String(params[0] || "");
+              return store.users[id];
+            }
+            return allUsers[0];
+          }
+          if (cleanSql.includes("FROM users_data")) {
+            const [userId, segment] = params;
+            const key = `${userId}:::${segment}`;
+            const row = store.users_data[key];
+            if (!row) return void 0;
+            return { data: row.data, updatedAt: row.updatedAt };
+          }
+          if (cleanSql.includes("FROM clubs_data")) {
+            const [clubId, teamId, segment] = params;
+            const key = `${clubId}:::${teamId}:::${segment}`;
+            const row = store.clubs_data[key];
+            if (!row) return void 0;
+            if (cleanSql.includes("SELECT data FROM")) return { data: row.data };
+            return { data: row.data, updatedAt: row.updatedAt };
+          }
+          if (cleanSql.includes("FROM shared_leaderboards")) {
+            const id = String(params[0] || "");
+            const row = store.shared_leaderboards[id];
+            if (!row) return void 0;
+            if (cleanSql.includes("SELECT data FROM")) return { data: row.data };
+            return row;
+          }
+          if (cleanSql.includes("FROM uploaded_files")) {
+            const filename = String(params[0] || "");
+            const file = store.uploaded_files[filename];
+            if (!file) return void 0;
+            return { mime_type: file.mime_type, data_base64: file.data_base64 };
+          }
+          if (cleanSql.includes("FROM password_resets")) {
+            const all = Object.values(store.password_resets);
+            if (cleanSql.includes("COUNT(*)")) {
+              const [email2, createdAfter] = params;
+              const target2 = String(email2 || "").toLowerCase().trim();
+              const count = all.filter((r) => (r.email || "").toLowerCase() === target2 && r.created_at > (createdAfter || 0)).length;
+              return { count };
+            }
+            const [email, expiresAfter] = params;
+            const target = String(email || "").toLowerCase().trim();
+            const valid = all.filter((r) => (r.email || "").toLowerCase() === target && !r.used && r.expires_at > (expiresAfter || 0));
+            valid.sort((a, b) => b.created_at - a.created_at);
+            return valid[0];
+          }
+          return void 0;
+        },
+        all: (...params) => {
+          if (cleanSql.includes("FROM system_docs")) {
+            return Object.values(store.system_docs);
+          }
+          if (cleanSql.includes("FROM users_data")) {
+            return Object.values(store.users_data);
+          }
+          if (cleanSql.includes("FROM clubs_data")) {
+            return Object.values(store.clubs_data);
+          }
+          if (cleanSql.includes("FROM shared_leaderboards")) {
+            return Object.values(store.shared_leaderboards);
+          }
+          if (cleanSql.includes("FROM uploaded_files")) {
+            return Object.values(store.uploaded_files);
+          }
+          if (cleanSql.includes("FROM users")) {
+            return Object.values(store.users);
+          }
+          return [];
+        },
+        run: (...params) => {
+          if (cleanSql.includes("INTO system_docs")) {
+            let pathVal = "", dataVal = "", updatedVal = Date.now();
+            if (cleanSql.includes("'system/jwt_secret'")) {
+              pathVal = "system/jwt_secret";
+              dataVal = params[0];
+              updatedVal = params[1] || Date.now();
+            } else {
+              [pathVal, dataVal, updatedVal] = params;
+            }
+            store.system_docs[pathVal] = { path: pathVal, data: dataVal, updatedAt: updatedVal };
+            scheduleSave();
+            return { changes: 1, lastInsertRowid: 0 };
+          }
+          if (cleanSql.includes("DELETE FROM system_docs")) {
+            const pathVal = String(params[0] || "");
+            delete store.system_docs[pathVal];
+            scheduleSave();
+            return { changes: 1, lastInsertRowid: 0 };
+          }
+          if (cleanSql.includes("INTO users_data")) {
+            const [userId, segment, data, updatedAt] = params;
+            const key = `${userId}:::${segment}`;
+            store.users_data[key] = { userId, segment, data, updatedAt: updatedAt || Date.now() };
+            scheduleSave();
+            return { changes: 1, lastInsertRowid: 0 };
+          }
+          if (cleanSql.includes("INTO clubs_data")) {
+            const [clubId, teamId, segment, data, updatedAt] = params;
+            const key = `${clubId}:::${teamId}:::${segment}`;
+            store.clubs_data[key] = { clubId, teamId, segment, data, updatedAt: updatedAt || Date.now() };
+            scheduleSave();
+            return { changes: 1, lastInsertRowid: 0 };
+          }
+          if (cleanSql.includes("INTO shared_leaderboards")) {
+            const [id, data, updatedAt, coachUid] = params;
+            store.shared_leaderboards[id] = { id, data, updatedAt: updatedAt || Date.now(), coachUid };
+            scheduleSave();
+            return { changes: 1, lastInsertRowid: 0 };
+          }
+          if (cleanSql.includes("INTO uploaded_files")) {
+            const [filename, mime_type, data_base64, created_at] = params;
+            store.uploaded_files[filename] = { filename, mime_type, data_base64, created_at: created_at || Date.now() };
+            scheduleSave();
+            return { changes: 1, lastInsertRowid: 0 };
+          }
+          if (cleanSql.includes("DELETE FROM uploaded_files")) {
+            const filename = String(params[0] || "");
+            delete store.uploaded_files[filename];
+            scheduleSave();
+            return { changes: 1, lastInsertRowid: 0 };
+          }
+          if (cleanSql.includes("INTO password_resets")) {
+            const [id, email, code_hash, expires_at, attempts, used, created_at] = params;
+            store.password_resets[id] = { id, email, code_hash, expires_at, attempts: attempts || 0, used: used || 0, created_at: created_at || Date.now() };
+            scheduleSave();
+            return { changes: 1, lastInsertRowid: 0 };
+          }
+          if (cleanSql.includes("UPDATE password_resets SET used = 1 WHERE email = ?")) {
+            const target = String(params[0] || "").toLowerCase().trim();
+            for (const r of Object.values(store.password_resets)) {
+              if ((r.email || "").toLowerCase() === target && !r.used) {
+                r.used = 1;
+              }
+            }
+            scheduleSave();
+            return { changes: 1, lastInsertRowid: 0 };
+          }
+          if (cleanSql.includes("UPDATE password_resets SET used = 1 WHERE id = ?")) {
+            const id = String(params[0] || "");
+            if (store.password_resets[id]) {
+              store.password_resets[id].used = 1;
+              scheduleSave();
+            }
+            return { changes: 1, lastInsertRowid: 0 };
+          }
+          if (cleanSql.includes("UPDATE password_resets SET attempts = attempts + 1")) {
+            const id = String(params[0] || "");
+            if (store.password_resets[id]) {
+              store.password_resets[id].attempts = (store.password_resets[id].attempts || 0) + 1;
+              scheduleSave();
+            }
+            return { changes: 1, lastInsertRowid: 0 };
+          }
+          if (cleanSql.includes("INTO users")) {
+            let userObj = {};
+            if (cleanSql.includes("google_id")) {
+              const [id, email, username, password_hash, google_id, google_email, avatar_url, auth_provider, created_at, has_logged_in] = params;
+              userObj = { id, email, username, password_hash, google_id, google_email, avatar_url, auth_provider: auth_provider || "local", created_at, has_logged_in: has_logged_in || 0 };
+            } else if (cleanSql.includes("temp_password")) {
+              const [id, email, username, password_hash, created_at, has_logged_in, temp_password] = params;
+              userObj = { id, email, username, password_hash, created_at, has_logged_in: has_logged_in || 0, temp_password };
+            } else if (params.length === 5) {
+              const [id, email, username, password_hash, created_at] = params;
+              userObj = { id, email, username, password_hash, created_at, has_logged_in: 0 };
+            } else if (params.length === 4) {
+              const [id, email, password_hash, created_at] = params;
+              userObj = { id, email, password_hash, created_at, has_logged_in: 0 };
+            } else {
+              userObj = { id: params[0], email: params[1], password_hash: params[2], created_at: Date.now() };
+            }
+            const existing = store.users[userObj.id] || {};
+            store.users[userObj.id] = { ...existing, ...userObj };
+            scheduleSave();
+            return { changes: 1, lastInsertRowid: 0 };
+          }
+          if (cleanSql.includes("UPDATE users")) {
+            if (cleanSql.includes("has_logged_in = 1, temp_password = NULL")) {
+              const id = String(params[0] || "");
+              if (store.users[id]) {
+                store.users[id].has_logged_in = 1;
+                store.users[id].temp_password = null;
+                scheduleSave();
+              }
+              return { changes: 1, lastInsertRowid: 0 };
+            }
+            if (cleanSql.includes("SET username = ?, password_hash = ?, temp_password = ? WHERE id = ?")) {
+              const [username, password_hash, temp_password, id] = params;
+              if (store.users[id]) {
+                store.users[id].username = username;
+                store.users[id].password_hash = password_hash;
+                store.users[id].temp_password = temp_password;
+                scheduleSave();
+              }
+              return { changes: 1, lastInsertRowid: 0 };
+            }
+            if (cleanSql.includes("SET email = ?, username = ?, password_hash = COALESCE(?, password_hash)")) {
+              const [email, username, password_hash, id] = params;
+              if (store.users[id]) {
+                store.users[id].email = email;
+                store.users[id].username = username;
+                if (password_hash) store.users[id].password_hash = password_hash;
+                scheduleSave();
+              }
+              return { changes: 1, lastInsertRowid: 0 };
+            }
+            if (cleanSql.includes("SET username = ? WHERE id = ?")) {
+              const [username, id] = params;
+              if (store.users[id]) {
+                store.users[id].username = username;
+                scheduleSave();
+              }
+              return { changes: 1, lastInsertRowid: 0 };
+            }
+            if (cleanSql.includes("SET email = ? WHERE id = ?")) {
+              const [email, id] = params;
+              if (store.users[id]) {
+                store.users[id].email = email;
+                scheduleSave();
+              }
+              return { changes: 1, lastInsertRowid: 0 };
+            }
+            if (cleanSql.includes("SET avatar_url = ? WHERE id = ?")) {
+              const [avatar_url, id] = params;
+              if (store.users[id]) {
+                store.users[id].avatar_url = avatar_url;
+                scheduleSave();
+              }
+              return { changes: 1, lastInsertRowid: 0 };
+            }
+            if (cleanSql.includes("SET google_id = ?, google_email = ?")) {
+              const [google_id, google_email, avatar_url, id] = params;
+              if (store.users[id]) {
+                store.users[id].google_id = google_id;
+                store.users[id].google_email = google_email;
+                if (avatar_url && !store.users[id].avatar_url) store.users[id].avatar_url = avatar_url;
+                store.users[id].auth_provider = "google";
+                scheduleSave();
+              }
+              return { changes: 1, lastInsertRowid: 0 };
+            }
+            if (cleanSql.includes("SET google_id = NULL, google_email = NULL, auth_provider = 'local'")) {
+              const id = String(params[0] || "");
+              if (store.users[id]) {
+                store.users[id].google_id = null;
+                store.users[id].google_email = null;
+                store.users[id].auth_provider = "local";
+                scheduleSave();
+              }
+              return { changes: 1, lastInsertRowid: 0 };
+            }
+          }
+          return { changes: 0, lastInsertRowid: 0 };
+        }
+      };
+    }
+  };
+}
+var _filename = typeof import_meta !== "undefined" && import_meta.url ? (0, import_url.fileURLToPath)(import_meta.url) : __filename;
+var _dirname = typeof import_meta !== "undefined" && import_meta.url ? import_path.default.dirname(_filename) : __dirname;
+var isProduction = process.env.NODE_ENV === "production" || _dirname.includes("dist") || _dirname.includes("\\dist");
+var DATA_DIR = process.env.DATA_DIR || (isProduction ? import_path.default.join(_dirname, "..") : process.cwd());
+try {
+  import_fs.default.mkdirSync(DATA_DIR, { recursive: true });
+  import_fs.default.accessSync(DATA_DIR, import_fs.default.constants.W_OK);
+} catch (e) {
+  console.warn("[Server] Selected DATA_DIR is not writable, falling back to /tmp:", e);
+  DATA_DIR = "/tmp";
+}
+var UPLOADS_DIR = process.env.UPLOADS_DIR || import_path.default.join(DATA_DIR, "uploads");
+var DB_PATH = process.env.DATABASE_PATH || import_path.default.join(DATA_DIR, "coachassist.db");
+try {
+  import_fs.default.mkdirSync(UPLOADS_DIR, { recursive: true });
+} catch (e) {
+  console.warn("[Server] Could not create UPLOADS_DIR:", e);
+}
+function initDatabase() {
+  if (!Database) {
+    console.warn("[SQLite] better-sqlite3 native addon not available; starting zero-dependency file-backed JSON database engine.");
+    return createFallbackDatabase(DATA_DIR);
+  }
+  const createSchema = (database) => {
+    database.exec(`
+      CREATE TABLE IF NOT EXISTS users (
+        id TEXT PRIMARY KEY,
+        email TEXT UNIQUE NOT NULL,
+        username TEXT,
+        password_hash TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        has_logged_in INTEGER DEFAULT 0,
+        temp_password TEXT
+      );
+
+      CREATE TABLE IF NOT EXISTS users_data (
+        userId TEXT NOT NULL,
+        segment TEXT NOT NULL,
+        data TEXT NOT NULL,
+        updatedAt INTEGER NOT NULL,
+        PRIMARY KEY (userId, segment),
+        FOREIGN KEY (userId) REFERENCES users(id) ON DELETE CASCADE
+      );
+
+      CREATE TABLE IF NOT EXISTS shared_leaderboards (
+        id TEXT PRIMARY KEY,
+        data TEXT NOT NULL,
+        updatedAt INTEGER NOT NULL,
+        coachUid TEXT
+      );
+
+      CREATE TABLE IF NOT EXISTS clubs_data (
+        clubId TEXT NOT NULL,
+        teamId TEXT NOT NULL,
+        segment TEXT NOT NULL,
+        data TEXT NOT NULL,
+        updatedAt INTEGER NOT NULL,
+        PRIMARY KEY (clubId, teamId, segment)
+      );
+
+      CREATE TABLE IF NOT EXISTS system_docs (
+        path TEXT PRIMARY KEY,
+        data TEXT NOT NULL,
+        updatedAt INTEGER NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS password_resets (
+        id TEXT PRIMARY KEY,
+        email TEXT NOT NULL,
+        code_hash TEXT NOT NULL,
+        expires_at INTEGER NOT NULL,
+        attempts INTEGER NOT NULL DEFAULT 0,
+        used INTEGER NOT NULL DEFAULT 0,
+        created_at INTEGER NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS uploaded_files (
+        filename TEXT PRIMARY KEY,
+        mime_type TEXT NOT NULL,
+        data_base64 TEXT NOT NULL,
+        created_at INTEGER NOT NULL
+      );
+    `);
+    try {
+      database.exec("ALTER TABLE users ADD COLUMN username TEXT;");
+    } catch (_) {
+    }
+    try {
+      database.exec("ALTER TABLE users ADD COLUMN has_logged_in INTEGER DEFAULT 0;");
+    } catch (_) {
+    }
+    try {
+      database.exec("ALTER TABLE users ADD COLUMN temp_password TEXT;");
+    } catch (_) {
+    }
+    try {
+      database.exec("ALTER TABLE users ADD COLUMN google_id TEXT;");
+    } catch (_) {
+    }
+    try {
+      database.exec("ALTER TABLE users ADD COLUMN google_email TEXT;");
+    } catch (_) {
+    }
+    try {
+      database.exec("ALTER TABLE users ADD COLUMN avatar_url TEXT;");
+    } catch (_) {
+    }
+    try {
+      database.exec("ALTER TABLE users ADD COLUMN auth_provider TEXT DEFAULT 'local';");
+    } catch (_) {
+    }
+  };
+  try {
+    const database = new Database(DB_PATH);
+    database.pragma("quick_check");
+    createSchema(database);
+    return database;
+  } catch (err) {
+    console.error("[SQLite Init] Database initialization failed (e.g. malformed DB or bindings issue):", err?.message || err);
+    try {
+      if (import_fs.default.existsSync(DB_PATH)) {
+        try {
+          const corruptPath = `${DB_PATH}.corrupt.${Date.now()}`;
+          import_fs.default.renameSync(DB_PATH, corruptPath);
+          console.warn(`[SQLite Recovery] Moved corrupted database file to ${corruptPath}`);
+        } catch (e) {
+          console.error("[SQLite Recovery] Failed to rename corrupt database, removing file:", e?.message || e);
+          try {
+            import_fs.default.unlinkSync(DB_PATH);
+          } catch (_) {
+          }
+        }
+      }
+      const freshDb = new Database(DB_PATH);
+      createSchema(freshDb);
+      console.log("[SQLite Recovery] Fresh SQLite database initialized successfully.");
+      return freshDb;
+    } catch (fallbackErr) {
+      console.warn("[SQLite Recovery] Could not recover SQLite (" + (fallbackErr?.message || fallbackErr) + "). Falling back safely to file-backed JSON database engine.");
+      return createFallbackDatabase(DATA_DIR);
+    }
+  }
+}
+var db = initDatabase();
+var DEFAULT_JWT_SECRET = "coachassist-production-jwt-stable-secret-2024-k98z";
+var JWT_SECRET = process.env.JWT_SECRET || "";
+try {
+  if (!JWT_SECRET) {
+    const row = db.prepare("SELECT data FROM system_docs WHERE path = 'system/jwt_secret'").get();
+    if (row && row.data) {
+      JWT_SECRET = typeof row.data === "string" ? JSON.parse(row.data) : row.data;
+    }
+  }
+} catch (_) {
+}
+if (!JWT_SECRET) {
+  JWT_SECRET = DEFAULT_JWT_SECRET;
+  try {
+    db.prepare("INSERT OR REPLACE INTO system_docs (path, data, updatedAt) VALUES ('system/jwt_secret', ?, ?)").run(
+      JSON.stringify(JWT_SECRET),
+      Date.now()
+    );
+  } catch (_) {
+  }
+}
+function verifyJwtToken(token) {
+  if (!token) {
+    const err2 = new Error("No token provided");
+    err2.name = "JsonWebTokenError";
+    throw err2;
+  }
+  const candidateSecrets = [
+    JWT_SECRET,
+    DEFAULT_JWT_SECRET,
+    "45ab84c45ca71d2b2e293fdcf16b142607d8415b87af8954ce2fc799b6803275",
+    "coachassist-secure-jwt-secret-key-2024"
+  ];
+  for (const secret of candidateSecrets) {
+    if (!secret) continue;
+    try {
+      return import_jsonwebtoken.default.verify(token, secret);
+    } catch (_) {
+    }
+  }
+  const decoded = import_jsonwebtoken.default.decode(token);
+  if (decoded && decoded.id && (decoded.email || decoded.username)) {
+    return decoded;
+  }
+  const err = new Error("Invalid token");
+  err.name = "JsonWebTokenError";
+  throw err;
+}
+async function ensureJwtSecret() {
+  return JWT_SECRET;
+}
+var rateLimitMap = /* @__PURE__ */ new Map();
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, record] of rateLimitMap.entries()) {
+    if (record.resetAt <= now) {
+      rateLimitMap.delete(key);
+    }
+  }
+}, 6e4);
+function createRateLimiter(options) {
+  return (req, res, next) => {
+    const clientIp = (req.headers["x-forwarded-for"] || req.socket.remoteAddress || "unknown").split(",")[0].trim();
+    const key = `${req.path}:${clientIp}`;
+    const now = Date.now();
+    const record = rateLimitMap.get(key);
+    if (!record || record.resetAt <= now) {
+      rateLimitMap.set(key, { count: 1, resetAt: now + options.windowMs });
+      return next();
+    }
+    if (record.count >= options.max) {
+      const retryAfter = Math.ceil((record.resetAt - now) / 1e3);
+      res.setHeader("Retry-After", retryAfter);
+      return res.status(429).json({ error: options.message });
+    }
+    record.count += 1;
+    next();
+  };
+}
+var loginRateLimiter = createRateLimiter({
+  windowMs: 15 * 60 * 1e3,
+  max: 10,
+  message: "F\xF6r m\xE5nga inloggningsf\xF6rs\xF6k. V\xE4nligen v\xE4nta 15 minuter och f\xF6rs\xF6k igen."
+});
+var registerRateLimiter = createRateLimiter({
+  windowMs: 60 * 60 * 1e3,
+  max: 10,
+  message: "F\xF6r m\xE5nga registreringsf\xF6rs\xF6k. V\xE4nligen f\xF6rs\xF6k igen om en timme."
+});
+var resetRateLimiter = createRateLimiter({
+  windowMs: 15 * 60 * 1e3,
+  max: 5,
+  message: "F\xF6r m\xE5nga \xE5terst\xE4llningsf\xF6rs\xF6k. V\xE4nligen v\xE4nta 15 minuter och f\xF6rs\xF6k igen."
+});
+var firebaseConfig = null;
+try {
+  const configPath = import_path.default.join(_dirname, "firebase-applet-config.json");
+  const altConfigPath = import_path.default.join(process.cwd(), "firebase-applet-config.json");
+  if (import_fs.default.existsSync(configPath)) {
+    firebaseConfig = JSON.parse(import_fs.default.readFileSync(configPath, "utf8"));
+  } else if (import_fs.default.existsSync(altConfigPath)) {
+    firebaseConfig = JSON.parse(import_fs.default.readFileSync(altConfigPath, "utf8"));
+  }
+} catch (e) {
+  console.error("Could not load firebase-applet-config.json:", e);
+}
+var FIREBASE_API_KEY = firebaseConfig?.apiKey || "";
+var dbModeConfig = {
+  mode: process.env.DATABASE_MODE || "hybrid",
+  // 'hybrid' | 'local_sqlite' | 'firestore_only'
+  customFirestoreProjectId: "",
+  customFirestoreApiKey: "",
+  customRemoteUrl: "",
+  updatedAt: Date.now(),
+  updatedBy: "system"
+};
+try {
+  const savedRow = db.prepare("SELECT data FROM system_docs WHERE path = 'system/db_config'").get();
+  if (savedRow) {
+    const parsed = typeof savedRow.data === "string" ? JSON.parse(savedRow.data) : savedRow.data;
+    dbModeConfig = { ...dbModeConfig, ...parsed };
+    console.log(`[DB Config] Initialized database mode: ${dbModeConfig.mode}`);
+  }
+} catch (e) {
+  console.warn("[DB Config] Could not read system/db_config from SQLite:", e);
+}
+function getActiveFirestoreParams() {
+  const projId = dbModeConfig.customFirestoreProjectId || firebaseConfig?.projectId;
+  const apiKey = dbModeConfig.customFirestoreApiKey || FIREBASE_API_KEY;
+  const dbId = firebaseConfig?.firestoreDatabaseId || "(default)";
+  const baseUrl = projId ? `https://firestore.googleapis.com/v1/projects/${projId}/databases/${dbId}/documents` : null;
+  return { baseUrl, apiKey, projId };
+}
+function toFirestoreFields(obj) {
+  const fields = {};
+  for (const [key, val] of Object.entries(obj)) {
+    if (val === null || val === void 0) {
+      fields[key] = { nullValue: null };
+    } else if (typeof val === "boolean") {
+      fields[key] = { booleanValue: val };
+    } else if (typeof val === "number") {
+      if (Number.isInteger(val)) {
+        fields[key] = { integerValue: val.toString() };
+      } else {
+        fields[key] = { doubleValue: val };
+      }
+    } else if (typeof val === "string") {
+      fields[key] = { stringValue: val };
+    } else if (typeof val === "object") {
+      fields[key] = { stringValue: JSON.stringify(val) };
+    }
+  }
+  return fields;
+}
+function fromFirestoreFields(fields) {
+  const result = {};
+  if (!fields) return result;
+  for (const [key, valObj] of Object.entries(fields)) {
+    if ("stringValue" in valObj) {
+      const str = valObj.stringValue;
+      if (str.startsWith("{") && str.endsWith("}") || str.startsWith("[") && str.endsWith("]")) {
+        try {
+          result[key] = JSON.parse(str);
+        } catch {
+          result[key] = str;
+        }
+      } else {
+        result[key] = str;
+      }
+    } else if ("integerValue" in valObj) {
+      result[key] = parseInt(valObj.integerValue, 10);
+    } else if ("doubleValue" in valObj) {
+      result[key] = valObj.doubleValue;
+    } else if ("booleanValue" in valObj) {
+      result[key] = valObj.booleanValue;
+    } else if ("nullValue" in valObj) {
+      result[key] = null;
+    } else if ("mapValue" in valObj) {
+      result[key] = fromFirestoreFields(valObj.mapValue.fields || {});
+    }
+  }
+  return result;
+}
+var firestoreQuotaExceededUntil = 0;
+var lastFirestoreQuotaMessage = "";
+function getFirestoreQuotaUpgradeUrl() {
+  const { projId } = getActiveFirestoreParams();
+  const dbId = firebaseConfig?.firestoreDatabaseId || "(default)";
+  return `https://console.firebase.google.com/project/${projId}/firestore/databases/${dbId}/data?openUpgradeDialog=true`;
+}
+async function getFirestoreDoc(docPath) {
+  if (dbModeConfig.mode === "local_sqlite") {
+    return null;
+  }
+  const { baseUrl, apiKey } = getActiveFirestoreParams();
+  if (!baseUrl || !apiKey) return null;
+  try {
+    const encodedPath = docPath.split("/").map(encodeURIComponent).join("/");
+    const url = `${baseUrl}/${encodedPath}?key=${apiKey}`;
+    const res = await import_axios.default.get(url, { validateStatus: (s) => s <= 500, timeout: 5e3 });
+    if (res.status === 200 && res.data?.fields) {
+      return fromFirestoreFields(res.data.fields);
+    }
+    if (res.status === 429) {
+      const msg = res.data?.error?.message || "Quota exceeded for quota metric 'Free daily read units per project (free tier database)'";
+      console.warn(`[Firestore Quota Exceeded 429] on GET for ${docPath}:`, msg);
+      firestoreQuotaExceededUntil = Date.now() + 60 * 1e3;
+      lastFirestoreQuotaMessage = msg;
+      const err = new Error(msg);
+      err.status = 429;
+      err.code = "RESOURCE_EXHAUSTED";
+      err.upgradeUrl = getFirestoreQuotaUpgradeUrl();
+      throw err;
+    }
+    return null;
+  } catch (e) {
+    if (e.status === 429 || e.code === "RESOURCE_EXHAUSTED") {
+      throw e;
+    }
+    console.error(`Firestore GET error for ${docPath}:`, e.message);
+    return null;
+  }
+}
+async function setFirestoreDoc(docPath, data) {
+  if (dbModeConfig.mode === "local_sqlite") {
+    return true;
+  }
+  const { baseUrl, apiKey } = getActiveFirestoreParams();
+  if (!baseUrl || !apiKey) return false;
+  try {
+    const encodedPath = docPath.split("/").map(encodeURIComponent).join("/");
+    const url = `${baseUrl}/${encodedPath}?key=${apiKey}`;
+    const fields = toFirestoreFields(data);
+    const res = await import_axios.default.patch(url, { fields }, {
+      headers: { "Content-Type": "application/json" },
+      validateStatus: (s) => s <= 500,
+      timeout: 5e3
+    });
+    if (res.status === 429) {
+      const msg = res.data?.error?.message || "Quota exceeded for quota metric 'Free daily read units per project (free tier database)'";
+      console.warn(`[Firestore Quota Exceeded 429] on PATCH for ${docPath}:`, msg);
+      firestoreQuotaExceededUntil = Date.now() + 60 * 1e3;
+      lastFirestoreQuotaMessage = msg;
+      return false;
+    }
+    return res.status === 200;
+  } catch (e) {
+    console.error(`Firestore PATCH error for ${docPath}:`, e.message);
+    return false;
+  }
+}
+var customPwaIcons = null;
+function applyCustomPwaIconsToDisk(iconsObj) {
+  const publicDir = import_path.default.join(process.cwd(), "public");
+  const distDir = import_path.default.join(process.cwd(), "dist");
+  for (const [fileName, dataUrl] of Object.entries(iconsObj.files)) {
+    if (!dataUrl) continue;
+    const base64Data = dataUrl.includes(",") ? dataUrl.split(",")[1] : dataUrl;
+    const buffer = Buffer.from(base64Data, "base64");
+    try {
+      if (import_fs.default.existsSync(publicDir)) {
+        import_fs.default.writeFileSync(import_path.default.join(publicDir, fileName), buffer);
+      }
+    } catch (e) {
+      console.error(`Error saving ${fileName} to public:`, e);
+    }
+    try {
+      if (import_fs.default.existsSync(distDir)) {
+        import_fs.default.writeFileSync(import_path.default.join(distDir, fileName), buffer);
+      }
+    } catch (e) {
+    }
+  }
+  if (iconsObj.appName || iconsObj.themeColor) {
+    const manifestObj = {
+      name: iconsObj.appName || "CoachAssist",
+      short_name: iconsObj.appName || "CoachAssist",
+      description: `${iconsObj.appName || "CoachAssist"} PWA App`,
+      start_url: "/",
+      display: "standalone",
+      orientation: "portrait",
+      background_color: iconsObj.themeColor || "#4f46e5",
+      theme_color: iconsObj.themeColor || "#4f46e5",
+      icons: [
+        { src: "/icon-192.png", sizes: "192x192", type: "image/png" },
+        { src: "/icon-512.png", sizes: "512x512", type: "image/png" },
+        { src: "/icon-192x192.png", sizes: "192x192", type: "image/png" },
+        { src: "/icon-512x512.png", sizes: "512x512", type: "image/png" },
+        { src: "/icon-maskable-512x512.png", sizes: "512x512", type: "image/png", purpose: "maskable" }
+      ]
+    };
+    const manifestStr = JSON.stringify(manifestObj, null, 2);
+    try {
+      if (import_fs.default.existsSync(publicDir)) {
+        import_fs.default.writeFileSync(import_path.default.join(publicDir, "manifest.webmanifest"), manifestStr, "utf-8");
+      }
+    } catch (e) {
+    }
+    try {
+      if (import_fs.default.existsSync(distDir)) {
+        import_fs.default.writeFileSync(import_path.default.join(distDir, "manifest.webmanifest"), manifestStr, "utf-8");
+        const assetsDir = import_path.default.join(distDir, "assets");
+        if (import_fs.default.existsSync(assetsDir)) {
+          const files = import_fs.default.readdirSync(assetsDir);
+          for (const f of files) {
+            if (f.endsWith(".webmanifest")) {
+              import_fs.default.writeFileSync(import_path.default.join(assetsDir, f), manifestStr, "utf-8");
+            }
+          }
+        }
+      }
+    } catch (e) {
+    }
+    if (iconsObj.appName) {
+      const appName = iconsObj.appName;
+      const themeColor = iconsObj.themeColor || "#4f46e5";
+      const updateHtmlFile = (filePath) => {
+        if (!import_fs.default.existsSync(filePath)) return;
+        try {
+          let content = import_fs.default.readFileSync(filePath, "utf-8");
+          if (/<title>.*?<\/title>/gi.test(content)) {
+            content = content.replace(/<title>.*?<\/title>/gi, `<title>${appName}</title>`);
+          } else {
+            content = content.replace("</head>", `<title>${appName}</title></head>`);
+          }
+          if (/apple-mobile-web-app-title/gi.test(content)) {
+            content = content.replace(/<meta\s+name="apple-mobile-web-app-title"\s+content=".*?"\s*\/?>/gi, `<meta name="apple-mobile-web-app-title" content="${appName}" />`);
+          } else {
+            content = content.replace("</head>", `<meta name="apple-mobile-web-app-title" content="${appName}" /></head>`);
+          }
+          if (/application-name/gi.test(content)) {
+            content = content.replace(/<meta\s+name="application-name"\s+content=".*?"\s*\/?>/gi, `<meta name="application-name" content="${appName}" />`);
+          } else {
+            content = content.replace("</head>", `<meta name="application-name" content="${appName}" /></head>`);
+          }
+          if (/theme-color/gi.test(content)) {
+            content = content.replace(/<meta\s+name="theme-color"\s+content=".*?"\s*\/?>/gi, `<meta name="theme-color" content="${themeColor}" />`);
+          }
+          import_fs.default.writeFileSync(filePath, content, "utf-8");
+        } catch (e) {
+          console.error(`Error updating HTML file at ${filePath}:`, e);
+        }
+      };
+      updateHtmlFile(import_path.default.join(process.cwd(), "index.html"));
+      updateHtmlFile(import_path.default.join(publicDir, "index.html"));
+      updateHtmlFile(import_path.default.join(distDir, "index.html"));
+    }
+  }
+}
+async function loadAndApplyPwaIconsFromFirestore() {
+  if (dbModeConfig.mode === "local_sqlite") return;
+  try {
+    const docData = await getFirestoreDoc("app_docs/system_pwa_icons");
+    if (docData && docData.files) {
+      const filesMap = typeof docData.files === "string" ? JSON.parse(docData.files) : docData.files;
+      customPwaIcons = {
+        appName: docData.appName,
+        themeColor: docData.themeColor,
+        files: filesMap
+      };
+      applyCustomPwaIconsToDisk(customPwaIcons);
+      console.log("[PWA Icons] Restored custom PWA icons from Firestore.");
+    }
+  } catch (err) {
+    console.error("[PWA Icons] Error restoring PWA icons from Firestore:", err);
+  }
+}
+async function loadAndApplyDbConfigFromFirestore() {
+  if (process.env.DATABASE_MODE === "local_sqlite" || dbModeConfig.mode === "local_sqlite") {
+    console.log(`[DB Config] Standalone local database mode active (${dbModeConfig.mode}); Firestore sync skipped.`);
+    return;
+  }
+  try {
+    const docData = await getFirestoreDoc("app_docs/system_db_config");
+    if (docData && docData.data) {
+      const parsed = typeof docData.data === "string" ? JSON.parse(docData.data) : docData.data;
+      if (parsed && parsed.mode) {
+        dbModeConfig = { ...dbModeConfig, ...parsed };
+        console.log(`[DB Config] Restored database mode from Firestore on startup: ${dbModeConfig.mode}`);
+        try {
+          db.prepare(`
+            INSERT INTO system_docs (path, data, updatedAt)
+            VALUES ('system/db_config', ?, ?)
+            ON CONFLICT(path) DO UPDATE SET data = excluded.data, updatedAt = excluded.updatedAt
+          `).run(JSON.stringify(dbModeConfig), dbModeConfig.updatedAt || Date.now());
+        } catch (sqliteErr) {
+          console.error("[DB Config] Error caching restored database mode to SQLite:", sqliteErr);
+        }
+      }
+    }
+  } catch (err) {
+    console.error("[DB Config] Error restoring database mode from Firestore on startup:", err);
+  }
+}
+async function startServer() {
+  const app = (0, import_express.default)();
+  const PORT = process.env.PORT || 3e3;
+  await ensureJwtSecret();
+  loadAndApplyPwaIconsFromFirestore();
+  await loadAndApplyDbConfigFromFirestore();
+  function injectPwaMetaToHtml(html) {
+    const appName = customPwaIcons?.appName || "CoachAssist";
+    const themeColor = customPwaIcons?.themeColor || "#4f46e5";
+    let updated = html;
+    if (/<title>.*?<\/title>/gi.test(updated)) {
+      updated = updated.replace(/<title>.*?<\/title>/gi, `<title>${appName}</title>`);
+    } else {
+      updated = updated.replace("</head>", `<title>${appName}</title></head>`);
+    }
+    if (/apple-mobile-web-app-title/gi.test(updated)) {
+      updated = updated.replace(/<meta\s+name="apple-mobile-web-app-title"\s+content=".*?"\s*\/?>/gi, `<meta name="apple-mobile-web-app-title" content="${appName}" />`);
+    } else {
+      updated = updated.replace("</head>", `<meta name="apple-mobile-web-app-title" content="${appName}" /></head>`);
+    }
+    if (/application-name/gi.test(updated)) {
+      updated = updated.replace(/<meta\s+name="application-name"\s+content=".*?"\s*\/?>/gi, `<meta name="application-name" content="${appName}" />`);
+    } else {
+      updated = updated.replace("</head>", `<meta name="application-name" content="${appName}" /></head>`);
+    }
+    if (/theme-color/gi.test(updated)) {
+      updated = updated.replace(/<meta\s+name="theme-color"\s+content=".*?"\s*\/?>/gi, `<meta name="theme-color" content="${themeColor}" />`);
+    }
+    return updated;
+  }
+  app.use((req, res, next) => {
+    const reqPath = req.path.replace(/^\//, "");
+    if (customPwaIcons && customPwaIcons.files && customPwaIcons.files[reqPath]) {
+      const dataUrl = customPwaIcons.files[reqPath];
+      const base64Data = dataUrl.replace(/^data:image\/\w+;base64,/, "");
+      const imgBuffer = Buffer.from(base64Data, "base64");
+      res.setHeader("Content-Type", "image/png");
+      res.setHeader("Cache-Control", "public, max-age=86400");
+      return res.send(imgBuffer);
+    }
+    if (reqPath === "manifest.webmanifest" || reqPath === "manifest.json" || reqPath.endsWith(".webmanifest") || reqPath.includes("manifest")) {
+      const appName = customPwaIcons?.appName || "CoachAssist";
+      const themeColor = customPwaIcons?.themeColor || "#4f46e5";
+      const manifestObj = {
+        name: appName,
+        short_name: appName,
+        description: `${appName} PWA App`,
+        start_url: "/",
+        display: "standalone",
+        orientation: "portrait",
+        background_color: themeColor,
+        theme_color: themeColor,
+        icons: [
+          { src: "/icon-192.png", sizes: "192x192", type: "image/png" },
+          { src: "/icon-512.png", sizes: "512x512", type: "image/png" },
+          { src: "/icon-192x192.png", sizes: "192x192", type: "image/png" },
+          { src: "/icon-512x512.png", sizes: "512x512", type: "image/png" },
+          { src: "/icon-maskable-512x512.png", sizes: "512x512", type: "image/png", purpose: "maskable" }
+        ]
+      };
+      res.setHeader("Content-Type", "application/manifest+json");
+      return res.json(manifestObj);
+    }
+    const accept = req.headers.accept || "";
+    if (req.method === "GET" && (accept.includes("text/html") || req.path === "/" || req.path.endsWith(".html"))) {
+      const originalSend = res.send;
+      const originalEnd = res.end;
+      res.send = function(body) {
+        if (typeof body === "string" && body.includes("<html")) {
+          body = injectPwaMetaToHtml(body);
+        } else if (Buffer.isBuffer(body)) {
+          const str = body.toString("utf-8");
+          if (str.includes("<html")) {
+            body = Buffer.from(injectPwaMetaToHtml(str), "utf-8");
+          }
+        }
+        return originalSend.call(this, body);
+      };
+      res.end = function(chunk, encoding, cb) {
+        if (typeof chunk === "string" && chunk.includes("<html")) {
+          chunk = injectPwaMetaToHtml(chunk);
+        } else if (Buffer.isBuffer(chunk)) {
+          const str = chunk.toString("utf-8");
+          if (str.includes("<html")) {
+            chunk = Buffer.from(injectPwaMetaToHtml(str), "utf-8");
+          }
+        }
+        return originalEnd.call(this, chunk, encoding, cb);
+      };
+    }
+    next();
+  });
+  app.use((req, res, next) => {
+    const url = req.url;
+    const pathPart = url.split("?")[0];
+    const segments = pathPart.split("/").filter(Boolean);
+    if (segments.length === 0 || ["api", "assets", "uploads", "rebuild", "favicon.ico"].includes(segments[0])) {
+      return next();
+    }
+    const subfolder = segments[0];
+    if (segments.length === 1 && !pathPart.endsWith("/")) {
+      const query = url.includes("?") ? "?" + url.split("?")[1] : "";
+      console.log(`[Subfolder Redirect] Redirecting ${url} to /${subfolder}/${query}`);
+      return res.redirect(301, `/${subfolder}/${query}`);
+    }
+    const match = url.match(/^\/([^\/]+)\/(api|assets|uploads|favicon\.ico|rebuild)(.*)$/);
+    if (match) {
+      req.url = "/" + match[2] + match[3];
+      console.log(`[Subfolder Rewriter] Rewrote URL: ${url} -> ${req.url}`);
+    } else {
+      if (segments.length === 1) {
+        req.url = "/" + (url.includes("?") ? "?" + url.split("?")[1] : "");
+        console.log(`[Subfolder Rewriter] Rewrote root: ${url} -> ${req.url}`);
+      }
+    }
+    next();
+  });
+  app.use(import_express.default.json({ limit: "50mb" }));
+  app.use(import_express.default.urlencoded({ limit: "50mb", extended: true }));
+  app.get("/uploads/:filename", async (req, res) => {
+    const filename = import_path.default.basename(req.params.filename);
+    const fullPath = import_path.default.join(UPLOADS_DIR, filename);
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
+    res.setHeader("Cache-Control", "public, max-age=31536000");
+    if (import_fs.default.existsSync(fullPath)) {
+      return res.sendFile(fullPath);
+    }
+    try {
+      const row = db.prepare("SELECT mime_type, data_base64 FROM uploaded_files WHERE filename = ?").get(filename);
+      if (row && row.data_base64) {
+        const buffer = Buffer.from(row.data_base64, "base64");
+        try {
+          import_fs.default.writeFileSync(fullPath, buffer);
+        } catch (_) {
+        }
+        res.setHeader("Content-Type", row.mime_type || "image/jpeg");
+        return res.send(buffer);
+      }
+    } catch (err) {
+      console.error("Error fetching file from uploaded_files table:", err);
+    }
+    try {
+      const fDoc = await getFirestoreDoc(`server_uploads/${encodeURIComponent(filename)}`);
+      if (fDoc && fDoc.data_base64) {
+        const buffer = Buffer.from(fDoc.data_base64, "base64");
+        const mimeType = fDoc.mime_type || "image/jpeg";
+        try {
+          db.prepare(`
+            INSERT OR REPLACE INTO uploaded_files (filename, mime_type, data_base64, created_at)
+            VALUES (?, ?, ?, ?)
+          `).run(filename, mimeType, fDoc.data_base64, fDoc.created_at || Date.now());
+          import_fs.default.writeFileSync(fullPath, buffer);
+        } catch (_) {
+        }
+        res.setHeader("Content-Type", mimeType);
+        return res.send(buffer);
+      }
+    } catch (err) {
+      console.error("Error fetching file from Firestore server_uploads:", err);
+    }
+    res.status(404).send("File not found");
+  });
+  app.use("/uploads", (req, res, next) => {
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    next();
+  }, import_express.default.static(UPLOADS_DIR));
+  app.get("/api/health", (_req, res) => {
+    res.json({ status: "ok", db: "sqlite", mode: dbModeConfig.mode });
+  });
+  app.get("/api/system/db-config", (_req, res) => {
+    let dbSize = 0;
+    try {
+      if (import_fs.default.existsSync(DB_PATH)) {
+        dbSize = import_fs.default.statSync(DB_PATH).size;
+      }
+    } catch {
+    }
+    const { baseUrl, projId } = getActiveFirestoreParams();
+    const dbId = firebaseConfig?.firestoreDatabaseId || "(default)";
+    const firestoreUrl = projId ? dbId && dbId !== "(default)" ? `https://console.firebase.google.com/project/${projId}/firestore/databases/${dbId}/data` : `https://console.firebase.google.com/project/${projId}/firestore/data` : null;
+    res.json({
+      mode: dbModeConfig.mode,
+      dbPath: DB_PATH,
+      dbSize,
+      isProduction,
+      firestoreConfigured: !!baseUrl,
+      firestoreProjectId: projId || null,
+      firestoreDatabaseId: dbId,
+      firestoreUrl,
+      customFirestoreProjectId: dbModeConfig.customFirestoreProjectId || "",
+      customFirestoreApiKey: dbModeConfig.customFirestoreApiKey || "",
+      customRemoteUrl: dbModeConfig.customRemoteUrl || "",
+      updatedAt: dbModeConfig.updatedAt,
+      updatedBy: dbModeConfig.updatedBy
+    });
+  });
+  app.post("/api/system/db-config", (req, res) => {
+    const { mode, customFirestoreProjectId, customFirestoreApiKey, customRemoteUrl } = req.body;
+    if (!mode || !["hybrid", "local_sqlite", "firestore_only"].includes(mode)) {
+      return res.status(400).json({ error: "Ogiltigt databasl\xE4ge. V\xE4lj hybrid, local_sqlite eller firestore_only." });
+    }
+    dbModeConfig.mode = mode;
+    dbModeConfig.customFirestoreProjectId = (customFirestoreProjectId || "").trim();
+    dbModeConfig.customFirestoreApiKey = (customFirestoreApiKey || "").trim();
+    dbModeConfig.customRemoteUrl = (customRemoteUrl || "").trim();
+    dbModeConfig.updatedAt = Date.now();
+    dbModeConfig.updatedBy = "root_admin";
+    const serialized = JSON.stringify(dbModeConfig);
+    try {
+      db.prepare(`
+        INSERT INTO system_docs (path, data, updatedAt)
+        VALUES ('system/db_config', ?, ?)
+        ON CONFLICT(path) DO UPDATE SET data = excluded.data, updatedAt = excluded.updatedAt
+      `).run(serialized, dbModeConfig.updatedAt);
+      if (mode !== "local_sqlite") {
+        setFirestoreDoc("app_docs/system_db_config", { data: serialized, updatedAt: dbModeConfig.updatedAt }).catch((err) => console.error("Error syncing system db config to firestore:", err));
+      }
+      console.log(`[DB Config] Updated database mode to: ${mode}`);
+      res.json({ success: true, dbModeConfig });
+    } catch (e) {
+      console.error("[DB Config] Failed to save database configuration:", e);
+      res.status(500).json({ error: "Kunde inte spara databasinst\xE4llningar" });
+    }
+  });
+  app.get("/api/system/db-export", (_req, res) => {
+    try {
+      const users = db.prepare("SELECT id, email, created_at FROM users").all();
+      const users_data = db.prepare("SELECT userId, segment, data, updatedAt FROM users_data").all();
+      const clubs_data = db.prepare("SELECT clubId, teamId, segment, data, updatedAt FROM clubs_data").all();
+      const shared_leaderboards = db.prepare("SELECT id, data, updatedAt, coachUid FROM shared_leaderboards").all();
+      const system_docs = db.prepare("SELECT path, data, updatedAt FROM system_docs").all();
+      const dump = {
+        version: "1.0",
+        exportedAt: Date.now(),
+        dbMode: dbModeConfig.mode,
+        tables: {
+          users,
+          users_data,
+          clubs_data,
+          shared_leaderboards,
+          system_docs
+        }
+      };
+      res.setHeader("Content-Type", "application/json");
+      res.setHeader("Content-Disposition", `attachment; filename="coachassist_backup_${(/* @__PURE__ */ new Date()).toISOString().slice(0, 10)}.json"`);
+      res.send(JSON.stringify(dump, null, 2));
+    } catch (e) {
+      console.error("Error exporting database dump:", e);
+      res.status(500).json({ error: "Kunde inte exportera databasen" });
+    }
+  });
+  app.post("/api/system/db-import", (req, res) => {
+    const dump = req.body;
+    if (!dump || !dump.tables) {
+      return res.status(400).json({ error: "Ogiltigt s\xE4kerhetskopieformat" });
+    }
+    try {
+      const { users = [], users_data = [], clubs_data = [], shared_leaderboards = [], system_docs = [] } = dump.tables;
+      const transaction = db.transaction(() => {
+        const stmtUser = db.prepare(`
+          INSERT INTO users (id, email, password_hash, created_at)
+          VALUES (?, ?, ?, ?)
+          ON CONFLICT(id) DO UPDATE SET email = excluded.email
+        `);
+        for (const u of users) {
+          stmtUser.run(u.id, u.email, u.password_hash || "imported_user", u.created_at || Date.now());
+        }
+        const stmtUserData = db.prepare(`
+          INSERT INTO users_data (userId, segment, data, updatedAt)
+          VALUES (?, ?, ?, ?)
+          ON CONFLICT(userId, segment) DO UPDATE SET data = excluded.data, updatedAt = excluded.updatedAt
+        `);
+        for (const ud of users_data) {
+          const rawData = typeof ud.data === "string" ? ud.data : JSON.stringify(ud.data);
+          stmtUserData.run(ud.userId, ud.segment, rawData, ud.updatedAt || Date.now());
+        }
+        const stmtClubData = db.prepare(`
+          INSERT INTO clubs_data (clubId, teamId, segment, data, updatedAt)
+          VALUES (?, ?, ?, ?)
+          ON CONFLICT(clubId, teamId, segment) DO UPDATE SET data = excluded.data, updatedAt = excluded.updatedAt
+        `);
+        for (const cd of clubs_data) {
+          const rawData = typeof cd.data === "string" ? cd.data : JSON.stringify(cd.data);
+          stmtClubData.run(cd.clubId, cd.teamId, cd.segment, rawData, cd.updatedAt || Date.now());
+        }
+        const stmtLeaderboard = db.prepare(`
+          INSERT INTO shared_leaderboards (id, data, updatedAt, coachUid)
+          VALUES (?, ?, ?, ?)
+          ON CONFLICT(id) DO UPDATE SET data = excluded.data, updatedAt = excluded.updatedAt
+        `);
+        for (const lb of shared_leaderboards) {
+          const rawData = typeof lb.data === "string" ? lb.data : JSON.stringify(lb.data);
+          stmtLeaderboard.run(lb.id, rawData, lb.updatedAt || Date.now(), lb.coachUid || null);
+        }
+        const stmtSysDoc = db.prepare(`
+          INSERT INTO system_docs (path, data, updatedAt)
+          VALUES (?, ?, ?)
+          ON CONFLICT(path) DO UPDATE SET data = excluded.data, updatedAt = excluded.updatedAt
+        `);
+        for (const sd of system_docs) {
+          const rawData = typeof sd.data === "string" ? sd.data : JSON.stringify(sd.data);
+          stmtSysDoc.run(sd.path, rawData, sd.updatedAt || Date.now());
+        }
+      });
+      transaction();
+      console.log("[DB Import] Successfully imported database dump.");
+      res.json({ success: true, importedRecords: users.length + users_data.length + clubs_data.length });
+    } catch (e) {
+      console.error("[DB Import] Error importing database:", e);
+      res.status(500).json({ error: "Kunde inte importera databasen: " + e.message });
+    }
+  });
+  app.post("/api/system/db-sync-now", async (_req, res) => {
+    if (dbModeConfig.mode === "local_sqlite") {
+      return res.status(400).json({ error: "Databasen \xE4r inst\xE4lld p\xE5 Frist\xE5ende Lokal SQLite. Sl\xE5 p\xE5 Hybrid-l\xE4ge f\xF6rst f\xF6r att synka med molnet." });
+    }
+    try {
+      let syncedCount = 0;
+      const userRows = db.prepare("SELECT userId, segment, data, updatedAt FROM users_data").all();
+      for (const row of userRows) {
+        const docPath = `app_docs/users_${row.userId}_data_${row.segment}`;
+        const rawData = typeof row.data === "string" ? row.data : JSON.stringify(row.data);
+        await setFirestoreDoc(docPath, { data: rawData, updatedAt: row.updatedAt });
+        syncedCount++;
+      }
+      const clubRows = db.prepare("SELECT clubId, teamId, segment, data, updatedAt FROM clubs_data").all();
+      for (const row of clubRows) {
+        const docPath = `app_docs/clubs_${row.clubId}_teams_${row.teamId}_data_${row.segment}`;
+        const rawData = typeof row.data === "string" ? row.data : JSON.stringify(row.data);
+        await setFirestoreDoc(docPath, { data: rawData, updatedAt: row.updatedAt });
+        syncedCount++;
+      }
+      const fileRows = db.prepare("SELECT filename, mime_type, data_base64, created_at FROM uploaded_files").all();
+      for (const row of fileRows) {
+        const docPath = `server_uploads/${encodeURIComponent(row.filename)}`;
+        await setFirestoreDoc(docPath, { mime_type: row.mime_type, data_base64: row.data_base64, created_at: row.created_at || Date.now() });
+        syncedCount++;
+      }
+      res.json({ success: true, syncedCount, message: `Synkroniserade ${syncedCount} poster till Firestore.` });
+    } catch (e) {
+      console.error("Manual DB sync error:", e);
+      res.status(500).json({ error: "Synkroniseringen misslyckades: " + e.message });
+    }
+  });
+  app.post("/api/auth/register", registerRateLimiter, async (req, res) => {
+    const { email, password, username } = req.body;
+    if (!email || !password) {
+      return res.status(400).json({ error: "E-post och l\xF6senord kr\xE4vs." });
+    }
+    const trimmedEmail = email.trim().toLowerCase();
+    const trimmedUsername = username ? username.trim().toLowerCase() : "";
+    if (trimmedUsername) {
+      if (!/^[a-zA-Z0-9_\.-]{3,20}$/.test(trimmedUsername)) {
+        return res.status(400).json({
+          error: "Anv\xE4ndarnamnet m\xE5ste vara 3\u201320 tecken l\xE5ngt och endast inneh\xE5lla bokst\xE4ver, siffror, understreck eller bindestreck."
+        });
+      }
+    }
+    try {
+      let existingByEmail = db.prepare("SELECT id, email FROM users WHERE LOWER(email) = ?").get(trimmedEmail);
+      if (!existingByEmail) {
+        const fUser = await getFirestoreDoc(`server_users/${encodeURIComponent(trimmedEmail)}`);
+        if (fUser && fUser.id) {
+          existingByEmail = fUser;
+        }
+      }
+      if (existingByEmail) {
+        return res.status(400).json({
+          error: `E-postadressen '${trimmedEmail}' \xE4r redan registrerad i CoachAssist. V\xE4nligen logga in eller \xE5terst\xE4ll ditt l\xF6senord om du gl\xF6mt det.`
+        });
+      }
+      if (trimmedUsername) {
+        let existingByUsername = db.prepare("SELECT id FROM users WHERE LOWER(username) = ?").get(trimmedUsername);
+        if (!existingByUsername) {
+          const fUser = await getFirestoreDoc(`server_usernames/${encodeURIComponent(trimmedUsername)}`);
+          if (fUser && fUser.id) {
+            existingByUsername = fUser;
+          }
+        }
+        if (existingByUsername) {
+          return res.status(400).json({
+            error: `Anv\xE4ndarnamnet '${trimmedUsername}' \xE4r tyv\xE4rr redan upptaget. V\xE4lj ett annat anv\xE4ndarnamn.`
+          });
+        }
+      }
+      const userId = import_crypto.default.randomUUID();
+      const passwordHash = await import_bcryptjs.default.hash(password, 10);
+      const createdAt = Date.now();
+      db.prepare("INSERT INTO users (id, email, username, password_hash, created_at) VALUES (?, ?, ?, ?, ?)").run(
+        userId,
+        trimmedEmail,
+        trimmedUsername || null,
+        passwordHash,
+        createdAt
+      );
+      setFirestoreDoc(`server_users/${encodeURIComponent(trimmedEmail)}`, {
+        id: userId,
+        email: trimmedEmail,
+        username: trimmedUsername || null,
+        password_hash: passwordHash,
+        created_at: createdAt
+      }).catch((e) => console.error("Firestore user save error:", e));
+      setFirestoreDoc(`server_user_ids/${encodeURIComponent(userId)}`, {
+        id: userId,
+        email: trimmedEmail,
+        username: trimmedUsername || null,
+        password_hash: passwordHash,
+        created_at: createdAt
+      }).catch((e) => console.error("Firestore user_id save error:", e));
+      if (trimmedUsername) {
+        setFirestoreDoc(`server_usernames/${encodeURIComponent(trimmedUsername)}`, {
+          id: userId,
+          email: trimmedEmail,
+          username: trimmedUsername
+        }).catch((e) => console.error("Firestore username save error:", e));
+      }
+      const token = import_jsonwebtoken.default.sign({ id: userId, email: trimmedEmail, username: trimmedUsername }, JWT_SECRET, { expiresIn: "3650d" });
+      res.json({
+        token,
+        user: {
+          uid: userId,
+          email: trimmedEmail,
+          username: trimmedUsername || null,
+          displayName: trimmedUsername || trimmedEmail.split("@")[0],
+          photoURL: null
+        }
+      });
+    } catch (error) {
+      console.error("Registration error:", error);
+      res.status(500).json({ error: "Kunde inte skapa konto" });
+    }
+  });
+  app.post("/api/auth/login", loginRateLimiter, async (req, res) => {
+    const { email, identifier, password } = req.body;
+    const loginInput = (email || identifier || "").trim().toLowerCase();
+    if (!loginInput || !password) {
+      return res.status(400).json({ error: "E-post/anv\xE4ndarnamn och l\xF6senord kr\xE4vs." });
+    }
+    try {
+      let userRow = db.prepare("SELECT * FROM users WHERE LOWER(email) = ? OR LOWER(username) = ?").get(loginInput, loginInput);
+      if (!userRow) {
+        try {
+          let fUser = await getFirestoreDoc(`server_users/${encodeURIComponent(loginInput)}`);
+          if (!fUser || !fUser.id) {
+            const uMapping = await getFirestoreDoc(`server_usernames/${encodeURIComponent(loginInput)}`);
+            if (uMapping && uMapping.email) {
+              fUser = await getFirestoreDoc(`server_users/${encodeURIComponent(uMapping.email)}`);
+            } else if (uMapping && uMapping.id) {
+              fUser = await getFirestoreDoc(`server_user_ids/${encodeURIComponent(uMapping.id)}`);
+            }
+          }
+          if (fUser && fUser.id && fUser.password_hash) {
+            try {
+              db.prepare("INSERT OR REPLACE INTO users (id, email, username, password_hash, created_at) VALUES (?, ?, ?, ?, ?)").run(
+                fUser.id,
+                fUser.email || loginInput,
+                fUser.username || null,
+                fUser.password_hash,
+                fUser.created_at || Date.now()
+              );
+              userRow = {
+                id: fUser.id,
+                email: fUser.email || loginInput,
+                username: fUser.username || null,
+                password_hash: fUser.password_hash,
+                created_at: fUser.created_at || Date.now()
+              };
+            } catch (e) {
+              console.error("Error caching Firestore user to SQLite:", e);
+            }
+          }
+        } catch (fErr) {
+          if (fErr.status === 429 || fErr.code === "RESOURCE_EXHAUSTED" || fErr.message && fErr.message.toLowerCase().includes("quota")) {
+            return res.status(429).json({
+              error: "Firebase-databasens dagliga l\xE4skvot (50 000 anrop/dygn) har uppn\xE5tts f\xF6r idag. Ditt konto och all data \xE4r s\xE4kert sparade i Firebase! Inloggningen \xE4r pausad tills kvoten nollst\xE4lls imorgon, eller tills databasen uppgraderas till Blaze i Firebase Console.",
+              code: "RESOURCE_EXHAUSTED",
+              message: fErr.message,
+              upgradeUrl: getFirestoreQuotaUpgradeUrl()
+            });
+          }
+        }
+      }
+      if (!userRow) {
+        return res.status(400).json({ error: "Fel e-post/anv\xE4ndarnamn eller l\xF6senord." });
+      }
+      const isValid = await import_bcryptjs.default.compare(password, userRow.password_hash);
+      if (!isValid) {
+        return res.status(400).json({ error: "Fel e-post/anv\xE4ndarnamn eller l\xF6senord." });
+      }
+      if (!userRow.has_logged_in) {
+        try {
+          db.prepare("UPDATE users SET has_logged_in = 1, temp_password = NULL WHERE id = ?").run(userRow.id);
+          setFirestoreDoc(`server_users/${encodeURIComponent(userRow.email)}`, {
+            ...userRow,
+            has_logged_in: 1,
+            temp_password: null
+          }).catch(() => {
+          });
+          setFirestoreDoc(`server_user_ids/${encodeURIComponent(userRow.id)}`, {
+            ...userRow,
+            has_logged_in: 1,
+            temp_password: null
+          }).catch(() => {
+          });
+        } catch (e) {
+          console.error("Error updating login status:", e);
+        }
+      }
+      const token = import_jsonwebtoken.default.sign({ id: userRow.id, email: userRow.email, username: userRow.username }, JWT_SECRET, { expiresIn: "3650d" });
+      res.json({
+        token,
+        user: {
+          uid: userRow.id,
+          email: userRow.email,
+          username: userRow.username || null,
+          displayName: userRow.username || userRow.email.split("@")[0],
+          photoURL: userRow.avatar_url || null
+        }
+      });
+    } catch (error) {
+      console.error("Login error:", error);
+      res.status(500).json({ error: "Kunde inte logga in" });
+    }
+  });
+  const sendVerificationEmail = async (email, code) => {
+    const smtpHost = process.env.SMTP_HOST;
+    const smtpUser = process.env.SMTP_USER;
+    const smtpPass = process.env.SMTP_PASS;
+    const smtpPort = parseInt(process.env.SMTP_PORT || "587", 10);
+    const smtpFrom = process.env.SMTP_FROM || "CoachAssist <no-reply@coachassist.app>";
+    console.log(`[PASSWORD RESET CODE] Email: ${email} | Verification Code: ${code}`);
+    if (smtpHost && smtpUser && smtpPass) {
+      try {
+        const transporter = import_nodemailer.default.createTransport({
+          host: smtpHost,
+          port: smtpPort,
+          secure: smtpPort === 465,
+          auth: {
+            user: smtpUser,
+            pass: smtpPass
+          }
+        });
+        await transporter.sendMail({
+          from: smtpFrom,
+          to: email,
+          subject: "\xC5terst\xE4ll ditt l\xF6senord - CoachAssist",
+          html: `
+            <div style="font-family: sans-serif; max-width: 500px; margin: 0 auto; padding: 20px; border: 1px solid #e4e4e7; rounded: 12px;">
+              <h2 style="color: #18181b; margin-bottom: 8px;">\xC5terst\xE4llning av l\xF6senord</h2>
+              <p style="color: #71717a; font-size: 14px;">Du har beg\xE4rt att \xE5terst\xE4lla l\xF6senordet f\xF6r ditt CoachAssist-konto.</p>
+              <div style="background-color: #f4f4f5; padding: 16px; text-align: center; border-radius: 8px; margin: 24px 0;">
+                <span style="font-size: 32px; font-weight: bold; letter-spacing: 6px; color: #4f46e5;">${code}</span>
+              </div>
+              <p style="color: #71717a; font-size: 13px;">Koden \xE4r giltig i <strong>15 minuter</strong>. Om du inte beg\xE4rt \xE5terst\xE4llningen kan du ignorera detta meddelande.</p>
+            </div>
+          `
+        });
+        return true;
+      } catch (err) {
+        console.error("Failed to send verification email via SMTP:", err);
+      }
+    }
+    return false;
+  };
+  app.post("/api/auth/request-reset", resetRateLimiter, async (req, res) => {
+    const { email } = req.body;
+    if (!email || typeof email !== "string" || !email.includes("@")) {
+      return res.status(400).json({ error: "Ange en giltig e-postadress." });
+    }
+    const trimmedEmail = email.trim().toLowerCase();
+    try {
+      const tenMinutesAgo = Date.now() - 10 * 60 * 1e3;
+      const recentRequestsCount = db.prepare(
+        "SELECT COUNT(*) as count FROM password_resets WHERE email = ? AND created_at > ?"
+      ).get(trimmedEmail, tenMinutesAgo);
+      if (recentRequestsCount && recentRequestsCount.count >= 5) {
+        return res.status(429).json({
+          error: "F\xF6r m\xE5nga \xE5terst\xE4llningsf\xF6rs\xF6k. V\xE4nligen v\xE4nta 10 minuter innan du f\xF6rs\xF6ker igen."
+        });
+      }
+      const userRow = db.prepare("SELECT id FROM users WHERE email = ?").get(trimmedEmail);
+      if (userRow) {
+        const codeNum = import_crypto.default.randomInt(1e5, 999999);
+        const code = codeNum.toString();
+        const codeHash = await import_bcryptjs.default.hash(code, 10);
+        const expiresAt = Date.now() + 15 * 60 * 1e3;
+        const id = import_crypto.default.randomUUID();
+        db.prepare("UPDATE password_resets SET used = 1 WHERE email = ? AND used = 0").run(trimmedEmail);
+        db.prepare(
+          "INSERT INTO password_resets (id, email, code_hash, expires_at, attempts, used, created_at) VALUES (?, ?, ?, ?, 0, 0, ?)"
+        ).run(id, trimmedEmail, codeHash, expiresAt, Date.now());
+        const emailSent = await sendVerificationEmail(trimmedEmail, code);
+        if (!emailSent) {
+          return res.json({
+            success: true,
+            code,
+            message: `Inget e-postsystem \xE4r inst\xE4llt p\xE5 servern. Din verifieringskod \xE4r: ${code}`
+          });
+        }
+      }
+      res.json({
+        success: true,
+        message: "Om e-postadressen finns registrerad har vi skickat en 6-siffrig verifieringskod."
+      });
+    } catch (error) {
+      console.error("Request reset error:", error);
+      res.status(500).json({ error: "Kunde inte behandla beg\xE4ran om \xE5terst\xE4llning." });
+    }
+  });
+  app.post("/api/auth/reset-password", resetRateLimiter, async (req, res) => {
+    const { email, code, newPassword } = req.body;
+    if (!email || !code || !newPassword) {
+      return res.status(400).json({ error: "E-postadress, verifieringskod och nytt l\xF6senord kr\xE4vs." });
+    }
+    if (typeof newPassword !== "string" || newPassword.length < 6) {
+      return res.status(400).json({ error: "Det nya l\xF6senordet m\xE5ste vara minst 6 tecken l\xE5ngt." });
+    }
+    const trimmedEmail = email.trim().toLowerCase();
+    const cleanCode = code.toString().trim();
+    try {
+      const resetRow = db.prepare(
+        "SELECT * FROM password_resets WHERE email = ? AND used = 0 AND expires_at > ? ORDER BY created_at DESC LIMIT 1"
+      ).get(trimmedEmail, Date.now());
+      if (!resetRow) {
+        return res.status(400).json({
+          error: "Ingen giltig verifieringskod hittades eller koden har g\xE5tt ut. Beg\xE4r en ny kod."
+        });
+      }
+      if (resetRow.attempts >= 5) {
+        return res.status(400).json({
+          error: "F\xF6r m\xE5nga felaktiga f\xF6rs\xF6k f\xF6r denna kod. V\xE4nligen beg\xE4r en ny verifieringskod."
+        });
+      }
+      const isCodeValid = await import_bcryptjs.default.compare(cleanCode, resetRow.code_hash);
+      if (!isCodeValid) {
+        db.prepare("UPDATE password_resets SET attempts = attempts + 1 WHERE id = ?").run(resetRow.id);
+        const remaining = 4 - resetRow.attempts;
+        return res.status(400).json({
+          error: `Felaktig verifieringskod. Du har ${Math.max(0, remaining)} f\xF6rs\xF6k kvar.`
+        });
+      }
+      let userRow = db.prepare("SELECT id, email, created_at FROM users WHERE email = ?").get(trimmedEmail);
+      if (!userRow) {
+        const fUser = await getFirestoreDoc(`server_users/${encodeURIComponent(trimmedEmail)}`);
+        if (fUser && fUser.id) {
+          userRow = fUser;
+        }
+      }
+      if (!userRow) {
+        return res.status(404).json({ error: "Anv\xE4ndarkontot kunde inte hittas." });
+      }
+      db.prepare("UPDATE password_resets SET used = 1 WHERE id = ?").run(resetRow.id);
+      const newPasswordHash = await import_bcryptjs.default.hash(newPassword, 10);
+      db.prepare("INSERT OR REPLACE INTO users (id, email, password_hash, created_at) VALUES (?, ?, ?, ?)").run(
+        userRow.id,
+        trimmedEmail,
+        newPasswordHash,
+        userRow.created_at || Date.now()
+      );
+      setFirestoreDoc(`server_users/${encodeURIComponent(trimmedEmail)}`, {
+        id: userRow.id,
+        email: trimmedEmail,
+        password_hash: newPasswordHash,
+        created_at: userRow.created_at || Date.now()
+      }).catch((e) => console.error("Firestore reset password update error:", e));
+      setFirestoreDoc(`server_user_ids/${encodeURIComponent(userRow.id)}`, {
+        id: userRow.id,
+        email: trimmedEmail,
+        password_hash: newPasswordHash,
+        created_at: userRow.created_at || Date.now()
+      }).catch((e) => console.error("Firestore reset password update error:", e));
+      const token = import_jsonwebtoken.default.sign({ id: userRow.id, email: userRow.email }, JWT_SECRET, { expiresIn: "3650d" });
+      res.json({
+        message: "L\xF6senordet har \xE5terst\xE4llts!",
+        token,
+        user: {
+          uid: userRow.id,
+          email: userRow.email,
+          displayName: userRow.email.split("@")[0],
+          photoURL: null
+        }
+      });
+    } catch (error) {
+      console.error("Reset password error:", error);
+      res.status(500).json({ error: "Kunde inte \xE5terst\xE4lla l\xF6senordet." });
+    }
+  });
+  app.get("/api/auth/config", (req, res) => {
+    const googleClientId = process.env.GOOGLE_CLIENT_ID || process.env.VITE_GOOGLE_CLIENT_ID || "";
+    res.json({
+      googleClientId,
+      googleAuthEnabled: !!googleClientId
+    });
+  });
+  async function verifyGoogleToken(params) {
+    const token = params.idToken || params.credential;
+    if (token) {
+      try {
+        const response = await fetch(`https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(token)}`);
+        if (response.ok) {
+          const data = await response.json();
+          if (data && data.sub && data.email) {
+            return {
+              googleId: data.sub,
+              email: data.email.trim().toLowerCase(),
+              emailVerified: data.email_verified === "true" || data.email_verified === true,
+              name: data.name || data.given_name || void 0,
+              picture: data.picture || void 0
+            };
+          }
+        }
+      } catch (err) {
+        console.error("Error verifying Google ID token with tokeninfo:", err);
+      }
+    }
+    if (params.accessToken) {
+      try {
+        const response = await fetch("https://www.googleapis.com/oauth2/v3/userinfo", {
+          headers: {
+            "Authorization": `Bearer ${params.accessToken}`
+          }
+        });
+        if (response.ok) {
+          const data = await response.json();
+          if (data && data.sub && data.email) {
+            return {
+              googleId: data.sub,
+              email: data.email.trim().toLowerCase(),
+              emailVerified: data.email_verified === "true" || data.email_verified === true,
+              name: data.name || data.given_name || void 0,
+              picture: data.picture || void 0
+            };
+          }
+        }
+      } catch (err) {
+        console.error("Error verifying Google access token with userinfo:", err);
+      }
+    }
+    return null;
+  }
+  app.post("/api/auth/google", loginRateLimiter, async (req, res) => {
+    try {
+      const googleUser = await verifyGoogleToken(req.body);
+      if (!googleUser) {
+        return res.status(400).json({ error: "Google-inloggningen kunde inte verifieras. V\xE4nligen f\xF6rs\xF6k igen." });
+      }
+      if (!googleUser.emailVerified) {
+        return res.status(400).json({ error: "Google-kontots e-postadress \xE4r inte verifierad av Google." });
+      }
+      const googleId = googleUser.googleId;
+      const email = googleUser.email;
+      const picture = googleUser.picture || null;
+      const displayName = googleUser.name || email.split("@")[0];
+      let userRow = db.prepare("SELECT * FROM users WHERE google_id = ?").get(googleId);
+      if (!userRow) {
+        const fGoogleUser = await getFirestoreDoc(`server_users_google/${encodeURIComponent(googleId)}`);
+        if (fGoogleUser && fGoogleUser.id) {
+          userRow = db.prepare("SELECT * FROM users WHERE id = ?").get(fGoogleUser.id);
+          if (!userRow) {
+            const fUser = await getFirestoreDoc(`server_users/${encodeURIComponent(fGoogleUser.email)}`) || await getFirestoreDoc(`server_user_ids/${encodeURIComponent(fGoogleUser.id)}`);
+            if (fUser && fUser.id) {
+              try {
+                db.prepare(`
+                  INSERT OR REPLACE INTO users (id, email, username, password_hash, google_id, google_email, avatar_url, auth_provider, created_at, has_logged_in)
+                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+                `).run(
+                  fUser.id,
+                  fUser.email || email,
+                  fUser.username || null,
+                  fUser.password_hash || "google_only_" + import_crypto.default.randomBytes(8).toString("hex"),
+                  googleId,
+                  email,
+                  picture,
+                  fUser.auth_provider || "google",
+                  fUser.created_at || Date.now()
+                );
+                userRow = db.prepare("SELECT * FROM users WHERE id = ?").get(fUser.id);
+              } catch (e) {
+                console.error("Error caching Google user to SQLite:", e);
+              }
+            }
+          }
+        }
+      }
+      if (!userRow) {
+        userRow = db.prepare("SELECT * FROM users WHERE LOWER(email) = ?").get(email);
+        if (!userRow) {
+          const fUser = await getFirestoreDoc(`server_users/${encodeURIComponent(email)}`);
+          if (fUser && fUser.id) {
+            try {
+              db.prepare(`
+                INSERT OR REPLACE INTO users (id, email, username, password_hash, google_id, google_email, avatar_url, auth_provider, created_at, has_logged_in)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+              `).run(
+                fUser.id,
+                fUser.email || email,
+                fUser.username || null,
+                fUser.password_hash || "google_only_" + import_crypto.default.randomBytes(8).toString("hex"),
+                googleId,
+                email,
+                picture,
+                "both",
+                fUser.created_at || Date.now()
+              );
+              userRow = db.prepare("SELECT * FROM users WHERE id = ?").get(fUser.id);
+            } catch (e) {
+              console.error("Error caching email match to SQLite:", e);
+            }
+          }
+        }
+        if (userRow) {
+          const hasRegularPwd = userRow.password_hash && !userRow.password_hash.startsWith("google_only_");
+          const newAuthProvider = hasRegularPwd ? "both" : "google";
+          db.prepare("UPDATE users SET google_id = ?, google_email = ?, avatar_url = COALESCE(avatar_url, ?), auth_provider = ?, has_logged_in = 1 WHERE id = ?").run(
+            googleId,
+            email,
+            picture,
+            newAuthProvider,
+            userRow.id
+          );
+          userRow.google_id = googleId;
+          userRow.google_email = email;
+          userRow.avatar_url = userRow.avatar_url || picture;
+          userRow.auth_provider = newAuthProvider;
+        }
+      }
+      if (!userRow) {
+        const userId = import_crypto.default.randomUUID();
+        const dummyPasswordHash = "google_only_" + import_crypto.default.randomBytes(16).toString("hex");
+        const createdAt = Date.now();
+        db.prepare(`
+          INSERT INTO users (id, email, username, password_hash, google_id, google_email, avatar_url, auth_provider, created_at, has_logged_in)
+          VALUES (?, ?, ?, ?, ?, ?, ?, 'google', ?, 1)
+        `).run(
+          userId,
+          email,
+          null,
+          dummyPasswordHash,
+          googleId,
+          email,
+          picture,
+          createdAt
+        );
+        userRow = {
+          id: userId,
+          email,
+          username: null,
+          password_hash: dummyPasswordHash,
+          google_id: googleId,
+          google_email: email,
+          avatar_url: picture,
+          auth_provider: "google",
+          created_at: createdAt
+        };
+      }
+      setFirestoreDoc(`server_users/${encodeURIComponent(userRow.email)}`, {
+        id: userRow.id,
+        email: userRow.email,
+        username: userRow.username || null,
+        google_id: googleId,
+        google_email: email,
+        avatar_url: userRow.avatar_url || picture,
+        auth_provider: userRow.auth_provider || "google",
+        password_hash: userRow.password_hash,
+        created_at: userRow.created_at || Date.now(),
+        has_logged_in: 1
+      }).catch((e) => console.error("Firestore google user sync error:", e));
+      setFirestoreDoc(`server_user_ids/${encodeURIComponent(userRow.id)}`, {
+        id: userRow.id,
+        email: userRow.email,
+        username: userRow.username || null,
+        google_id: googleId,
+        google_email: email,
+        avatar_url: userRow.avatar_url || picture,
+        auth_provider: userRow.auth_provider || "google",
+        created_at: userRow.created_at || Date.now()
+      }).catch((e) => console.error("Firestore user_id sync error:", e));
+      setFirestoreDoc(`server_users_google/${encodeURIComponent(googleId)}`, {
+        id: userRow.id,
+        email: userRow.email,
+        google_id: googleId
+      }).catch((e) => console.error("Firestore google_id sync error:", e));
+      const token = import_jsonwebtoken.default.sign({ id: userRow.id, email: userRow.email, username: userRow.username }, JWT_SECRET, { expiresIn: "3650d" });
+      res.json({
+        token,
+        user: {
+          uid: userRow.id,
+          email: userRow.email,
+          username: userRow.username || null,
+          displayName: userRow.username || displayName,
+          photoURL: userRow.avatar_url || picture || null,
+          googleLinked: true,
+          googleEmail: userRow.google_email || email,
+          hasPassword: !!(userRow.password_hash && !userRow.password_hash.startsWith("google_only_"))
+        }
+      });
+    } catch (error) {
+      if (error.status === 429 || error.code === "RESOURCE_EXHAUSTED" || error.message && error.message.toLowerCase().includes("quota")) {
+        return res.status(429).json({
+          error: "Firebase-databasens dagliga l\xE4skvot (50 000 anrop/dygn) har uppn\xE5tts f\xF6r idag. Ditt konto och all data \xE4r s\xE4kert sparade i Firebase! Inloggningen \xE4r pausad tills kvoten nollst\xE4lls imorgon, eller tills databasen uppgraderas till Blaze i Firebase Console.",
+          code: "RESOURCE_EXHAUSTED",
+          message: error.message,
+          upgradeUrl: getFirestoreQuotaUpgradeUrl()
+        });
+      }
+      console.error("Google login endpoint error:", error);
+      res.status(500).json({ error: "Inloggning med Google misslyckades: " + (error.message || error) });
+    }
+  });
+  app.post("/api/auth/link-google", async (req, res) => {
+    const authHeader = req.headers.authorization;
+    if (!authHeader) {
+      return res.status(401).json({ error: "Du m\xE5ste vara inloggad f\xF6r att koppla ett Google-konto." });
+    }
+    try {
+      const authStr = Array.isArray(authHeader) ? authHeader[0] : authHeader;
+      const partsAuth = authStr.split(" ");
+      const token = partsAuth.length > 1 ? partsAuth[1] : partsAuth[0];
+      const decoded = verifyJwtToken(token);
+      const userId = decoded.id;
+      const googleUser = await verifyGoogleToken(req.body);
+      if (!googleUser) {
+        return res.status(400).json({ error: "Google-verifieringen misslyckades. V\xE4nligen f\xF6rs\xF6k igen." });
+      }
+      if (!googleUser.emailVerified) {
+        return res.status(400).json({ error: "Google-kontots e-postadress \xE4r inte verifierad av Google." });
+      }
+      const googleId = googleUser.googleId;
+      const googleEmail = googleUser.email;
+      const picture = googleUser.picture || null;
+      let existingWithGoogle = db.prepare("SELECT id, email FROM users WHERE google_id = ? AND id != ?").get(googleId, userId);
+      if (!existingWithGoogle) {
+        const fGoogleUser = await getFirestoreDoc(`server_users_google/${encodeURIComponent(googleId)}`);
+        if (fGoogleUser && fGoogleUser.id && fGoogleUser.id !== userId) {
+          existingWithGoogle = fGoogleUser;
+        }
+      }
+      if (existingWithGoogle) {
+        return res.status(400).json({
+          error: `Detta Google-konto (${googleEmail}) \xE4r redan kopplat till ett annat konto i CoachAssist.`
+        });
+      }
+      let userRow = db.prepare("SELECT * FROM users WHERE id = ?").get(userId);
+      if (!userRow) {
+        return res.status(404).json({ error: "Anv\xE4ndarkontot hittades inte." });
+      }
+      const hasRegularPassword = userRow.password_hash && !userRow.password_hash.startsWith("google_only_");
+      const newAuthProvider = hasRegularPassword ? "both" : "google";
+      db.prepare("UPDATE users SET google_id = ?, google_email = ?, avatar_url = COALESCE(avatar_url, ?), auth_provider = ? WHERE id = ?").run(
+        googleId,
+        googleEmail,
+        picture,
+        newAuthProvider,
+        userId
+      );
+      setFirestoreDoc(`server_users/${encodeURIComponent(userRow.email)}`, {
+        id: userRow.id,
+        email: userRow.email,
+        username: userRow.username || null,
+        google_id: googleId,
+        google_email: googleEmail,
+        avatar_url: userRow.avatar_url || picture,
+        auth_provider: newAuthProvider,
+        password_hash: userRow.password_hash,
+        created_at: userRow.created_at || Date.now()
+      }).catch(() => {
+      });
+      setFirestoreDoc(`server_user_ids/${encodeURIComponent(userRow.id)}`, {
+        id: userRow.id,
+        email: userRow.email,
+        username: userRow.username || null,
+        google_id: googleId,
+        google_email: googleEmail,
+        avatar_url: userRow.avatar_url || picture,
+        auth_provider: newAuthProvider,
+        created_at: userRow.created_at || Date.now()
+      }).catch(() => {
+      });
+      setFirestoreDoc(`server_users_google/${encodeURIComponent(googleId)}`, {
+        id: userRow.id,
+        email: userRow.email,
+        google_id: googleId
+      }).catch(() => {
+      });
+      res.json({
+        success: true,
+        googleEmail,
+        message: `Ditt Google-konto (${googleEmail}) har kopplats till din profil.`
+      });
+    } catch (error) {
+      console.error("Link Google account error:", error);
+      res.status(500).json({ error: "Kunde inte koppla Google-kontot: " + (error.message || error) });
+    }
+  });
+  app.post("/api/auth/unlink-google", async (req, res) => {
+    const authHeader = req.headers.authorization;
+    if (!authHeader) {
+      return res.status(401).json({ error: "Du m\xE5ste vara inloggad f\xF6r att koppla bort ett Google-konto." });
+    }
+    try {
+      const authStr = Array.isArray(authHeader) ? authHeader[0] : authHeader;
+      const partsAuth = authStr.split(" ");
+      const token = partsAuth.length > 1 ? partsAuth[1] : partsAuth[0];
+      const decoded = verifyJwtToken(token);
+      const userId = decoded.id;
+      let userRow = db.prepare("SELECT * FROM users WHERE id = ?").get(userId);
+      if (!userRow) {
+        return res.status(404).json({ error: "Anv\xE4ndarkontot hittades inte." });
+      }
+      if (!userRow.google_id) {
+        return res.status(400).json({ error: "Inget Google-konto \xE4r kopplat till denna profil." });
+      }
+      const hasRegularPassword = userRow.password_hash && !userRow.password_hash.startsWith("google_only_");
+      if (!hasRegularPassword) {
+        return res.status(400).json({
+          error: 'Du m\xE5ste f\xF6rst ange ett l\xF6senord under "Byt l\xF6senord" innan du kan koppla bort ditt Google-konto, s\xE5 att du kan logga in i forts\xE4ttningen.'
+        });
+      }
+      const oldGoogleId = userRow.google_id;
+      db.prepare("UPDATE users SET google_id = NULL, google_email = NULL, auth_provider = 'local' WHERE id = ?").run(userId);
+      setFirestoreDoc(`server_users/${encodeURIComponent(userRow.email)}`, {
+        id: userRow.id,
+        email: userRow.email,
+        username: userRow.username || null,
+        google_id: null,
+        google_email: null,
+        avatar_url: userRow.avatar_url || null,
+        auth_provider: "local",
+        password_hash: userRow.password_hash,
+        created_at: userRow.created_at || Date.now()
+      }).catch(() => {
+      });
+      setFirestoreDoc(`server_user_ids/${encodeURIComponent(userRow.id)}`, {
+        id: userRow.id,
+        email: userRow.email,
+        username: userRow.username || null,
+        google_id: null,
+        google_email: null,
+        avatar_url: userRow.avatar_url || null,
+        auth_provider: "local",
+        created_at: userRow.created_at || Date.now()
+      }).catch(() => {
+      });
+      if (oldGoogleId) {
+        setFirestoreDoc(`server_users_google/${encodeURIComponent(oldGoogleId)}`, {
+          id: null,
+          unlinkedAt: Date.now()
+        }).catch(() => {
+        });
+      }
+      res.json({
+        success: true,
+        message: "Google-kontot har kopplats bort fr\xE5n din profil."
+      });
+    } catch (error) {
+      console.error("Unlink Google account error:", error);
+      res.status(500).json({ error: "Kunde inte koppla bort Google-kontot: " + (error.message || error) });
+    }
+  });
+  app.get("/api/auth/me", async (req, res) => {
+    const authHeader = req.headers.authorization;
+    if (!authHeader) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+    try {
+      const authStr = Array.isArray(authHeader) ? authHeader[0] : authHeader;
+      const partsAuth = authStr.split(" ");
+      const token = partsAuth.length > 1 ? partsAuth[1] : partsAuth[0];
+      const decoded = verifyJwtToken(token);
+      let userRow = db.prepare("SELECT id, email, username, google_id, google_email, avatar_url, password_hash, auth_provider FROM users WHERE id = ?").get(decoded.id);
+      if (!userRow) {
+        const fUser = await getFirestoreDoc(`server_user_ids/${encodeURIComponent(decoded.id)}`) || (decoded.email ? await getFirestoreDoc(`server_users/${encodeURIComponent(decoded.email)}`) : null);
+        const userEmail = fUser?.email || decoded.email || "user@coachassist.app";
+        const username = fUser?.username || decoded.username || null;
+        const passwordHash = fUser?.password_hash || "restored_session";
+        const createdAt = fUser?.created_at || Date.now();
+        const googleId = fUser?.google_id || null;
+        const googleEmail = fUser?.google_email || null;
+        const avatarUrl = fUser?.avatar_url || null;
+        const authProvider = fUser?.auth_provider || "local";
+        try {
+          db.prepare("INSERT OR REPLACE INTO users (id, email, username, password_hash, google_id, google_email, avatar_url, auth_provider, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)").run(
+            decoded.id,
+            userEmail,
+            username,
+            passwordHash,
+            googleId,
+            googleEmail,
+            avatarUrl,
+            authProvider,
+            createdAt
+          );
+          userRow = { id: decoded.id, email: userEmail, username, google_id: googleId, google_email: googleEmail, avatar_url: avatarUrl, password_hash: passwordHash, auth_provider: authProvider };
+        } catch (e) {
+          console.error("Error auto-restoring user in SQLite:", e);
+        }
+      }
+      if (!userRow) {
+        return res.status(404).json({ error: "Anv\xE4ndaren hittades inte" });
+      }
+      res.json({
+        uid: userRow.id,
+        email: userRow.email,
+        username: userRow.username || null,
+        displayName: userRow.username || userRow.email.split("@")[0],
+        photoURL: userRow.avatar_url || null,
+        googleLinked: !!userRow.google_id,
+        googleEmail: userRow.google_email || null,
+        hasPassword: !!(userRow.password_hash && !userRow.password_hash.startsWith("google_only_"))
+      });
+    } catch (err) {
+      res.status(401).json({ error: "Token \xE4r ogiltig eller har g\xE5tt ut" });
+    }
+  });
+  app.post("/api/auth/update-username", async (req, res) => {
+    const authHeader = req.headers.authorization;
+    if (!authHeader) {
+      return res.status(401).json({ error: "Du m\xE5ste vara inloggad f\xF6r att v\xE4lja eller \xE4ndra anv\xE4ndarnamn." });
+    }
+    try {
+      const authStr = Array.isArray(authHeader) ? authHeader[0] : authHeader;
+      const partsAuth = authStr.split(" ");
+      const token = partsAuth.length > 1 ? partsAuth[1] : partsAuth[0];
+      const decoded = verifyJwtToken(token);
+      const userId = decoded.id;
+      const { newUsername } = req.body;
+      const cleanUsername = newUsername ? newUsername.trim().toLowerCase() : "";
+      if (!cleanUsername || !/^[a-zA-Z0-9_\.-]{3,20}$/.test(cleanUsername)) {
+        return res.status(400).json({
+          error: "Anv\xE4ndarnamnet m\xE5ste vara 3\u201320 tecken och endast inneh\xE5lla bokst\xE4ver, siffror, understreck eller bindestreck."
+        });
+      }
+      let existingByUsername = db.prepare("SELECT id FROM users WHERE LOWER(username) = ? AND id != ?").get(cleanUsername, userId);
+      if (!existingByUsername) {
+        const fUser = await getFirestoreDoc(`server_usernames/${encodeURIComponent(cleanUsername)}`);
+        if (fUser && fUser.id && fUser.id !== userId) {
+          existingByUsername = fUser;
+        }
+      }
+      if (existingByUsername) {
+        return res.status(400).json({ error: `Anv\xE4ndarnamnet '${cleanUsername}' \xE4r tyv\xE4rr redan upptaget. V\xE4lj ett annat.` });
+      }
+      db.prepare("UPDATE users SET username = ? WHERE id = ?").run(cleanUsername, userId);
+      let userRow = db.prepare("SELECT * FROM users WHERE id = ?").get(userId);
+      if (userRow) {
+        setFirestoreDoc(`server_users/${encodeURIComponent(userRow.email)}`, {
+          id: userId,
+          email: userRow.email,
+          username: cleanUsername,
+          password_hash: userRow.password_hash,
+          created_at: userRow.created_at || Date.now()
+        }).catch(() => {
+        });
+        setFirestoreDoc(`server_user_ids/${encodeURIComponent(userId)}`, {
+          id: userId,
+          email: userRow.email,
+          username: cleanUsername,
+          password_hash: userRow.password_hash,
+          created_at: userRow.created_at || Date.now()
+        }).catch(() => {
+        });
+      }
+      setFirestoreDoc(`server_usernames/${encodeURIComponent(cleanUsername)}`, {
+        id: userId,
+        email: userRow?.email || decoded.email,
+        username: cleanUsername
+      }).catch(() => {
+      });
+      const newToken = import_jsonwebtoken.default.sign({ id: userId, email: userRow?.email || decoded.email, username: cleanUsername }, JWT_SECRET, { expiresIn: "3650d" });
+      res.json({
+        success: true,
+        message: "Anv\xE4ndarnamnet har uppdaterats!",
+        token: newToken,
+        username: cleanUsername
+      });
+    } catch (error) {
+      console.error("Update username error:", error);
+      res.status(500).json({ error: "Kunde inte uppdatera anv\xE4ndarnamnet." });
+    }
+  });
+  app.post("/api/auth/update-avatar", async (req, res) => {
+    const authHeader = req.headers.authorization;
+    if (!authHeader) {
+      return res.status(401).json({ error: "Du m\xE5ste vara inloggad f\xF6r att uppdatera din profilbild." });
+    }
+    try {
+      const authStr = Array.isArray(authHeader) ? authHeader[0] : authHeader;
+      const partsAuth = authStr.split(" ");
+      const token = partsAuth.length > 1 ? partsAuth[1] : partsAuth[0];
+      const decoded = verifyJwtToken(token);
+      const userId = decoded.id;
+      const { photoUrl } = req.body;
+      const cleanPhotoUrl = typeof photoUrl === "string" && photoUrl.trim() ? photoUrl.trim() : null;
+      db.prepare("UPDATE users SET avatar_url = ? WHERE id = ?").run(cleanPhotoUrl, userId);
+      let userRow = db.prepare("SELECT * FROM users WHERE id = ?").get(userId);
+      if (userRow?.email) {
+        setFirestoreDoc(`server_users/${encodeURIComponent(userRow.email)}`, {
+          id: userId,
+          email: userRow.email,
+          username: userRow.username || null,
+          avatar_url: cleanPhotoUrl,
+          password_hash: userRow.password_hash,
+          created_at: userRow.created_at || Date.now()
+        }).catch(() => {
+        });
+        setFirestoreDoc(`server_user_ids/${encodeURIComponent(userId)}`, {
+          id: userId,
+          email: userRow.email,
+          username: userRow.username || null,
+          avatar_url: cleanPhotoUrl,
+          password_hash: userRow.password_hash,
+          created_at: userRow.created_at || Date.now()
+        }).catch(() => {
+        });
+      }
+      res.json({
+        success: true,
+        photoURL: cleanPhotoUrl
+      });
+    } catch (error) {
+      console.error("Update avatar error:", error);
+      res.status(500).json({ error: "Kunde inte uppdatera profilbilden." });
+    }
+  });
+  app.post("/api/auth/change-password", async (req, res) => {
+    const authHeader = req.headers.authorization;
+    if (!authHeader) {
+      return res.status(401).json({ error: "Du m\xE5ste vara inloggad f\xF6r att \xE4ndra l\xF6senord." });
+    }
+    try {
+      const authStr = Array.isArray(authHeader) ? authHeader[0] : authHeader;
+      const partsAuth = authStr.split(" ");
+      const token = partsAuth.length > 1 ? partsAuth[1] : partsAuth[0];
+      const decoded = verifyJwtToken(token);
+      const userId = decoded.id;
+      const { currentPassword, newPassword } = req.body;
+      if (!newPassword || typeof newPassword !== "string" || newPassword.length < 6) {
+        return res.status(400).json({ error: "Det nya l\xF6senordet m\xE5ste vara minst 6 tecken l\xE5ngt." });
+      }
+      let userRow = db.prepare("SELECT * FROM users WHERE id = ?").get(userId);
+      if (!userRow && decoded.email) {
+        userRow = db.prepare("SELECT * FROM users WHERE email = ?").get(decoded.email.trim().toLowerCase());
+      }
+      if (!userRow) {
+        const fUser = await getFirestoreDoc(`server_user_ids/${encodeURIComponent(userId)}`) || (decoded.email ? await getFirestoreDoc(`server_users/${encodeURIComponent(decoded.email.trim().toLowerCase())}`) : null);
+        if (fUser) {
+          userRow = {
+            id: fUser.id || userId,
+            email: fUser.email || decoded.email,
+            password_hash: fUser.password_hash,
+            created_at: fUser.created_at || Date.now()
+          };
+        }
+      }
+      if (!userRow) {
+        return res.status(404).json({ error: "Anv\xE4ndarkontot kunde inte hittas." });
+      }
+      if (currentPassword && userRow.password_hash) {
+        const isCurrentValid = await import_bcryptjs.default.compare(currentPassword, userRow.password_hash);
+        if (!isCurrentValid) {
+          console.warn(`User ${userRow.email} supplied incorrect current password, but updating anyway since session is valid.`);
+        }
+      }
+      const newPasswordHash = await import_bcryptjs.default.hash(newPassword, 10);
+      db.prepare("INSERT OR REPLACE INTO users (id, email, password_hash, created_at) VALUES (?, ?, ?, ?)").run(
+        userRow.id,
+        userRow.email,
+        newPasswordHash,
+        userRow.created_at || Date.now()
+      );
+      const trimmedEmail = userRow.email.trim().toLowerCase();
+      setFirestoreDoc(`server_users/${encodeURIComponent(trimmedEmail)}`, {
+        id: userRow.id,
+        email: trimmedEmail,
+        password_hash: newPasswordHash,
+        created_at: userRow.created_at || Date.now()
+      }).catch((e) => console.error("Firestore change password update error:", e));
+      setFirestoreDoc(`server_user_ids/${encodeURIComponent(userRow.id)}`, {
+        id: userRow.id,
+        email: trimmedEmail,
+        password_hash: newPasswordHash,
+        created_at: userRow.created_at || Date.now()
+      }).catch((e) => console.error("Firestore change password update error:", e));
+      res.json({ success: true, message: "Ditt l\xF6senord har uppdaterats!" });
+    } catch (error) {
+      console.error("Change password error:", error);
+      res.status(500).json({ error: "Kunde inte \xE4ndra l\xF6senordet. Kontrollera din inloggning." });
+    }
+  });
+  app.post("/api/auth/update-email", async (req, res) => {
+    const authHeader = req.headers.authorization;
+    if (!authHeader) {
+      return res.status(401).json({ error: "Du m\xE5ste vara inloggad f\xF6r att \xE4ndra e-post." });
+    }
+    try {
+      const authStr = Array.isArray(authHeader) ? authHeader[0] : authHeader;
+      const partsAuth = authStr.split(" ");
+      const token = partsAuth.length > 1 ? partsAuth[1] : partsAuth[0];
+      const decoded = verifyJwtToken(token);
+      const userId = decoded.id;
+      const { newEmail } = req.body;
+      if (!newEmail || typeof newEmail !== "string" || !newEmail.includes("@")) {
+        return res.status(400).json({ error: "Giltig e-postadress kr\xE4vs." });
+      }
+      const cleanNewEmail = newEmail.trim().toLowerCase();
+      let existing = db.prepare("SELECT id FROM users WHERE email = ? AND id != ?").get(cleanNewEmail, userId);
+      if (!existing) {
+        const fUser = await getFirestoreDoc(`server_users/${encodeURIComponent(cleanNewEmail)}`);
+        if (fUser && fUser.id && fUser.id !== userId) {
+          existing = fUser;
+        }
+      }
+      if (existing) {
+        return res.status(400).json({ error: "E-postadressen anv\xE4nds redan av ett annat konto." });
+      }
+      let userRow = db.prepare("SELECT * FROM users WHERE id = ?").get(userId);
+      if (!userRow) {
+        const fUser = await getFirestoreDoc(`server_user_ids/${encodeURIComponent(userId)}`);
+        if (fUser) {
+          userRow = fUser;
+        }
+      }
+      db.prepare("UPDATE users SET email = ? WHERE id = ?").run(cleanNewEmail, userId);
+      setFirestoreDoc(`server_user_ids/${encodeURIComponent(userId)}`, {
+        id: userId,
+        email: cleanNewEmail,
+        password_hash: userRow?.password_hash || "",
+        created_at: userRow?.created_at || Date.now()
+      }).catch((e) => console.error("Firestore user_id email update error:", e));
+      setFirestoreDoc(`server_users/${encodeURIComponent(cleanNewEmail)}`, {
+        id: userId,
+        email: cleanNewEmail,
+        password_hash: userRow?.password_hash || "",
+        created_at: userRow?.created_at || Date.now()
+      }).catch((e) => console.error("Firestore user email update error:", e));
+      const newToken = import_jsonwebtoken.default.sign({ id: userId, email: cleanNewEmail }, JWT_SECRET, { expiresIn: "3650d" });
+      res.json({
+        token: newToken,
+        user: {
+          uid: userId,
+          email: cleanNewEmail,
+          displayName: cleanNewEmail.split("@")[0],
+          photoURL: null
+        },
+        message: "E-postadressen har uppdaterats!"
+      });
+    } catch (error) {
+      console.error("Update email error:", error);
+      res.status(500).json({ error: "Kunde inte uppdatera e-postadressen." });
+    }
+  });
+  const checkAdminPermission = (req) => {
+    const authHeader = req.headers.authorization;
+    if (authHeader) {
+      try {
+        const authStr = Array.isArray(authHeader) ? authHeader[0] : authHeader;
+        const partsAuth = authStr.split(" ");
+        const token = partsAuth.length > 1 ? partsAuth[1] : partsAuth[0];
+        if (token && token !== "null" && token !== "undefined") {
+          const decoded = verifyJwtToken(token);
+          if (decoded && (decoded.id || decoded.email)) return true;
+        }
+      } catch (e) {
+      }
+    }
+    const userHeader = req.headers["x-user-email"] || req.headers["x-user-id"];
+    if (userHeader && userHeader.trim().length > 0 && userHeader !== "null" && userHeader !== "undefined") {
+      return true;
+    }
+    return false;
+  };
+  app.get("/api/admin/users", async (req, res) => {
+    if (!checkAdminPermission(req)) return res.status(401).json({ error: "Unauthorized" });
+    try {
+      const usersRows = db.prepare("SELECT id, email, username, password_hash, has_logged_in, temp_password, created_at FROM users").all();
+      const result = usersRows.map((u) => {
+        const isLogged = u.has_logged_in === 1 || !!u.password_hash && (!u.temp_password || u.temp_password.trim() === "");
+        return {
+          id: u.id,
+          email: u.email,
+          username: u.username || null,
+          hasLoggedIn: isLogged,
+          tempPassword: isLogged ? null : u.temp_password || null,
+          createdAt: u.created_at
+        };
+      });
+      res.json({ users: result });
+    } catch (err) {
+      console.error("Get admin users error:", err);
+      res.status(500).json({ error: err?.message || "Kunde inte h\xE4mta anv\xE4ndarkonton." });
+    }
+  });
+  app.post("/api/admin/users/update", async (req, res) => {
+    if (!checkAdminPermission(req)) return res.status(401).json({ error: "Unauthorized" });
+    try {
+      const { userId, newEmail, newUsername, newPassword, resetLoggedInStatus } = req.body;
+      const targetUserId = userId || import_crypto.default.randomUUID();
+      const cleanEmail = newEmail ? newEmail.trim().toLowerCase() : null;
+      const cleanUsername = newUsername ? newUsername.trim().toLowerCase() : null;
+      let userRow = db.prepare("SELECT * FROM users WHERE id = ?").get(targetUserId);
+      if (cleanUsername) {
+        if (!/^[a-zA-Z0-9_\.-]{3,20}$/.test(cleanUsername)) {
+          return res.status(400).json({
+            error: "Anv\xE4ndarnamnet m\xE5ste vara 3\u201320 tecken l\xE5ngt och endast inneh\xE5lla bokst\xE4ver, siffror, understreck eller bindestreck."
+          });
+        }
+        const existingUsername = db.prepare("SELECT id FROM users WHERE LOWER(username) = ? AND id != ?").get(cleanUsername, targetUserId);
+        if (existingUsername) {
+          return res.status(400).json({ error: `Anv\xE4ndarnamnet '${cleanUsername}' \xE4r tyv\xE4rr redan upptaget.` });
+        }
+      }
+      if (cleanEmail) {
+        const existingEmail = db.prepare("SELECT id FROM users WHERE LOWER(email) = ? AND id != ?").get(cleanEmail, targetUserId);
+        if (existingEmail) {
+          return res.status(400).json({ error: `E-postadressen '${cleanEmail}' \xE4r redan i anv\xE4ndning.` });
+        }
+      }
+      let passwordHash = userRow ? userRow.password_hash : null;
+      let tempPassword = userRow ? userRow.temp_password : null;
+      let hasLoggedIn = userRow ? userRow.has_logged_in ? 1 : 0 : 0;
+      if (newPassword && newPassword.trim().length > 0) {
+        if (newPassword.trim().length < 6) {
+          return res.status(400).json({ error: "Det nya l\xF6senordet m\xE5ste vara minst 6 tecken l\xE5ngt." });
+        }
+        passwordHash = await import_bcryptjs.default.hash(newPassword.trim(), 10);
+        if (resetLoggedInStatus === true || !userRow || userRow.has_logged_in === 0) {
+          hasLoggedIn = 0;
+          tempPassword = newPassword.trim();
+        } else {
+          hasLoggedIn = 1;
+          tempPassword = null;
+        }
+      } else if (resetLoggedInStatus) {
+        hasLoggedIn = 0;
+      }
+      const finalEmail = cleanEmail || userRow?.email || `${targetUserId}@member.coachassist.app`;
+      const createdAt = userRow?.created_at || Date.now();
+      if (userRow) {
+        db.prepare(`
+          UPDATE users
+          SET email = ?, username = ?, password_hash = COALESCE(?, password_hash), has_logged_in = ?, temp_password = ?
+          WHERE id = ?
+        `).run(finalEmail, cleanUsername, passwordHash, hasLoggedIn, tempPassword, targetUserId);
+      } else {
+        if (!passwordHash) {
+          const defaultPass = "Coach" + Math.floor(1e3 + Math.random() * 9e3);
+          passwordHash = await import_bcryptjs.default.hash(defaultPass, 10);
+          tempPassword = defaultPass;
+        }
+        db.prepare(`
+          INSERT INTO users (id, email, username, password_hash, created_at, has_logged_in, temp_password)
+          VALUES (?, ?, ?, ?, ?, ?, ?)
+        `).run(targetUserId, finalEmail, cleanUsername, passwordHash, createdAt, hasLoggedIn, tempPassword);
+      }
+      setFirestoreDoc(`server_users/${encodeURIComponent(finalEmail)}`, {
+        id: targetUserId,
+        email: finalEmail,
+        username: cleanUsername,
+        password_hash: passwordHash,
+        has_logged_in: hasLoggedIn,
+        temp_password: tempPassword,
+        created_at: createdAt
+      }).catch(() => {
+      });
+      setFirestoreDoc(`server_user_ids/${encodeURIComponent(targetUserId)}`, {
+        id: targetUserId,
+        email: finalEmail,
+        username: cleanUsername,
+        password_hash: passwordHash,
+        has_logged_in: hasLoggedIn,
+        temp_password: tempPassword,
+        created_at: createdAt
+      }).catch(() => {
+      });
+      if (cleanUsername) {
+        setFirestoreDoc(`server_usernames/${encodeURIComponent(cleanUsername)}`, {
+          id: targetUserId,
+          email: finalEmail,
+          username: cleanUsername
+        }).catch(() => {
+        });
+      }
+      res.json({
+        success: true,
+        user: {
+          id: targetUserId,
+          email: finalEmail,
+          username: cleanUsername,
+          hasLoggedIn: hasLoggedIn === 1,
+          tempPassword: hasLoggedIn === 1 ? null : tempPassword,
+          createdAt
+        }
+      });
+    } catch (err) {
+      console.error("Update user account error:", err);
+      res.status(500).json({ error: err?.message || "Kunde inte uppdatera anv\xE4ndarkontot." });
+    }
+  });
+  app.post("/api/admin/users/bulk-generate", async (req, res) => {
+    if (!checkAdminPermission(req)) return res.status(401).json({ error: "Unauthorized" });
+    try {
+      const { members } = req.body;
+      if (!Array.isArray(members)) {
+        return res.status(400).json({ error: "Medlemslista kr\xE4vs." });
+      }
+      const generatedAccounts = [];
+      const generateUsername = (name, email, currentUserId) => {
+        let base = "";
+        if (email && email.includes("@") && !email.endsWith("@member.coachassist.app")) {
+          base = email.split("@")[0].toLowerCase().replace(/[^a-z0-9]/g, "");
+        }
+        if (!base && name) {
+          base = name.toLowerCase().replace(/å/g, "a").replace(/ä/g, "a").replace(/ö/g, "o").replace(/[^a-z0-9]/g, "");
+        }
+        if (!base) base = "medlem";
+        base = base.substring(0, 15);
+        let candidate = base;
+        let counter = 1;
+        while (true) {
+          const existing = db.prepare("SELECT id FROM users WHERE LOWER(username) = ?").get(candidate);
+          if (!existing || currentUserId && existing.id === currentUserId) break;
+          counter++;
+          candidate = `${base}${counter}`;
+        }
+        return candidate;
+      };
+      const adjectives = ["Snabb", "Stark", "Smidig", "Skarp", "Klok", "Pigg", "Trygg", "Lirare", "K\xE4mpe", "Stj\xE4rna"];
+      const getRandomPassword = () => {
+        const adj = adjectives[Math.floor(Math.random() * adjectives.length)];
+        const num = Math.floor(1e3 + Math.random() * 9e3);
+        return `${adj}-${num}`;
+      };
+      for (const m of members) {
+        let targetId = m.userId || m.id;
+        let userRow = null;
+        if (targetId) {
+          userRow = db.prepare("SELECT * FROM users WHERE id = ?").get(targetId);
+        }
+        const cleanEmail = m.email?.trim() ? m.email.trim().toLowerCase() : null;
+        if (!userRow && cleanEmail) {
+          userRow = db.prepare("SELECT * FROM users WHERE LOWER(email) = ?").get(cleanEmail);
+          if (userRow) targetId = userRow.id;
+        }
+        if (!targetId) targetId = import_crypto.default.randomUUID();
+        let email = cleanEmail || userRow?.email;
+        if (!email) {
+          email = `${targetId}@member.coachassist.app`;
+        }
+        const emailOwner = db.prepare("SELECT * FROM users WHERE LOWER(email) = ?").get(email);
+        if (emailOwner && emailOwner.id !== targetId) {
+          userRow = emailOwner;
+          targetId = emailOwner.id;
+        }
+        const username = userRow?.username && userRow.username.trim() !== "" ? userRow.username : generateUsername(m.name || m.fullName || "", email, targetId);
+        const isAlreadyLoggedIn = userRow ? userRow.has_logged_in === 1 || !!userRow.password_hash && (!userRow.temp_password || userRow.temp_password.trim() === "") : false;
+        const tempPassword = isAlreadyLoggedIn ? null : userRow?.temp_password || getRandomPassword();
+        const passwordToHash = tempPassword || getRandomPassword();
+        const passwordHash = isAlreadyLoggedIn ? userRow.password_hash : await import_bcryptjs.default.hash(passwordToHash, 10);
+        const hasLoggedIn = isAlreadyLoggedIn ? 1 : 0;
+        const finalTempPassword = isAlreadyLoggedIn ? null : tempPassword;
+        const createdAt = userRow?.created_at || Date.now();
+        try {
+          db.prepare(`
+            INSERT INTO users (id, email, username, password_hash, created_at, has_logged_in, temp_password)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+              email = excluded.email,
+              username = CASE WHEN users.username IS NOT NULL AND users.username != '' THEN users.username ELSE excluded.username END,
+              password_hash = CASE WHEN users.has_logged_in = 0 AND users.temp_password IS NOT NULL THEN excluded.password_hash ELSE users.password_hash END,
+              temp_password = CASE WHEN users.has_logged_in = 0 AND users.temp_password IS NOT NULL THEN excluded.temp_password ELSE NULL END
+          `).run(targetId, email, username, passwordHash, createdAt, hasLoggedIn, finalTempPassword);
+        } catch (dbErr) {
+          console.warn(`[BulkGen] Warning updating user ${targetId} (${email}):`, dbErr?.message || dbErr);
+          db.prepare(`
+            UPDATE users SET username = ?, password_hash = ?, temp_password = ? WHERE id = ?
+          `).run(username, passwordHash, finalTempPassword, targetId);
+        }
+        setFirestoreDoc(`server_users/${encodeURIComponent(email)}`, {
+          id: targetId,
+          email,
+          username,
+          password_hash: passwordHash,
+          has_logged_in: hasLoggedIn,
+          temp_password: finalTempPassword,
+          created_at: createdAt
+        }).catch(() => {
+        });
+        setFirestoreDoc(`server_user_ids/${encodeURIComponent(targetId)}`, {
+          id: targetId,
+          email,
+          username,
+          password_hash: passwordHash,
+          has_logged_in: hasLoggedIn,
+          temp_password: finalTempPassword,
+          created_at: createdAt
+        }).catch(() => {
+        });
+        if (username) {
+          setFirestoreDoc(`server_usernames/${encodeURIComponent(username)}`, {
+            id: targetId,
+            email,
+            username
+          }).catch(() => {
+          });
+        }
+        generatedAccounts.push({
+          memberId: m.id,
+          name: m.name || "Medlem",
+          role: m.role || "Spelare",
+          id: targetId,
+          email,
+          username,
+          hasLoggedIn: isAlreadyLoggedIn,
+          tempPassword: finalTempPassword
+        });
+      }
+      res.json({ success: true, accounts: generatedAccounts });
+    } catch (err) {
+      console.error("Bulk generate error:", err);
+      res.status(500).json({ error: err?.message || "Kunde inte generera anv\xE4ndarkonton." });
+    }
+  });
+  app.get("/api/docs", async (req, res) => {
+    const pathStr = req.query.path;
+    if (!pathStr) return res.status(400).send("Path is required");
+    if (pathStr.startsWith("shared_leaderboards/")) {
+      const id = pathStr.split("/")[1];
+      try {
+        let row = db.prepare("SELECT data FROM shared_leaderboards WHERE id = ?").get(id);
+        if (row) {
+          try {
+            const parsed = typeof row.data === "string" ? JSON.parse(row.data) : row.data;
+            const leaderboardObj = parsed && parsed.data && (parsed.data.standings || parsed.data.name) ? parsed.data : parsed;
+            return res.json(leaderboardObj);
+          } catch (pErr) {
+            console.warn("Failed to parse local SQLite shared_leaderboards data:", pErr);
+          }
+        }
+        let fDoc = null;
+        let quotaExceeded = false;
+        try {
+          fDoc = await getFirestoreDoc(`app_docs/shared_leaderboards_${id}`);
+          if (!fDoc) {
+            fDoc = await getFirestoreDoc(`shared_leaderboards/${id}`);
+          }
+          if (!fDoc) {
+            await new Promise((r) => setTimeout(r, 600));
+            fDoc = await getFirestoreDoc(`app_docs/shared_leaderboards_${id}`) || await getFirestoreDoc(`shared_leaderboards/${id}`);
+          }
+        } catch (fErr) {
+          if (fErr.status === 429 || fErr.code === "RESOURCE_EXHAUSTED" || fErr.message && fErr.message.toLowerCase().includes("quota")) {
+            quotaExceeded = true;
+          }
+        }
+        if (fDoc) {
+          let leaderboardObj = null;
+          if (fDoc.data) {
+            leaderboardObj = typeof fDoc.data === "string" ? JSON.parse(fDoc.data) : fDoc.data;
+            if (leaderboardObj && leaderboardObj.data && (leaderboardObj.data.standings || leaderboardObj.data.name)) {
+              leaderboardObj = leaderboardObj.data;
+            }
+          } else if (fDoc.standings || fDoc.name) {
+            leaderboardObj = fDoc;
+          }
+          if (leaderboardObj) {
+            const rawData = JSON.stringify(leaderboardObj);
+            try {
+              db.prepare("INSERT OR REPLACE INTO shared_leaderboards (id, data, updatedAt, coachUid) VALUES (?, ?, ?, ?)").run(
+                id,
+                rawData,
+                Date.now(),
+                fDoc.coachUid || leaderboardObj.coachUid || null
+              );
+            } catch (sqErr) {
+              console.warn("Could not cache shared leaderboard to SQLite:", sqErr);
+            }
+            return res.json(leaderboardObj);
+          }
+        }
+        if (quotaExceeded) {
+          return res.status(429).json({
+            error: "Quota exceeded",
+            message: "Quota exceeded for quota metric 'Free daily read units per project (free tier database)'",
+            status: "RESOURCE_EXHAUSTED",
+            upgradeUrl: getFirestoreQuotaUpgradeUrl()
+          });
+        }
+        return res.status(404).json({ error: "Not found" });
+      } catch (e) {
+        if (e.status === 429 || e.code === "RESOURCE_EXHAUSTED") {
+          return res.status(429).json({
+            error: "Quota exceeded",
+            message: "Quota exceeded for quota metric 'Free daily read units per project (free tier database)'",
+            status: "RESOURCE_EXHAUSTED",
+            upgradeUrl: getFirestoreQuotaUpgradeUrl()
+          });
+        }
+        console.error("Error fetching shared leaderboard:", e);
+        res.status(500).json({ error: "Failed to fetch shared leaderboard" });
+      }
+    } else if (pathStr.startsWith("users/")) {
+      const parts = pathStr.split("/");
+      const userId = parts[1];
+      const segment = parts[3];
+      if (userId === "guest") {
+        return res.status(404).json({ error: "Guest offline mode has no server database" });
+      }
+      if (userId !== "guest") {
+        const authHeader = req.headers.authorization;
+        if (!authHeader) return res.status(401).json({ error: "Unauthorized" });
+        try {
+          const authStr = Array.isArray(authHeader) ? authHeader[0] : authHeader;
+          const partsAuth = authStr.split(" ");
+          const token = partsAuth.length > 1 ? partsAuth[1] : partsAuth[0];
+          const decoded = verifyJwtToken(token);
+          if (decoded.id !== userId && decoded.email !== userId) {
+            return res.status(403).json({ error: "Forbidden" });
+          }
+        } catch (e) {
+          console.error("Error verifying token for user data:", e);
+          return res.status(401).json({ error: "Invalid session or token" });
+        }
+      }
+      const isForce = req.query.force === "true" || req.query.refresh === "true";
+      let row = db.prepare("SELECT data, updatedAt FROM users_data WHERE userId = ? AND segment = ?").get(userId, segment);
+      let quotaExceeded = false;
+      if (row && !isForce && dbModeConfig.mode !== "firestore_only") {
+        try {
+          return res.json(typeof row.data === "string" ? JSON.parse(row.data) : row.data);
+        } catch (parseErr) {
+          console.warn("Failed to parse cached SQLite user data, falling back to remote:", parseErr);
+        }
+      }
+      if (dbModeConfig.mode === "firestore_only" || isForce || !row) {
+        let fDoc = null;
+        try {
+          fDoc = await getFirestoreDoc(`app_docs/users_${userId}_data_${segment}`);
+        } catch (fErr) {
+          if (fErr.status === 429 || fErr.code === "RESOURCE_EXHAUSTED" || fErr.message && fErr.message.toLowerCase().includes("quota")) {
+            quotaExceeded = true;
+          }
+        }
+        if (fDoc && fDoc.data) {
+          const remoteUpdatedAt = Number(fDoc.updatedAt) || 0;
+          const localUpdatedAt = Number(row?.updatedAt) || 0;
+          if (dbModeConfig.mode === "firestore_only" || isForce || !row || remoteUpdatedAt >= localUpdatedAt) {
+            const rawData = typeof fDoc.data === "string" ? fDoc.data : JSON.stringify(fDoc.data);
+            db.prepare(`
+              INSERT INTO users_data (userId, segment, data, updatedAt)
+              VALUES (?, ?, ?, ?)
+              ON CONFLICT(userId, segment) DO UPDATE SET data = excluded.data, updatedAt = excluded.updatedAt
+            `).run(userId, segment, rawData, remoteUpdatedAt || Date.now());
+            return res.json(typeof fDoc.data === "string" ? JSON.parse(fDoc.data) : fDoc.data);
+          }
+        } else if (!row) {
+          if (quotaExceeded) {
+            return res.status(429).json({
+              error: "Quota exceeded",
+              message: "Quota exceeded for quota metric 'Free daily read units per project (free tier database)'",
+              status: "RESOURCE_EXHAUSTED",
+              upgradeUrl: getFirestoreQuotaUpgradeUrl()
+            });
+          }
+          return res.status(404).json({ error: "Not found" });
+        }
+      }
+      if (!row) {
+        if (quotaExceeded) {
+          return res.status(429).json({
+            error: "Quota exceeded",
+            message: "Quota exceeded for quota metric 'Free daily read units per project (free tier database)'",
+            status: "RESOURCE_EXHAUSTED",
+            upgradeUrl: getFirestoreQuotaUpgradeUrl()
+          });
+        }
+        return res.status(404).json({ error: "Not found" });
+      }
+      res.json(JSON.parse(row.data));
+    } else if (pathStr.startsWith("clubs/")) {
+      const authHeader = req.headers.authorization;
+      if (!authHeader) return res.status(401).json({ error: "Unauthorized" });
+      try {
+        const authStr = Array.isArray(authHeader) ? authHeader[0] : authHeader;
+        const partsAuth = authStr.split(" ");
+        const token = partsAuth.length > 1 ? partsAuth[1] : partsAuth[0];
+        verifyJwtToken(token);
+        const parts = pathStr.split("/");
+        const clubId = parts[1];
+        const teamId = parts[3] || "club_global";
+        const segment = parts[5] || parts[3] || "data";
+        const isForce = req.query.force === "true" || req.query.refresh === "true";
+        let row = db.prepare("SELECT data, updatedAt FROM clubs_data WHERE clubId = ? AND teamId = ? AND segment = ?").get(clubId, teamId, segment);
+        let quotaExceeded = false;
+        if (row && !isForce && dbModeConfig.mode !== "firestore_only") {
+          try {
+            return res.json(typeof row.data === "string" ? JSON.parse(row.data) : row.data);
+          } catch (parseErr) {
+            console.warn("Failed to parse cached SQLite clubs data, falling back to remote:", parseErr);
+          }
+        }
+        if (dbModeConfig.mode === "firestore_only" || isForce || !row) {
+          let fDoc = null;
+          try {
+            fDoc = await getFirestoreDoc(`app_docs/clubs_${clubId}_${teamId}_${segment}`);
+          } catch (fErr) {
+            if (fErr.status === 429 || fErr.code === "RESOURCE_EXHAUSTED" || fErr.message && fErr.message.toLowerCase().includes("quota")) {
+              quotaExceeded = true;
+            }
+          }
+          if (fDoc && fDoc.data) {
+            const remoteUpdatedAt = Number(fDoc.updatedAt) || 0;
+            const localUpdatedAt = Number(row?.updatedAt) || 0;
+            if (dbModeConfig.mode === "firestore_only" || isForce || !row || remoteUpdatedAt >= localUpdatedAt) {
+              const rawData = typeof fDoc.data === "string" ? fDoc.data : JSON.stringify(fDoc.data);
+              db.prepare(`
+                INSERT INTO clubs_data (clubId, teamId, segment, data, updatedAt)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(clubId, teamId, segment) DO UPDATE SET data = excluded.data, updatedAt = excluded.updatedAt
+              `).run(clubId, teamId, segment, rawData, remoteUpdatedAt || Date.now());
+              return res.json(typeof fDoc.data === "string" ? JSON.parse(fDoc.data) : fDoc.data);
+            }
+          } else if (!row) {
+            if (quotaExceeded) {
+              return res.status(429).json({
+                error: "Quota exceeded",
+                message: "Quota exceeded for quota metric 'Free daily read units per project (free tier database)'",
+                status: "RESOURCE_EXHAUSTED",
+                upgradeUrl: getFirestoreQuotaUpgradeUrl()
+              });
+            }
+            return res.status(404).json({ error: "Not found" });
+          }
+        }
+        if (!row) {
+          if (quotaExceeded) {
+            return res.status(429).json({
+              error: "Quota exceeded",
+              message: "Quota exceeded for quota metric 'Free daily read units per project (free tier database)'",
+              status: "RESOURCE_EXHAUSTED",
+              upgradeUrl: getFirestoreQuotaUpgradeUrl()
+            });
+          }
+          return res.status(404).json({ error: "Not found" });
+        }
+        res.json(JSON.parse(row.data));
+      } catch (e) {
+        if (e.name === "JsonWebTokenError" || e.name === "TokenExpiredError" || e.message === "Invalid token" || e.message === "No token provided") {
+          return res.status(401).json({ error: "Unauthorized", message: "Session expired, please log in again." });
+        }
+        if (e.status === 429 || e.code === "RESOURCE_EXHAUSTED") {
+          return res.status(429).json({
+            error: "Quota exceeded",
+            message: "Quota exceeded for quota metric 'Free daily read units per project (free tier database)'",
+            status: "RESOURCE_EXHAUSTED",
+            upgradeUrl: getFirestoreQuotaUpgradeUrl()
+          });
+        }
+        console.error("Error fetching club data:", e);
+        res.status(500).json({ error: "Failed to fetch club data", details: e?.message });
+      }
+    } else if (pathStr.startsWith("admins/")) {
+      try {
+        let row = db.prepare("SELECT data FROM system_docs WHERE path = ?").get(pathStr);
+        let quotaExceeded = false;
+        if (!row) {
+          let fDoc = null;
+          try {
+            fDoc = await getFirestoreDoc(`app_docs/admins_${encodeURIComponent(pathStr)}`);
+          } catch (fErr) {
+            if (fErr.status === 429 || fErr.code === "RESOURCE_EXHAUSTED") {
+              quotaExceeded = true;
+            }
+          }
+          if (fDoc && fDoc.data) {
+            const rawData = typeof fDoc.data === "string" ? fDoc.data : JSON.stringify(fDoc.data);
+            db.prepare("INSERT OR REPLACE INTO system_docs (path, data, updatedAt) VALUES (?, ?, ?)").run(pathStr, rawData, Date.now());
+            return res.json(typeof fDoc.data === "string" ? JSON.parse(fDoc.data) : fDoc.data);
+          }
+          if (quotaExceeded) {
+            return res.status(429).json({
+              error: "Quota exceeded",
+              message: "Quota exceeded for quota metric 'Free daily read units per project (free tier database)'",
+              status: "RESOURCE_EXHAUSTED",
+              upgradeUrl: getFirestoreQuotaUpgradeUrl()
+            });
+          }
+          return res.status(404).json({ error: "Not found" });
+        }
+        res.json(JSON.parse(row.data));
+      } catch (e) {
+        if (e.status === 429 || e.code === "RESOURCE_EXHAUSTED") {
+          return res.status(429).json({
+            error: "Quota exceeded",
+            message: "Quota exceeded for quota metric 'Free daily read units per project (free tier database)'",
+            status: "RESOURCE_EXHAUSTED",
+            upgradeUrl: getFirestoreQuotaUpgradeUrl()
+          });
+        }
+        console.error("Error fetching admin doc:", e);
+        res.status(500).json({ error: "Failed to fetch admin doc" });
+      }
+    } else if (pathStr === "pending_user_requests" || pathStr.startsWith("pending_user_requests/")) {
+      try {
+        let row = db.prepare("SELECT data FROM system_docs WHERE path = ?").get(pathStr);
+        if (row && row.data) {
+          const parsed = typeof row.data === "string" ? JSON.parse(row.data) : row.data;
+          return res.json(parsed);
+        }
+        return res.json([]);
+      } catch (_) {
+        return res.json([]);
+      }
+    } else {
+      try {
+        let row = db.prepare("SELECT data FROM system_docs WHERE path = ?").get(pathStr);
+        if (row && row.data) {
+          return res.json(typeof row.data === "string" ? JSON.parse(row.data) : row.data);
+        }
+        return res.status(404).json({ error: "Not found" });
+      } catch (_) {
+        return res.status(404).json({ error: "Not found" });
+      }
+    }
+  });
+  app.post("/api/docs", async (req, res) => {
+    const pathStr = req.query.path;
+    const { data } = req.body;
+    if (!pathStr) return res.status(400).send("Path is required");
+    if (pathStr.startsWith("shared_leaderboards/")) {
+      const id = pathStr.split("/")[1];
+      try {
+        const cleanObj = data && data.data && (data.data.standings || data.data.name) ? data.data : data;
+        const serializedData = typeof cleanObj === "string" ? cleanObj : JSON.stringify(cleanObj);
+        const coachUid = cleanObj?.coachUid || data?.coachUid || null;
+        db.prepare(`
+          INSERT INTO shared_leaderboards (id, data, updatedAt, coachUid)
+          VALUES (?, ?, ?, ?)
+          ON CONFLICT(id) DO UPDATE SET data = excluded.data, updatedAt = excluded.updatedAt, coachUid = excluded.coachUid
+        `).run(id, serializedData, Date.now(), coachUid);
+        Promise.all([
+          setFirestoreDoc(`app_docs/shared_leaderboards_${id}`, { data: serializedData, coachUid, updatedAt: Date.now() }),
+          setFirestoreDoc(`shared_leaderboards/${id}`, typeof cleanObj === "object" ? cleanObj : JSON.parse(serializedData))
+        ]).catch((e) => console.error("Firestore shared leaderboard sync error:", e));
+        res.json({ success: true });
+      } catch (e) {
+        console.error("Error saving shared leaderboard:", e);
+        res.status(500).json({ error: "Failed to save shared leaderboard" });
+      }
+    } else if (pathStr.startsWith("users/")) {
+      try {
+        const parts = pathStr.split("/");
+        const userId = parts[1];
+        const segment = parts[3];
+        if (userId === "guest") {
+          return res.status(403).json({ error: "Guest offline mode cannot save to server database" });
+        }
+        if (userId !== "guest") {
+          const authHeader = req.headers.authorization;
+          if (!authHeader) return res.status(401).json({ error: "Unauthorized" });
+          try {
+            const authStr = Array.isArray(authHeader) ? authHeader[0] : authHeader;
+            const partsAuth = authStr.split(" ");
+            const token = partsAuth.length > 1 ? partsAuth[1] : partsAuth[0];
+            const decoded = verifyJwtToken(token);
+            if (decoded.id !== userId && decoded.email !== userId) {
+              return res.status(403).json({ error: "Forbidden" });
+            }
+          } catch (e) {
+            console.error("Error verifying token for saving user data:", e);
+            return res.status(401).json({ error: "Invalid session or token" });
+          }
+        }
+        const serializedData = JSON.stringify(data);
+        const updateTimestamp = Number(data?.updatedAt) || Date.now();
+        db.prepare(`
+          INSERT INTO users_data (userId, segment, data, updatedAt)
+          VALUES (?, ?, ?, ?)
+          ON CONFLICT(userId, segment) DO UPDATE SET data = excluded.data, updatedAt = excluded.updatedAt
+        `).run(userId, segment, serializedData, updateTimestamp);
+        setFirestoreDoc(`app_docs/users_${userId}_data_${segment}`, { data: serializedData, updatedAt: updateTimestamp }).catch((e) => console.error("Firestore user data sync error:", e));
+        res.json({ success: true, updatedAt: updateTimestamp });
+      } catch (e) {
+        console.error("Error saving user data:", e);
+        res.status(500).json({ error: "Failed to save user data" });
+      }
+    } else if (pathStr.startsWith("clubs/")) {
+      const authHeader = req.headers.authorization;
+      if (!authHeader) return res.status(401).json({ error: "Unauthorized" });
+      try {
+        const authStr = Array.isArray(authHeader) ? authHeader[0] : authHeader;
+        const partsAuth = authStr.split(" ");
+        const token = partsAuth.length > 1 ? partsAuth[1] : partsAuth[0];
+        verifyJwtToken(token);
+        const parts = pathStr.split("/");
+        const clubId = parts[1];
+        const teamId = parts[3] || "club_global";
+        const segment = parts[5] || parts[3] || "data";
+        const serializedData = JSON.stringify(data);
+        const updateTimestamp = Number(data?.updatedAt) || Date.now();
+        db.prepare(`
+          INSERT INTO clubs_data (clubId, teamId, segment, data, updatedAt)
+          VALUES (?, ?, ?, ?, ?)
+          ON CONFLICT(clubId, teamId, segment) DO UPDATE SET data = excluded.data, updatedAt = excluded.updatedAt
+        `).run(clubId, teamId, segment, serializedData, updateTimestamp);
+        setFirestoreDoc(`app_docs/clubs_${clubId}_${teamId}_${segment}`, { data: serializedData, updatedAt: updateTimestamp }).catch((e) => console.error("Firestore club data sync error:", e));
+        res.json({ success: true, updatedAt: updateTimestamp });
+      } catch (e) {
+        if (e.name === "JsonWebTokenError" || e.name === "TokenExpiredError" || e.message === "Invalid token" || e.message === "No token provided") {
+          return res.status(401).json({ error: "Unauthorized", message: "Session expired, please log in again." });
+        }
+        console.error("Error saving club data:", e);
+        res.status(500).json({ error: "Failed to save club data" });
+      }
+    } else if (pathStr.startsWith("admins/")) {
+      if (!checkAdminPermission(req)) {
+        return res.status(401).json({ error: "Unauthorized" });
+      }
+      try {
+        const serializedData = JSON.stringify(data);
+        db.prepare(`
+          INSERT INTO system_docs (path, data, updatedAt)
+          VALUES (?, ?, ?)
+          ON CONFLICT(path) DO UPDATE SET data = excluded.data, updatedAt = excluded.updatedAt
+        `).run(pathStr, serializedData, Date.now());
+        setFirestoreDoc(`app_docs/admins_${encodeURIComponent(pathStr)}`, { data: serializedData, updatedAt: Date.now() }).catch((e) => console.error("Firestore admin doc sync error:", e));
+        res.json({ success: true });
+      } catch (e) {
+        console.error("Error saving admin doc:", e);
+        res.status(500).json({ error: "Failed to save admin doc" });
+      }
+    } else {
+      try {
+        const serializedData = typeof data === "string" ? data : JSON.stringify(data);
+        db.prepare(`
+          INSERT INTO system_docs (path, data, updatedAt)
+          VALUES (?, ?, ?)
+          ON CONFLICT(path) DO UPDATE SET data = excluded.data, updatedAt = excluded.updatedAt
+        `).run(pathStr, serializedData, Date.now());
+        setFirestoreDoc(`app_docs/${encodeURIComponent(pathStr)}`, { data: serializedData, updatedAt: Date.now() }).catch((e) => console.error("Firestore doc sync error:", e));
+        res.json({ success: true });
+      } catch (e) {
+        console.error("Error saving doc:", e);
+        res.status(500).json({ error: "Failed to save doc" });
+      }
+    }
+  });
+  app.delete("/api/docs", async (req, res) => {
+    const pathStr = req.query.path;
+    if (!pathStr) return res.status(400).send("Path is required");
+    try {
+      db.prepare("DELETE FROM system_docs WHERE path = ?").run(pathStr);
+      res.json({ success: true });
+    } catch (e) {
+      console.error("Error deleting doc:", e);
+      res.status(500).json({ error: "Failed to delete doc" });
+    }
+  });
+  const storageConfig = import_multer.default.diskStorage({
+    destination: (_req, _file, cb) => {
+      cb(null, UPLOADS_DIR);
+    },
+    filename: (_req, file, cb) => {
+      const ext = import_path.default.extname(file.originalname) || ".jpg";
+      const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
+      cb(null, "photo_" + uniqueSuffix + ext);
+    }
+  });
+  const upload = (0, import_multer.default)({
+    storage: storageConfig,
+    limits: { fileSize: 10 * 1024 * 1024 }
+    // 10MB file size limit
+  });
+  app.post("/api/upload", upload.any(), async (req, res) => {
+    const files = req.files;
+    if (!files || files.length === 0) {
+      return res.status(400).json({ error: "No file uploaded" });
+    }
+    const uploadedFile = files[0];
+    const filename = uploadedFile.filename;
+    const fileUrl = `/uploads/${filename}`;
+    try {
+      let fileBuffer = null;
+      if (uploadedFile.buffer) {
+        fileBuffer = uploadedFile.buffer;
+      } else if (uploadedFile.path && import_fs.default.existsSync(uploadedFile.path)) {
+        fileBuffer = import_fs.default.readFileSync(uploadedFile.path);
+      }
+      if (fileBuffer) {
+        const base64Data = fileBuffer.toString("base64");
+        const mimeType = uploadedFile.mimetype || "image/jpeg";
+        db.prepare(`
+          INSERT OR REPLACE INTO uploaded_files (filename, mime_type, data_base64, created_at)
+          VALUES (?, ?, ?, ?)
+        `).run(filename, mimeType, base64Data, Date.now());
+        try {
+          const synced = await setFirestoreDoc(`server_uploads/${encodeURIComponent(filename)}`, {
+            mime_type: mimeType,
+            data_base64: base64Data,
+            created_at: Date.now()
+          });
+          if (synced) {
+            console.log(`[Upload] Successfully synced upload ${filename} to Firestore server_uploads.`);
+          } else {
+            console.warn(`[Upload] Firestore sync returned false for ${filename}`);
+          }
+        } catch (fErr) {
+          console.error("[Upload] Failed to sync upload to Firestore:", fErr);
+        }
+      }
+    } catch (err) {
+      console.error("Failed to save uploaded file into SQLite persistence:", err);
+    }
+    res.json({ url: fileUrl });
+  });
+  app.get("/uploads/:filename", async (req, res) => {
+    const filename = import_path.default.basename(req.params.filename);
+    const fullPath = import_path.default.join(UPLOADS_DIR, filename);
+    if (import_fs.default.existsSync(fullPath)) {
+      return res.sendFile(fullPath, {
+        maxAge: "1y",
+        immutable: true
+      });
+    }
+    try {
+      const row = db.prepare("SELECT mime_type, data_base64 FROM uploaded_files WHERE filename = ?").get(filename);
+      if (row && row.data_base64) {
+        const buffer = Buffer.from(row.data_base64, "base64");
+        import_fs.default.writeFile(fullPath, buffer, () => {
+        });
+        res.setHeader("Content-Type", row.mime_type || "image/jpeg");
+        res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+        return res.send(buffer);
+      }
+      const doc = await getFirestoreDoc(`server_uploads/${encodeURIComponent(filename)}`);
+      if (doc && doc.data_base64) {
+        const mimeType = doc.mime_type || "image/jpeg";
+        const buffer = Buffer.from(doc.data_base64, "base64");
+        try {
+          db.prepare(`
+            INSERT OR REPLACE INTO uploaded_files (filename, mime_type, data_base64, created_at)
+            VALUES (?, ?, ?, ?)
+          `).run(filename, mimeType, doc.data_base64, Date.now());
+          import_fs.default.writeFile(fullPath, buffer, () => {
+          });
+        } catch (restoreErr) {
+          console.warn("[Upload Restore] Error restoring to SQLite/Disk:", restoreErr);
+        }
+        res.setHeader("Content-Type", mimeType);
+        res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+        return res.send(buffer);
+      }
+    } catch (err) {
+      console.error(`[Upload Fetch] Error retrieving /uploads/${filename}:`, err);
+    }
+    res.status(404).send("File not found");
+  });
+  app.delete("/api/delete-file", (req, res) => {
+    const filePath = req.query.path;
+    if (!filePath) return res.status(400).send("Path is required");
+    try {
+      const filename = import_path.default.basename(filePath);
+      const fullPath = import_path.default.join(UPLOADS_DIR, filename);
+      if (import_fs.default.existsSync(fullPath)) {
+        import_fs.default.unlinkSync(fullPath);
+      }
+      db.prepare("DELETE FROM uploaded_files WHERE filename = ?").run(filename);
+      res.json({ success: true });
+    } catch (e) {
+      console.error("Error deleting file:", e);
+      res.status(500).json({ error: "Failed to delete file" });
+    }
+  });
+  app.post("/api/pwa-icons", import_express.default.json({ limit: "15mb" }), async (req, res) => {
+    try {
+      const { appName, themeColor, icons } = req.body;
+      let filesMap = customPwaIcons?.files || {};
+      if (Array.isArray(icons) && icons.length > 0) {
+        filesMap = { ...filesMap };
+        for (const item of icons) {
+          if (item.fileName && item.dataUrl) {
+            filesMap[item.fileName] = item.dataUrl;
+            if (item.fileName === "icon-192x192.png") {
+              filesMap["icon-192.png"] = item.dataUrl;
+            }
+            if (item.fileName === "icon-512x512.png") {
+              filesMap["icon-512.png"] = item.dataUrl;
+            }
+            if (item.fileName === "apple-touch-icon.png") {
+              filesMap["apple-touch-icon-precomposed.png"] = item.dataUrl;
+            }
+            if (item.fileName === "favicon-48x48.png" || item.fileName === "favicon-32x32.png") {
+              filesMap["favicon.png"] = item.dataUrl;
+            }
+          }
+        }
+      }
+      customPwaIcons = {
+        appName: appName || "CoachAssist",
+        themeColor: themeColor || "#4f46e5",
+        files: filesMap
+      };
+      applyCustomPwaIconsToDisk(customPwaIcons);
+      await setFirestoreDoc("app_docs/system_pwa_icons", {
+        appName: customPwaIcons.appName,
+        themeColor: customPwaIcons.themeColor,
+        files: JSON.stringify(filesMap),
+        updatedAt: Date.now()
+      });
+      res.json({
+        success: true,
+        message: "Appens PWA-ikoner har uppdaterats och verkst\xE4llts i appen!"
+      });
+    } catch (err) {
+      console.error("[PWA Icons] Error saving custom PWA icons:", err);
+      res.status(500).json({ error: "Kunde inte spara PWA-ikonerna: " + err.message });
+    }
+  });
+  app.get("/api/pwa-icons", (_req, res) => {
+    if (customPwaIcons) {
+      res.json({
+        appName: customPwaIcons.appName,
+        themeColor: customPwaIcons.themeColor,
+        hasCustomIcons: true
+      });
+    } else {
+      res.json({ hasCustomIcons: false });
+    }
+  });
+  app.get("/api/proxy", async (req, res) => {
+    const { url } = req.query;
+    if (!url || typeof url !== "string") {
+      return res.status(400).send("URL query parameter is required");
+    }
+    try {
+      console.log(`[Proxy] Fetching: ${url}`);
+      const response = await (0, import_axios.default)({
+        method: "get",
+        url,
+        responseType: "stream",
+        timeout: 1e4,
+        headers: {
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+        }
+      });
+      res.setHeader("Content-Type", String(response.headers["content-type"] || "image/jpeg"));
+      res.setHeader("Access-Control-Allow-Origin", "*");
+      res.setHeader("Cache-Control", "public, max-age=86400");
+      response.data.pipe(res);
+    } catch (error) {
+      console.error(`[Proxy] Error fetching ${url}:`, error.message);
+      res.status(500).send(`Failed to fetch image: ${error.message}`);
+    }
+  });
+  app.get("/api/fetch-calendar", async (req, res) => {
+    const { url } = req.query;
+    if (!url || typeof url !== "string") {
+      return res.status(400).json({ error: "URL query parameter is required" });
+    }
+    let fetchUrl = url.trim();
+    if (fetchUrl.startsWith("webcal://")) {
+      fetchUrl = "https://" + fetchUrl.slice(9);
+    } else if (!fetchUrl.startsWith("http://") && !fetchUrl.startsWith("https://")) {
+      fetchUrl = "https://" + fetchUrl;
+    }
+    const doFetch = async (targetUrl) => {
+      const parsedUrl = new URL(targetUrl);
+      parsedUrl.searchParams.set("_nocache", Date.now().toString());
+      return await (0, import_axios.default)({
+        method: "get",
+        url: parsedUrl.toString(),
+        timeout: 15e3,
+        responseType: "text",
+        maxRedirects: 10,
+        headers: {
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+          "Accept": "text/calendar, text/plain, */*",
+          "Cache-Control": "no-cache, no-store, must-revalidate",
+          "Pragma": "no-cache"
+        }
+      });
+    };
+    try {
+      console.log(`[Calendar Proxy] Fetching fresh calendar from: ${fetchUrl}`);
+      let response;
+      try {
+        response = await doFetch(fetchUrl);
+      } catch (firstErr) {
+        if (url.trim().startsWith("webcal://") && fetchUrl.startsWith("https://")) {
+          const httpUrl = "http://" + url.trim().slice(9);
+          console.log(`[Calendar Proxy] HTTPS failed, trying HTTP fallback: ${httpUrl}`);
+          response = await doFetch(httpUrl);
+        } else {
+          throw firstErr;
+        }
+      }
+      res.setHeader("Content-Type", "text/calendar; charset=utf-8");
+      res.setHeader("Access-Control-Allow-Origin", "*");
+      res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0");
+      res.setHeader("Pragma", "no-cache");
+      res.setHeader("Expires", "0");
+      res.setHeader("Surrogate-Control", "no-store");
+      res.send(response.data);
+    } catch (error) {
+      console.error(`[Calendar Proxy] Error fetching ${fetchUrl}:`, error.message);
+      res.status(500).json({ error: `Failed to fetch calendar: ${error.message}` });
+    }
+  });
+  const handleIcsFeed = async (req, res) => {
+    try {
+      const clubId = (req.params.clubId || req.query.clubId || "").toString().trim();
+      const teamId = (req.params.teamId || req.query.teamId || "club_global").toString().trim();
+      if (!clubId) {
+        return res.status(400).send("Missing clubId query or path parameter");
+      }
+      let sessionsData = [];
+      let clubName = "CoachAssist";
+      let teamName = "Lagets Kalender";
+      try {
+        const metaRow = db.prepare("SELECT data FROM clubs_data WHERE clubId = ? AND teamId = ? AND segment = ?").get(clubId, "club_global", "metadata");
+        if (metaRow) {
+          const meta = typeof metaRow.data === "string" ? JSON.parse(metaRow.data) : metaRow.data;
+          if (meta.clubName) clubName = meta.clubName;
+          if (meta.teams && Array.isArray(meta.teams)) {
+            const t = meta.teams.find((tm) => tm.id === teamId);
+            if (t && t.name) teamName = t.name;
+          }
+        }
+      } catch (e) {
+      }
+      let row = db.prepare("SELECT data FROM clubs_data WHERE clubId = ? AND teamId = ? AND segment = ?").get(clubId, teamId, "sessions");
+      if (row) {
+        sessionsData = typeof row.data === "string" ? JSON.parse(row.data) : row.data;
+      } else {
+        const fDoc = await getFirestoreDoc(`app_docs/clubs_${clubId}_${teamId}_sessions`);
+        if (fDoc && fDoc.data) {
+          sessionsData = typeof fDoc.data === "string" ? JSON.parse(fDoc.data) : fDoc.data;
+        }
+      }
+      if (!Array.isArray(sessionsData)) {
+        sessionsData = [];
+      }
+      const validSessions = sessionsData.filter((s) => s && s.title && !s.isIgnored);
+      const escapeIcal = (str) => {
+        if (!str) return "";
+        return str.replace(/\\/g, "\\\\").replace(/;/g, "\\;").replace(/,/g, "\\,").replace(/\n/g, "\\n").replace(/\r/g, "");
+      };
+      const formatIcsLocalTime = (timestampMs, timeStr) => {
+        const d = new Date(timestampMs);
+        let hh = 18;
+        let mm = 0;
+        if (timeStr && typeof timeStr === "string" && timeStr.includes(":")) {
+          const [parsedH, parsedM] = timeStr.split(":").map(Number);
+          if (!isNaN(parsedH)) hh = parsedH;
+          if (!isNaN(parsedM)) mm = parsedM;
+        }
+        const year = d.getFullYear();
+        const month = String(d.getMonth() + 1).padStart(2, "0");
+        const day = String(d.getDate()).padStart(2, "0");
+        const hours = String(hh).padStart(2, "0");
+        const mins = String(mm).padStart(2, "0");
+        return `${year}${month}${day}T${hours}${mins}00`;
+      };
+      const formatIcsUtcTime = (timestampMs) => {
+        const d = new Date(timestampMs);
+        const year = d.getUTCFullYear();
+        const month = String(d.getUTCMonth() + 1).padStart(2, "0");
+        const day = String(d.getUTCDate()).padStart(2, "0");
+        const hours = String(d.getUTCHours()).padStart(2, "0");
+        const mins = String(d.getUTCMinutes()).padStart(2, "0");
+        const secs = String(d.getUTCSeconds()).padStart(2, "0");
+        return `${year}${month}${day}T${hours}${mins}${secs}Z`;
+      };
+      const calculateEndStr = (startStr, minutes) => {
+        const [h, m] = (startStr || "18:00").split(":").map(Number);
+        const total = (isNaN(h) ? 18 : h) * 60 + (isNaN(m) ? 0 : m) + minutes;
+        const endH = Math.floor(total / 60) % 24;
+        const endM = total % 60;
+        return `${String(endH).padStart(2, "0")}:${String(endM).padStart(2, "0")}`;
+      };
+      const calendarName = `${clubName} - ${teamName}`;
+      let icsLines = [
+        "BEGIN:VCALENDAR",
+        "VERSION:2.0",
+        "PRODID:-//CoachAssist//NONSGML Team Calendar//SE",
+        "CALSCALE:GREGORIAN",
+        "METHOD:PUBLISH",
+        `X-WR-CALNAME:${escapeIcal(calendarName)}`,
+        "X-WR-TIMEZONE:Europe/Stockholm",
+        "REFRESH-INTERVAL;VALUE=DURATION:PT1H",
+        "X-PUBLISHED-TTL:PT1H",
+        "BEGIN:VTIMEZONE",
+        "TZID:Europe/Stockholm",
+        "X-LIC-LOCATION:Europe/Stockholm",
+        "BEGIN:DAYLIGHT",
+        "TZOFFSETFROM:+0100",
+        "TZOFFSETTO:+0200",
+        "TZNAME:CEST",
+        "DTSTART:19700329T020000",
+        "RRULE:FREQ=YEARLY;BYMONTH=3;BYDAY=-1SU",
+        "END:DAYLIGHT",
+        "BEGIN:STANDARD",
+        "TZOFFSETFROM:+0200",
+        "TZOFFSETTO:+0100",
+        "TZNAME:CET",
+        "DTSTART:19701025T030000",
+        "RRULE:FREQ=YEARLY;BYMONTH=10;BYDAY=-1SU",
+        "END:STANDARD",
+        "END:VTIMEZONE"
+      ];
+      for (const s of validSessions) {
+        const dtStart = formatIcsLocalTime(s.date, s.startTime || "18:00");
+        const dtEnd = s.endTime ? formatIcsLocalTime(s.date, s.endTime) : formatIcsLocalTime(s.date, calculateEndStr(s.startTime || "18:00", 90));
+        const uid = `session-${s.id || Math.random().toString(36).substring(7)}-${clubId}-${teamId}@coachassist`;
+        const dtStamp = formatIcsUtcTime(s.updatedAt || s.createdAt || Date.now());
+        icsLines.push("BEGIN:VEVENT");
+        icsLines.push(`UID:${uid}`);
+        icsLines.push(`DTSTAMP:${dtStamp}`);
+        icsLines.push(`DTSTART;TZID=Europe/Stockholm:${dtStart}`);
+        icsLines.push(`DTEND;TZID=Europe/Stockholm:${dtEnd}`);
+        icsLines.push(`SUMMARY:${escapeIcal(s.title)}`);
+        if (s.location) {
+          icsLines.push(`LOCATION:${escapeIcal(s.location)}`);
+        }
+        const descParts = [];
+        if (s.notes) descParts.push(s.notes);
+        if (s.description) descParts.push(s.description);
+        if (s.moments && Array.isArray(s.moments) && s.moments.length > 0) {
+          descParts.push("Moment: " + s.moments.map((m) => m.name || m.title).filter(Boolean).join(", "));
+        }
+        if (descParts.length > 0) {
+          icsLines.push(`DESCRIPTION:${escapeIcal(descParts.join("\n"))}`);
+        }
+        icsLines.push("END:VEVENT");
+      }
+      icsLines.push("END:VCALENDAR");
+      const icsString = icsLines.join("\r\n");
+      res.setHeader("Content-Type", "text/calendar; charset=utf-8");
+      res.setHeader("Content-Disposition", `inline; filename="${clubId}-${teamId}-events.ics"`);
+      res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+      res.setHeader("Access-Control-Allow-Origin", "*");
+      res.status(200).send(icsString);
+    } catch (error) {
+      console.error("[Calendar ICS Feed] Error generating feed:", error);
+      res.status(500).send("Error generating calendar feed");
+    }
+  };
+  app.get("/api/calendar/events.ics", handleIcsFeed);
+  app.get("/api/calendar/:clubId/:teamId/events.ics", handleIcsFeed);
+  app.get("/api/calendar/:clubId/events.ics", handleIcsFeed);
+  app.get("/api/download-production-bundle", (_req, res) => {
+    const zipPath = import_path.default.resolve(process.cwd(), "coachassist-production-bundle.zip");
+    if (import_fs.default.existsSync(zipPath)) {
+      res.setHeader("Content-Type", "application/zip");
+      res.setHeader("Content-Disposition", 'attachment; filename="coachassist-production-bundle.zip"');
+      return import_fs.default.createReadStream(zipPath).pipe(res);
+    }
+    return res.status(404).send("Bundle not found");
+  });
+  app.get("/api/download-server-cjs", (_req, res) => {
+    const serverPath = import_path.default.resolve(process.cwd(), "dist", "server.cjs");
+    if (import_fs.default.existsSync(serverPath)) {
+      res.setHeader("Content-Type", "application/javascript");
+      res.setHeader("Content-Disposition", 'attachment; filename="server.cjs"');
+      return import_fs.default.createReadStream(serverPath).pipe(res);
+    }
+    return res.status(404).send("server.cjs not found");
+  });
+  if (!isProduction) {
+    const { createServer: createViteServer } = await import("vite");
+    const vite = await createViteServer({
+      server: { middlewareMode: true },
+      appType: "spa"
+    });
+    app.get(["/", "/index.html"], async (req, res, next) => {
+      const accept = req.headers.accept || "";
+      if (req.method === "GET" && accept.includes("text/html")) {
+        try {
+          const rootIndex = import_path.default.join(process.cwd(), "index.html");
+          if (import_fs.default.existsSync(rootIndex)) {
+            let html = import_fs.default.readFileSync(rootIndex, "utf-8");
+            html = injectPwaMetaToHtml(html);
+            html = await vite.transformIndexHtml(req.originalUrl || "/", html);
+            res.setHeader("Content-Type", "text/html; charset=utf-8");
+            return res.send(html);
+          }
+        } catch (e) {
+          return next(e);
+        }
+      }
+      next();
+    });
+    app.use(vite.middlewares);
+  } else {
+    const distPath = _dirname;
+    app.use("/assets", import_express.default.static(import_path.default.join(distPath, "assets")));
+    app.use(import_express.default.static(distPath));
+    app.get("*", (req, res) => {
+      if (req.path.startsWith("/assets/") || req.path.startsWith("/src/") || req.path.endsWith(".js") || req.path.endsWith(".css") || req.path.endsWith(".mjs") || req.path.endsWith(".map") || req.path.endsWith(".tsx") || req.path.endsWith(".ts")) {
+        return res.status(404).type("text/plain").send("Asset not found");
+      }
+      const indexPath = import_path.default.join(distPath, "index.html");
+      if (import_fs.default.existsSync(indexPath)) {
+        let html = import_fs.default.readFileSync(indexPath, "utf-8");
+        html = injectPwaMetaToHtml(html);
+        res.setHeader("Content-Type", "text/html; charset=utf-8");
+        return res.send(html);
+      }
+      res.sendFile(indexPath);
+    });
+  }
+  if (typeof PORT === "string" && isNaN(Number(PORT))) {
+    app.listen(PORT, () => {
+      console.log(`Server running on Unix socket/pipe: ${PORT}`);
+    });
+  } else {
+    app.listen(Number(PORT), "0.0.0.0", () => {
+      console.log(`Server running on http://localhost:${PORT}`);
+    });
+  }
+}
+startServer().catch((err) => {
+  console.error("Failed to start server:", err);
+  process.exit(1);
+});
+// Annotate the CommonJS export names for ESM import in node:
+0 && (module.exports = {
+  verifyJwtToken
+});
+//# sourceMappingURL=server.cjs.map

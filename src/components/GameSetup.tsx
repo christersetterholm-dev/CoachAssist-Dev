@@ -1416,11 +1416,11 @@ export default function GameSetup({
                           </span>
                         </div>
                         <div className="flex flex-wrap gap-1.5 min-h-[30px]">
-                          {sortPlayersByPosition(team.playerIds || [], combinedSquad).map(pid => {
+                          {sortPlayersByPosition(team.playerIds || [], combinedSquad).map((pid, idx) => {
                             const player = combinedSquad.find(p => p.id === pid);
                             return player ? (
                               <motion.div 
-                                key={pid} 
+                                key={`${pid}-${idx}`} 
                                 drag
                                 dragSnapToOrigin
                                 whileDrag={{ 
@@ -1485,11 +1485,11 @@ export default function GameSetup({
                           </span>
                         </div>
                         <div className="flex flex-wrap gap-1.5 min-h-[30px]">
-                          {sortPlayersByPosition(jokerPlayerIds || [], combinedSquad).map(pid => {
+                          {sortPlayersByPosition(jokerPlayerIds || [], combinedSquad).map((pid, idx) => {
                             const player = combinedSquad.find(p => p.id === pid);
                             return player ? (
                               <motion.div 
-                                key={pid} 
+                                key={`joker-${pid}-${idx}`} 
                                 drag
                                 dragSnapToOrigin
                                 whileDrag={{ 
@@ -1549,11 +1549,11 @@ export default function GameSetup({
                           </span>
                         </div>
                         <div className="flex flex-wrap gap-1.5 min-h-[30px]">
-                          {sortPlayersByPosition(unassignedPlayers.map(p => p.id), combinedSquad).map(pid => {
+                          {sortPlayersByPosition(unassignedPlayers.map(p => p.id), combinedSquad).map((pid, idx) => {
                             const player = combinedSquad.find(p => p.id === pid);
                             return player ? (
                               <motion.div 
-                                key={pid} 
+                                key={`unassigned-${pid}-${idx}`} 
                                 drag
                                 dragSnapToOrigin
                                 whileDrag={{ 
@@ -1751,7 +1751,7 @@ export default function GameSetup({
                               const isGuest = typeof pid === 'string' && pid.startsWith('guest_');
                               return currentAttendanceIds.includes(pid) || (isGuest && (guestPlayers || []).some(gp => gp.id === pid));
                             })
-                            .map(pid => {
+                            .map((pid, idx) => {
                               const player = combinedSquad.find(p => p.id === pid);
                               if (!player) return null;
                               const isSelected = team.playerIds.includes(player.id);
@@ -1759,7 +1759,7 @@ export default function GameSetup({
                               
                               return (
                                 <button
-                                key={player.id}
+                                key={`${player.id}-${idx}`}
                                 type="button"
                                 onClick={() => togglePlayerInTeam(team.id, player.id)}
                                 className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all border flex items-center gap-1 ${

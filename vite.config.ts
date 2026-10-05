@@ -23,6 +23,9 @@ export default defineConfig(({mode}) => {
         'firebase/storage': path.resolve(__dirname, 'src/lib/firebase.ts'),
       },
     },
+    optimizeDeps: {
+      exclude: ['firebase', 'firebase/app', 'firebase/auth', 'firebase/firestore', 'firebase/storage'],
+    },
     server: {
       proxy: {
         '/api': {

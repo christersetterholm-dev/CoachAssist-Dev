@@ -14,7 +14,42 @@ const serverPath = path.join(__dirname, 'dist', 'server.cjs');
 if (fs.existsSync(serverPath)) {
   console.log('Production server found. Starting Coach Assist...');
   process.env.NODE_ENV = 'production'; // Force production mode
-  require('./dist/server.cjs');
+  try {
+    require('./dist/server.cjs');
+  } catch (startupErr) {
+    console.error('CRITICAL: dist/server.cjs failed to start:', startupErr);
+    try {
+      fs.writeFileSync(path.join(__dirname, 'server-crash.log'), String(startupErr && startupErr.stack ? startupErr.stack : startupErr));
+    } catch (_) {}
+
+    // Start fallback diagnostic server so user can see exactly why it failed
+    const http = require('http');
+    const port = process.env.PORT || 3000;
+    const server = http.createServer((req, res) => {
+      res.writeHead(500, { 'Content-Type': 'text/html; charset=utf-8' });
+      res.end(`<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><title>CoachAssist - Serverfel</title></head>
+<body style="font-family:system-ui,sans-serif;background:#0f172a;color:#f8fafc;padding:40px;margin:0;">
+  <div style="max-width:800px;margin:0 auto;background:#1e293b;border-radius:12px;padding:30px;border:1px solid #334155;">
+    <h2 style="color:#f87171;margin-top:0;">⚠️ Serverfel vid uppstart av CoachAssist</h2>
+    <p>Node.js försökte starta <code>dist/server.cjs</code> men stötte på ett fel:</p>
+    <pre style="background:#090d16;padding:16px;border-radius:8px;color:#cbd5e1;overflow-x:auto;font-size:13px;line-height:1.5;">${startupErr && startupErr.stack ? startupErr.stack : startupErr}</pre>
+    <div style="background:#064e3b;padding:16px;border-radius:8px;margin-top:20px;color:#a7f3d0;">
+      <strong>Lösning:</strong><br/>
+      Om felet nämner <em>"Cannot find module"</em>, gå till cPanel &rarr; <strong>Setup Node.js App</strong> och klicka på <strong>Run NPM Install</strong>.
+    </div>
+  </div>
+</body>
+</html>`);
+    });
+
+    if (typeof port === 'string' && isNaN(Number(port))) {
+      server.listen(port);
+    } else {
+      server.listen(Number(port), '0.0.0.0');
+    }
+  }
 } else {
   console.log('Production server bundle not found yet. Starting automatic background build and fallback server...');
 

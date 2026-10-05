@@ -1,8 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { User, Phone, Fingerprint, Check, Save, AtSign, Lock, Key, Eye, EyeOff, ShieldCheck, AlertCircle, Landmark, Info, Link2, Unlink, Camera, Upload, Trash2, Loader2, VibrateOff } from 'lucide-react';
 import { UserProfile, Club, ClubMetadata, ClubMember } from '../types';
-import { db, getApiUrl, auth, linkGoogleAccount, unlinkGoogleAccount, storage, ref, uploadBytes, getDownloadURL } from '../lib/firebase';
-import { doc, getDoc, setDoc } from 'firebase/firestore';
+import { db, getApiUrl, auth, linkGoogleAccount, unlinkGoogleAccount, storage, ref, uploadBytes, getDownloadURL, doc, getDoc, setDoc } from '../lib/firebase';
 import ImageCropper from './ImageCropper';
 
 interface ProfileAndSettingsProps {

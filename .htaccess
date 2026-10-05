@@ -1,14 +1,13 @@
-# ==============================================================================
-# CLOUDLINUX / CPANEL PASSENGER CONFIGURATION
-# If hosting via cPanel Node.js Selector, cPanel maintains a block like this here:
-# # DO NOT REMOVE. CLOUDLINUX PASSENGER CONFIGURATION BEGIN
-# PassengerAppRoot "/home/setterho/coachassist.setterholm.se"
-# PassengerBaseURI "/"
-# PassengerNodejs "/home/setterho/nodevenv/coachassist.setterholm.se/22/bin/node"
-# PassengerAppType node
-# PassengerStartupFile app.cjs
-# # DO NOT REMOVE. CLOUDLINUX PASSENGER CONFIGURATION END
-# ==============================================================================
+# DO NOT REMOVE. CLOUDLINUX PASSENGER CONFIGURATION BEGIN
+PassengerAppRoot "/home/setterho/coachassist.setterholm.se"
+PassengerBaseURI "/"
+PassengerNodejs "/home/setterho/nodevenv/coachassist.setterholm.se/20/bin/node"
+PassengerAppType node
+PassengerStartupFile app.cjs
+# DO NOT REMOVE. CLOUDLINUX PASSENGER CONFIGURATION END
+
+# Enable detailed error messages in browser if application crashes during startup
+PassengerFriendlyErrorPages on
 
 # Apache configuration for CoachAssist hosted at root of domain or subdomain
 <IfModule mod_rewrite.c>
@@ -31,13 +30,16 @@
   RewriteRule ^ - [L]
 
   # 4. If an asset, script, or stylesheet was requested but not found, return a 404 immediately
-  # so it is never served as HTML, preventing "Failed to load module script: Expected JavaScript but got text/html"
-  RewriteCond %{REQUEST_URI} \.(js|css|mjs|tsx|ts|map|png|jpg|svg|ico|webmanifest)$ [NC]
+  # (exclude /api/ and /uploads/ so Node.js can dynamically handle API routes and database-backed image recovery)
+  RewriteCond %{REQUEST_URI} !^/api/
+  RewriteCond %{REQUEST_URI} !^/uploads/
+  RewriteCond %{REQUEST_URI} \.(js|css|mjs|tsx|ts|map|png|jpg|jpeg|svg|ico|webmanifest)$ [NC]
   RewriteRule ^ - [R=404,L]
 
-  # 5. SPA Client-Side Routing Fallback (for non-API routes)
+  # 5. SPA Client-Side Routing Fallback (for non-API and non-uploads routes)
   # When accessing subpages directly, serve dist/index.html so React Router/SPA can render it.
   RewriteCond %{REQUEST_URI} !^/api/
+  RewriteCond %{REQUEST_URI} !^/uploads/
   RewriteRule ^ dist/index.html [L]
 </IfModule>
 

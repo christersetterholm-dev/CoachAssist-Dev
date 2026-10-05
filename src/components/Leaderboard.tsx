@@ -2,8 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { Trophy, Share2, Crown, Star, ChevronDown, Eye, EyeOff, Plus, Lock, Trash2, Loader2, Edit2, Check, User } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { SquadPlayer, Exercise, Period, PeriodStandings } from '../types';
-import { db, auth, handleFirestoreError, OperationType } from '../lib/firebase';
-import { doc, getDoc, setDoc } from 'firebase/firestore';
+import { db, auth, handleFirestoreError, OperationType, doc, getDoc, setDoc } from '../lib/firebase';
 import { calculateLeaderboard } from '../lib/leaderboardUtils';
 import { CachedImage } from './CachedImage';
 

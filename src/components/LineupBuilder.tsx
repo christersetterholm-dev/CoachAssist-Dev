@@ -2,9 +2,9 @@ import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import { motion, AnimatePresence, useDragControls } from 'motion/react';
 // import html2canvas from 'html-to-image'; // Removed
 import { SquadPlayer, Lineup, LineupPlayer, FormationVariant, FormationPosition, TacticalSavedBoard, TrainingSession } from '../types';
-import { User as FirebaseUser } from 'firebase/auth';
+import { User as FirebaseUser } from '../lib/firebase';
 import { CachedImage } from './CachedImage';
-import { Plus, Minus, X, Trash2, Image as ImageIcon, User, Save, Settings, ClipboardList, ClipboardPaste, ClipboardCheck, Camera, Check, Edit2, Undo2, Redo2, Maximize2, Minimize2, Copy, Trophy, Upload, Pencil, ArrowUpRight, Eraser, RotateCcw, Trash, Shirt, Pin, PinOff, Smartphone, Monitor, ChevronDown, ChevronUp, RefreshCw, GripVertical, Footprints, Archive, ArchiveRestore, Layout, Eye, EyeOff, Target, Play, Move, Route, Type, FolderOpen, Cloud, CloudOff, Bookmark, Network, UserCheck, Link, Unlink, Calendar } from 'lucide-react';
+import { Plus, Minus, X, Trash2, Image as ImageIcon, User, Save, Settings, ClipboardList, ClipboardPaste, ClipboardCheck, Camera, Check, Edit2, Undo2, Redo2, Maximize2, Minimize2, Copy, Trophy, Upload, Pencil, ArrowUpRight, Eraser, RotateCcw, Trash, Shirt, Pin, PinOff, Smartphone, Monitor, ChevronDown, ChevronUp, RefreshCw, GripVertical, Footprints, Archive, ArchiveRestore, Layout, Eye, EyeOff, Target, Play, Move, Route, Type, FolderOpen, Cloud, CloudOff, Bookmark, Network, UserCheck, Link, Unlink, Calendar, Users, Info } from 'lucide-react';
 
 import { FORMATION_TEMPLATES } from '../lib/formations';
 import { findSquadMatch } from '../lib/teamUtils';
@@ -354,6 +354,125 @@ function LineupReorderItem({
   );
 }
 
+export const CLASSIC_POSITIONS: Record<number, { name: string; pos: string; role: string; desc: string }> = {
+  1: { name: 'Målvakt', pos: 'MV', role: 'Målvakt', desc: 'Lagets sista utpost som räddar skott och använder händerna i straffområdet.' },
+  2: { name: 'Högerback', pos: 'HB', role: 'Högerback', desc: 'Defensiv spelare på högerkanter som fokuserar på en-mot-en-spel och brytningar.' },
+  3: { name: 'Vänsterback', pos: 'VB', role: 'Vänsterback', desc: 'Defensiv spelare på vänsterkanten, ofta med ett mer offensivt ansvar.' },
+  4: { name: 'Mittback', pos: 'MB', role: 'Mittback / Defensiv mittfältare', desc: 'Stark brytarsäker mittback eller balansspelare på mittfältet.' },
+  5: { name: 'Mittback', pos: 'MB', role: 'Mittback', desc: 'Central försvarsspelare som är stark i duellspelet och styr backlinjen.' },
+  6: { name: 'Defensiv mitt', pos: 'DM', role: 'Defensiv mittfältare / Mittback', desc: 'Hård försvarsgeneral eller spelskickligt defensivt ankare.' },
+  7: { name: 'Högerytter', pos: 'HY', role: 'Höger ytter / Yttermittfältare', desc: 'Snabb och kreativ spelare på högerkanten.' },
+  8: { name: 'Central mitt', pos: 'CM', role: 'Central mittfältare', desc: 'Uthållig tvåvägsspelare som täcker stora ytor både i anfall och försvar.' },
+  9: { name: 'Centerforward', pos: 'CF', role: 'Centerforward / Anfallare', desc: 'Målfarlig central anfallare och spjutspets.' },
+  10: { name: 'Spelfördelare', pos: 'OM', role: 'Spelfördelare / Offensiv mitt', desc: 'Kreativ spelfördelare och släpande anfallare.' },
+  11: { name: 'Vänsterytter', pos: 'VY', role: 'Vänster ytter / Yttermittfältare', desc: 'Snabb och kreativ spelare på vänsterkanten.' },
+};
+
+export const CLASSIC_FORMATIONS_MAP: Record<string, { name: string; desc: string; blue: { x: number; y: number }[] }> = {
+  '4-4-2': {
+    name: '4-4-2 Rak',
+    desc: 'Klassisk balans med rak fyrbackslinje, rakt mittfält och två forwards.',
+    blue: [
+      { x: 50, y: 92 }, // 1 MV
+      { x: 86, y: 77 }, // 2 HB
+      { x: 14, y: 77 }, // 3 VB
+      { x: 62, y: 79 }, // 4 MB
+      { x: 38, y: 79 }, // 5 MB
+      { x: 38, y: 64 }, // 6 DM/CM
+      { x: 86, y: 58 }, // 7 HY
+      { x: 62, y: 64 }, // 8 CM
+      { x: 40, y: 52 }, // 9 CF
+      { x: 60, y: 52 }, // 10 OM/CF
+      { x: 14, y: 58 }, // 11 VY
+    ]
+  },
+  '4-3-3': {
+    name: '4-3-3 Offensiv',
+    desc: 'Fyrbackslinje med defensivt ankare, två centrala mittfältare och tre anfallare.',
+    blue: [
+      { x: 50, y: 92 }, // 1 MV
+      { x: 86, y: 77 }, // 2 HB
+      { x: 14, y: 77 }, // 3 VB
+      { x: 62, y: 79 }, // 4 MB
+      { x: 38, y: 79 }, // 5 MB
+      { x: 50, y: 68 }, // 6 DM
+      { x: 86, y: 53 }, // 7 HY
+      { x: 65, y: 61 }, // 8 CM
+      { x: 50, y: 51 }, // 9 CF
+      { x: 35, y: 61 }, // 10 OM
+      { x: 14, y: 53 }, // 11 VY
+    ]
+  },
+  '4-2-3-1': {
+    name: '4-2-3-1',
+    desc: 'Dubbla defensiva mittfältare och tre offensiva bakom en ensam spjutspets.',
+    blue: [
+      { x: 50, y: 92 }, // 1 MV
+      { x: 86, y: 77 }, // 2 HB
+      { x: 14, y: 77 }, // 3 VB
+      { x: 62, y: 79 }, // 4 MB
+      { x: 38, y: 79 }, // 5 MB
+      { x: 37, y: 67 }, // 6 DM
+      { x: 86, y: 56 }, // 7 HY
+      { x: 63, y: 67 }, // 8 DM/CM
+      { x: 50, y: 51 }, // 9 CF
+      { x: 50, y: 58 }, // 10 OM
+      { x: 14, y: 56 }, // 11 VY
+    ]
+  },
+  '3-5-2': {
+    name: '3-5-2 Wingbacks',
+    desc: 'Tre mittbackar med offensiva wingbacks som behärskar hela korridorerna.',
+    blue: [
+      { x: 50, y: 92 }, // 1 MV
+      { x: 88, y: 62 }, // 2 HB/WB
+      { x: 12, y: 62 }, // 3 VB/WB
+      { x: 68, y: 78 }, // 4 MB
+      { x: 50, y: 80 }, // 5 MB
+      { x: 32, y: 78 }, // 6 MB
+      { x: 85, y: 56 }, // 7 HY
+      { x: 50, y: 67 }, // 8 DM
+      { x: 40, y: 52 }, // 9 CF
+      { x: 60, y: 52 }, // 10 OM
+      { x: 15, y: 56 }, // 11 VY
+    ]
+  },
+  '5-3-2': {
+    name: '5-3-2 Kompakt',
+    desc: 'Extremt stabil fembackslinje med tre centrala mittfältare och två anfallare.',
+    blue: [
+      { x: 50, y: 92 }, // 1 MV
+      { x: 88, y: 73 }, // 2 HB/WB
+      { x: 12, y: 73 }, // 3 VB/WB
+      { x: 68, y: 79 }, // 4 MB
+      { x: 50, y: 80 }, // 5 MB
+      { x: 32, y: 79 }, // 6 MB
+      { x: 68, y: 63 }, // 7 CM
+      { x: 50, y: 66 }, // 8 DM
+      { x: 40, y: 52 }, // 9 CF
+      { x: 32, y: 63 }, // 10 OM
+      { x: 60, y: 52 }, // 11 CF
+    ]
+  },
+  '3-4-3': {
+    name: '3-4-3 Totalfotboll',
+    desc: 'Offensiv uppställning med trebackslinje, fyrfält och tre forwards.',
+    blue: [
+      { x: 50, y: 92 }, // 1 MV
+      { x: 86, y: 64 }, // 2 RM
+      { x: 14, y: 64 }, // 3 LM
+      { x: 68, y: 78 }, // 4 MB
+      { x: 50, y: 80 }, // 5 MB
+      { x: 32, y: 78 }, // 6 MB
+      { x: 86, y: 53 }, // 7 HY
+      { x: 60, y: 66 }, // 8 CM
+      { x: 50, y: 51 }, // 9 CF
+      { x: 40, y: 66 }, // 10 OM
+      { x: 14, y: 53 }, // 11 VY
+    ]
+  }
+};
+
 export default function LineupBuilder({ 
   squad, 
   lineup, 
@@ -428,11 +547,12 @@ export default function LineupBuilder({
 
     for (const p of playerList) {
       if (!p || !p.playerId) continue;
-      // Must exist in active squad
-      if (!squadList.some(s => s.id === p.playerId)) continue;
+      // Must exist in active squad or be a tactical player
+      const isTactical = p.playerId.startsWith('tactical-');
+      if (!isTactical && !squadList.some(s => s.id === p.playerId)) continue;
       // Must be unique squad player
-      if (seenPlayerIds.has(p.playerId)) continue;
-      seenPlayerIds.add(p.playerId);
+      if (!isTactical && seenPlayerIds.has(p.playerId)) continue;
+      if (!isTactical) seenPlayerIds.add(p.playerId);
 
       if (p.isSubstitute) {
         subsList.push({ ...p, isSubstitute: true });
@@ -653,10 +773,11 @@ export default function LineupBuilder({
   const [tacticalColor, setTacticalColor] = useState('#ffffff');
   const [footballPos, setFootballPos] = useState<{ x: number, y: number } | null>(lineup?.tacticalBoard?.footballPos || null);
   const [footballScale, setFootballScale] = useState<number>(lineup?.tacticalBoard?.footballScale || 1);
-  const [opponents, setOpponents] = useState<{ id: string, x: number, y: number }[]>(lineup?.tacticalBoard?.opponents || []);
+  const [opponents, setOpponents] = useState<{ id: string, x: number, y: number, number?: number | string, name?: string, role?: string }[]>(lineup?.tacticalBoard?.opponents || []);
   const [showOpponents, setShowOpponents] = useState(lineup?.tacticalBoard?.showOpponents ?? true);
   const [opponentColor, setOpponentColor] = useState(lineup?.tacticalBoard?.opponentColor || '#ef4444');
   const [tacticalPlayers, setTacticalPlayers] = useState<LineupPlayer[]>(lineup?.tacticalBoard?.players || []);
+  const [showPositionDescriptions, setShowPositionDescriptions] = useState<boolean>(lineup?.tacticalBoard?.showPositionDescriptions ?? false);
 
   const tacticalSnapshotRef = useRef<{
     drawings: string;
@@ -665,6 +786,7 @@ export default function LineupBuilder({
     footballPos: string;
     footballScale: number;
     showOpponents: boolean;
+    showPositionDescriptions: boolean;
     opponentColor: string;
     pitchType: string;
   } | null>(null);
@@ -676,6 +798,7 @@ export default function LineupBuilder({
     footballPosition: { x: number; y: number } | null,
     scale: number,
     showOpps: boolean,
+    showPosDesc: boolean,
     color: string,
     pType: string
   ) => {
@@ -693,6 +816,7 @@ export default function LineupBuilder({
       footballPos: JSON.stringify(footballPosition),
       footballScale: scale,
       showOpponents: showOpps,
+      showPositionDescriptions: showPosDesc,
       opponentColor: color,
       pitchType: pType,
     };
@@ -721,6 +845,7 @@ export default function LineupBuilder({
     const hasNewFootball = currentFootballPos !== snapshot.footballPos;
     const hasNewScale = footballScale !== snapshot.footballScale;
     const hasNewShowOpponents = showOpponents !== snapshot.showOpponents;
+    const hasNewShowPosDesc = showPositionDescriptions !== snapshot.showPositionDescriptions;
     const hasNewOpponentColor = opponentColor !== snapshot.opponentColor;
     const hasNewPitchType = pitchType !== snapshot.pitchType;
 
@@ -731,6 +856,7 @@ export default function LineupBuilder({
       hasNewFootball ||
       hasNewScale ||
       hasNewShowOpponents ||
+      hasNewShowPosDesc ||
       hasNewOpponentColor ||
       hasNewPitchType
     );
@@ -748,6 +874,7 @@ export default function LineupBuilder({
         footballPos,
         footballScale,
         showOpponents,
+        showPositionDescriptions,
         opponentColor,
         pitchType
       );
@@ -759,63 +886,19 @@ export default function LineupBuilder({
   const [currentPath, setCurrentPath] = useState<{ x: number, y: number }[]>([]);
   const longPressTimer = useRef<NodeJS.Timeout | null>(null);
   const lastTapTime = useRef<number>(0);
+  const hasLongPressedRef = useRef<boolean>(false);
+  const pointerStartPosRef = useRef<{ x: number, y: number } | null>(null);
 
-  const handlePointerDownWithDeletion = (e: React.PointerEvent, type: 'opponent' | 'ball', id?: string) => {
-    e.stopPropagation();
-    
-    // Check for double tap
-    const now = Date.now();
-    if (now - lastTapTime.current < 300) {
-      pushHistory();
-      if (type === 'opponent' && id) {
-        setOpponents(prev => prev.filter(o => o.id !== id));
-      } else if (type === 'ball') {
-        setFootballPos(null);
-      }
-      setHasUnsavedChanges(true);
-      if (longPressTimer.current) clearTimeout(longPressTimer.current);
-      return;
-    }
-    lastTapTime.current = now;
-
-    // Direct eraser check
-    if (tacticalTool === 'eraser' || tacticalTool === 'move') {
-      pushHistory();
-      if (type === 'opponent' && id) {
-        if (tacticalTool === 'eraser') setOpponents(prev => prev.filter(o => o.id !== id));
-      } else if (type === 'ball') {
-        if (tacticalTool === 'eraser') setFootballPos(null);
-      }
-      if (tacticalTool === 'eraser') {
-        setHasUnsavedChanges(true);
-        return;
-      }
-    }
-
-    // Long press detection
-    longPressTimer.current = setTimeout(() => {
-      pushHistory();
-      if (type === 'opponent' && id) {
-        setOpponents(prev => prev.filter(o => o.id !== id));
-      } else if (type === 'ball') {
-        setFootballPos(null);
-      }
-      setHasUnsavedChanges(true);
-      // Vibrate if supported
-      if (typeof navigator !== 'undefined' && navigator.vibrate) {
-        navigator.vibrate(50);
-      }
-    }, 600);
-
-    // Continue with normal dragging
-    if (type === 'ball') {
-      pushHistory();
-      setDraggingBall(true);
-    } else if (type === 'opponent' && id) {
-      pushHistory();
-      setDraggingOpponentId(id);
-    }
-  };
+  const [numberEditTarget, setNumberEditTarget] = useState<{
+    type: 'blue' | 'opponent';
+    id: string;
+    currentNumber: string;
+    currentName: string;
+    teamColor: string;
+    teamLabel: string;
+  } | null>(null);
+  const [editNumberValue, setEditNumberValue] = useState<string>('');
+  const [editNameValue, setEditNameValue] = useState<string>('');
 
   const clearLongPress = () => {
     if (longPressTimer.current) {
@@ -823,8 +906,24 @@ export default function LineupBuilder({
       longPressTimer.current = null;
     }
   };
+
+  useEffect(() => {
+    const handleGlobalRelease = () => {
+      clearLongPress();
+      setDraggingBlueId(null);
+      setDraggingOpponentId(null);
+      setDraggingBall(false);
+    };
+    window.addEventListener('pointerup', handleGlobalRelease);
+    window.addEventListener('pointercancel', handleGlobalRelease);
+    return () => {
+      window.removeEventListener('pointerup', handleGlobalRelease);
+      window.removeEventListener('pointercancel', handleGlobalRelease);
+    };
+  }, []);
   const [draggingBall, setDraggingBall] = useState(false);
   const [draggingOpponentId, setDraggingOpponentId] = useState<string | null>(null);
+  const [draggingBlueId, setDraggingBlueId] = useState<string | null>(null);
   const [tempTitle, setTempTitle] = useState('');
   const [tempTeamName, setTempTeamName] = useState('');
   const [tempSessionId, setTempSessionId] = useState<string | undefined>(lineup?.sessionId);
@@ -834,6 +933,9 @@ export default function LineupBuilder({
   const [showScreenshotTip, setShowScreenshotTip] = useState(false);
   const [showFormationModal, setShowFormationModal] = useState(false);
   const [showOpponentFormationModal, setShowOpponentFormationModal] = useState(false);
+  const [blueFormation, setBlueFormation] = useState<string>('4-4-2');
+  const [redFormation, setRedFormation] = useState<string>('4-4-2');
+  const [formationTab, setFormationTab] = useState<'blue' | 'red' | 'classic-info' | 'squad'>('blue');
   const [showSaveFormation, setShowSaveFormation] = useState(false);
   const [newFormationName, setNewFormationName] = useState('');
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
@@ -876,6 +978,35 @@ export default function LineupBuilder({
     // The undo/redo stacks remain fully functional in-memory.
   }, [lineupHistories, lineupFutures]);
 
+  const getSquadPlayer = useCallback((id: string): SquadPlayer | undefined => {
+    const found = squadPlayers.find(s => s.id === id);
+    if (found) return found;
+    if (id && id.startsWith('tactical-blue-')) {
+      const num = parseInt(id.replace('tactical-blue-', ''), 10);
+      const classic = CLASSIC_POSITIONS[num] || { name: `Spelare ${num}`, pos: `P${num}`, desc: '', role: 'Spelare' };
+      return {
+        id,
+        name: `${num}. ${classic.name}`,
+        number: String(num),
+        position: classic.pos,
+        role: 'player'
+      };
+    }
+    if (id && id.startsWith('tactical-')) {
+      const numPart = id.replace(/[^0-9]/g, '');
+      const num = numPart ? parseInt(numPart, 10) : 1;
+      const classic = CLASSIC_POSITIONS[num] || { name: `Spelare ${num}`, pos: `P${num}`, desc: '', role: 'Spelare' };
+      return {
+        id,
+        name: `${num}. ${classic.name}`,
+        number: String(num),
+        position: classic.pos,
+        role: 'player'
+      };
+    }
+    return undefined;
+  }, [squadPlayers]);
+
   const pushHistory = useCallback(() => {
     setLineupHistories(prev => {
       const currentHistory = prev[currentId] || [];
@@ -901,6 +1032,7 @@ export default function LineupBuilder({
         opponents: JSON.parse(JSON.stringify(opponents)),
         tacticalDrawings: JSON.parse(JSON.stringify(tacticalDrawings)),
         showOpponents,
+        showPositionDescriptions,
         opponentColor,
         formation: currentFormation
       };
@@ -909,7 +1041,7 @@ export default function LineupBuilder({
       return { ...prev, [currentId]: newHistory };
     });
     setLineupFutures(prev => ({ ...prev, [currentId]: [] })); // Clear future for this specific lineup
-  }, [currentId, lineupName, teamName, playerScale, nameTagStyle, nameDisplayMode, showNameBackground, nameBackgroundType, showPhoto, showName, showNumber, teamLogoUrl, pitchType, players, tacticalPlayers, footballPos, opponents, tacticalDrawings, showOpponents, opponentColor, currentFormation]);
+  }, [currentId, lineupName, teamName, playerScale, nameTagStyle, nameDisplayMode, showNameBackground, nameBackgroundType, showPhoto, showName, showNumber, teamLogoUrl, pitchType, orientation, attackDirection, players, tacticalPlayers, footballPos, footballScale, opponents, tacticalDrawings, showOpponents, showPositionDescriptions, opponentColor, currentFormation]);
 
   const handleUndo = useCallback(() => {
     if (history.length === 0 || isRestoringHistory.current) return;
@@ -928,6 +1060,8 @@ export default function LineupBuilder({
       showNumber,
       teamLogoUrl,
       pitchType,
+      orientation,
+      attackDirection,
       players: JSON.parse(JSON.stringify(players)),
       tacticalPlayers: JSON.parse(JSON.stringify(tacticalPlayers)),
       footballPos: footballPos ? { ...footballPos } : null,
@@ -935,6 +1069,7 @@ export default function LineupBuilder({
       opponents: JSON.parse(JSON.stringify(opponents)),
       tacticalDrawings: JSON.parse(JSON.stringify(tacticalDrawings)),
       showOpponents,
+      showPositionDescriptions,
       opponentColor,
       formation: currentFormation
     };
@@ -957,13 +1092,16 @@ export default function LineupBuilder({
     setShowNumber(last.showNumber);
     setTeamLogoUrl(last.teamLogoUrl);
     setPitchType(last.pitchType);
-    setPlayers(JSON.parse(JSON.stringify(last.players)));
-    setTacticalPlayers(JSON.parse(JSON.stringify(last.tacticalPlayers || last.players)));
+    if (last.orientation) setOrientation(last.orientation);
+    if (last.attackDirection) setAttackDirection(last.attackDirection);
+    setPlayers(JSON.parse(JSON.stringify(last.players || [])));
+    setTacticalPlayers(JSON.parse(JSON.stringify(last.tacticalPlayers || last.players || [])));
     setFootballPos(last.footballPos ? { ...last.footballPos } : null);
     setFootballScale(last.footballScale || 1);
-    setOpponents(JSON.parse(JSON.stringify(last.opponents)));
-    setTacticalDrawings(JSON.parse(JSON.stringify(last.tacticalDrawings)));
-    setShowOpponents(last.showOpponents);
+    setOpponents(JSON.parse(JSON.stringify(last.opponents || [])));
+    setTacticalDrawings(JSON.parse(JSON.stringify(last.tacticalDrawings || [])));
+    setShowOpponents(last.showOpponents ?? true);
+    setShowPositionDescriptions(last.showPositionDescriptions ?? false);
     setOpponentColor(last.opponentColor || '#ef4444');
     setCurrentFormation(last.formation);
     setHasUnsavedChanges(true);
@@ -972,7 +1110,7 @@ export default function LineupBuilder({
     setTimeout(() => {
       isRestoringHistory.current = false;
     }, 100);
-  }, [currentId, history, lineupName, teamName, playerScale, nameTagStyle, nameDisplayMode, showNameBackground, nameBackgroundType, showPhoto, showName, showNumber, teamLogoUrl, pitchType, orientation, attackDirection, players, footballPos, footballScale, opponents, tacticalDrawings, showOpponents, opponentColor, currentFormation]);
+  }, [currentId, history, lineupName, teamName, playerScale, nameTagStyle, nameDisplayMode, showNameBackground, nameBackgroundType, showPhoto, showName, showNumber, teamLogoUrl, pitchType, orientation, attackDirection, players, tacticalPlayers, footballPos, footballScale, opponents, tacticalDrawings, showOpponents, showPositionDescriptions, opponentColor, currentFormation]);
 
   const handleRedo = useCallback(() => {
     const futures = lineupFutures[currentId] || [];
@@ -992,6 +1130,8 @@ export default function LineupBuilder({
       showNumber,
       teamLogoUrl,
       pitchType,
+      orientation,
+      attackDirection,
       players: JSON.parse(JSON.stringify(players)),
       tacticalPlayers: JSON.parse(JSON.stringify(tacticalPlayers)),
       footballPos: footballPos ? { ...footballPos } : null,
@@ -999,6 +1139,7 @@ export default function LineupBuilder({
       opponents: JSON.parse(JSON.stringify(opponents)),
       tacticalDrawings: JSON.parse(JSON.stringify(tacticalDrawings)),
       showOpponents,
+      showPositionDescriptions,
       opponentColor,
       formation: currentFormation
     };
@@ -1021,13 +1162,16 @@ export default function LineupBuilder({
     setShowNumber(next.showNumber);
     setTeamLogoUrl(next.teamLogoUrl);
     setPitchType(next.pitchType);
-    setPlayers(JSON.parse(JSON.stringify(next.players)));
-    setTacticalPlayers(JSON.parse(JSON.stringify(next.tacticalPlayers || next.players)));
+    if (next.orientation) setOrientation(next.orientation);
+    if (next.attackDirection) setAttackDirection(next.attackDirection);
+    setPlayers(JSON.parse(JSON.stringify(next.players || [])));
+    setTacticalPlayers(JSON.parse(JSON.stringify(next.tacticalPlayers || next.players || [])));
     setFootballPos(next.footballPos ? { ...next.footballPos } : null);
     setFootballScale(next.footballScale || 1);
-    setOpponents(JSON.parse(JSON.stringify(next.opponents)));
-    setTacticalDrawings(JSON.parse(JSON.stringify(next.tacticalDrawings)));
-    setShowOpponents(next.showOpponents);
+    setOpponents(JSON.parse(JSON.stringify(next.opponents || [])));
+    setTacticalDrawings(JSON.parse(JSON.stringify(next.tacticalDrawings || [])));
+    setShowOpponents(next.showOpponents ?? true);
+    setShowPositionDescriptions(next.showPositionDescriptions ?? false);
     setOpponentColor(next.opponentColor || '#ef4444');
     setCurrentFormation(next.formation);
     setHasUnsavedChanges(true);
@@ -1036,7 +1180,7 @@ export default function LineupBuilder({
     setTimeout(() => {
       isRestoringHistory.current = false;
     }, 100);
-  }, [currentId, lineupFutures, lineupName, teamName, playerScale, nameTagStyle, nameDisplayMode, showNameBackground, nameBackgroundType, showPhoto, showName, showNumber, teamLogoUrl, pitchType, orientation, attackDirection, players, footballPos, footballScale, opponents, tacticalDrawings, showOpponents, opponentColor, currentFormation]);
+  }, [currentId, lineupFutures, lineupName, teamName, playerScale, nameTagStyle, nameDisplayMode, showNameBackground, nameBackgroundType, showPhoto, showName, showNumber, teamLogoUrl, pitchType, orientation, attackDirection, players, tacticalPlayers, footballPos, footballScale, opponents, tacticalDrawings, showOpponents, showPositionDescriptions, opponentColor, currentFormation]);
 
   const handleSelectLineupWithHistory = useCallback((id: string) => {
     if (id === lineup?.id) {
@@ -1049,7 +1193,165 @@ export default function LineupBuilder({
       return;
     }
     onSelectLineup(id);
-  }, [lineup?.id, onSelectLineup, players]);
+  }, [lineup?.id, onSelectLineup, players, pushHistory]);
+
+  const handleOpenNumberEdit = useCallback((type: 'blue' | 'opponent', id: string) => {
+    clearLongPress();
+    if (type === 'blue') {
+      const p = tacticalPlayers.find(tp => tp.id === id || tp.playerId === id) || players.find(lp => lp.id === id);
+      if (!p) return;
+      const sp = getSquadPlayer(p.playerId);
+      const currentNum = p.customNumber !== undefined && p.customNumber !== null && p.customNumber !== '' 
+        ? p.customNumber 
+        : (sp?.number || (p.playerId.startsWith('tactical-blue-') ? p.playerId.replace('tactical-blue-', '') : ''));
+      const numInt = Number(currentNum);
+      const currentName = p.customName 
+        || (CLASSIC_POSITIONS[numInt]?.name ? `${currentNum}. ${CLASSIC_POSITIONS[numInt]?.name}` : (sp?.name || `Spelare ${currentNum}`));
+      setNumberEditTarget({
+        type: 'blue',
+        id: p.id,
+        currentNumber: String(currentNum || ''),
+        currentName: currentName || '',
+        teamColor: '#2563eb',
+        teamLabel: 'Blått lag'
+      });
+      setEditNumberValue(String(currentNum || ''));
+      setEditNameValue(currentName || '');
+    } else {
+      const opp = opponents.find(o => o.id === id);
+      if (!opp) return;
+      const currentNum = opp.number !== undefined && opp.number !== null && opp.number !== '' ? String(opp.number) : '';
+      const numInt = Number(currentNum);
+      const currentName = opp.name || (CLASSIC_POSITIONS[numInt]?.name ? `${currentNum}. ${CLASSIC_POSITIONS[numInt]?.name}` : `Spelare ${currentNum}`);
+      setNumberEditTarget({
+        type: 'opponent',
+        id: opp.id,
+        currentNumber: currentNum,
+        currentName: currentName,
+        teamColor: opponentColor || '#ef4444',
+        teamLabel: 'Rött lag / Motståndare'
+      });
+      setEditNumberValue(currentNum);
+      setEditNameValue(currentName);
+    }
+  }, [tacticalPlayers, players, opponents, opponentColor, getSquadPlayer]);
+
+  const handleSaveNumberEdit = useCallback(() => {
+    if (!numberEditTarget) return;
+    pushHistory();
+    const newNum = editNumberValue.trim();
+    const newName = editNameValue.trim();
+    
+    if (numberEditTarget.type === 'blue') {
+      setTacticalPlayers(prev => prev.map(p => {
+        if (p.id === numberEditTarget.id || p.playerId === numberEditTarget.id) {
+          return {
+            ...p,
+            customNumber: newNum,
+            customName: newName
+          };
+        }
+        return p;
+      }));
+    } else {
+      setOpponents(prev => prev.map(o => {
+        if (o.id === numberEditTarget.id) {
+          return {
+            ...o,
+            number: newNum,
+            name: newName || (newNum && CLASSIC_POSITIONS[Number(newNum)]?.name ? `${newNum}. ${CLASSIC_POSITIONS[Number(newNum)]?.name}` : o.name)
+          };
+        }
+        return o;
+      }));
+    }
+    setHasUnsavedChanges(true);
+    setNumberEditTarget(null);
+  }, [numberEditTarget, editNumberValue, editNameValue, pushHistory]);
+
+  const handleDeleteFromEditModal = useCallback(() => {
+    if (!numberEditTarget) return;
+    pushHistory();
+    if (numberEditTarget.type === 'blue') {
+      setTacticalPlayers(prev => prev.filter(p => p.id !== numberEditTarget.id && p.playerId !== numberEditTarget.id));
+    } else {
+      setOpponents(prev => prev.filter(o => o.id !== numberEditTarget.id));
+    }
+    setHasUnsavedChanges(true);
+    setNumberEditTarget(null);
+  }, [numberEditTarget, pushHistory]);
+
+  const handlePointerDownWithDeletion = (e: React.PointerEvent, type: 'opponent' | 'blue' | 'ball', id?: string) => {
+    e.stopPropagation();
+    hasLongPressedRef.current = false;
+    const startX = e.clientX;
+    const startY = e.clientY;
+    pointerStartPosRef.current = { x: startX, y: startY };
+    
+    // Check for double tap/click -> open number edit
+    const now = Date.now();
+    if (now - lastTapTime.current < 350 && (type === 'opponent' || type === 'blue') && id) {
+      clearLongPress();
+      lastTapTime.current = 0;
+      handleOpenNumberEdit(type, id);
+      return;
+    }
+    lastTapTime.current = now;
+
+    // Direct eraser check
+    if (tacticalTool === 'eraser') {
+      pushHistory();
+      if (type === 'opponent' && id) {
+        setOpponents(prev => prev.filter(o => o.id !== id));
+      } else if (type === 'blue' && id) {
+        setTacticalPlayers(prev => prev.filter(p => p.id !== id && p.playerId !== id));
+      } else if (type === 'ball') {
+        setFootballPos(null);
+      }
+      setHasUnsavedChanges(true);
+      return;
+    }
+
+    // Prepare dragging for opponent, blue, or ball immediately
+    if (type === 'ball') {
+      setDraggingBall(true);
+    } else if (type === 'opponent' && id) {
+      setDraggingOpponentId(id);
+    } else if (type === 'blue' && id) {
+      if (isMaximized) {
+        setDraggingBlueId(id);
+      } else {
+        setDraggingId(id);
+        const targetPlayer = tacticalPlayers.find(p => p.id === id || p.playerId === id);
+        if (targetPlayer) {
+          setDragPos({ x: targetPlayer.x, y: targetPlayer.y });
+        }
+      }
+    }
+  };
+
+  // Keyboard shortcut listener for Undo/Redo (Ctrl+Z / Cmd+Z / Ctrl+Y)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) {
+        return;
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
+        e.preventDefault();
+        if (e.shiftKey) {
+          handleRedo();
+        } else {
+          handleUndo();
+        }
+      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') {
+        e.preventDefault();
+        handleRedo();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [handleUndo, handleRedo]);
 
   const fieldRef = useRef<HTMLDivElement>(null);
   const benchRef = useRef<HTMLDivElement>(null);
@@ -1235,6 +1537,12 @@ export default function LineupBuilder({
     if (!isMaximized || !fieldRef.current) return;
     const { x, y } = transformCoords(e.clientX, e.clientY);
 
+    // Cancel long press immediately on any movement greater than 5px
+    if (pointerStartPosRef.current) {
+      const dist = Math.hypot(e.clientX - pointerStartPosRef.current.x, e.clientY - pointerStartPosRef.current.y);
+      if (dist > 5) clearLongPress();
+    }
+
     if (draggingBall) {
       setFootballPos({ x, y });
       return;
@@ -1242,6 +1550,25 @@ export default function LineupBuilder({
 
     if (draggingOpponentId) {
       setOpponents(prev => prev.map(o => o.id === draggingOpponentId ? { ...o, x, y } : o));
+      return;
+    }
+
+    if (draggingBlueId) {
+      setTacticalPlayers(prev => prev.map(p => 
+        (p.id === draggingBlueId || p.playerId === draggingBlueId) 
+          ? { ...p, x, y, isSubstitute: false, isHolding: false } 
+          : p
+      ));
+      return;
+    }
+
+    if (draggingId && isMaximized) {
+      setTacticalPlayers(prev => prev.map(p => 
+        (p.id === draggingId || p.playerId === draggingId) 
+          ? { ...p, x, y, isSubstitute: false, isHolding: false } 
+          : p
+      ));
+      setDragPos({ x, y });
       return;
     }
 
@@ -1302,6 +1629,20 @@ export default function LineupBuilder({
   };
 
   const handleTacticalEnd = () => {
+    clearLongPress();
+
+    if (hasLongPressedRef.current) {
+      hasLongPressedRef.current = false;
+      setDraggingBall(false);
+      setDraggingOpponentId(null);
+      setDraggingBlueId(null);
+      setDraggingId(null);
+      setDragPos(null);
+      setIsTransforming(null);
+      setTransformStart(null);
+      return;
+    }
+
     if (isDrawing) {
       if (currentPath.length > 1) {
         pushHistory();
@@ -1320,14 +1661,18 @@ export default function LineupBuilder({
       setIsDrawing(false);
       setCurrentPath([]);
     }
-    if (draggingBall || draggingOpponentId) {
+    if (draggingBall || draggingOpponentId || draggingBlueId || (draggingId && isMaximized)) {
       setHasUnsavedChanges(true);
     }
     setIsTransforming(null);
     setTransformStart(null);
-    clearLongPress();
     setDraggingBall(false);
     setDraggingOpponentId(null);
+    setDraggingBlueId(null);
+    if (isMaximized) {
+      setDraggingId(null);
+      setDragPos(null);
+    }
   };
 
   const clearTactical = () => {
@@ -1404,6 +1749,10 @@ export default function LineupBuilder({
 
 
 
+  // Active players & setter mapped for normal vs maximized tactical board
+  const activePlayers = isMaximized ? tacticalPlayers : players;
+  const setActivePlayers = isMaximized ? setTacticalPlayers : setPlayers;
+
   // Use refs for dragging to keep event listeners stable and avoid re-binding performance hits
   const dragInfoRef = useRef<{ id: string; x: number; y: number; hoveredId: string | null } | null>(null);
 
@@ -1414,8 +1763,9 @@ export default function LineupBuilder({
       return;
     }
 
-    // Initialize drag info
-    const initialPlayer = players.find(p => p.id === draggingId);
+    // Initialize drag info from active players (tactical or squad)
+    const currentList = isMaximized ? tacticalPlayers : players;
+    const initialPlayer = currentList.find(p => p.id === draggingId);
     if (initialPlayer) {
       dragInfoRef.current = { 
         id: draggingId, 
@@ -1427,6 +1777,11 @@ export default function LineupBuilder({
 
     const handlePointerMove = (e: PointerEvent) => {
       if (!fieldRef.current || !dragInfoRef.current) return;
+
+      if (pointerStartPosRef.current) {
+        const dist = Math.hypot(e.clientX - pointerStartPosRef.current.x, e.clientY - pointerStartPosRef.current.y);
+        if (dist > 8) clearLongPress();
+      }
       
       const rect = fieldRef.current.getBoundingClientRect();
       const rawVX = ((e.clientX - rect.left) / rect.width) * 100;
@@ -1462,7 +1817,8 @@ export default function LineupBuilder({
       let closestId = null;
       let minDistance = 4; // Further reduced radius (from 6) to avoid accidental "sucking"
 
-      activePlayers.forEach(p => {
+      const listForSwap = isMaximized ? tacticalPlayers : activePlayers;
+      listForSwap.forEach(p => {
         if (p.id === draggingId || p.isSubstitute) return;
         
         const dx = rawX - p.x;
@@ -1486,6 +1842,15 @@ export default function LineupBuilder({
     };
 
     const handlePointerUp = (e: PointerEvent) => {
+      clearLongPress();
+      if (hasLongPressedRef.current) {
+        hasLongPressedRef.current = false;
+        setDraggingId(null);
+        setDragPos(null);
+        setHoveredPlayerId(null);
+        dragInfoRef.current = null;
+        return;
+      }
       const info = dragInfoRef.current;
       if (draggingId && info) {
         if (!fieldRef.current) return;
@@ -1515,100 +1880,125 @@ export default function LineupBuilder({
         }
         
         const targetId = info.hoveredId;
-        let isDroppedOnBench = (orientation === 'landscape' ? (rawVY > 95 && rawVX >= -10 && rawVX <= 110) : (rawY > 98 && rawX >= -10 && rawX <= 110));
-        if (!isDroppedOnBench && benchRef.current) {
-          const bRect = benchRef.current.getBoundingClientRect();
-          if (
-            e.clientX >= bRect.left - 20 &&
-            e.clientX <= bRect.right + 20 &&
-            e.clientY >= bRect.top - 20 &&
-            e.clientY <= bRect.bottom + 30
-          ) {
-            isDroppedOnBench = true;
-          }
-        }
         
-        if (targetId) {
-          // --- SWAP LOGIC ---
+        if (isMaximized) {
+          // In maximized tactical mode, players can move freely or swap with each other
           pushHistory();
-          
-          setActivePlayers((prev: LineupPlayer[]) => {
-            const dPlayer = prev.find(p => p.id === draggingId);
-            const tPlayer = prev.find(p => p.id === targetId);
-            
-            if (!dPlayer || !tPlayer) return prev;
-            const isSubstReplacement = dPlayer.isSubstitute || dPlayer.isHolding;
-
-            return prev.map(p => {
-              if (p.id === draggingId) {
-                return { ...p, isSubstitute: false, x: tPlayer.x, y: tPlayer.y, isHolding: false };
-              }
-              if (p.id === targetId) {
-                if (isSubstReplacement) {
-                  return { ...p, isSubstitute: true, isHolding: false };
-                } else {
-                  return { ...p, x: dPlayer.x, y: dPlayer.y, isHolding: false };
-                }
-              }
-              return p;
+          if (targetId) {
+            setTacticalPlayers((prev: LineupPlayer[]) => {
+              const dPlayer = prev.find(p => p.id === draggingId);
+              const tPlayer = prev.find(p => p.id === targetId);
+              if (!dPlayer || !tPlayer) return prev;
+              return prev.map(p => {
+                if (p.id === draggingId) return { ...p, x: tPlayer.x, y: tPlayer.y };
+                if (p.id === targetId) return { ...p, x: dPlayer.x, y: dPlayer.y };
+                return p;
+              });
             });
-          });
-        } else if (isDroppedOnBench) {
-          // --- DROP ON BENCH WITH SLOT INSERTION ---
-          pushHistory();
-          setActivePlayers((prev: LineupPlayer[]) => {
-            const currentSubCount = getValidSubsCount(prev, draggingId);
-            if (currentSubCount >= 7) {
-              alert("Du kan inte ha mer än 7 avbytare på bänken.");
-              return prev;
-            }
-
-            const dPlayer = prev.find(p => p.id === draggingId);
-            if (!dPlayer) return prev;
-
-            const startersList = prev.filter(p => !p.isSubstitute && p.id !== draggingId && p.playerId !== dPlayer.playerId);
-            const seenSubPlayerIds = new Set<string>();
-            const otherSubs = prev.filter(p => {
-              if (!p.isSubstitute) return false;
-              if (p.id === draggingId || p.playerId === dPlayer.playerId) return false;
-              if (!squadPlayers.some(s => s.id === p.playerId)) return false;
-              if (seenSubPlayerIds.has(p.playerId)) return false;
-              seenSubPlayerIds.add(p.playerId);
-              return true;
-            });
-
-            // Determine target slot (0 to 6)
-            const bRect = benchRef.current?.getBoundingClientRect();
-            const dropSlotIndex = bRect && bRect.width > 0
-              ? Math.min(6, Math.max(0, Math.floor(((e.clientX - bRect.left) / bRect.width) * 7)))
-              : Math.min(6, Math.max(0, Math.floor((orientation === 'landscape' ? rawVX : rawX) / (100 / 7))));
-
-            const updatedSubs = [...otherSubs];
-            updatedSubs.splice(dropSlotIndex, 0, { ...dPlayer, isSubstitute: true, isHolding: false });
-
-            return [...startersList, ...updatedSubs];
-          });
-        } else if (isInFieldX && isInFieldY) {
-          pushHistory();
-          setActivePlayers((prev: LineupPlayer[]) => prev.map(p => 
-            p.id === draggingId 
-              ? { ...p, isSubstitute: false, x: info.x, y: info.y, isHolding: false } 
-              : p
-          ));
+          } else {
+            setTacticalPlayers((prev: LineupPlayer[]) => prev.map(p => 
+              p.id === draggingId 
+                ? { ...p, isSubstitute: false, x: info.x, y: info.y, isHolding: false } 
+                : p
+            ));
+          }
+          setHasUnsavedChanges(true);
         } else {
-          pushHistory();
-          setActivePlayers((prev: LineupPlayer[]) => {
-            const currentSubCount = getValidSubsCount(prev, draggingId);
-            if (currentSubCount >= 7) {
-              alert("Du kan inte ha mer än 7 avbytare på bänken.");
-              return prev;
+          let isDroppedOnBench = (orientation === 'landscape' ? (rawVY > 95 && rawVX >= -10 && rawVX <= 110) : (rawY > 98 && rawX >= -10 && rawX <= 110));
+          if (!isDroppedOnBench && benchRef.current) {
+            const bRect = benchRef.current.getBoundingClientRect();
+            if (
+              e.clientX >= bRect.left - 20 &&
+              e.clientX <= bRect.right + 20 &&
+              e.clientY >= bRect.top - 20 &&
+              e.clientY <= bRect.bottom + 30
+            ) {
+              isDroppedOnBench = true;
             }
-            return prev.map(p => 
-              p.id === draggingId ? { ...p, isSubstitute: true, isHolding: false } : p
-            );
-          });
+          }
+          
+          if (targetId) {
+            // --- SWAP LOGIC ---
+            pushHistory();
+            
+            setActivePlayers((prev: LineupPlayer[]) => {
+              const dPlayer = prev.find(p => p.id === draggingId);
+              const tPlayer = prev.find(p => p.id === targetId);
+              
+              if (!dPlayer || !tPlayer) return prev;
+              const isSubstReplacement = dPlayer.isSubstitute || dPlayer.isHolding;
+
+              return prev.map(p => {
+                if (p.id === draggingId) {
+                  return { ...p, isSubstitute: false, x: tPlayer.x, y: tPlayer.y, isHolding: false };
+                }
+                if (p.id === targetId) {
+                  if (isSubstReplacement) {
+                    return { ...p, isSubstitute: true, isHolding: false };
+                  } else {
+                    return { ...p, x: dPlayer.x, y: dPlayer.y, isHolding: false };
+                  }
+                }
+                return p;
+              });
+            });
+          } else if (isDroppedOnBench) {
+            // --- DROP ON BENCH WITH SLOT INSERTION ---
+            pushHistory();
+            setActivePlayers((prev: LineupPlayer[]) => {
+              const currentSubCount = getValidSubsCount(prev, draggingId);
+              if (currentSubCount >= 7) {
+                alert("Du kan inte ha mer än 7 avbytare på bänken.");
+                return prev;
+              }
+
+              const dPlayer = prev.find(p => p.id === draggingId);
+              if (!dPlayer) return prev;
+
+              const startersList = prev.filter(p => !p.isSubstitute && p.id !== draggingId && p.playerId !== dPlayer.playerId);
+              const seenSubPlayerIds = new Set<string>();
+              const otherSubs = prev.filter(p => {
+                if (!p.isSubstitute) return false;
+                if (p.id === draggingId || p.playerId === dPlayer.playerId) return false;
+                if (!squadPlayers.some(s => s.id === p.playerId)) return false;
+                if (seenSubPlayerIds.has(p.playerId)) return false;
+                seenSubPlayerIds.add(p.playerId);
+                return true;
+              });
+
+              // Determine target slot (0 to 6)
+              const bRect = benchRef.current?.getBoundingClientRect();
+              const dropSlotIndex = bRect && bRect.width > 0
+                ? Math.min(6, Math.max(0, Math.floor(((e.clientX - bRect.left) / bRect.width) * 7)))
+                : Math.min(6, Math.max(0, Math.floor((orientation === 'landscape' ? rawVX : rawX) / (100 / 7))));
+
+              const updatedSubs = [...otherSubs];
+              updatedSubs.splice(dropSlotIndex, 0, { ...dPlayer, isSubstitute: true, isHolding: false });
+
+              return [...startersList, ...updatedSubs];
+            });
+          } else if (isInFieldX && isInFieldY) {
+            pushHistory();
+            setActivePlayers((prev: LineupPlayer[]) => prev.map(p => 
+              p.id === draggingId 
+                ? { ...p, isSubstitute: false, x: info.x, y: info.y, isHolding: false } 
+                : p
+            ));
+          } else {
+            pushHistory();
+            setActivePlayers((prev: LineupPlayer[]) => {
+              const currentSubCount = getValidSubsCount(prev, draggingId);
+              if (currentSubCount >= 7) {
+                alert("Du kan inte ha mer än 7 avbytare på bänken.");
+                return prev;
+              }
+              return prev.map(p => 
+                p.id === draggingId ? { ...p, isSubstitute: true, isHolding: false } : p
+              );
+            });
+          }
+          setHasUnsavedChanges(true);
         }
-        setHasUnsavedChanges(true);
       }
       
       lastInteractionTimeRef.current = Date.now();
@@ -1674,6 +2064,7 @@ export default function LineupBuilder({
       setFootballScale(lineup.tacticalBoard?.footballScale || 1);
       setOpponents(lineup.tacticalBoard?.opponents || []);
       setShowOpponents(lineup.tacticalBoard?.showOpponents ?? true);
+      setShowPositionDescriptions(lineup.tacticalBoard?.showPositionDescriptions ?? false);
       setOpponentColor(lineup.tacticalBoard?.opponentColor || '#ef4444');
       const savedTacticalPlayers = lineup.tacticalBoard?.players || [];
       const sanitizedTactical = sanitizeLineupPlayers(
@@ -1773,6 +2164,11 @@ export default function LineupBuilder({
       if (prev !== remote) return remote;
       return prev;
     });
+    setShowPositionDescriptions(prev => {
+      const remote = lineup.tacticalBoard?.showPositionDescriptions ?? false;
+      if (prev !== remote) return remote;
+      return prev;
+    });
 
     setTeamNotes(prev => {
       const remote = lineup.notes?.team?.text || '';
@@ -1833,6 +2229,7 @@ export default function LineupBuilder({
       footballScale,
       opponents,
       showOpponents,
+      showPositionDescriptions,
       opponentColor,
       players: tacticalPlayers
     };
@@ -1858,7 +2255,7 @@ export default function LineupBuilder({
     if (!isStillDifferent) {
       setHasUnsavedChanges(false);
     }
-  }, [lineup, lineupName, teamName, players, playerScale, nameTagStyle, nameDisplayMode, showNameBackground, nameBackgroundType, currentFormation, showPhoto, showName, showNumber, teamLogoUrl, pitchType, orientation, attackDirection, tacticalDrawings, footballPos, footballScale, opponents, showOpponents, opponentColor, tacticalPlayers, teamNotes, teamMedia, opponentNotes, opponentMedia, hasUnsavedChanges]);
+  }, [lineup, lineupName, teamName, players, playerScale, nameTagStyle, nameDisplayMode, showNameBackground, nameBackgroundType, currentFormation, showPhoto, showName, showNumber, teamLogoUrl, pitchType, orientation, attackDirection, tacticalDrawings, footballPos, footballScale, opponents, showOpponents, showPositionDescriptions, opponentColor, tacticalPlayers, teamNotes, teamMedia, opponentNotes, opponentMedia, hasUnsavedChanges]);
 
   // Auto-save changes back to the parent
   useEffect(() => {
@@ -1893,6 +2290,7 @@ export default function LineupBuilder({
         footballScale,
         opponents,
         showOpponents,
+        showPositionDescriptions,
         opponentColor,
         players: tacticalPlayers
       }
@@ -1908,6 +2306,7 @@ export default function LineupBuilder({
       footballScale: lineup.tacticalBoard?.footballScale || 1,
       opponents: lineup.tacticalBoard?.opponents || [],
       showOpponents: lineup.tacticalBoard?.showOpponents ?? true,
+      showPositionDescriptions: lineup.tacticalBoard?.showPositionDescriptions ?? false,
       opponentColor: lineup.tacticalBoard?.opponentColor || '#ef4444',
       players: lineup.tacticalBoard?.players || []
     };
@@ -1979,7 +2378,7 @@ export default function LineupBuilder({
         setHasUnsavedChanges(false);
       }
     };
-  }, [lineupName, teamName, players, tacticalPlayers, playerScale, nameTagStyle, nameDisplayMode, showNameBackground, nameBackgroundType, currentFormation, showPhoto, showName, showNumber, teamLogoUrl, pitchType, orientation, attackDirection, tacticalDrawings, footballPos, footballScale, opponents, showOpponents, opponentColor, teamNotes, teamMedia, opponentNotes, opponentMedia, lineup?.id, hasUnsavedChanges]);
+  }, [lineupName, teamName, players, tacticalPlayers, playerScale, nameTagStyle, nameDisplayMode, showNameBackground, nameBackgroundType, currentFormation, showPhoto, showName, showNumber, teamLogoUrl, pitchType, orientation, attackDirection, tacticalDrawings, footballPos, footballScale, opponents, showOpponents, showPositionDescriptions, opponentColor, teamNotes, teamMedia, opponentNotes, opponentMedia, lineup?.id, hasUnsavedChanges]);
 
   const applyFormation = (variant: FormationVariant) => {
     pushHistory();
@@ -2034,33 +2433,125 @@ export default function LineupBuilder({
     setHasUnsavedChanges(true);
   };
 
+  const setupTwoTeams = (bForm: string = blueFormation, rForm: string = redFormation) => {
+    pushHistory();
+    const bf = CLASSIC_FORMATIONS_MAP[bForm] || CLASSIC_FORMATIONS_MAP['4-4-2'];
+    const rf = CLASSIC_FORMATIONS_MAP[rForm] || CLASSIC_FORMATIONS_MAP['4-4-2'];
+
+    const newBlue: LineupPlayer[] = bf.blue.map((pos, idx) => {
+      const num = idx + 1;
+      return {
+        id: `tactical-blue-${num}`,
+        playerId: `tactical-blue-${num}`,
+        x: pos.x,
+        y: pos.y,
+        isSubstitute: false
+      };
+    });
+
+    const newRed = rf.blue.map((pos, idx) => {
+      const num = idx + 1;
+      const classic = CLASSIC_POSITIONS[num] || { name: `Spelare ${num}`, role: 'Spelare' };
+      return {
+        id: `tactical-red-${num}`,
+        number: num,
+        name: `${num}. ${classic.name}`,
+        role: classic.role,
+        x: 100 - pos.x,
+        y: 100 - pos.y
+      };
+    });
+
+    setTacticalPlayers(newBlue);
+    setOpponents(newRed);
+    setFootballPos({ x: 50, y: 50 });
+    setShowOpponents(true);
+    setShowPositionDescriptions(false);
+    setIsDrawingsVisible(true);
+    setBlueFormation(bForm);
+    setRedFormation(rForm);
+    setOpponentColor('#ef4444');
+    setHasUnsavedChanges(true);
+  };
+
+  const applyBlueFormation = (formKey: string) => {
+    const bf = CLASSIC_FORMATIONS_MAP[formKey] || CLASSIC_FORMATIONS_MAP['4-4-2'];
+    pushHistory();
+    const newBlue: LineupPlayer[] = bf.blue.map((pos, idx) => {
+      const num = idx + 1;
+      return {
+        id: `tactical-blue-${num}`,
+        playerId: `tactical-blue-${num}`,
+        x: pos.x,
+        y: pos.y,
+        isSubstitute: false
+      };
+    });
+    setTacticalPlayers(newBlue);
+    setBlueFormation(formKey);
+    setHasUnsavedChanges(true);
+  };
+
+  const applyRedFormation = (formKey: string) => {
+    const rf = CLASSIC_FORMATIONS_MAP[formKey] || CLASSIC_FORMATIONS_MAP['4-4-2'];
+    pushHistory();
+    const newRed = rf.blue.map((pos, idx) => {
+      const num = idx + 1;
+      const classic = CLASSIC_POSITIONS[num] || { name: `Spelare ${num}`, role: 'Spelare' };
+      return {
+        id: `tactical-red-${num}`,
+        number: num,
+        name: `${num}. ${classic.name}`,
+        role: classic.role,
+        x: 100 - pos.x,
+        y: 100 - pos.y
+      };
+    });
+    setOpponents(newRed);
+    setRedFormation(formKey);
+    setShowOpponents(true);
+    setHasUnsavedChanges(true);
+  };
+
   const applyOpponentFormation = (variant: FormationVariant) => {
     pushHistory();
     
-    // Create exactly 11 opponent circles
-    const newOpponents: { id: string, x: number, y: number }[] = [];
+    // Create exactly 11 opponent circles with classic positions
+    const newOpponents: { id: string, x: number, y: number, number?: number, name?: string, role?: string }[] = [];
     
     // 1. Goalkeeper (Opponent's perspective: flipped according to custom formation if defined, else central top)
+    const gkClassic = CLASSIC_POSITIONS[1];
     if (variant.gkPosition) {
       newOpponents.push({
         id: Math.random().toString(36).substr(2, 9),
         x: 100 - variant.gkPosition.x,
-        y: 100 - variant.gkPosition.y
+        y: 100 - variant.gkPosition.y,
+        number: 1,
+        name: `1. ${gkClassic.name}`,
+        role: gkClassic.role
       });
     } else {
       newOpponents.push({
         id: Math.random().toString(36).substr(2, 9),
         x: 50,
-        y: 6 
+        y: 6,
+        number: 1,
+        name: `1. ${gkClassic.name}`,
+        role: gkClassic.role
       });
     }
 
     // 2. Outfield players (Flipped coordinates)
-    variant.positions.forEach(pos => {
+    variant.positions.forEach((pos, idx) => {
+      const num = idx + 2;
+      const classic = CLASSIC_POSITIONS[num] || { name: `Spelare ${num}`, role: 'Spelare' };
       newOpponents.push({
         id: Math.random().toString(36).substr(2, 9),
         x: 100 - pos.x, // Flip x to preserve left/right from opponent view
-        y: 100 - pos.y
+        y: 100 - pos.y,
+        number: num,
+        name: `${num}. ${classic.name}`,
+        role: classic.role
       });
     });
 
@@ -2176,6 +2667,7 @@ export default function LineupBuilder({
       footballPos: footballPos ? { ...footballPos } : null,
       footballScale,
       showOpponents,
+      showPositionDescriptions,
       opponentColor,
       pitchType,
     };
@@ -2197,6 +2689,7 @@ export default function LineupBuilder({
       footballPos,
       footballScale,
       showOpponents,
+      showPositionDescriptions,
       opponentColor,
       pitchType
     );
@@ -2213,6 +2706,7 @@ export default function LineupBuilder({
     const newFootballPos = board.footballPos ? { ...board.footballPos } : null;
     const newFootballScale = board.footballScale !== undefined ? board.footballScale : footballScale;
     const newShowOpponents = board.showOpponents ?? true;
+    const newShowPositionDescriptions = board.showPositionDescriptions ?? false;
     const newOpponentColor = board.opponentColor || opponentColor;
     const newPitchType = board.pitchType || pitchType;
 
@@ -2222,6 +2716,7 @@ export default function LineupBuilder({
     setFootballPos(newFootballPos);
     setFootballScale(newFootballScale);
     setShowOpponents(newShowOpponents);
+    setShowPositionDescriptions(newShowPositionDescriptions);
     setOpponentColor(newOpponentColor);
     if (newPitchType) setPitchType(newPitchType as any);
     
@@ -2233,6 +2728,7 @@ export default function LineupBuilder({
       newFootballPos,
       newFootballScale,
       newShowOpponents,
+      newShowPositionDescriptions,
       newOpponentColor,
       newPitchType
     );
@@ -2566,8 +3062,6 @@ export default function LineupBuilder({
     return fullName;
   };
 
-  const getSquadPlayer = (id: string) => squadPlayers.find(s => s.id === id);
-
   const calculateBestSpawnPosition = useCallback((currentPlayers: LineupPlayer[]) => {
     const corners = [
       { x: 8, y: 8 },    // Top Left
@@ -2598,27 +3092,29 @@ export default function LineupBuilder({
     return bestCorner;
   }, []);
   
-  const activePlayers = isMaximized ? tacticalPlayers : players;
-  const setActivePlayers = isMaximized ? setTacticalPlayers : setPlayers;
-
   const validLineupPlayers = useMemo(() => {
+    if (isMaximized) return activePlayers;
     const uniqueIds = new Set<string>();
     const uniquePlayerIds = new Set<string>();
     return activePlayers.filter(p => {
-      // Must be in squad
-      if (!squadPlayers.some(s => s.id === p.playerId)) return false;
+      // Must be in squad OR be a virtual tactical player (e.g. starts with 'tactical-')
+      const isTactical = p.playerId.startsWith('tactical-');
+      if (!isTactical && !squadPlayers.some(s => s.id === p.playerId)) return false;
       // Must have unique instance ID to avoid map key collisions
       if (uniqueIds.has(p.id)) return false;
       // Also preserve "one per squad player" rule for UI logic
-      if (uniquePlayerIds.has(p.playerId)) return false;
+      if (!isTactical && uniquePlayerIds.has(p.playerId)) return false;
       
       uniqueIds.add(p.id);
       uniquePlayerIds.add(p.playerId);
       return true;
     });
-  }, [activePlayers, squad]);
+  }, [activePlayers, isMaximized, squad, squadPlayers]);
 
-  const starters = useMemo(() => validLineupPlayers.filter(p => !p.isSubstitute), [validLineupPlayers]);
+  const starters = useMemo(() => {
+    if (isMaximized) return activePlayers;
+    return validLineupPlayers.filter(p => !p.isSubstitute);
+  }, [isMaximized, activePlayers, validLineupPlayers]);
   const subs = useMemo(() => validLineupPlayers.filter(p => p.isSubstitute), [validLineupPlayers]);
 
   const renderLineupContent = (isSimplified: boolean = false, customRef?: React.Ref<HTMLDivElement>) => {
@@ -3132,8 +3628,8 @@ export default function LineupBuilder({
               </defs>
               
               {/* Previous Drawings */}
-              {tacticalDrawings.map((draw) => (
-                <g key={draw.id}>
+              {tacticalDrawings.map((draw, idx) => (
+                <g key={`draw-${draw.id || idx}-${idx}`}>
                   {draw.type === 'circle' ? (
                     <ellipse
                       cx={draw.points[0].x}
@@ -3436,37 +3932,72 @@ export default function LineupBuilder({
             </svg>
           )}
 
-          {/* Opponents Layer */}
-          {isMaximized && showOpponents && isDrawingsVisible && opponents.map((opp) => (
-            <div 
-              key={opp.id}
-              className={`absolute z-40 transition-none select-none ${isSimplified ? '' : 'cursor-move'}`}
-              onPointerDown={isSimplified ? undefined : (e) => handlePointerDownWithDeletion(e, 'opponent', opp.id)}
-              onPointerUp={isSimplified ? undefined : clearLongPress}
-              onPointerCancel={isSimplified ? undefined : clearLongPress}
-              onPointerMove={isSimplified ? undefined : () => {
-                if (draggingOpponentId === opp.id) {
-                  clearLongPress();
-                }
-              }}
-              style={{
-                left: `${opp.x}%`,
-                top: `${opp.y}%`,
-                transform: `translate(-50%, -50%) rotate(${getCounterRotation()})`,
-                width: `${playerScale * 50}px`,
-                height: `${playerScale * 50}px`,
-              }}
-            >
-              <div className="w-full h-full flex items-center justify-center">
-                <Shirt 
-                  size={playerScale * 40} 
-                  style={{ color: opponentColor }}
-                  fill="currentColor"
-                  className="drop-shadow-md"
-                />
+          {/* Opponents Layer (Red Team / Motståndare) */}
+          {isMaximized && showOpponents && isDrawingsVisible && opponents.map((opp, idx) => {
+            const oppNum = opp.number !== undefined && opp.number !== null && opp.number !== '' ? opp.number : (idx + 1);
+            const oppName = opp.name || (CLASSIC_POSITIONS[Number(oppNum)]?.name ? `${oppNum}. ${CLASSIC_POSITIONS[Number(oppNum)]?.name}` : `Spelare ${oppNum}`);
+            const oppDesc = showPositionDescriptions ? (CLASSIC_POSITIONS[Number(oppNum)]?.desc || '') : '';
+            return (
+              <div 
+                key={`opp-${opp.id || idx}-${idx}`}
+                className={`absolute z-40 transition-none select-none group ${isSimplified ? '' : 'cursor-move'}`}
+                onPointerDown={isSimplified ? undefined : (e) => handlePointerDownWithDeletion(e, 'opponent', opp.id)}
+                onPointerUp={isSimplified ? undefined : clearLongPress}
+                onPointerCancel={isSimplified ? undefined : clearLongPress}
+                title={oppDesc ? `${oppName}: ${oppDesc}` : oppName}
+                style={{
+                  left: `${opp.x}%`,
+                  top: `${opp.y}%`,
+                  transform: `translate(-50%, -50%) rotate(${getCounterRotation()})`,
+                  width: `${playerScale * 50}px`,
+                  height: `${playerScale * 50}px`,
+                }}
+              >
+                <div className="w-full h-full flex flex-col items-center justify-center relative">
+                  <div className="relative flex items-center justify-center">
+                    <Shirt 
+                      size={playerScale * 40} 
+                      style={{ color: opponentColor || '#ef4444' }}
+                      fill="currentColor"
+                      className="drop-shadow-md"
+                    />
+                    <span 
+                      className="absolute inset-0 flex items-center justify-center font-black text-white text-[11px] pointer-events-none drop-shadow-sm"
+                      style={{ fontSize: `${Math.max(9, 13 * playerScale)}px`, marginTop: `${-2 * playerScale}px` }}
+                    >
+                      {oppNum}
+                    </span>
+
+                    {/* Quick Edit Pencil Button */}
+                    <button
+                      type="button"
+                      onPointerDown={(e) => {
+                        e.stopPropagation();
+                        clearLongPress();
+                      }}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        clearLongPress();
+                        handleOpenNumberEdit('opponent', opp.id);
+                      }}
+                      className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-white dark:bg-zinc-800 text-zinc-700 dark:text-zinc-200 border border-zinc-300 dark:border-zinc-600 shadow-md flex items-center justify-center opacity-0 group-hover:opacity-100 hover:opacity-100 transition-opacity hover:scale-110 active:scale-95 cursor-pointer z-50"
+                      title="Ändra nummer & position"
+                    >
+                      <Pencil size={10} />
+                    </button>
+                  </div>
+                  {oppName && showPositionDescriptions && (
+                    <span 
+                      className="mt-0.5 text-[9px] font-bold text-white bg-red-900/90 backdrop-blur-xs px-1.5 py-0.5 rounded-full whitespace-nowrap shadow-sm pointer-events-none"
+                      style={{ fontSize: `${Math.max(8, 10 * playerScale)}px` }}
+                    >
+                      {oppName}
+                    </span>
+                  )}
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
 
           {/* Football Icon */}
           {isMaximized && footballPos && isDrawingsVisible && (
@@ -3563,51 +4094,86 @@ export default function LineupBuilder({
 
           {/* Draggable Players on Field */}
           <AnimatePresence>
-            {starters.map((p) => {
-              const sp = getSquadPlayer(p.playerId);
-              if (!sp) return null;
+            {starters.map((p, idx) => {
+              const sp = getSquadPlayer(p.playerId) || {
+                id: p.playerId || p.id,
+                name: p.customName || `Spelare ${idx + 1}`,
+                number: p.customNumber || String(idx + 1),
+                position: `P${idx + 1}`,
+                role: 'player'
+              };
               
-              const isDragging = draggingId === p.id;
-              const displayX = isDragging && dragPos ? dragPos.x : p.x;
-              const displayY = isDragging && dragPos ? dragPos.y : p.y;
+              const isDragging = isMaximized ? draggingBlueId === p.id : draggingId === p.id;
+              const displayX = isMaximized ? p.x : (isDragging && dragPos ? dragPos.x : p.x);
+              const displayY = isMaximized ? p.y : (isDragging && dragPos ? dragPos.y : p.y);
+              const isTacticalBlue = p.playerId.startsWith('tactical-blue-');
+              const displayNum = p.customNumber !== undefined && p.customNumber !== null && p.customNumber !== '' 
+                ? p.customNumber 
+                : (sp.number || (isTacticalBlue ? p.playerId.replace('tactical-blue-', '') : ''));
+              const numInt = Number(displayNum);
+              const classicInfo = CLASSIC_POSITIONS[numInt] || (isTacticalBlue ? CLASSIC_POSITIONS[Number(sp.number)] : null);
+              const displayName = p.customName 
+                || (classicInfo ? `${displayNum}. ${classicInfo.name}` : sp.name);
+              const tooltipTitle = classicInfo ? (showPositionDescriptions ? `${displayName}: ${classicInfo.desc}` : displayName) : displayName;
 
               return (
                 <div
-                  key={p.id}
+                  key={`starter-${p.id || idx}-${idx}`}
                   data-player-id={p.id}
-                  className={`absolute z-10 player-node group select-none transition-all ${
-                    isSimplified ? '' : (isEditMode ? 'cursor-pointer' : 'cursor-grab active:cursor-grabbing')
-                  } ${isDragging ? 'opacity-40 scale-90 pointer-events-none' : ''} ${hoveredPlayerId === p.id ? 'z-40' : ''} ${p.isHolding ? 'z-30' : ''}`}
+                  title={tooltipTitle}
+                  className={`absolute player-node select-none ${
+                    isMaximized 
+                      ? 'z-40 transition-none cursor-move group' 
+                      : `${hoveredPlayerId === p.id ? 'z-40' : p.isHolding ? 'z-30' : 'z-10'} group ${
+                          isSimplified ? '' : (isEditMode ? 'cursor-pointer' : 'cursor-grab active:cursor-grabbing')
+                        } ${
+                          isDragging ? 'opacity-40 scale-90 pointer-events-none' : ''
+                        }`
+                  }`}
                   style={{
                     left: `${displayX}%`,
                     top: `${displayY}%`,
                     touchAction: 'none',
                     transform: `translate(-50%, -50%) rotate(${getCounterRotation()})`,
-                    transition: (isDragging || isSimplified || (Date.now() - lastInteractionTimeRef.current < 50)) ? 'none' : 'left 0.5s cubic-bezier(0.19, 1, 0.22, 1), top 0.5s cubic-bezier(0.19, 1, 0.22, 1), opacity 0.3s ease, transform 0.3s ease'
+                    width: isMaximized ? `${playerScale * 50}px` : undefined,
+                    height: isMaximized ? `${playerScale * 50}px` : undefined,
+                    transition: (isDragging || isSimplified || isMaximized || (Date.now() - lastInteractionTimeRef.current < 50)) ? 'none' : 'left 0.5s cubic-bezier(0.19, 1, 0.22, 1), top 0.5s cubic-bezier(0.19, 1, 0.22, 1), opacity 0.3s ease, transform 0.3s ease'
                   }}
                   onPointerDown={isSimplified ? undefined : (e) => {
-                    e.stopPropagation();
-                    if (!isEditMode) {
-                      if (p.isHolding) {
-                        // Tapping/dragging the holding player immediately clears the holding state (amber highlight)
-                        // so they become normally movable and stay exactly where placed.
-                        pushHistory();
-                        setActivePlayers((prev: LineupPlayer[]) => prev.map(lp => 
-                          lp.id === p.id ? { ...lp, isHolding: false } : lp
-                        ));
-                        setHasUnsavedChanges(true);
-                      }
+                    if (isMaximized) {
+                      handlePointerDownWithDeletion(e, 'blue', p.id);
+                    } else {
+                      e.stopPropagation();
+                      if (!isEditMode) {
+                        if (p.isHolding) {
+                          // Tapping/dragging the holding player immediately clears the holding state (amber highlight)
+                          // so they become normally movable and stay exactly where placed.
+                          pushHistory();
+                          setActivePlayers((prev: LineupPlayer[]) => prev.map(lp => 
+                            lp.id === p.id ? { ...lp, isHolding: false } : lp
+                          ));
+                          setHasUnsavedChanges(true);
+                        }
 
-                      // We completely removed the automatic onPointerDown swapping behavior
-                      // that was causing subs to jump on top of the goalkeeper when clicking other players.
-                      pushHistory();
-                      setDraggingId(p.id);
-                      setDragPos({ x: p.x, y: p.y });
+                        // We completely removed the automatic onPointerDown swapping behavior
+                        // that was causing subs to jump on top of the goalkeeper when clicking other players.
+                        pushHistory();
+                        setDraggingId(p.id);
+                        setDragPos({ x: p.x, y: p.y });
+                      }
                     }
+                  }}
+                  onPointerUp={isSimplified ? undefined : () => {
+                    clearLongPress();
+                    if (isMaximized) setDraggingBlueId(null);
+                  }}
+                  onPointerCancel={isSimplified ? undefined : () => {
+                    clearLongPress();
+                    if (isMaximized) setDraggingBlueId(null);
                   }}
                   onClick={isSimplified ? undefined : (e) => {
                     e.stopPropagation();
-                    if (isEditMode) {
+                    if (isEditMode && !isMaximized) {
                       setSelectedForEdit(p.id);
                     }
                   }}
@@ -3630,118 +4196,186 @@ export default function LineupBuilder({
                         )}
                       </AnimatePresence>
 
-                      <div 
-                        className={`rounded-full border-2 bg-zinc-100 dark:bg-zinc-800 overflow-hidden shadow-2xl transition-all ${
-                          !isSimplified && isEditMode 
-                            ? 'border-indigo-500 ring-4 ring-indigo-500/20' 
-                            : (hoveredPlayerId === p.id ? 'border-indigo-400 ring-4 ring-indigo-400/40 scale-110 shadow-indigo-200' : (p.isHolding ? 'border-amber-400 ring-4 ring-amber-400/40 shadow-lg' : 'border-white'))
-                        } ${!isSimplified ? 'group-hover:scale-110' : ''}`}
-                        style={{ 
-                          width: `${3.5 * playerScale}rem`, 
-                          height: `${3.5 * playerScale}rem`,
-                          display: showPhoto ? 'flex' : 'none'
-                        }}
-                      >
-                        {sp.photoUrl ? (
-                          <CachedImage 
-                            src={sp.photoUrl} 
-                            alt={sp.name} 
-                            className="w-full h-full object-cover pointer-events-none" 
-                            decoding="async"
+                      {isTacticalBlue ? (
+                        <div className="relative flex items-center justify-center">
+                          <Shirt 
+                            size={playerScale * 40} 
+                            style={{ color: '#2563eb' }}
+                            fill="currentColor"
+                            className="drop-shadow-md"
                           />
-                        ) : (
-                          <div className="w-full h-full bg-gradient-to-br from-blue-900 to-indigo-950 flex items-center justify-center text-white/50">
-                            <User size={24 * playerScale} />
-                          </div>
-                        )}
+                          <span 
+                            className="absolute inset-0 flex items-center justify-center font-black text-white text-[11px] pointer-events-none drop-shadow-sm"
+                            style={{ fontSize: `${Math.max(9, 13 * playerScale)}px`, marginTop: `${-2 * playerScale}px` }}
+                          >
+                            {displayNum}
+                          </span>
 
-                        {/* Swap indicator icon */}
-                        {hoveredPlayerId === p.id && (() => {
-                          const dPlayer = players.find(lp => lp.id === draggingId);
-                          const isReplacement = dPlayer && (dPlayer.isSubstitute || dPlayer.isHolding);
-                          return (
-                            <div className="absolute inset-0 bg-indigo-600/60 backdrop-blur-[1px] flex flex-col items-center justify-center text-white p-2">
-                              {isReplacement ? (
-                                <>
-                                  <ArrowUpRight size={28} className="animate-bounce" />
-                                  <span className="text-[10px] font-bold uppercase leading-none mt-1">Byt in</span>
-                                </>
-                              ) : (
-                                <>
-                                  <RefreshCw size={28} className="animate-spin-slow" />
-                                  <span className="text-[10px] font-bold uppercase leading-none mt-1">Skifta</span>
-                                </>
-                              )}
-                            </div>
-                          );
-                        })()}
-
-                        {!isSimplified && isEditMode && (
-                          <div className="absolute inset-0 bg-indigo-600/20 flex items-center justify-center">
-                            <Edit2 size={20 * playerScale} className="text-white" />
-                          </div>
-                        )}
-                      </div>
-                      {sp.number && showNumber && (
-                        <div 
-                          className="absolute bg-zinc-900 text-white rounded-full flex items-center justify-center font-black border-2 border-white shadow-lg"
-                          style={{
-                            width: `${1.5 * playerScale}rem`,
-                            height: `${1.5 * playerScale}rem`,
-                            fontSize: `${0.6 * playerScale}rem`,
-                            bottom: showPhoto ? 0 : 'auto',
-                            right: showPhoto ? 0 : 'auto',
-                            top: !showPhoto ? '50%' : 'auto',
-                            left: !showPhoto ? '50%' : 'auto',
-                            transform: !showPhoto ? 'translate(-50%, -50%)' : 'none',
-                            position: showPhoto ? 'absolute' : 'relative'
-                          }}
-                        >
-                          {sp.number}
+                          {/* Quick Edit Pencil Button */}
+                          {isMaximized && (
+                            <button
+                              type="button"
+                              onPointerDown={(e) => {
+                                e.stopPropagation();
+                                clearLongPress();
+                              }}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                clearLongPress();
+                                handleOpenNumberEdit('blue', p.id);
+                              }}
+                              className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-white dark:bg-zinc-800 text-zinc-700 dark:text-zinc-200 border border-zinc-300 dark:border-zinc-600 shadow-md flex items-center justify-center opacity-0 group-hover:opacity-100 hover:opacity-100 transition-opacity hover:scale-110 active:scale-95 cursor-pointer z-50"
+                              title="Ändra nummer & position"
+                            >
+                              <Pencil size={10} />
+                            </button>
+                          )}
                         </div>
+                      ) : (
+                        <>
+                          <div 
+                            className={`rounded-full border-2 bg-zinc-100 dark:bg-zinc-800 overflow-hidden shadow-2xl transition-all ${
+                              !isSimplified && isEditMode 
+                                ? 'border-indigo-500 ring-4 ring-indigo-500/20' 
+                                : (hoveredPlayerId === p.id ? 'border-indigo-400 ring-4 ring-indigo-400/40 scale-110 shadow-indigo-200' : (p.isHolding ? 'border-amber-400 ring-4 ring-amber-400/40 shadow-lg' : 'border-white'))
+                            } ${!isSimplified ? 'group-hover:scale-110' : ''}`}
+                            style={{ 
+                              width: `${3.5 * playerScale}rem`, 
+                              height: `${3.5 * playerScale}rem`,
+                              display: (showPhoto || isMaximized) ? 'flex' : 'none'
+                            }}
+                          >
+                            {sp.photoUrl ? (
+                              <CachedImage 
+                                src={sp.photoUrl} 
+                                alt={sp.name} 
+                                className="w-full h-full object-cover pointer-events-none" 
+                                decoding="async"
+                              />
+                            ) : (
+                              <div className="w-full h-full bg-gradient-to-br from-blue-900 to-indigo-950 flex items-center justify-center text-white/50">
+                                <User size={24 * playerScale} />
+                              </div>
+                            )}
+
+                            {/* Swap indicator icon */}
+                            {hoveredPlayerId === p.id && (() => {
+                              const dPlayer = players.find(lp => lp.id === draggingId);
+                              const isReplacement = dPlayer && (dPlayer.isSubstitute || dPlayer.isHolding);
+                              return (
+                                <div className="absolute inset-0 bg-indigo-600/60 backdrop-blur-[1px] flex flex-col items-center justify-center text-white p-2">
+                                  {isReplacement ? (
+                                    <>
+                                      <ArrowUpRight size={28} className="animate-bounce" />
+                                      <span className="text-[10px] font-bold uppercase leading-none mt-1">Byt in</span>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <RefreshCw size={28} className="animate-spin-slow" />
+                                      <span className="text-[10px] font-bold uppercase leading-none mt-1">Skifta</span>
+                                    </>
+                                  )}
+                                </div>
+                              );
+                            })()}
+
+                            {!isSimplified && isEditMode && (
+                              <div className="absolute inset-0 bg-indigo-600/20 flex items-center justify-center">
+                                <Edit2 size={20 * playerScale} className="text-white" />
+                              </div>
+                            )}
+                          </div>
+                          {sp.number && (showNumber || isMaximized) && (
+                            <div 
+                              className="absolute bg-zinc-900 text-white rounded-full flex items-center justify-center font-black border-2 border-white shadow-lg"
+                              style={{
+                                width: `${1.5 * playerScale}rem`,
+                                height: `${1.5 * playerScale}rem`,
+                                fontSize: `${0.6 * playerScale}rem`,
+                                bottom: (showPhoto || isMaximized) ? 0 : 'auto',
+                                right: (showPhoto || isMaximized) ? 0 : 'auto',
+                                top: !(showPhoto || isMaximized) ? '50%' : 'auto',
+                                left: !(showPhoto || isMaximized) ? '50%' : 'auto',
+                                transform: !(showPhoto || isMaximized) ? 'translate(-50%, -50%)' : 'none',
+                                position: (showPhoto || isMaximized) ? 'absolute' : 'relative'
+                              }}
+                            >
+                              {sp.number}
+                            </div>
+                          )}
+
+                          {/* Quick Edit Pencil Button for Squad Player in Tactical Mode */}
+                          {isMaximized && (
+                            <button
+                              type="button"
+                              onPointerDown={(e) => {
+                                e.stopPropagation();
+                                clearLongPress();
+                              }}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                clearLongPress();
+                                handleOpenNumberEdit('blue', p.id);
+                              }}
+                              className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-white dark:bg-zinc-800 text-zinc-700 dark:text-zinc-200 border border-zinc-300 dark:border-zinc-600 shadow-md flex items-center justify-center opacity-0 group-hover:opacity-100 hover:opacity-100 transition-opacity hover:scale-110 active:scale-95 cursor-pointer z-50"
+                              title="Ändra nummer & position"
+                            >
+                              <Pencil size={10} />
+                            </button>
+                          )}
+                        </>
                       )}
                     </div>
-                    {showName && (
+                    {showPositionDescriptions && (
                       <div className="mt-1">
-                        <div 
-                          className={`font-black text-center tracking-tight leading-tight transition-all flex flex-col items-center group/names ${
-                            (nameBackgroundType === 'badge' || nameBackgroundType === 'transparent') ? (
-                              `rounded-full px-2 py-0.5 shadow-md border ${
-                                hoveredPlayerId === p.id 
-                                  ? 'bg-indigo-600 text-white border-indigo-400 scale-105'
-                                  : (nameTagStyle === 'dark' 
-                                      ? (nameBackgroundType === 'transparent' ? 'bg-zinc-900/20 backdrop-blur-md text-white border-zinc-700/30' : 'bg-zinc-900 text-white border-zinc-800') 
-                                      : (nameBackgroundType === 'transparent' ? 'bg-white/20 backdrop-blur-md text-black border-white/30' : 'bg-white text-black border-zinc-200'))
-                              }`
-                            ) : 'gap-0.5'
-                          }`}
-                          style={{
-                            fontSize: `${0.6 * playerScale}rem`,
-                            opacity: isDragging ? 0.3 : 1,
-                          }}
-                        >
-                          {(() => {
-                            const displayName = getVisibleName(sp.name);
-                            const useSingleLine = ['initials', 'firstLastInitial', 'initialLastName'].includes(nameDisplayMode);
-                            const parts = useSingleLine ? [displayName] : displayName.split(' ');
-                            return parts.map((part, i) => (
-                              <div 
-                                key={i} 
-                                className={`truncate whitespace-nowrap ${
-                                  hoveredPlayerId === p.id ? 'text-white' : (
-                                    nameBackgroundType === 'solid' ? (
-                                      `px-1.5 ${nameTagStyle === 'dark' ? 'bg-zinc-900 text-white' : 'bg-white text-black shadow-sm'}`
-                                    ) : 
-                                    (nameBackgroundType === 'badge' || nameBackgroundType === 'transparent') ? '' : 
-                                    (nameTagStyle === 'dark' ? 'text-zinc-900' : 'text-white drop-shadow-md')
-                                  )
-                                }`}
-                              >
-                                {part}
-                              </div>
-                            ));
-                          })()}
-                        </div>
+                        {isTacticalBlue ? (
+                          <span 
+                            className="mt-0.5 text-[9px] font-bold text-white bg-blue-900/90 backdrop-blur-xs px-1.5 py-0.5 rounded-full whitespace-nowrap shadow-sm pointer-events-none"
+                            style={{ fontSize: `${Math.max(8, 10 * playerScale)}px` }}
+                          >
+                            {displayName}
+                          </span>
+                        ) : (
+                          <div 
+                            className={`font-black text-center tracking-tight leading-tight transition-all flex flex-col items-center group/names ${
+                              (nameBackgroundType === 'badge' || nameBackgroundType === 'transparent') ? (
+                                `rounded-full px-2 py-0.5 shadow-md border ${
+                                  hoveredPlayerId === p.id 
+                                    ? 'bg-indigo-600 text-white border-indigo-400 scale-105'
+                                    : (nameTagStyle === 'dark' 
+                                        ? (nameBackgroundType === 'transparent' ? 'bg-zinc-900/20 backdrop-blur-md text-white border-zinc-700/30' : 'bg-zinc-900 text-white border-zinc-800') 
+                                        : (nameBackgroundType === 'transparent' ? 'bg-white/20 backdrop-blur-md text-black border-white/30' : 'bg-white text-black border-zinc-200'))
+                                }`
+                              ) : 'gap-0.5'
+                            }`}
+                            style={{
+                              fontSize: `${0.6 * playerScale}rem`,
+                              opacity: isDragging ? 0.3 : 1,
+                            }}
+                          >
+                            {(() => {
+                              const displayName = getVisibleName(sp.name);
+                              const useSingleLine = ['initials', 'firstLastInitial', 'initialLastName'].includes(nameDisplayMode);
+                              const parts = useSingleLine ? [displayName] : displayName.split(' ');
+                              return parts.map((part, i) => (
+                                <div 
+                                  key={i} 
+                                  className={`truncate whitespace-nowrap ${
+                                    hoveredPlayerId === p.id ? 'text-white' : (
+                                      nameBackgroundType === 'solid' ? (
+                                        `px-1.5 ${nameTagStyle === 'dark' ? 'bg-zinc-900 text-white' : 'bg-white text-black shadow-sm'}`
+                                      ) : 
+                                      (nameBackgroundType === 'badge' || nameBackgroundType === 'transparent') ? '' : 
+                                      (nameTagStyle === 'dark' ? 'text-zinc-900' : 'text-white drop-shadow-md')
+                                    )
+                                  }`}
+                                >
+                                  {part}
+                                </div>
+                              ));
+                            })()}
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>
@@ -3818,14 +4452,14 @@ export default function LineupBuilder({
                         Inga avbytare valda (dra hit spelare för att bänka)
                       </p>
                     ) : (
-                      subs.map((p) => {
+                      subs.map((p, idx) => {
                         const sp = getSquadPlayer(p.playerId);
                         if (!sp) return null;
                         const isDragging = draggingId === p.id;
 
                         return (
                           <div 
-                            key={p.id}
+                            key={`sub-${p.id || idx}-${idx}`}
                             className={`shrink-0 flex flex-col items-center justify-start relative group transition-all duration-300 touch-none select-none ${subs.length >= 7 ? 'px-0 xs:px-0.5' : 'px-0.5 sm:px-1'} ${isDragging ? 'opacity-20 scale-90' : 'opacity-100'}`}
                           >
                             <div
@@ -3947,13 +4581,13 @@ export default function LineupBuilder({
       {isMaximized && (
         <>
           <div className="fixed top-[calc(0.75rem+env(safe-area-inset-top,0px))] left-3 right-3 z-[100] flex justify-end pointer-events-none">
-            <div className="flex items-center gap-1.5 overflow-x-auto whitespace-nowrap scrollbar-none touch-pan-x py-1 px-2 pointer-events-auto max-w-full">
+            <div className="flex items-center gap-1.5 overflow-x-auto whitespace-nowrap scrollbar-none touch-pan-x py-1.5 px-2.5 pointer-events-auto max-w-full bg-white/95 dark:bg-zinc-900/95 backdrop-blur-md rounded-2xl border border-zinc-200 dark:border-zinc-700 shadow-2xl">
               <button
                 onClick={() => setIsDrawingsVisible(!isDrawingsVisible)}
-                className={`w-8 h-8 rounded-lg flex items-center justify-center shadow-xl border transition-all flex-shrink-0 group pointer-events-auto ${
+                className={`w-8 h-8 rounded-lg flex items-center justify-center shadow-sm border transition-all flex-shrink-0 group pointer-events-auto cursor-pointer ${
                   isDrawingsVisible
-                    ? 'bg-amber-600 text-white border-amber-500 hover:bg-amber-700'
-                    : 'bg-amber-600/10 text-amber-650 hover:bg-amber-600/20 border-amber-500/35'
+                    ? 'bg-indigo-600 text-white border-indigo-500 hover:bg-indigo-700'
+                    : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-800 dark:text-zinc-100 border-zinc-200 dark:border-zinc-700 hover:bg-zinc-200 dark:hover:bg-zinc-700 hover:text-black dark:hover:text-white'
                 }`}
                 title={isDrawingsVisible ? "Dölj ritat/placerat på planen" : "Visa ritat/placerat på planen"}
               >
@@ -3961,10 +4595,10 @@ export default function LineupBuilder({
               </button>
               <button
                 onClick={() => setShowDelaunayNetwork(!showDelaunayNetwork)}
-                className={`w-8 h-8 rounded-lg flex items-center justify-center shadow-xl border transition-all flex-shrink-0 group pointer-events-auto ${
+                className={`w-8 h-8 rounded-lg flex items-center justify-center shadow-sm border transition-all flex-shrink-0 group pointer-events-auto cursor-pointer ${
                   showDelaunayNetwork
-                    ? 'bg-amber-600 text-white border-amber-500 hover:bg-amber-700'
-                    : 'bg-amber-600/10 text-amber-650 hover:bg-amber-600/20 border-amber-500/35'
+                    ? 'bg-indigo-600 text-white border-indigo-500 hover:bg-indigo-700'
+                    : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-800 dark:text-zinc-100 border-zinc-200 dark:border-zinc-700 hover:bg-zinc-200 dark:hover:bg-zinc-700 hover:text-black dark:hover:text-white'
                 }`}
                 title={showDelaunayNetwork ? "Dölj passningsnät (Delaunay)" : "Visa passningsnät (Delaunay)"}
               >
@@ -3981,35 +4615,100 @@ export default function LineupBuilder({
                     setTacticalTool('move');
                   }
                 }}
-                className={`w-8 h-8 rounded-lg flex items-center justify-center shadow-xl border transition-all flex-shrink-0 group pointer-events-auto ${
+                className={`w-8 h-8 rounded-lg flex items-center justify-center shadow-sm border transition-all flex-shrink-0 group pointer-events-auto cursor-pointer ${
                   isControlsVisible 
-                    ? 'bg-amber-600 text-white border-amber-500 hover:bg-amber-700' 
-                    : 'bg-amber-600/10 text-amber-650 hover:bg-amber-600/20 border-amber-500/35'
+                    ? 'bg-indigo-600 text-white border-indigo-500 hover:bg-indigo-700' 
+                    : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-800 dark:text-zinc-100 border-zinc-200 dark:border-zinc-700 hover:bg-zinc-200 dark:hover:bg-zinc-700 hover:text-black dark:hover:text-white'
                 }`}
                 title={isControlsVisible ? "Dölj ritverktyg" : "Visa ritverktyg"}
               >
                 <Pencil size={16} />
               </button>
+
+              {/* Ångra & Gör om snabbknappar */}
+              <div className="flex items-center gap-0.5 bg-zinc-100 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 p-0.5 rounded-lg shrink-0">
+                <button
+                  type="button"
+                  onClick={handleUndo}
+                  disabled={history.length === 0}
+                  className={`w-7 h-7 rounded-md flex items-center justify-center transition-all ${
+                    history.length === 0
+                      ? 'text-zinc-300 dark:text-zinc-600 cursor-not-allowed opacity-40'
+                      : 'text-zinc-700 dark:text-zinc-200 hover:text-black dark:hover:text-white hover:bg-zinc-200 dark:hover:bg-zinc-700 cursor-pointer active:scale-95'
+                  }`}
+                  title="Ångra borttagning eller flytt (Ctrl+Z)"
+                >
+                  <Undo2 size={15} />
+                </button>
+                <button
+                  type="button"
+                  onClick={handleRedo}
+                  disabled={future.length === 0}
+                  className={`w-7 h-7 rounded-md flex items-center justify-center transition-all ${
+                    future.length === 0
+                      ? 'text-zinc-300 dark:text-zinc-600 cursor-not-allowed opacity-40'
+                      : 'text-zinc-700 dark:text-zinc-200 hover:text-black dark:hover:text-white hover:bg-zinc-200 dark:hover:bg-zinc-700 cursor-pointer active:scale-95'
+                  }`}
+                  title="Gör om (Ctrl+Y / Ctrl+Shift+Z)"
+                >
+                  <Redo2 size={15} />
+                </button>
+              </div>
+
+              {/* 2 Lag (11v11) Snabbknapp: Blått vs Rött lag */}
               <button
-                onClick={() => setShowFormationModal(true)}
-                className="w-8 h-8 bg-amber-600/10 text-amber-650 hover:bg-amber-600/20 border border-amber-500/35 rounded-lg flex items-center justify-center shadow-xl transition-all flex-shrink-0 group pointer-events-auto"
-                title="Välj formation / positioner"
+                onClick={() => setupTwoTeams()}
+                className="px-2.5 h-8 bg-blue-600 hover:bg-blue-700 text-white rounded-lg flex items-center gap-1.5 shadow-md border border-blue-500 text-[11px] font-bold transition-all shrink-0 cursor-pointer pointer-events-auto active:scale-95"
+                title="Ställ upp 2 lag (11 mot 11: Blått lag mot Rött lag med nummer 1-11)"
+              >
+                <Users size={15} />
+                <span>2 Lag (11v11)</span>
+              </button>
+
+              {/* Visa/dölj beskrivningar (Badgen under spelaren) snabbknapp */}
+              <button
+                onClick={() => {
+                  setShowPositionDescriptions(!showPositionDescriptions);
+                  setHasUnsavedChanges(true);
+                }}
+                className={`px-2.5 h-8 rounded-lg flex items-center gap-1.5 shadow-sm border text-[11px] font-bold transition-all shrink-0 cursor-pointer pointer-events-auto active:scale-95 ${
+                  showPositionDescriptions
+                    ? 'bg-indigo-600 text-white border-indigo-500 hover:bg-indigo-700 shadow-md'
+                    : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-800 dark:text-zinc-100 border-zinc-200 dark:border-zinc-700 hover:bg-zinc-200 dark:hover:bg-zinc-700 hover:text-black dark:hover:text-white'
+                }`}
+                title={showPositionDescriptions ? "Dölj positionsbeskrivningar under spelarna på planen" : "Visa positionsbeskrivningar under spelarna på planen"}
+              >
+                {showPositionDescriptions ? <EyeOff size={15} /> : <Eye size={15} />}
+                <span>{showPositionDescriptions ? 'Dölj beskrivningar' : 'Visa beskrivningar'}</span>
+              </button>
+
+              <button
+                onClick={() => {
+                  setFormationTab('blue');
+                  setShowFormationModal(true);
+                }}
+                className={`w-8 h-8 rounded-lg flex items-center justify-center shadow-sm border transition-all flex-shrink-0 group pointer-events-auto cursor-pointer ${
+                  showFormationModal
+                    ? 'bg-indigo-600 text-white border-indigo-500 hover:bg-indigo-700'
+                    : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-800 dark:text-zinc-100 border-zinc-200 dark:border-zinc-700 hover:bg-zinc-200 dark:hover:bg-zinc-700 hover:text-black dark:hover:text-white'
+                }`}
+                title="Välj formation för Blått & Rött lag"
               >
                 <Layout size={16} />
               </button>
               <button
                 onClick={() => setShowNotesModal(true)}
-                className="w-8 h-8 bg-amber-600/10 text-amber-650 hover:bg-amber-600/20 border border-amber-500/35 rounded-lg flex items-center justify-center shadow-xl transition-all flex-shrink-0 group pointer-events-auto"
+                className="w-8 h-8 bg-zinc-100 dark:bg-zinc-800 text-zinc-800 dark:text-zinc-100 border border-zinc-200 dark:border-zinc-700 hover:bg-zinc-200 dark:hover:bg-zinc-700 hover:text-black dark:hover:text-white rounded-lg flex items-center justify-center shadow-sm transition-all flex-shrink-0 group pointer-events-auto cursor-pointer"
                 title="Anteckningar"
               >
                 <ClipboardList size={16} />
               </button>
               <button
                 onClick={() => setShowTacticalSavedBoardsModal(true)}
-                className={`w-8 h-8 rounded-lg flex items-center justify-center shadow-xl border transition-all flex-shrink-0 group pointer-events-auto ${
+                className={`w-8 h-8 rounded-lg flex items-center justify-center shadow-sm border transition-all flex-shrink-0 group pointer-events-auto cursor-pointer ${
                   showTacticalSavedBoardsModal 
-                    ? 'bg-amber-600 text-white border-amber-500 hover:bg-amber-700' 
-                    : 'bg-amber-600/10 text-amber-650 hover:bg-amber-600/20 border-amber-500/35'
+                    ? 'bg-indigo-600 text-white border-indigo-500 hover:bg-indigo-700' 
+                    : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-800 dark:text-zinc-100 border-zinc-200 dark:border-zinc-700 hover:bg-zinc-200 dark:hover:bg-zinc-700 hover:text-black dark:hover:text-white'
                 }`}
                 title="Spara / Öppna rittavlor"
               >
@@ -4024,10 +4723,10 @@ export default function LineupBuilder({
                     setShowZoomMenu(false);
                   }
                 }}
-                className={`w-8 h-8 rounded-lg flex items-center justify-center shadow-xl border transition-all flex-shrink-0 group pointer-events-auto ${
+                className={`w-8 h-8 rounded-lg flex items-center justify-center shadow-sm border transition-all flex-shrink-0 group pointer-events-auto cursor-pointer ${
                   showSavedLineups 
-                    ? 'bg-amber-600 text-white border-amber-500 hover:bg-amber-700' 
-                    : 'bg-amber-600/10 text-amber-650 hover:bg-amber-600/20 border-amber-500/35'
+                    ? 'bg-indigo-600 text-white border-indigo-500 hover:bg-indigo-700' 
+                    : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-800 dark:text-zinc-100 border-zinc-200 dark:border-zinc-700 hover:bg-zinc-200 dark:hover:bg-zinc-700 hover:text-black dark:hover:text-white'
                 }`}
                 title={showSavedLineups ? "Dölj sparade laguppställningar" : "Visa sparade laguppställningar"}
               >
@@ -4038,10 +4737,10 @@ export default function LineupBuilder({
                   onClick={() => {
                     onSaveLineup({ ...lineup, isPublishedToPlayers: !lineup.isPublishedToPlayers });
                   }}
-                  className={`px-2.5 h-8 rounded-lg flex items-center gap-1.5 shadow-xl border text-[11px] font-bold transition-all shrink-0 pointer-events-auto cursor-pointer ${
+                  className={`px-2.5 h-8 rounded-lg flex items-center gap-1.5 shadow-sm border text-[11px] font-bold transition-all shrink-0 pointer-events-auto cursor-pointer ${
                     lineup.isPublishedToPlayers
                       ? 'bg-emerald-600 text-white border-emerald-500 hover:bg-emerald-700'
-                      : 'bg-amber-600/10 text-amber-650 hover:bg-amber-600/20 border-amber-500/35'
+                      : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-800 dark:text-zinc-100 border-zinc-200 dark:border-zinc-700 hover:bg-zinc-200 dark:hover:bg-zinc-700 hover:text-black dark:hover:text-white'
                   }`}
                   title={lineup.isPublishedToPlayers ? "Publicerad för spelare (Klicka för att dölja)" : "Publicera för spelare"}
                 >
@@ -4058,10 +4757,10 @@ export default function LineupBuilder({
                     setShowZoomMenu(false);
                   }
                 }}
-                className={`w-8 h-8 rounded-lg flex items-center justify-center shadow-xl border transition-all flex-shrink-0 group pointer-events-auto ${
+                className={`w-8 h-8 rounded-lg flex items-center justify-center shadow-sm border transition-all flex-shrink-0 group pointer-events-auto cursor-pointer ${
                   showBenchMaximized 
-                    ? 'bg-amber-600 text-white border-amber-500 hover:bg-amber-700' 
-                    : 'bg-amber-600/10 text-amber-650 hover:bg-amber-600/20 border-amber-500/35'
+                    ? 'bg-indigo-600 text-white border-indigo-500 hover:bg-indigo-700' 
+                    : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-800 dark:text-zinc-100 border-zinc-200 dark:border-zinc-700 hover:bg-zinc-200 dark:hover:bg-zinc-700 hover:text-black dark:hover:text-white'
                 }`}
                 title={showBenchMaximized ? "Dölj avbätare" : "Visa avbytare (Bänk)"}
               >
@@ -4076,10 +4775,10 @@ export default function LineupBuilder({
                     setShowBenchMaximized(false);
                   }
                 }}
-                className={`w-8 h-8 rounded-lg flex items-center justify-center shadow-xl border transition-all flex-shrink-0 group pointer-events-auto ${
+                className={`w-8 h-8 rounded-lg flex items-center justify-center shadow-sm border transition-all flex-shrink-0 group pointer-events-auto cursor-pointer ${
                   showZoomMenu 
-                    ? 'bg-amber-600 text-white border-amber-500 hover:bg-amber-700' 
-                    : 'bg-amber-600/10 text-amber-650 hover:bg-amber-600/20 border-amber-500/35'
+                    ? 'bg-indigo-600 text-white border-indigo-500 hover:bg-indigo-700' 
+                    : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-800 dark:text-zinc-100 border-zinc-200 dark:border-zinc-700 hover:bg-zinc-200 dark:hover:bg-zinc-700 hover:text-black dark:hover:text-white'
                 }`}
                 title={showZoomMenu ? "Dölj inställningar & zoom" : "Visa inställningar & zoom"}
               >
@@ -4095,14 +4794,14 @@ export default function LineupBuilder({
                     setAttackDirection('up');
                   }
                 }}
-                className="w-8 h-8 bg-amber-600/10 text-amber-650 hover:bg-amber-600/20 border border-amber-500/35 rounded-lg flex items-center justify-center shadow-xl transition-all flex-shrink-0 group pointer-events-auto"
+                className="w-8 h-8 bg-zinc-100 dark:bg-zinc-800 text-zinc-800 dark:text-zinc-100 border border-zinc-200 dark:border-zinc-700 hover:bg-zinc-200 dark:hover:bg-zinc-700 hover:text-black dark:hover:text-white rounded-lg flex items-center justify-center shadow-sm transition-all flex-shrink-0 group pointer-events-auto cursor-pointer"
                 title={orientation === 'landscape' ? "Byt till stående läge" : "Byt till liggande läge (TV)"}
               >
                 {orientation === 'landscape' ? <Smartphone size={16} /> : <Monitor size={16} />}
               </button>
               <button
                 onClick={handleCloseTacticalRequest}
-                className="w-8 h-8 bg-amber-600/10 text-amber-650 hover:bg-amber-600/20 border border-amber-500/35 rounded-lg flex items-center justify-center shadow-xl transition-all flex-shrink-0 group pointer-events-auto"
+                className="w-8 h-8 bg-zinc-100 dark:bg-zinc-800 text-zinc-800 dark:text-zinc-100 border border-zinc-200 dark:border-zinc-700 hover:bg-zinc-200 dark:hover:bg-zinc-700 hover:text-black dark:hover:text-white rounded-lg flex items-center justify-center shadow-sm transition-all flex-shrink-0 group pointer-events-auto cursor-pointer"
                 title="Lämna rittavlan"
               >
                 <Minimize2 size={16} className="group-hover:rotate-12 transition-transform" />
@@ -4364,6 +5063,29 @@ export default function LineupBuilder({
                     </div>
                   </div>
 
+                  {/* Positionsbeskrivningar setting toggle */}
+                  <div className="flex flex-col gap-1.5 pt-2 border-t border-zinc-100 dark:border-zinc-800/80">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] font-bold text-zinc-700 dark:text-zinc-300 uppercase tracking-wide">Positionsbeskrivning</span>
+                      <span className="text-[9px] font-semibold text-zinc-500 dark:text-zinc-400">{showPositionDescriptions ? 'Visas' : 'Dold'}</span>
+                    </div>
+                    <button
+                      onClick={() => {
+                        setShowPositionDescriptions(!showPositionDescriptions);
+                        setHasUnsavedChanges(true);
+                      }}
+                      className={`w-full py-2 px-3 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all flex items-center justify-center gap-2 border cursor-pointer ${
+                        showPositionDescriptions
+                          ? 'bg-indigo-600 border-indigo-500 text-white shadow-sm'
+                          : 'bg-zinc-50 dark:bg-black/20 border-zinc-200 dark:border-zinc-800 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800/50'
+                      }`}
+                      title={showPositionDescriptions ? "Dölj beskrivning av positioner" : "Visa beskrivning av positioner"}
+                    >
+                      {showPositionDescriptions ? <EyeOff size={13} /> : <Eye size={13} />}
+                      <span>{showPositionDescriptions ? 'Dölj beskrivningar' : 'Visa beskrivningar'}</span>
+                    </button>
+                  </div>
+
                 </div>
               </motion.div>
             )}
@@ -4407,13 +5129,13 @@ export default function LineupBuilder({
                   {subs.length === 0 ? (
                     <p className="text-[10px] text-zinc-400 dark:text-zinc-600 italic py-3 text-center w-full">Inga avbytare i den här laguppställningen...</p>
                   ) : (
-                    subs.map(p => {
+                    subs.map((p, idx) => {
                       const sp = getSquadPlayer(p.playerId);
                       if (!sp) return null;
                       
                       return (
                         <button
-                          key={p.id}
+                          key={`dock-sub-${p.id || idx}-${idx}`}
                           className={orientation === 'vertical'
                             ? "flex items-center gap-3 w-full px-3 py-2.5 rounded-2xl border border-zinc-100/50 dark:border-zinc-800/50 bg-zinc-50/50 dark:bg-zinc-950/20 hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:border-zinc-200 dark:hover:border-zinc-700 transition-all active:scale-95 text-left"
                             : "flex flex-col items-center gap-1 shrink-0 px-2.5 py-1.5 rounded-xl border border-transparent hover:bg-zinc-100 dark:hover:bg-zinc-800/50 hover:border-zinc-200 dark:hover:border-zinc-700/50 transition-all active:scale-95"}
@@ -4541,10 +5263,10 @@ export default function LineupBuilder({
                   </div>
                   
                   {/* Undo, Redo & Clear moved to the left */}
-                  <div className="flex items-center gap-1 bg-black/5 dark:bg-black/20 p-1 rounded-xl mr-1">
+                  <div className="flex items-center gap-1 bg-zinc-100 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 p-1 rounded-xl mr-1">
                     <button 
                       onClick={handleUndo}
-                      className={`p-2 rounded-lg transition-all ${history.length === 0 ? 'text-zinc-300 dark:text-zinc-800' : 'text-zinc-500 hover:text-zinc-900 dark:hover:text-white hover:bg-zinc-100 dark:hover:bg-zinc-800'}`}
+                      className={`p-2 rounded-lg transition-all ${history.length === 0 ? 'text-zinc-400 dark:text-zinc-600 cursor-not-allowed' : 'text-zinc-700 dark:text-zinc-200 hover:text-black dark:hover:text-white hover:bg-zinc-200 dark:hover:bg-zinc-700'}`}
                       disabled={history.length === 0}
                       title="Ångra"
                     >
@@ -4552,7 +5274,7 @@ export default function LineupBuilder({
                     </button>
                     <button 
                       onClick={handleRedo}
-                      className={`p-2 rounded-lg transition-all ${future.length === 0 ? 'text-zinc-300 dark:text-zinc-800' : 'text-zinc-500 hover:text-zinc-900 dark:hover:text-white hover:bg-zinc-100 dark:hover:bg-zinc-800'}`}
+                      className={`p-2 rounded-lg transition-all ${future.length === 0 ? 'text-zinc-400 dark:text-zinc-600 cursor-not-allowed' : 'text-zinc-700 dark:text-zinc-200 hover:text-black dark:hover:text-white hover:bg-zinc-200 dark:hover:bg-zinc-700'}`}
                       disabled={future.length === 0}
                       title="Gör om"
                     >
@@ -4560,7 +5282,7 @@ export default function LineupBuilder({
                     </button>
                     <button 
                       onClick={clearTactical}
-                      className="p-2 rounded-lg text-zinc-500 hover:text-red-500 hover:bg-red-500/10 transition-all font-bold"
+                      className="p-2 rounded-lg text-zinc-700 dark:text-zinc-200 hover:text-red-500 hover:bg-red-500/10 transition-all font-bold"
                       title="Radera allt"
                     >
                       <Trash size={18} />
@@ -4569,70 +5291,70 @@ export default function LineupBuilder({
 
                   <button 
                     onClick={() => setTacticalTool('move')}
-                    className={`p-2.5 rounded-xl transition-all ${tacticalTool === 'move' ? 'bg-indigo-600 text-white shadow-lg' : 'text-zinc-500 hover:text-zinc-900 dark:hover:text-white hover:bg-zinc-100 dark:hover:bg-zinc-800'}`}
+                    className={`p-2.5 rounded-xl border transition-all ${tacticalTool === 'move' ? 'bg-indigo-600 text-white border-indigo-500 shadow-md ring-2 ring-indigo-400/50 scale-105' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-800 dark:text-zinc-100 border-zinc-200 dark:border-zinc-700 hover:bg-zinc-200 dark:hover:bg-zinc-700 hover:text-black dark:hover:text-white shadow-sm'}`}
                     title="Flyttläge"
                   >
                     <Move size={20} strokeWidth={2.5} />
                   </button>
                   <button 
                     onClick={() => setTacticalTool('pen')}
-                    className={`p-2.5 rounded-xl transition-all ${tacticalTool === 'pen' ? 'bg-indigo-600 text-white shadow-lg' : 'text-zinc-500 hover:text-zinc-900 dark:hover:text-white hover:bg-zinc-100 dark:hover:bg-zinc-800'}`}
+                    className={`p-2.5 rounded-xl border transition-all ${tacticalTool === 'pen' ? 'bg-indigo-600 text-white border-indigo-500 shadow-md ring-2 ring-indigo-400/50 scale-105' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-800 dark:text-zinc-100 border-zinc-200 dark:border-zinc-700 hover:bg-zinc-200 dark:hover:bg-zinc-700 hover:text-black dark:hover:text-white shadow-sm'}`}
                     title="Frihandspenna"
                   >
                     <Pencil size={20} strokeWidth={2.5} />
                   </button>
                   <button 
                     onClick={() => setTacticalTool('arrow')}
-                    className={`p-2.5 rounded-xl transition-all ${tacticalTool === 'arrow' ? 'bg-indigo-600 text-white shadow-lg' : 'text-zinc-500 hover:text-zinc-900 dark:hover:text-white hover:bg-zinc-100 dark:hover:bg-zinc-800'}`}
+                    className={`p-2.5 rounded-xl border transition-all ${tacticalTool === 'arrow' ? 'bg-indigo-600 text-white border-indigo-500 shadow-md ring-2 ring-indigo-400/50 scale-105' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-800 dark:text-zinc-100 border-zinc-200 dark:border-zinc-700 hover:bg-zinc-200 dark:hover:bg-zinc-700 hover:text-black dark:hover:text-white shadow-sm'}`}
                     title="Dra pilar"
                   >
                     <ArrowUpRight size={20} strokeWidth={2.5} />
                   </button>
                   <button 
                     onClick={() => setTacticalTool('freehand-arrow')}
-                    className={`p-2.5 rounded-xl transition-all ${tacticalTool === 'freehand-arrow' ? 'bg-indigo-600 text-white shadow-lg' : 'text-zinc-500 hover:text-zinc-900 dark:hover:text-white hover:bg-zinc-100 dark:hover:bg-zinc-800'}`}
+                    className={`p-2.5 rounded-xl border transition-all ${tacticalTool === 'freehand-arrow' ? 'bg-indigo-600 text-white border-indigo-500 shadow-md ring-2 ring-indigo-400/50 scale-105' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-800 dark:text-zinc-100 border-zinc-200 dark:border-zinc-700 hover:bg-zinc-200 dark:hover:bg-zinc-700 hover:text-black dark:hover:text-white shadow-sm'}`}
                     title="Frihandspil"
                   >
                     <Route size={20} strokeWidth={2.5} />
                   </button>
                   <button 
                     onClick={() => setTacticalTool('circle')}
-                    className={`p-2.5 rounded-xl transition-all ${tacticalTool === 'circle' ? 'bg-indigo-600 text-white shadow-lg' : 'text-zinc-500 hover:text-zinc-900 dark:hover:text-white hover:bg-zinc-100 dark:hover:bg-zinc-800'}`}
+                    className={`p-2.5 rounded-xl border transition-all ${tacticalTool === 'circle' ? 'bg-indigo-600 text-white border-indigo-500 shadow-md ring-2 ring-indigo-400/50 scale-105' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-800 dark:text-zinc-100 border-zinc-200 dark:border-zinc-700 hover:bg-zinc-200 dark:hover:bg-zinc-700 hover:text-black dark:hover:text-white shadow-sm'}`}
                     title="Rita cirkel"
                   >
                     <div className="w-5 h-5 rounded-full border-2 border-current" />
                   </button>
                   <button 
                     onClick={() => setTacticalTool('rectangle')}
-                    className={`p-2.5 rounded-xl transition-all ${tacticalTool === 'rectangle' ? 'bg-indigo-600 text-white shadow-lg' : 'text-zinc-500 hover:text-zinc-900 dark:hover:text-white hover:bg-zinc-100 dark:hover:bg-zinc-800'}`}
+                    className={`p-2.5 rounded-xl border transition-all ${tacticalTool === 'rectangle' ? 'bg-indigo-600 text-white border-indigo-500 shadow-md ring-2 ring-indigo-400/50 scale-105' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-800 dark:text-zinc-100 border-zinc-200 dark:border-zinc-700 hover:bg-zinc-200 dark:hover:bg-zinc-700 hover:text-black dark:hover:text-white shadow-sm'}`}
                     title="Rita fyrkant"
                   >
                     <div className="w-5 h-5 border-2 border-current rounded-sm" />
                   </button>
                   <button 
                     onClick={() => setTacticalTool('text')}
-                    className={`p-2.5 rounded-xl transition-all ${tacticalTool === 'text' ? 'bg-indigo-600 text-white shadow-lg' : 'text-zinc-500 hover:text-zinc-900 dark:hover:text-white hover:bg-zinc-100 dark:hover:bg-zinc-800'}`}
+                    className={`p-2.5 rounded-xl border transition-all ${tacticalTool === 'text' ? 'bg-indigo-600 text-white border-indigo-500 shadow-md ring-2 ring-indigo-400/50 scale-105' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-800 dark:text-zinc-100 border-zinc-200 dark:border-zinc-700 hover:bg-zinc-200 dark:hover:bg-zinc-700 hover:text-black dark:hover:text-white shadow-sm'}`}
                     title="Skriv text"
                   >
                     <Type size={20} strokeWidth={2.5} />
                   </button>
                   <button 
                     onClick={() => setTacticalTool('ball')}
-                    className={`p-2.5 rounded-xl transition-all ${tacticalTool === 'ball' ? 'bg-indigo-600 text-white shadow-lg' : 'text-zinc-500 hover:text-zinc-900 dark:hover:text-white hover:bg-zinc-100 dark:hover:bg-zinc-800'}`}
+                    className={`p-2.5 rounded-xl border transition-all ${tacticalTool === 'ball' ? 'bg-indigo-600 text-white border-indigo-500 shadow-md ring-2 ring-indigo-400/50 scale-105' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-800 dark:text-zinc-100 border-zinc-200 dark:border-zinc-700 hover:bg-zinc-200 dark:hover:bg-zinc-700 hover:text-black dark:hover:text-white shadow-sm'}`}
                     title="Placera boll"
                   >
-                    <SoccerBallIcon size={20} className={tacticalTool === 'ball' ? 'text-white' : 'text-zinc-500'} />
+                    <SoccerBallIcon size={20} className={tacticalTool === 'ball' ? 'text-white' : 'text-zinc-800 dark:text-zinc-100'} />
                   </button>
                   <button 
                     onClick={() => setTacticalTool('opponent')}
-                    className={`p-2.5 rounded-xl transition-all ${tacticalTool === 'opponent' ? 'bg-indigo-600 text-white shadow-lg' : 'text-zinc-500 hover:text-zinc-900 dark:hover:text-white hover:bg-zinc-100 dark:hover:bg-zinc-800'}`}
+                    className={`p-2.5 rounded-xl border transition-all ${tacticalTool === 'opponent' ? 'bg-indigo-600 text-white border-indigo-500 shadow-md ring-2 ring-indigo-400/50 scale-105' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-800 dark:text-zinc-100 border-zinc-200 dark:border-zinc-700 hover:bg-zinc-200 dark:hover:bg-zinc-700 hover:text-black dark:hover:text-white shadow-sm'}`}
                     title="Placera motståndare"
                   >
                     <Shirt size={20} strokeWidth={2.5} />
                   </button>
                   <button 
                     onClick={() => setTacticalTool('eraser')}
-                    className={`p-2.5 rounded-xl transition-all ${tacticalTool === 'eraser' ? 'bg-indigo-600 text-white shadow-lg' : 'text-zinc-500 hover:text-zinc-900 dark:hover:text-white hover:bg-zinc-100 dark:hover:bg-zinc-800'}`}
+                    className={`p-2.5 rounded-xl border transition-all ${tacticalTool === 'eraser' ? 'bg-indigo-600 text-white border-indigo-500 shadow-md ring-2 ring-indigo-400/50 scale-105' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-800 dark:text-zinc-100 border-zinc-200 dark:border-zinc-700 hover:bg-zinc-200 dark:hover:bg-zinc-700 hover:text-black dark:hover:text-white shadow-sm'}`}
                     title="Suddgummi"
                   >
                     <Eraser size={20} strokeWidth={2.5} />
@@ -4642,7 +5364,7 @@ export default function LineupBuilder({
 
                   <button 
                     onClick={() => setShowDelaunayNetwork(!showDelaunayNetwork)}
-                    className={`p-2.5 rounded-xl transition-all ${showDelaunayNetwork ? 'bg-indigo-600 text-white shadow-lg' : 'text-zinc-500 hover:text-zinc-900 dark:hover:text-white hover:bg-zinc-100 dark:hover:bg-zinc-800'}`}
+                    className={`p-2.5 rounded-xl border transition-all ${showDelaunayNetwork ? 'bg-indigo-600 text-white border-indigo-500 shadow-md ring-2 ring-indigo-400/50 scale-105' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-800 dark:text-zinc-100 border-zinc-200 dark:border-zinc-700 hover:bg-zinc-200 dark:hover:bg-zinc-700 hover:text-black dark:hover:text-white shadow-sm'}`}
                     title={showDelaunayNetwork ? "Dölj passningsnät (Delaunay)" : "Visa passningsnät (Delaunay)"}
                   >
                     <Network size={20} strokeWidth={2.5} />
@@ -4980,6 +5702,20 @@ export default function LineupBuilder({
                 title={showSavedLineups ? "Dölj sparade laguppställningar" : "Visa sparade laguppställningar"}
               >
                 <FolderOpen size={20} />
+              </button>
+              <button
+                onClick={() => {
+                  setShowPositionDescriptions(!showPositionDescriptions);
+                  setHasUnsavedChanges(true);
+                }}
+                className={`p-2.5 rounded-xl border transition-all active:scale-95 shrink-0 shadow-sm ${
+                  showPositionDescriptions 
+                    ? 'bg-indigo-600 text-white border-indigo-500' 
+                    : 'bg-white dark:bg-zinc-900 text-zinc-500 border-zinc-100 dark:border-zinc-800 hover:bg-zinc-50'
+                }`}
+                title={showPositionDescriptions ? "Dölj positionsbeskrivningar under spelarna på planen" : "Visa positionsbeskrivningar under spelarna på planen"}
+              >
+                {showPositionDescriptions ? <EyeOff size={20} /> : <Eye size={20} />}
               </button>
               <button
                 onClick={() => setShowPreview(true)}
@@ -5321,6 +6057,25 @@ export default function LineupBuilder({
                         >
                           <span className="text-[10px] font-black uppercase tracking-widest">{showName ? 'Ja' : 'Nej'}</span>
                           <User size={14} className={showName ? 'text-white' : 'text-zinc-400'} />
+                        </button>
+                      </div>
+
+                      {/* Position Description Toggle */}
+                      <div className="flex flex-col gap-2">
+                        <span className="text-[10px] font-black text-zinc-500 dark:text-zinc-400 uppercase tracking-widest ml-1">Positionsbeskrivning</span>
+                        <button
+                          onClick={() => {
+                            setShowPositionDescriptions(!showPositionDescriptions);
+                            setHasUnsavedChanges(true);
+                          }}
+                          className={`flex items-center justify-between px-4 py-3 rounded-2xl border transition-all cursor-pointer ${
+                            showPositionDescriptions
+                              ? 'bg-indigo-600 border-indigo-500 text-white shadow-lg'
+                              : 'bg-zinc-100 dark:bg-zinc-950 border-zinc-200 dark:border-zinc-800 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-200 dark:hover:bg-zinc-800'
+                          }`}
+                        >
+                          <span className="text-[10px] font-black uppercase tracking-widest">{showPositionDescriptions ? 'Ja' : 'Nej'}</span>
+                          {showPositionDescriptions ? <Eye size={14} className="text-white" /> : <EyeOff size={14} className="text-zinc-400" />}
                         </button>
                       </div>
 
@@ -5972,6 +6727,196 @@ export default function LineupBuilder({
             </motion.div>
           </motion.div>
         )}
+
+        {/** Number & Position Edit Modal */}
+        <AnimatePresence>
+          {numberEditTarget && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 bg-black/60 backdrop-blur-md z-[200] flex items-center justify-center p-4"
+              onClick={() => setNumberEditTarget(null)}
+            >
+              <motion.div
+                initial={{ scale: 0.9, opacity: 0, y: 15 }}
+                animate={{ scale: 1, opacity: 1, y: 0 }}
+                exit={{ scale: 0.9, opacity: 0, y: 15 }}
+                className="bg-white dark:bg-zinc-900 rounded-3xl p-6 sm:p-7 max-w-md w-full shadow-2xl border border-zinc-200 dark:border-zinc-800"
+                onClick={(e) => e.stopPropagation()}
+              >
+                {/* Header */}
+                <div className="flex items-center justify-between mb-5">
+                  <div className="flex items-center gap-2.5">
+                    <div 
+                      className="w-9 h-9 rounded-xl flex items-center justify-center text-white font-black text-sm shadow-md"
+                      style={{ backgroundColor: numberEditTarget.teamColor }}
+                    >
+                      <Shirt size={18} fill="currentColor" />
+                    </div>
+                    <div>
+                      <h3 className="text-base font-black text-zinc-900 dark:text-white">
+                        Ändra nummer & position
+                      </h3>
+                      <p className="text-xs font-semibold text-zinc-500">
+                        {numberEditTarget.teamLabel}
+                      </p>
+                    </div>
+                  </div>
+                  <button 
+                    onClick={() => setNumberEditTarget(null)} 
+                    className="w-8 h-8 rounded-xl bg-zinc-100 dark:bg-zinc-800 flex items-center justify-center text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 transition-colors cursor-pointer"
+                  >
+                    <X size={18} />
+                  </button>
+                </div>
+
+                <div className="space-y-4">
+                  {/* Number / Position Input */}
+                  <div>
+                    <label className="block text-xs font-bold text-zinc-700 dark:text-zinc-300 mb-1.5">
+                      Spelarnummer / Position på tröjan
+                    </label>
+                    <div className="relative">
+                      <input
+                        type="text"
+                        value={editNumberValue}
+                        onChange={(e) => setEditNumberValue(e.target.value)}
+                        placeholder="t.ex. 6, 8, 10, MV..."
+                        className="w-full px-3.5 py-2.5 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-xl text-zinc-900 dark:text-white font-bold text-base focus:outline-none focus:ring-2 focus:ring-blue-500/50"
+                        autoFocus
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            handleSaveNumberEdit();
+                          }
+                        }}
+                      />
+                    </div>
+                    <p className="text-[11px] text-zinc-500 dark:text-zinc-400 mt-1">
+                      Flera spelare kan ha samma nummer (t.ex. två 6:or på planen).
+                    </p>
+                  </div>
+
+                  {/* Quick Number Presets */}
+                  <div>
+                    <span className="block text-[11px] font-bold text-zinc-500 uppercase tracking-wider mb-1.5">
+                      Snabbval nummer (1–11)
+                    </span>
+                    <div className="grid grid-cols-6 gap-1.5">
+                      {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11].map(num => (
+                        <button
+                          key={num}
+                          type="button"
+                          onClick={() => {
+                            setEditNumberValue(String(num));
+                            const classic = CLASSIC_POSITIONS[num];
+                            if (classic && !editNameValue) {
+                              setEditNameValue(classic.name);
+                            }
+                          }}
+                          className={`py-1.5 rounded-lg text-xs font-black transition-all cursor-pointer ${
+                            editNumberValue === String(num)
+                              ? 'bg-blue-600 text-white shadow-sm ring-2 ring-blue-500/30'
+                              : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-200 dark:hover:bg-zinc-700'
+                          }`}
+                        >
+                          {num}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Quick Tactical Role Presets */}
+                  <div>
+                    <span className="block text-[11px] font-bold text-zinc-500 uppercase tracking-wider mb-1.5">
+                      Vanliga taktiska roller & positioner
+                    </span>
+                    <div className="flex flex-wrap gap-1.5">
+                      {[
+                        { num: '6', name: 'Defensiv mitt (6:a)' },
+                        { num: '8', name: 'Central mitt (8:a)' },
+                        { num: '10', name: 'Offensiv mitt (10:a)' },
+                        { num: '9', name: 'Centerforward (9:a)' },
+                        { num: '7', name: 'Högerytter (7:a)' },
+                        { num: '11', name: 'Vänsterytter (11:a)' },
+                        { num: '4', name: 'Mittback (4:a)' },
+                        { num: '5', name: 'Mittback (5:a)' },
+                        { num: '2', name: 'Högerback (2:a)' },
+                        { num: '3', name: 'Vänsterback (3:a)' },
+                        { num: '1', name: 'Målvakt (1:a)' },
+                      ].map(preset => (
+                        <button
+                          key={preset.name}
+                          type="button"
+                          onClick={() => {
+                            setEditNumberValue(preset.num);
+                            setEditNameValue(preset.name);
+                          }}
+                          className="px-2.5 py-1 rounded-lg text-[11px] font-bold bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-colors cursor-pointer border border-zinc-200/50 dark:border-zinc-700/50"
+                        >
+                          {preset.name}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Name / Description Input */}
+                  <div>
+                    <label className="block text-xs font-bold text-zinc-700 dark:text-zinc-300 mb-1.5">
+                      Beskrivning / Roll (valfritt)
+                    </label>
+                    <input
+                      type="text"
+                      value={editNameValue}
+                      onChange={(e) => setEditNameValue(e.target.value)}
+                      placeholder="t.ex. Defensiv mitt, Balans, Spelfördelare..."
+                      className="w-full px-3.5 py-2.5 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-xl text-zinc-900 dark:text-white font-medium text-xs focus:outline-none focus:ring-2 focus:ring-blue-500/50"
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          handleSaveNumberEdit();
+                        }
+                      }}
+                    />
+                  </div>
+
+                  {/* Actions */}
+                  <div className="flex items-center justify-between pt-3 border-t border-zinc-100 dark:border-zinc-800 gap-2">
+                    <button
+                      type="button"
+                      onClick={handleDeleteFromEditModal}
+                      className="px-3 py-2 bg-red-50 hover:bg-red-100 dark:bg-red-950/40 dark:hover:bg-red-900/50 text-red-600 dark:text-red-400 rounded-xl text-xs font-bold transition-colors flex items-center gap-1.5 cursor-pointer active:scale-95"
+                      title="Ta bort spelaren från planen (kan ångras)"
+                    >
+                      <Trash2 size={14} />
+                      <span>Ta bort</span>
+                    </button>
+                    
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setNumberEditTarget(null)}
+                        className="px-4 py-2 bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-zinc-700 dark:text-zinc-300 rounded-xl text-xs font-bold transition-colors cursor-pointer"
+                      >
+                        Avbryt
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleSaveNumberEdit}
+                        className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold shadow-md transition-all cursor-pointer active:scale-95 flex items-center gap-1.5"
+                      >
+                        <Check size={14} />
+                        <span>Spara</span>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </motion.div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
         {/** Save Formation Name Modal */}
         <AnimatePresence>
           {showSaveFormation && (
@@ -6035,168 +6980,439 @@ export default function LineupBuilder({
               initial={{ scale: 0.9, opacity: 0, y: 20 }}
               animate={{ scale: 1, opacity: 1, y: 0 }}
               exit={{ scale: 0.9, opacity: 0, y: 20 }}
-              className="bg-zinc-50 dark:bg-zinc-950 rounded-[40px] p-8 max-w-2xl w-full max-h-[85vh] overflow-y-auto shadow-2xl border border-white dark:border-zinc-900 custom-scrollbar"
+              className="bg-zinc-50 dark:bg-zinc-950 rounded-[40px] p-6 sm:p-8 max-w-3xl w-full max-h-[88vh] overflow-y-auto shadow-2xl border border-zinc-200 dark:border-zinc-800 custom-scrollbar"
               onClick={(e) => e.stopPropagation()}
             >
-              <div className="flex items-center justify-between mb-8">
+              <div className="flex items-center justify-between mb-6">
                 <div>
-                  <h3 className="text-3xl font-black text-zinc-900 dark:text-white tracking-tight">Välj formation</h3>
-                  <p className="text-sm text-zinc-500 font-medium mt-1">Utforska olika taktiska uppställningar för ditt lag.</p>
+                  <h3 className="text-2xl sm:text-3xl font-black text-zinc-900 dark:text-white tracking-tight">
+                    {isMaximized ? 'Formationer & Taktisk Uppställning' : 'Välj formation'}
+                  </h3>
+                  <p className="text-xs sm:text-sm text-zinc-500 font-medium mt-1">
+                    {isMaximized 
+                      ? 'Välj taktisk formation för Blått och Rött lag, eller utforska klassiska positioner 1–11.' 
+                      : 'Utforska olika taktiska uppställningar för ditt lag.'}
+                  </p>
                 </div>
-                <button onClick={() => setShowFormationModal(false)} className="w-12 h-12 rounded-2xl bg-white dark:bg-zinc-900 flex items-center justify-center text-zinc-400 hover:text-zinc-600 shadow-sm">
-                  <X size={24} />
+                <button onClick={() => setShowFormationModal(false)} className="w-10 h-10 sm:w-12 sm:h-12 rounded-2xl bg-white dark:bg-zinc-900 flex items-center justify-center text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 shadow-sm transition-transform active:scale-95">
+                  <X size={22} />
                 </button>
               </div>
 
-            <div className="space-y-10">
-                {customFormations.length > 0 && (
-                  <div className="space-y-4">
-                    <div className="flex items-center gap-3 px-1">
-                      <div className="h-6 w-1 bg-emerald-600 rounded-full" />
-                      <h4 className="text-lg font-black text-zinc-900 dark:text-white uppercase tracking-tighter">Mina Formationer</h4>
+              {isMaximized && (
+                <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 mb-6 p-1.5 bg-zinc-200/70 dark:bg-zinc-900 rounded-2xl border border-zinc-200 dark:border-zinc-800">
+                  <button
+                    onClick={() => setFormationTab('blue')}
+                    className={`flex-1 min-w-[110px] py-2.5 px-3 rounded-xl text-xs font-black transition-all flex items-center justify-center gap-2 ${
+                      formationTab === 'blue'
+                        ? 'bg-blue-600 text-white shadow-md'
+                        : 'text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800'
+                    }`}
+                  >
+                    <div className="w-2.5 h-2.5 rounded-full bg-blue-300 border border-white" />
+                    <span>Blått lag ({blueFormation})</span>
+                  </button>
+
+                  <button
+                    onClick={() => setFormationTab('red')}
+                    className={`flex-1 min-w-[110px] py-2.5 px-3 rounded-xl text-xs font-black transition-all flex items-center justify-center gap-2 ${
+                      formationTab === 'red'
+                        ? 'bg-red-600 text-white shadow-md'
+                        : 'text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800'
+                    }`}
+                  >
+                    <div className="w-2.5 h-2.5 rounded-full bg-red-300 border border-white" />
+                    <span>Rött lag ({redFormation})</span>
+                  </button>
+
+                  <button
+                    onClick={() => setFormationTab('classic-info')}
+                    className={`py-2.5 px-3 rounded-xl text-xs font-black transition-all flex items-center justify-center gap-1.5 ${
+                      formationTab === 'classic-info'
+                        ? 'bg-zinc-900 dark:bg-white text-white dark:text-zinc-900 shadow-md'
+                        : 'text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800'
+                    }`}
+                  >
+                    <Info size={14} />
+                    <span>Tröjnummer 1–11</span>
+                  </button>
+
+                  <button
+                    onClick={() => setFormationTab('squad')}
+                    className={`py-2.5 px-3 rounded-xl text-xs font-black transition-all flex items-center justify-center gap-1.5 ${
+                      formationTab === 'squad'
+                        ? 'bg-zinc-900 dark:bg-white text-white dark:text-zinc-900 shadow-md'
+                        : 'text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800'
+                    }`}
+                  >
+                    <Layout size={14} />
+                    <span>Mallar</span>
+                  </button>
+                </div>
+              )}
+
+              {/* TAB 1: BLUE FORMATION */}
+              {isMaximized && formationTab === 'blue' && (
+                <div className="space-y-4">
+                  <div className="p-4 rounded-2xl bg-blue-50/90 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-900/60 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div>
+                      <h4 className="text-sm font-black text-blue-950 dark:text-blue-200">Blått lag (11 spelare, nummer 1–11)</h4>
+                      <p className="text-xs text-blue-800/90 dark:text-blue-300/90 mt-0.5">
+                        {orientation === 'landscape' 
+                          ? 'I liggande läge (TV) försvarar Blått lag vänster mål och anfaller åt höger.' 
+                          : 'I stående läge försvarar Blått lag nedre målet och anfaller uppåt.'}
+                      </p>
                     </div>
-                    <div className="grid grid-cols-1 gap-3">
-                      {customFormations.map((v) => (
-                        <div key={v.id} className="relative group">
-                          <button
-                            onClick={() => applyFormation(v)}
-                            className={`w-full text-left p-6 rounded-3xl border-2 transition-all hover:scale-[1.01] active:scale-[0.99] ${
-                              currentFormation === v.name
-                                ? 'border-emerald-600 bg-emerald-50 dark:bg-emerald-950/20'
-                                : 'border-white dark:border-zinc-900 bg-white dark:bg-zinc-900 shadow-sm'
-                            }`}
-                          >
-                            <div className="flex items-start justify-between gap-4">
-                              <div>
-                                <div className="flex items-center gap-2 mb-1">
-                                  <span className={`text-base font-black ${currentFormation === v.name ? 'text-emerald-600' : 'text-zinc-900 dark:text-white'}`}>
-                                    {v.name}
-                                  </span>
-                                </div>
-                                <p className="text-xs text-zinc-500 leading-relaxed font-medium">
-                                  {v.description}
-                                </p>
-                              </div>
-                              <div className="hidden sm:flex shrink-0 w-20 h-20 bg-zinc-100 dark:bg-zinc-800 rounded-2xl items-center justify-center border border-zinc-200 dark:border-zinc-700">
-                                <div className="w-14 h-14 relative">
-                                    <div className="absolute inset-0 border border-zinc-300 dark:border-zinc-600 rounded-md" />
-                                    {v.positions.map((pos, idx) => (
-                                      <div 
-                                        key={idx} 
-                                        className="absolute w-1 h-1 bg-emerald-500 rounded-full"
-                                        style={{ left: `${pos.x}%`, top: `${pos.y}%`, transform: 'translate(-50%, -50%)' }}
-                                      />
-                                    ))}
-                                    <div className="absolute w-1 h-1 bg-emerald-500 rounded-full" style={{ left: '50%', top: '90%', transform: 'translate(-50%, -50%)' }} />
-                                </div>
-                              </div>
+                    <button
+                      onClick={() => {
+                        setupTwoTeams(blueFormation, redFormation);
+                        setShowFormationModal(false);
+                      }}
+                      className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold shadow-md transition-all shrink-0 active:scale-95 flex items-center gap-1.5 self-start sm:self-auto cursor-pointer"
+                    >
+                      <Users size={14} />
+                      <span>Ställ upp 2 lag (11v11)</span>
+                    </button>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                    {Object.entries(CLASSIC_FORMATIONS_MAP).map(([key, form]) => {
+                      const isSelected = blueFormation === key;
+                      return (
+                        <button
+                          key={key}
+                          onClick={() => applyBlueFormation(key)}
+                          className={`group text-left p-4 sm:p-5 rounded-3xl border-2 transition-all hover:scale-[1.01] active:scale-[0.99] flex items-center justify-between gap-3 cursor-pointer ${
+                            isSelected
+                              ? 'border-blue-600 bg-blue-50/70 dark:bg-blue-950/30 shadow-md ring-2 ring-blue-500/20'
+                              : 'border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 shadow-sm hover:border-blue-400'
+                          }`}
+                        >
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 mb-1">
+                              <span className={`text-base font-black ${isSelected ? 'text-blue-600 dark:text-blue-400' : 'text-zinc-900 dark:text-white'}`}>
+                                {form.name}
+                              </span>
+                              {isSelected && (
+                                <span className="p-1 rounded-full bg-blue-600 text-white text-[10px]">
+                                  <Check size={10} />
+                                </span>
+                              )}
                             </div>
-                          </button>
-                          <div className="absolute top-4 right-4 flex gap-1">
-                            <button 
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                onTogglePinFormation?.(v.id);
-                              }}
-                              className={`p-2 rounded-full duration-200 ${
-                                pinnedFormationIds.includes(v.id) 
-                                  ? 'bg-amber-100 text-amber-600' 
-                                  : 'text-zinc-400 hover:bg-zinc-100'
-                              }`}
-                              title={pinnedFormationIds.includes(v.id) ? "Avpinna" : "Pinna på startsidan"}
-                            >
-                              {pinnedFormationIds.includes(v.id) ? <PinOff size={16} /> : <Pin size={16} />}
-                            </button>
-                            <button 
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                onDeleteCustomFormation?.(v.id);
-                              }}
-                              className="p-2 text-zinc-400 hover:text-red-500 rounded-full hover:bg-red-50 duration-200"
-                              title="Radera"
-                            >
-                              <Trash2 size={16} />
-                            </button>
+                            <p className="text-xs text-zinc-500 dark:text-zinc-400 leading-snug line-clamp-2">
+                              {form.desc}
+                            </p>
                           </div>
-                        </div>
-                      ))}
+                          <div className="shrink-0 w-16 h-20 bg-emerald-900/10 dark:bg-emerald-950/40 rounded-xl flex items-center justify-center border border-emerald-500/30 p-1">
+                            <div className="w-12 h-16 relative">
+                              <div className="absolute inset-0 border border-white/20 rounded-xs" />
+                              <div className="absolute top-1/2 left-0 right-0 h-[1px] bg-white/10" />
+                              {form.blue.map((pos, idx) => (
+                                <div
+                                  key={idx}
+                                  className="absolute w-1.5 h-1.5 rounded-full bg-blue-500 border border-white/80"
+                                  style={{ left: `${pos.x}%`, top: `${pos.y}%`, transform: 'translate(-50%, -50%)' }}
+                                />
+                              ))}
+                            </div>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* TAB 2: RED FORMATION */}
+              {isMaximized && formationTab === 'red' && (
+                <div className="space-y-4">
+                  <div className="p-4 rounded-2xl bg-red-50/90 dark:bg-red-950/40 border border-red-200 dark:border-red-900/60 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div>
+                      <h4 className="text-sm font-black text-red-950 dark:text-red-200">Rött lag / Motståndare (11 spelare, nummer 1–11)</h4>
+                      <p className="text-xs text-red-800/90 dark:text-red-300/90 mt-0.5">
+                        {orientation === 'landscape' 
+                          ? 'I liggande läge (TV) försvarar Rött lag höger mål och anfaller åt vänster.' 
+                          : 'I stående läge försvarar Rött lag övre målet och anfaller nedåt.'}
+                      </p>
+                    </div>
+                    <button
+                      onClick={() => {
+                        setupTwoTeams(blueFormation, redFormation);
+                        setShowFormationModal(false);
+                      }}
+                      className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-xl text-xs font-bold shadow-md transition-all shrink-0 active:scale-95 flex items-center gap-1.5 self-start sm:self-auto cursor-pointer"
+                    >
+                      <Users size={14} />
+                      <span>Ställ upp 2 lag (11v11)</span>
+                    </button>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                    {Object.entries(CLASSIC_FORMATIONS_MAP).map(([key, form]) => {
+                      const isSelected = redFormation === key;
+                      return (
+                        <button
+                          key={key}
+                          onClick={() => applyRedFormation(key)}
+                          className={`group text-left p-4 sm:p-5 rounded-3xl border-2 transition-all hover:scale-[1.01] active:scale-[0.99] flex items-center justify-between gap-3 cursor-pointer ${
+                            isSelected
+                              ? 'border-red-600 bg-red-50/70 dark:bg-red-950/30 shadow-md ring-2 ring-red-500/20'
+                              : 'border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 shadow-sm hover:border-red-400'
+                          }`}
+                        >
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 mb-1">
+                              <span className={`text-base font-black ${isSelected ? 'text-red-600 dark:text-red-400' : 'text-zinc-900 dark:text-white'}`}>
+                                {form.name}
+                              </span>
+                              {isSelected && (
+                                <span className="p-1 rounded-full bg-red-600 text-white text-[10px]">
+                                  <Check size={10} />
+                                </span>
+                              )}
+                            </div>
+                            <p className="text-xs text-zinc-500 dark:text-zinc-400 leading-snug line-clamp-2">
+                              {form.desc}
+                            </p>
+                          </div>
+                          <div className="shrink-0 w-16 h-20 bg-emerald-900/10 dark:bg-emerald-950/40 rounded-xl flex items-center justify-center border border-emerald-500/30 p-1">
+                            <div className="w-12 h-16 relative">
+                              <div className="absolute inset-0 border border-white/20 rounded-xs" />
+                              <div className="absolute top-1/2 left-0 right-0 h-[1px] bg-white/10" />
+                              {form.blue.map((pos, idx) => (
+                                <div
+                                  key={idx}
+                                  className="absolute w-1.5 h-1.5 rounded-full bg-red-500 border border-white/80"
+                                  style={{ left: `${100 - pos.x}%`, top: `${100 - pos.y}%`, transform: 'translate(-50%, -50%)' }}
+                                />
+                              ))}
+                            </div>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* TAB 3: CLASSIC 1-11 NUMBERS & POSITIONS */}
+              {isMaximized && formationTab === 'classic-info' && (
+                <div className="space-y-4">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 rounded-2xl bg-zinc-100 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800">
+                    <div>
+                      <h4 className="text-sm font-black text-zinc-900 dark:text-white">Klassiska tröjnummer och positioner</h4>
+                      <p className="text-xs text-zinc-500 mt-0.5">Traditionella nummer 1–11 och deras roller på fotbollsplanen.</p>
+                    </div>
+                    <div className="flex items-center gap-2 flex-wrap self-start sm:self-auto">
+                      <button
+                        onClick={() => {
+                          setShowPositionDescriptions(!showPositionDescriptions);
+                          setHasUnsavedChanges(true);
+                        }}
+                        className={`px-3 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer border ${
+                          showPositionDescriptions
+                            ? 'bg-indigo-600 border-indigo-500 text-white shadow-sm'
+                            : 'bg-white dark:bg-zinc-800 border-zinc-200 dark:border-zinc-700 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-750'
+                        }`}
+                        title={showPositionDescriptions ? "Dölj beskrivning av positionerna" : "Visa beskrivning av positionerna"}
+                      >
+                        {showPositionDescriptions ? <EyeOff size={14} /> : <Eye size={14} />}
+                        <span>{showPositionDescriptions ? 'Dölj beskrivningar' : 'Visa beskrivningar'}</span>
+                      </button>
+
+                      <button
+                        onClick={() => {
+                          setupTwoTeams(blueFormation, redFormation);
+                          setShowFormationModal(false);
+                        }}
+                        className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition-all shrink-0 active:scale-95 flex items-center gap-1.5 cursor-pointer"
+                      >
+                        <Users size={14} />
+                        <span>Applicera på planen (11v11)</span>
+                      </button>
                     </div>
                   </div>
-                )}
 
-                {FORMATION_TEMPLATES.map((template) => (
-                  <div key={template.id} className="space-y-4">
-                    <div className="flex items-center gap-3 px-1">
-                      <div className="h-6 w-1 bg-indigo-600 rounded-full" />
-                      <h4 className="text-lg font-black text-zinc-900 dark:text-white uppercase tracking-tighter">{template.name} ({template.category})</h4>
-                    </div>
-                    <div className="grid grid-cols-1 gap-3">
-                      {template.variants.map((v) => {
-                        const isPinned = pinnedFormationIds.includes(template.id);
-                        return (
+                  <div className="divide-y divide-zinc-200 dark:divide-zinc-800 bg-white dark:bg-zinc-900 rounded-3xl border border-zinc-200 dark:border-zinc-800 overflow-hidden shadow-sm">
+                    {Object.entries(CLASSIC_POSITIONS).map(([numStr, posInfo]) => {
+                      const num = Number(numStr);
+                      return (
+                        <div key={num} className="p-3.5 sm:p-4 flex items-start gap-3.5 hover:bg-zinc-50 dark:hover:bg-zinc-850/50 transition-colors">
+                          <div className="relative shrink-0 flex items-center justify-center w-10 h-10 rounded-2xl bg-blue-100 dark:bg-blue-950/80 border border-blue-200 dark:border-blue-900/60 text-blue-700 dark:text-blue-300 font-black text-base shadow-xs">
+                            {num}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex flex-wrap items-center gap-2 mb-1">
+                              <span className="text-sm font-black text-zinc-900 dark:text-white">{posInfo.name}</span>
+                              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 border border-zinc-200 dark:border-zinc-700">
+                                {posInfo.role}
+                              </span>
+                            </div>
+                            {showPositionDescriptions && (
+                              <p className="text-xs text-zinc-600 dark:text-zinc-400 font-medium leading-relaxed mt-1 animate-in fade-in">
+                                {posInfo.desc}
+                              </p>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* TAB 4: SQUAD / TEMPLATES (or default when not maximized) */}
+              {(!isMaximized || formationTab === 'squad') && (
+                <div className="space-y-10">
+                  {customFormations.length > 0 && (
+                    <div className="space-y-4">
+                      <div className="flex items-center gap-3 px-1">
+                        <div className="h-6 w-1 bg-emerald-600 rounded-full" />
+                        <h4 className="text-lg font-black text-zinc-900 dark:text-white uppercase tracking-tighter">Mina Formationer</h4>
+                      </div>
+                      <div className="grid grid-cols-1 gap-3">
+                        {customFormations.map((v) => (
                           <div key={v.id} className="relative group">
                             <button
                               onClick={() => applyFormation(v)}
-                              className={`w-full text-left p-6 rounded-3xl border-2 transition-all hover:scale-[1.01] active:scale-[0.99] ${
+                              className={`w-full text-left p-6 rounded-3xl border-2 transition-all hover:scale-[1.01] active:scale-[0.99] cursor-pointer ${
                                 currentFormation === v.name
-                                  ? 'border-indigo-600 bg-indigo-50 dark:bg-indigo-950/20'
+                                  ? 'border-emerald-600 bg-emerald-50 dark:bg-emerald-950/20'
                                   : 'border-white dark:border-zinc-900 bg-white dark:bg-zinc-900 shadow-sm'
                               }`}
                             >
                               <div className="flex items-start justify-between gap-4">
                                 <div>
-                                  <div className="flex items-center gap-2 mb-2">
-                                    <span className={`text-base font-black ${currentFormation === v.name ? 'text-indigo-600' : 'text-zinc-900 dark:text-white'}`}>
+                                  <div className="flex items-center gap-2 mb-1">
+                                    <span className={`text-base font-black ${currentFormation === v.name ? 'text-emerald-600' : 'text-zinc-900 dark:text-white'}`}>
                                       {v.name}
                                     </span>
-                                    {currentFormation === v.name && (
-                                      <div className="bg-indigo-600 text-white rounded-full p-1">
-                                        <Check size={10} />
-                                      </div>
-                                    )}
                                   </div>
-                                  <p className="text-sm text-zinc-500 dark:text-zinc-400 leading-relaxed font-medium">
+                                  <p className="text-xs text-zinc-500 leading-relaxed font-medium">
                                     {v.description}
                                   </p>
                                 </div>
-                                <div className="hidden sm:flex shrink-0 w-24 h-24 bg-zinc-100 dark:bg-zinc-800 rounded-2xl items-center justify-center border border-zinc-200 dark:border-zinc-700">
-                                   <div className="w-16 h-16 relative">
-                                      {/* Miniature pitch preview */}
+                                <div className="hidden sm:flex shrink-0 w-20 h-20 bg-zinc-100 dark:bg-zinc-800 rounded-2xl items-center justify-center border border-zinc-200 dark:border-zinc-700">
+                                  <div className="w-14 h-14 relative">
                                       <div className="absolute inset-0 border border-zinc-300 dark:border-zinc-600 rounded-md" />
-                                      <div className="absolute top-1/2 left-0 right-0 h-[1px] bg-zinc-300 dark:border-zinc-600" />
                                       {v.positions.map((pos, idx) => (
                                         <div 
                                           key={idx} 
-                                          className="absolute w-1 h-1 bg-indigo-500 rounded-full"
+                                          className="absolute w-1 h-1 bg-emerald-500 rounded-full"
                                           style={{ left: `${pos.x}%`, top: `${pos.y}%`, transform: 'translate(-50%, -50%)' }}
                                         />
                                       ))}
-                                      <div className="absolute w-1 h-1 bg-indigo-500 rounded-full" style={{ left: '50%', top: '90%', transform: 'translate(-50%, -50%)' }} />
-                                   </div>
+                                      <div className="absolute w-1 h-1 bg-emerald-500 rounded-full" style={{ left: '50%', top: '90%', transform: 'translate(-50%, -50%)' }} />
+                                  </div>
                                 </div>
                               </div>
                             </button>
-                            <button 
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                onTogglePinFormation?.(template.id);
-                              }}
-                              className={`absolute top-4 right-4 p-2 rounded-full duration-200 ${
-                                isPinned 
-                                  ? 'bg-amber-100 text-amber-600' 
-                                  : 'text-zinc-400 hover:bg-zinc-100'
-                              }`}
-                              title={isPinned ? "Avpinna" : "Pinna på startsidan"}
-                            >
-                              {isPinned ? <PinOff size={16} /> : <Pin size={16} />}
-                            </button>
+                            <div className="absolute top-4 right-4 flex gap-1">
+                              <button 
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  onTogglePinFormation?.(v.id);
+                                }}
+                                className={`p-2 rounded-full duration-200 cursor-pointer ${
+                                  pinnedFormationIds.includes(v.id) 
+                                    ? 'bg-amber-100 text-amber-600' 
+                                    : 'text-zinc-400 hover:bg-zinc-100'
+                                }`}
+                                title={pinnedFormationIds.includes(v.id) ? "Avpinna" : "Pinna på startsidan"}
+                              >
+                                {pinnedFormationIds.includes(v.id) ? <PinOff size={16} /> : <Pin size={16} />}
+                              </button>
+                              <button 
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  onDeleteCustomFormation?.(v.id);
+                                }}
+                                className="p-2 text-zinc-400 hover:text-red-500 rounded-full hover:bg-red-50 duration-200 cursor-pointer"
+                                title="Radera"
+                              >
+                                <Trash2 size={16} />
+                              </button>
+                            </div>
                           </div>
-                        );
-                      })}
+                        ))}
+                      </div>
                     </div>
-                  </div>
-                ))}
-              </div>
+                  )}
+
+                  {FORMATION_TEMPLATES.map((template) => (
+                    <div key={template.id} className="space-y-4">
+                      <div className="flex items-center gap-3 px-1">
+                        <div className="h-6 w-1 bg-indigo-600 rounded-full" />
+                        <h4 className="text-lg font-black text-zinc-900 dark:text-white uppercase tracking-tighter">{template.name} ({template.category})</h4>
+                      </div>
+                      <div className="grid grid-cols-1 gap-3">
+                        {template.variants.map((v) => {
+                          const isPinned = pinnedFormationIds.includes(template.id);
+                          return (
+                            <div key={v.id} className="relative group">
+                              <button
+                                onClick={() => applyFormation(v)}
+                                className={`w-full text-left p-6 rounded-3xl border-2 transition-all hover:scale-[1.01] active:scale-[0.99] cursor-pointer ${
+                                  currentFormation === v.name
+                                    ? 'border-indigo-600 bg-indigo-50 dark:bg-indigo-950/20'
+                                    : 'border-white dark:border-zinc-900 bg-white dark:bg-zinc-900 shadow-sm'
+                                }`}
+                              >
+                                <div className="flex items-start justify-between gap-4">
+                                  <div>
+                                    <div className="flex items-center gap-2 mb-2">
+                                      <span className={`text-base font-black ${currentFormation === v.name ? 'text-indigo-600' : 'text-zinc-900 dark:text-white'}`}>
+                                        {v.name}
+                                      </span>
+                                      {currentFormation === v.name && (
+                                        <div className="bg-indigo-600 text-white rounded-full p-1">
+                                          <Check size={10} />
+                                        </div>
+                                      )}
+                                    </div>
+                                    <p className="text-sm text-zinc-500 dark:text-zinc-400 leading-relaxed font-medium">
+                                      {v.description}
+                                    </p>
+                                  </div>
+                                  <div className="hidden sm:flex shrink-0 w-24 h-24 bg-zinc-100 dark:bg-zinc-800 rounded-2xl items-center justify-center border border-zinc-200 dark:border-zinc-700">
+                                     <div className="w-16 h-16 relative">
+                                        {/* Miniature pitch preview */}
+                                        <div className="absolute inset-0 border border-zinc-300 dark:border-zinc-600 rounded-md" />
+                                        <div className="absolute top-1/2 left-0 right-0 h-[1px] bg-zinc-300 dark:border-zinc-600" />
+                                        {v.positions.map((pos, idx) => (
+                                          <div 
+                                            key={idx} 
+                                            className="absolute w-1 h-1 bg-indigo-500 rounded-full"
+                                            style={{ left: `${pos.x}%`, top: `${pos.y}%`, transform: 'translate(-50%, -50%)' }}
+                                          />
+                                        ))}
+                                        <div className="absolute w-1 h-1 bg-indigo-500 rounded-full" style={{ left: '50%', top: '90%', transform: 'translate(-50%, -50%)' }} />
+                                     </div>
+                                  </div>
+                                </div>
+                              </button>
+                              <button 
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  onTogglePinFormation?.(template.id);
+                                }}
+                                className={`absolute top-4 right-4 p-2 rounded-full duration-200 cursor-pointer ${
+                                  isPinned 
+                                    ? 'bg-amber-100 text-amber-600' 
+                                    : 'text-zinc-400 hover:bg-zinc-100'
+                                }`}
+                                title={isPinned ? "Avpinna" : "Pinna på startsidan"}
+                              >
+                                {isPinned ? <PinOff size={16} /> : <Pin size={16} />}
+                              </button>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </motion.div>
           </motion.div>
         )}
@@ -6261,9 +7477,9 @@ export default function LineupBuilder({
                   </div>
                 ) : (
                   <div className="space-y-3">
-                    {lineup.savedTacticalBoards.map((board) => (
+                    {lineup.savedTacticalBoards.map((board, idx) => (
                       <div 
-                        key={board.id} 
+                        key={`board-${board.id || idx}-${idx}`} 
                         className="flex items-center justify-between p-3.5 sm:p-4 bg-white dark:bg-zinc-900 border border-zinc-150 dark:border-zinc-800/80 rounded-2xl hover:border-emerald-500/30 transition-all shadow-sm group"
                       >
                         <div className="flex-1 min-w-0 pr-2">

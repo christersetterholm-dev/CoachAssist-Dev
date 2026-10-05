@@ -2,8 +2,7 @@ import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { RotateCcw, Trophy, ArrowLeft, Check, Sun, Moon, Timer as TimerIcon, Edit2, Zap, Rocket, Users, LayoutDashboard, Unlock, LogIn, LogOut, User as UserIcon, ShieldCheck, Cloud, Globe, AlertTriangle, Calendar, Settings, RefreshCw, Bell, Building2, Shirt, VibrateOff } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { SquadPlayer, Exercise, Team, PointsConfig, Period, PeriodStandings, Lineup, TrainingSession, TrainingSettings, CoachData, BankExercise, SessionMoment, UserProfile, ClubMember, ClubTeam, Club } from './types';
-import { auth, signInWithGoogle, db, handleFirestoreError, OperationType, getApiUrl, doc, onSnapshot, setDoc, getDoc, collection, getDocs } from './lib/firebase';
-import { onAuthStateChanged, signOut, User } from 'firebase/auth';
+import { auth, signInWithGoogle, db, handleFirestoreError, OperationType, getApiUrl, doc, onSnapshot, setDoc, getDoc, collection, getDocs, onAuthStateChanged, signOut, User } from './lib/firebase';
 import { calculateLeaderboard } from './lib/leaderboardUtils';
 import { syncSquadToClubMembers, getMergedSquadAndClubMembers, deduplicateSquad } from './lib/clubUtils';
 
@@ -198,8 +197,8 @@ const mergeLineups = (remoteLineups: Lineup[] = [], localLineups: Lineup[] = [])
       // Local lineup doesn't exist in remote (created/copied locally or offline) -> KEEP IT!
       map.set(l.id, l);
     } else {
-      const localTime = Math.max(l.updatedAt || 0, l.date || 0);
-      const remoteTime = Math.max(existing.updatedAt || 0, existing.date || 0);
+      const localTime = l.updatedAt || l.createdAt || 0;
+      const remoteTime = existing.updatedAt || existing.createdAt || 0;
       if (localTime >= remoteTime) {
         map.set(l.id, l);
       }
@@ -220,8 +219,8 @@ const mergeExercises = (remoteExercises: Exercise[] = [], localExercises: Exerci
       // Local exercise doesn't exist in remote (created/copied locally or offline) -> KEEP IT!
       map.set(e.id, e);
     } else {
-      const localTime = Math.max(e.updatedAt || 0, e.date || 0, (e as any).createdAt || 0);
-      const remoteTime = Math.max(existing.updatedAt || 0, existing.date || 0, (existing as any).createdAt || 0);
+      const localTime = e.updatedAt || (e as any).createdAt || 0;
+      const remoteTime = existing.updatedAt || (existing as any).createdAt || 0;
       if (localTime >= remoteTime) {
         map.set(e.id, e);
       }
@@ -242,8 +241,8 @@ const mergeSessions = (remoteSessions: TrainingSession[] = [], localSessions: Tr
       // Local session doesn't exist in remote (created locally or offline) -> KEEP IT!
       map.set(s.id, s);
     } else {
-      const localTime = Math.max(s.updatedAt || 0, s.date || 0, (s as any).createdAt || 0);
-      const remoteTime = Math.max(existing.updatedAt || 0, existing.date || 0, (existing as any).createdAt || 0);
+      const localTime = s.updatedAt || (s as any).createdAt || 0;
+      const remoteTime = existing.updatedAt || (existing as any).createdAt || 0;
       if (localTime >= remoteTime) {
         map.set(s.id, s);
       } else {
@@ -2161,7 +2160,7 @@ export default function App() {
       if (syncUserIdRef.current && syncUserIdRef.current !== user.uid) return;
       syncUserIdRef.current = user.uid;
 
-      const debounceDelay = 4000; // 4s debounce so typing/planning changes don't send excessive rapid requests to cloud
+      const debounceDelay = 1200; // 1.2s debounce so typing/planning changes sync quickly and cleanly to cloud without spamming
 
       const syncData = async () => {
         if (!user || (syncUserIdRef.current && syncUserIdRef.current !== user.uid) || isSyncingRef.current) return;
@@ -2699,11 +2698,14 @@ export default function App() {
       createdAt: Date.now(),
       updatedAt: Date.now()
     };
+    let updatedSessionsList: TrainingSession[] = [];
     setData(prev => {
       const updated = {
         ...prev,
         sessions: [newSession, ...(prev.sessions || [])]
       };
+      updatedSessionsList = updated.sessions;
+      latestDataRef.current = updated;
       try {
         setPrefixedItem('football_sessions', JSON.stringify(updated.sessions), user);
         setPrefixedItem('data', JSON.stringify(updated), user);
@@ -2712,15 +2714,19 @@ export default function App() {
     });
     setActiveSessionId(newSession.id);
     setSessionActionCount(prev => prev + 1);
+    pushDirtySegments(true, { sessions: updatedSessionsList }).catch(err => console.warn('App: Instant push on new session:', err));
   };
 
   const onAddSessionsBatch = (newSessions: TrainingSession[]) => {
+    let updatedSessionsList: TrainingSession[] = [];
     setData(prev => {
       const updatedSessions = [...newSessions, ...(prev.sessions || [])];
+      updatedSessionsList = updatedSessions;
       const updated = {
         ...prev,
         sessions: updatedSessions
       };
+      latestDataRef.current = updated;
       try {
         setPrefixedItem('football_sessions', JSON.stringify(updatedSessions), user);
         setPrefixedItem('data', JSON.stringify(updated), user);
@@ -2728,15 +2734,19 @@ export default function App() {
       return updated;
     });
     setSessionActionCount(prev => prev + 1);
+    pushDirtySegments(true, { sessions: updatedSessionsList }).catch(err => console.warn('App: Instant push on batch sessions:', err));
   };
 
-  const onUpdateSession = (updatedSession: TrainingSession) => {
+  const onUpdateSession = (updatedSession: TrainingSession, instantPush = false) => {
+    let updatedSessionsList: TrainingSession[] = [];
     setData(prev => {
       const updatedSessions = prev.sessions.map(s => s.id === updatedSession.id ? updatedSession : s);
+      updatedSessionsList = updatedSessions;
       const updated = {
         ...prev,
         sessions: updatedSessions
       };
+      latestDataRef.current = updated;
       try {
         setPrefixedItem('football_sessions', JSON.stringify(updatedSessions), user);
         setPrefixedItem('data', JSON.stringify(updated), user);
@@ -2744,6 +2754,9 @@ export default function App() {
       return updated;
     });
     setSessionActionCount(prev => prev + 1);
+    if (instantPush) {
+      pushDirtySegments(true, { sessions: updatedSessionsList }).catch(err => console.warn('App: Instant push on update session:', err));
+    }
   };
 
   const addBankExercise = (exercise: Omit<BankExercise, 'id' | 'createdAt'>) => {
@@ -2842,6 +2855,8 @@ export default function App() {
   const onDeleteSession = (id: string) => {
     const isCoachOrAdmin = user ? (isRootAdmin || userRoles.includes('admin') || userRoles.includes('coach')) : true;
     if (!isCoachOrAdmin) return;
+    let updatedSessionsList: TrainingSession[] = [];
+    let updatedDeletedList: TrainingSession[] = [];
     setData(prev => {
       const sessionToDelete = prev.sessions.find(s => s.id === id);
       const updatedSessions = prev.sessions.filter(s => s.id !== id);
@@ -2849,16 +2864,28 @@ export default function App() {
         ? [sessionToDelete, ...(prev.deletedSessions || [])]
         : (prev.deletedSessions || []);
       
-      return {
+      updatedSessionsList = updatedSessions;
+      updatedDeletedList = updatedDeleted;
+      const updated = {
         ...prev,
         sessions: updatedSessions,
         deletedSessions: updatedDeleted
       };
+      latestDataRef.current = updated;
+      try {
+        setPrefixedItem('football_sessions', JSON.stringify(updatedSessions), user);
+        setPrefixedItem('football_deleted_sessions', JSON.stringify(updatedDeleted), user);
+        setPrefixedItem('data', JSON.stringify(updated), user);
+      } catch (e) {}
+      return updated;
     });
     setSessionActionCount(prev => prev + 1);
+    pushDirtySegments(true, { sessions: updatedSessionsList, deletedSessions: updatedDeletedList }).catch(err => console.warn('App: Instant push on delete session:', err));
   };
 
   const onRestoreSession = (id: string) => {
+    let updatedSessionsList: TrainingSession[] = [];
+    let updatedDeletedList: TrainingSession[] = [];
     setData(prev => {
       const restoredSession = (prev.deletedSessions || []).find(s => s.id === id);
       const updatedDeleted = (prev.deletedSessions || []).filter(s => s.id !== id);
@@ -2866,24 +2893,46 @@ export default function App() {
         ? [restoredSession, ...prev.sessions]
         : prev.sessions;
       
-      return {
+      updatedSessionsList = updatedSessions;
+      updatedDeletedList = updatedDeleted;
+      const updated = {
         ...prev,
         sessions: updatedSessions,
         deletedSessions: updatedDeleted
       };
+      latestDataRef.current = updated;
+      try {
+        setPrefixedItem('football_sessions', JSON.stringify(updatedSessions), user);
+        setPrefixedItem('football_deleted_sessions', JSON.stringify(updatedDeleted), user);
+        setPrefixedItem('data', JSON.stringify(updated), user);
+      } catch (e) {}
+      return updated;
     });
     setSessionActionCount(prev => prev + 1);
+    pushDirtySegments(true, { sessions: updatedSessionsList, deletedSessions: updatedDeletedList }).catch(err => console.warn('App: Instant push on restore session:', err));
   };
 
   const onDeleteSessionPermanent = (ids: string | string[]) => {
     const isCoachOrAdmin = user ? (isRootAdmin || userRoles.includes('admin') || userRoles.includes('coach')) : true;
     if (!isCoachOrAdmin) return;
     const idArray = Array.isArray(ids) ? ids : [ids];
-    setData(prev => ({
-      ...prev,
-      deletedSessions: (prev.deletedSessions || []).filter(s => !idArray.includes(s.id))
-    }));
+    let updatedDeletedList: TrainingSession[] = [];
+    setData(prev => {
+      const updatedDeleted = (prev.deletedSessions || []).filter(s => !idArray.includes(s.id));
+      updatedDeletedList = updatedDeleted;
+      const updated = {
+        ...prev,
+        deletedSessions: updatedDeleted
+      };
+      latestDataRef.current = updated;
+      try {
+        setPrefixedItem('football_deleted_sessions', JSON.stringify(updatedDeleted), user);
+        setPrefixedItem('data', JSON.stringify(updated), user);
+      } catch (e) {}
+      return updated;
+    });
     setSessionActionCount(prev => prev + 1);
+    pushDirtySegments(true, { deletedSessions: updatedDeletedList }).catch(err => console.warn('App: Instant push on permanent delete:', err));
   };
 
   const handleCopySession = (id: string) => {
@@ -3987,8 +4036,8 @@ export default function App() {
                               Root Admin
                             </span>
                           )}
-                          {userRoles.map(role => (
-                            <span key={role} className="text-[9px] font-black uppercase tracking-wider bg-indigo-50 dark:bg-indigo-950/40 text-indigo-600 dark:text-indigo-400 px-2 py-0.5 rounded-md border border-indigo-100/40 dark:border-indigo-900/40">
+                          {Array.from(new Set(userRoles)).map((role, idx) => (
+                            <span key={`${role}-${idx}`} className="text-[9px] font-black uppercase tracking-wider bg-indigo-50 dark:bg-indigo-950/40 text-indigo-600 dark:text-indigo-400 px-2 py-0.5 rounded-md border border-indigo-100/40 dark:border-indigo-900/40">
                               {role === 'admin' ? 'Admin' : role === 'coach' ? 'Tränare' : role === 'player' ? 'Spelare' : 'Förälder'}
                             </span>
                           ))}
@@ -4331,12 +4380,12 @@ export default function App() {
                       </span>
                       
                       <div className="flex flex-wrap gap-1 items-center min-h-[22px]">
-                        {Array.from(new Set(jokers as string[])).map((id: string) => {
+                        {Array.from(new Set(jokers as string[])).map((id: string, jIdx: number) => {
                           const player = combinedExerciseSquad.find(p => p.id === id);
                           if (!player) return null;
                           return (
                             <motion.span
-                              key={id}
+                              key={`joker-${id}-${jIdx}`}
                               drag={isCoachOrAdmin}
                               dragSnapToOrigin
                               onDragStart={() => { if (isCoachOrAdmin) setDraggedPlayerId(id); }}
@@ -4622,6 +4671,9 @@ export default function App() {
             userRoles={userRoles}
             userProfile={userProfile}
             onClose={() => {
+              if (sessionActionCountRef.current > 0) {
+                pushDirtySegments(true).catch(err => console.warn('App: Push on session editor close:', err));
+              }
               setActiveSessionId(null);
               setLinkToMomentId(null);
             }}

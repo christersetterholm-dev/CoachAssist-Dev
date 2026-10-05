@@ -1,8 +1,7 @@
 import React, { useState, useRef, useMemo } from 'react';
 import { UserPlus, Trash2, Edit2, X, Users, Upload, FileSpreadsheet, FileText, ClipboardList, Camera, Loader2, ArrowUpDown, Check, Search, AlertTriangle, Activity } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { storage, db, ref, uploadBytes, getDownloadURL, getApiUrl } from '../lib/firebase';
-import { doc, getDoc } from 'firebase/firestore';
+import { storage, db, ref, uploadBytes, getDownloadURL, getApiUrl, doc, getDoc } from '../lib/firebase';
 import { SquadPlayer, ClubMember, ClubTeam, TrainingSession } from '../types';
 import { deduplicateSquad } from '../lib/clubUtils';
 import * as XLSX from 'xlsx';

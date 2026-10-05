@@ -124,9 +124,9 @@ export default function PlayerCard({
         <div className="p-1 sm:p-2 border-b border-white/10 flex flex-col items-center justify-center shrink-0">
           <div className="flex flex-wrap justify-center gap-1 px-2">
             {teamPlayers.length > 0 ? (
-              teamPlayers.map(p => (
+              teamPlayers.map((p, pIdx) => (
                 <motion.span 
-                  key={p.id} 
+                  key={`${p.id || 'player'}-${pIdx}`} 
                   drag={!disabled}
                   dragSnapToOrigin
                   onDragStart={() => onDragStart?.(p.id)}

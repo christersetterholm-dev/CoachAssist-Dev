@@ -208,11 +208,11 @@ export default function TeamOverviewModal({
                     </div>
                   </div>
                   <div className="flex flex-wrap gap-2 min-h-[40px]">
-                    {sortPlayersByPosition(team.playerIds || [], squad).map(pid => {
+                    {sortPlayersByPosition(team.playerIds || [], squad).map((pid, idx) => {
                       const player = squad.find(p => p.id === pid);
                       return player ? (
                         <motion.div 
-                          key={pid} 
+                          key={`${pid}-${idx}`} 
                           drag
                           dragSnapToOrigin
                           whileDrag={{ 
@@ -278,11 +278,11 @@ export default function TeamOverviewModal({
                     </div>
                   </div>
                   <div className="flex flex-wrap gap-2 min-h-[40px]">
-                    {sortPlayersByPosition(exercise.jokerPlayerIds || [], squad).map(pid => {
+                    {sortPlayersByPosition(exercise.jokerPlayerIds || [], squad).map((pid, idx) => {
                       const player = squad.find(p => p.id === pid);
                       return player ? (
                         <motion.div 
-                          key={pid} 
+                          key={`joker-${pid}-${idx}`} 
                           drag
                           dragSnapToOrigin
                           whileDrag={{ 
@@ -344,11 +344,11 @@ export default function TeamOverviewModal({
                 </div>
               </div>
               <div className="flex flex-wrap gap-2 min-h-[60px]">
-                {sortPlayersByPosition(unassignedPlayers.map(p => p.id), squad).map(pid => {
+                {sortPlayersByPosition(unassignedPlayers.map(p => p.id), squad).map((pid, idx) => {
                   const player = squad.find(p => p.id === pid);
                   return player ? (
                     <motion.div 
-                      key={pid} 
+                      key={`unassigned-${pid}-${idx}`} 
                       drag
                       dragSnapToOrigin
                       whileDrag={{ 

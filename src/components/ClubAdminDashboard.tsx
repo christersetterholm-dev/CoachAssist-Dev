@@ -1,8 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Landmark, Trash2, Edit3, Users, Shield, ShieldAlert, Check, PlusCircle, Search, Mail, Phone, Fingerprint, Settings, ArrowRight, UserPlus, Save, Smartphone, X, Database, Server, HardDrive, Cloud, RefreshCw, Download, Upload, Globe, Cpu, CheckCircle2, AlertTriangle, AlertCircle, Calendar, Link, Copy, ExternalLink, FileSpreadsheet, FileText, Camera, Loader2, Key, UserCheck, Sparkles, Filter, ArrowUpDown, RotateCcw } from 'lucide-react';
 import { Club, ClubMetadata, ClubTeam, ClubMember, SquadPlayer, TrainingSettings, TrainingSession } from '../types';
-import { db, storage, getApiUrl, ref, uploadBytes, getDownloadURL } from '../lib/firebase';
-import { doc, getDoc, setDoc } from 'firebase/firestore';
+import { db, storage, getApiUrl, ref, uploadBytes, getDownloadURL, doc, getDoc, setDoc } from '../lib/firebase';
 import PwaIconGenerator from './PwaIconGenerator';
 import ImageCropper from './ImageCropper';
 import { CachedImage } from './CachedImage';
@@ -226,6 +225,7 @@ export default function ClubAdminDashboard({
     mode: 'hybrid' | 'local_sqlite' | 'firestore_only';
     dbPath?: string;
     dbSize?: number;
+    dbEngine?: 'sqlite' | 'json_store';
     isProduction?: boolean;
     firestoreConfigured?: boolean;
     firestoreProjectId?: string | null;
@@ -3712,7 +3712,9 @@ export default function ClubAdminDashboard({
               <div className="p-4 bg-zinc-50 dark:bg-zinc-950 rounded-2xl border border-zinc-150 dark:border-zinc-850">
                 <div className="flex items-center gap-2 text-zinc-400 mb-1">
                   <HardDrive size={14} />
-                  <span className="text-[10px] uppercase tracking-wider font-black">SQLite Storlek</span>
+                  <span className="text-[10px] uppercase tracking-wider font-black">
+                    {dbConfig.dbEngine === 'json_store' ? 'Lokal Databas (JSON)' : 'Lokal Databas (SQLite)'}
+                  </span>
                 </div>
                 <div className="text-sm font-black text-zinc-900 dark:text-white">
                   {dbConfig.dbSize ? `${(dbConfig.dbSize / 1024).toFixed(1)} KB` : '0 KB'}
@@ -3752,7 +3754,7 @@ export default function ClubAdminDashboard({
                   <span className="text-[10px] uppercase tracking-wider font-black">Servermiljö</span>
                 </div>
                 <div className="text-sm font-black text-zinc-900 dark:text-white">
-                  {dbConfig.isProduction ? 'Produktion / Cloud Run' : 'Utveckling / Webbhotell'}
+                  {dbConfig.isProduction ? 'Produktion / Webbhotell' : 'Utveckling / Lokal'}
                 </div>
               </div>
             </div>

@@ -1,0 +1,26 @@
+{
+  "users": {},
+  "users_data": {},
+  "shared_leaderboards": {},
+  "clubs_data": {},
+  "system_docs": {
+    "system/jwt_secret": {
+      "path": "system/jwt_secret",
+      "data": "\"coachassist-production-jwt-stable-secret-2024-k98z\"",
+      "updatedAt": 1790889077832
+    },
+    "{\"mode\":\"firestore_only\",\"customFirestoreProjectId\":\"\",\"customFirestoreApiKey\":\"\",\"customRemoteUrl\":\"\",\"updatedAt\":1785941998732,\"updatedBy\":\"root_admin\"}": {
+      "path": "{\"mode\":\"firestore_only\",\"customFirestoreProjectId\":\"\",\"customFirestoreApiKey\":\"\",\"customRemoteUrl\":\"\",\"updatedAt\":1785941998732,\"updatedBy\":\"root_admin\"}",
+      "data": 1785941998732
+    }
+  },
+  "password_resets": {},
+  "uploaded_files": {
+    "photo_1790891794821-291013265.jpg": {
+      "filename": "photo_1790891794821-291013265.jpg",
+      "mime_type": "image/jpeg",
+      "data_base64": "dGVzdCBpbWFnZSBkYXRhCg==",
+      "created_at": 1790891794824
+    }
+  }
+}

@@ -1,6 +1,5 @@
 import { SquadPlayer, ClubMember } from '../types';
-import { db } from './firebase';
-import { doc, getDoc, setDoc } from 'firebase/firestore';
+import { db, doc, getDoc, setDoc } from './firebase';
 
 /**
  * Deduplicates an array of SquadPlayer objects by ID, personnummer, email, or (fullName + number/role).
