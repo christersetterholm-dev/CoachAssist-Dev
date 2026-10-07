@@ -734,7 +734,11 @@ export default function LineupBuilder({
   const [transformStart, setTransformStart] = useState<{ x: number, y: number, initialPoints: any[] } | null>(null);
 
   // Sync tactical players with main players (handles additions/deletions/subs while keeping custom positioning on the drawing board)
+  // Sync tactical players with main players (handles additions/deletions/subs while keeping custom positioning on the drawing board)
   useEffect(() => {
+    // If in maximized tactical mode, do NOT wipe out tactical players with main roster!
+    if (isMaximized) return;
+
     setTacticalPlayers(prevTactical => {
       const prevList = prevTactical || [];
       const prevMap = new Map<string, LineupPlayer>(prevList.map(p => [p.id, p]));
@@ -775,9 +779,11 @@ export default function LineupBuilder({
   const [footballScale, setFootballScale] = useState<number>(lineup?.tacticalBoard?.footballScale || 1);
   const [opponents, setOpponents] = useState<{ id: string, x: number, y: number, number?: number | string, name?: string, role?: string }[]>(lineup?.tacticalBoard?.opponents || []);
   const [showOpponents, setShowOpponents] = useState(lineup?.tacticalBoard?.showOpponents ?? true);
+  const [showBlueTeam, setShowBlueTeam] = useState(lineup?.tacticalBoard?.showBlueTeam ?? true);
   const [opponentColor, setOpponentColor] = useState(lineup?.tacticalBoard?.opponentColor || '#ef4444');
   const [tacticalPlayers, setTacticalPlayers] = useState<LineupPlayer[]>(lineup?.tacticalBoard?.players || []);
   const [showPositionDescriptions, setShowPositionDescriptions] = useState<boolean>(lineup?.tacticalBoard?.showPositionDescriptions ?? false);
+  const dragHistoryPushedRef = useRef<boolean>(false);
 
   const tacticalSnapshotRef = useRef<{
     drawings: string;
@@ -786,6 +792,7 @@ export default function LineupBuilder({
     footballPos: string;
     footballScale: number;
     showOpponents: boolean;
+    showBlueTeam: boolean;
     showPositionDescriptions: boolean;
     opponentColor: string;
     pitchType: string;
@@ -798,6 +805,7 @@ export default function LineupBuilder({
     footballPosition: { x: number; y: number } | null,
     scale: number,
     showOpps: boolean,
+    showBlue: boolean,
     showPosDesc: boolean,
     color: string,
     pType: string
@@ -816,6 +824,7 @@ export default function LineupBuilder({
       footballPos: JSON.stringify(footballPosition),
       footballScale: scale,
       showOpponents: showOpps,
+      showBlueTeam: showBlue,
       showPositionDescriptions: showPosDesc,
       opponentColor: color,
       pitchType: pType,
@@ -845,6 +854,7 @@ export default function LineupBuilder({
     const hasNewFootball = currentFootballPos !== snapshot.footballPos;
     const hasNewScale = footballScale !== snapshot.footballScale;
     const hasNewShowOpponents = showOpponents !== snapshot.showOpponents;
+    const hasNewShowBlueTeam = showBlueTeam !== snapshot.showBlueTeam;
     const hasNewShowPosDesc = showPositionDescriptions !== snapshot.showPositionDescriptions;
     const hasNewOpponentColor = opponentColor !== snapshot.opponentColor;
     const hasNewPitchType = pitchType !== snapshot.pitchType;
@@ -856,6 +866,7 @@ export default function LineupBuilder({
       hasNewFootball ||
       hasNewScale ||
       hasNewShowOpponents ||
+      hasNewShowBlueTeam ||
       hasNewShowPosDesc ||
       hasNewOpponentColor ||
       hasNewPitchType
@@ -865,15 +876,18 @@ export default function LineupBuilder({
   // Whenever entering rittavlan/maximized mode, copy the current lineup's player positions to the tactical players and set initial snapshot
   useEffect(() => {
     if (isMaximized) {
-      const initialTacticalPlayers = players.map(p => ({ ...p }));
-      setTacticalPlayers(initialTacticalPlayers);
+      setTacticalPlayers(prev => {
+        if (prev && prev.length > 0) return prev;
+        return players.map(p => ({ ...p }));
+      });
       updateTacticalSnapshot(
         tacticalDrawings,
         opponents,
-        initialTacticalPlayers,
+        tacticalPlayers.length > 0 ? tacticalPlayers : players,
         footballPos,
         footballScale,
         showOpponents,
+        showBlueTeam,
         showPositionDescriptions,
         opponentColor,
         pitchType
@@ -1032,6 +1046,7 @@ export default function LineupBuilder({
         opponents: JSON.parse(JSON.stringify(opponents)),
         tacticalDrawings: JSON.parse(JSON.stringify(tacticalDrawings)),
         showOpponents,
+        showBlueTeam,
         showPositionDescriptions,
         opponentColor,
         formation: currentFormation
@@ -1041,7 +1056,7 @@ export default function LineupBuilder({
       return { ...prev, [currentId]: newHistory };
     });
     setLineupFutures(prev => ({ ...prev, [currentId]: [] })); // Clear future for this specific lineup
-  }, [currentId, lineupName, teamName, playerScale, nameTagStyle, nameDisplayMode, showNameBackground, nameBackgroundType, showPhoto, showName, showNumber, teamLogoUrl, pitchType, orientation, attackDirection, players, tacticalPlayers, footballPos, footballScale, opponents, tacticalDrawings, showOpponents, showPositionDescriptions, opponentColor, currentFormation]);
+  }, [currentId, lineupName, teamName, playerScale, nameTagStyle, nameDisplayMode, showNameBackground, nameBackgroundType, showPhoto, showName, showNumber, teamLogoUrl, pitchType, orientation, attackDirection, players, tacticalPlayers, footballPos, footballScale, opponents, tacticalDrawings, showOpponents, showBlueTeam, showPositionDescriptions, opponentColor, currentFormation]);
 
   const handleUndo = useCallback(() => {
     if (history.length === 0 || isRestoringHistory.current) return;
@@ -1069,6 +1084,7 @@ export default function LineupBuilder({
       opponents: JSON.parse(JSON.stringify(opponents)),
       tacticalDrawings: JSON.parse(JSON.stringify(tacticalDrawings)),
       showOpponents,
+      showBlueTeam,
       showPositionDescriptions,
       opponentColor,
       formation: currentFormation
@@ -1095,12 +1111,13 @@ export default function LineupBuilder({
     if (last.orientation) setOrientation(last.orientation);
     if (last.attackDirection) setAttackDirection(last.attackDirection);
     setPlayers(JSON.parse(JSON.stringify(last.players || [])));
-    setTacticalPlayers(JSON.parse(JSON.stringify(last.tacticalPlayers || last.players || [])));
+    setTacticalPlayers(JSON.parse(JSON.stringify(last.tacticalPlayers !== undefined ? last.tacticalPlayers : (last.players || []))));
     setFootballPos(last.footballPos ? { ...last.footballPos } : null);
     setFootballScale(last.footballScale || 1);
-    setOpponents(JSON.parse(JSON.stringify(last.opponents || [])));
+    setOpponents(JSON.parse(JSON.stringify(last.opponents !== undefined ? last.opponents : [])));
     setTacticalDrawings(JSON.parse(JSON.stringify(last.tacticalDrawings || [])));
     setShowOpponents(last.showOpponents ?? true);
+    setShowBlueTeam(last.showBlueTeam ?? true);
     setShowPositionDescriptions(last.showPositionDescriptions ?? false);
     setOpponentColor(last.opponentColor || '#ef4444');
     setCurrentFormation(last.formation);
@@ -1110,7 +1127,7 @@ export default function LineupBuilder({
     setTimeout(() => {
       isRestoringHistory.current = false;
     }, 100);
-  }, [currentId, history, lineupName, teamName, playerScale, nameTagStyle, nameDisplayMode, showNameBackground, nameBackgroundType, showPhoto, showName, showNumber, teamLogoUrl, pitchType, orientation, attackDirection, players, tacticalPlayers, footballPos, footballScale, opponents, tacticalDrawings, showOpponents, showPositionDescriptions, opponentColor, currentFormation]);
+  }, [currentId, history, lineupName, teamName, playerScale, nameTagStyle, nameDisplayMode, showNameBackground, nameBackgroundType, showPhoto, showName, showNumber, teamLogoUrl, pitchType, orientation, attackDirection, players, tacticalPlayers, footballPos, footballScale, opponents, tacticalDrawings, showOpponents, showBlueTeam, showPositionDescriptions, opponentColor, currentFormation]);
 
   const handleRedo = useCallback(() => {
     const futures = lineupFutures[currentId] || [];
@@ -1139,6 +1156,7 @@ export default function LineupBuilder({
       opponents: JSON.parse(JSON.stringify(opponents)),
       tacticalDrawings: JSON.parse(JSON.stringify(tacticalDrawings)),
       showOpponents,
+      showBlueTeam,
       showPositionDescriptions,
       opponentColor,
       formation: currentFormation
@@ -1165,12 +1183,13 @@ export default function LineupBuilder({
     if (next.orientation) setOrientation(next.orientation);
     if (next.attackDirection) setAttackDirection(next.attackDirection);
     setPlayers(JSON.parse(JSON.stringify(next.players || [])));
-    setTacticalPlayers(JSON.parse(JSON.stringify(next.tacticalPlayers || next.players || [])));
+    setTacticalPlayers(JSON.parse(JSON.stringify(next.tacticalPlayers !== undefined ? next.tacticalPlayers : (next.players || []))));
     setFootballPos(next.footballPos ? { ...next.footballPos } : null);
     setFootballScale(next.footballScale || 1);
-    setOpponents(JSON.parse(JSON.stringify(next.opponents || [])));
+    setOpponents(JSON.parse(JSON.stringify(next.opponents !== undefined ? next.opponents : [])));
     setTacticalDrawings(JSON.parse(JSON.stringify(next.tacticalDrawings || [])));
     setShowOpponents(next.showOpponents ?? true);
+    setShowBlueTeam(next.showBlueTeam ?? true);
     setShowPositionDescriptions(next.showPositionDescriptions ?? false);
     setOpponentColor(next.opponentColor || '#ef4444');
     setCurrentFormation(next.formation);
@@ -1180,7 +1199,7 @@ export default function LineupBuilder({
     setTimeout(() => {
       isRestoringHistory.current = false;
     }, 100);
-  }, [currentId, lineupFutures, lineupName, teamName, playerScale, nameTagStyle, nameDisplayMode, showNameBackground, nameBackgroundType, showPhoto, showName, showNumber, teamLogoUrl, pitchType, orientation, attackDirection, players, tacticalPlayers, footballPos, footballScale, opponents, tacticalDrawings, showOpponents, showPositionDescriptions, opponentColor, currentFormation]);
+  }, [currentId, lineupFutures, lineupName, teamName, playerScale, nameTagStyle, nameDisplayMode, showNameBackground, nameBackgroundType, showPhoto, showName, showNumber, teamLogoUrl, pitchType, orientation, attackDirection, players, tacticalPlayers, footballPos, footballScale, opponents, tacticalDrawings, showOpponents, showBlueTeam, showPositionDescriptions, opponentColor, currentFormation]);
 
   const handleSelectLineupWithHistory = useCallback((id: string) => {
     if (id === lineup?.id) {
@@ -1284,6 +1303,7 @@ export default function LineupBuilder({
   const handlePointerDownWithDeletion = (e: React.PointerEvent, type: 'opponent' | 'blue' | 'ball', id?: string) => {
     e.stopPropagation();
     hasLongPressedRef.current = false;
+    dragHistoryPushedRef.current = false;
     const startX = e.clientX;
     const startY = e.clientY;
     pointerStartPosRef.current = { x: startX, y: startY };
@@ -1543,6 +1563,12 @@ export default function LineupBuilder({
       if (dist > 5) clearLongPress();
     }
 
+    const isDraggingAnyItem = draggingBall || draggingOpponentId || draggingBlueId || (draggingId && isMaximized) || (isTransforming && selectedDrawingId);
+    if (isDraggingAnyItem && !dragHistoryPushedRef.current) {
+      pushHistory();
+      dragHistoryPushedRef.current = true;
+    }
+
     if (draggingBall) {
       setFootballPos({ x, y });
       return;
@@ -1630,6 +1656,7 @@ export default function LineupBuilder({
 
   const handleTacticalEnd = () => {
     clearLongPress();
+    dragHistoryPushedRef.current = false;
 
     if (hasLongPressedRef.current) {
       hasLongPressedRef.current = false;
@@ -2689,6 +2716,7 @@ export default function LineupBuilder({
       footballPos,
       footballScale,
       showOpponents,
+      showBlueTeam,
       showPositionDescriptions,
       opponentColor,
       pitchType
@@ -2728,6 +2756,7 @@ export default function LineupBuilder({
       newFootballPos,
       newFootballScale,
       newShowOpponents,
+      showBlueTeam,
       newShowPositionDescriptions,
       newOpponentColor,
       newPitchType

@@ -45,7 +45,7 @@ const INITIAL_DATA: CoachData = {
   trainingSettings: {
     defaultStartTime: '18:00',
     defaultDuration: 90,
-    icsUrl: 'webcal://cal.laget.se/KSKSeniorer.ics'
+    icsUrl: ''
   },
   exerciseBank: [],
   exerciseBankCategories: []
@@ -1074,10 +1074,21 @@ export default function App() {
       const rawSquad = savedSquad ? JSON.parse(savedSquad) : [];
       const deduplicatedSquad = Array.from(new Map(rawSquad.map((p: any) => [p.id, p])).values()) as SquadPlayer[];
 
+      let parsedSettings: TrainingSettings = savedSettings ? JSON.parse(savedSettings) : INITIAL_DATA.trainingSettings;
+      let parsedSessions: TrainingSession[] = savedSessions ? normalizeSessionMoments(deduplicateById(JSON.parse(savedSessions))) : [];
+
+      if (!user && (parsedSettings?.icsUrl === 'webcal://cal.laget.se/KSKSeniorer.ics' || parsedSettings?.icsUrl === '')) {
+        parsedSettings = { ...parsedSettings, icsUrl: '' };
+        if (savedSettings && JSON.parse(savedSettings).icsUrl === 'webcal://cal.laget.se/KSKSeniorer.ics') {
+          // Clear any sessions that were auto-synced into guest cache
+          parsedSessions = [];
+        }
+      }
+
       const newState: CoachData = {
         squad: deduplicatedSquad,
         exercises: savedExercises ? deduplicateById(JSON.parse(savedExercises)) : [],
-        sessions: savedSessions ? normalizeSessionMoments(deduplicateById(JSON.parse(savedSessions))) : [],
+        sessions: parsedSessions,
         deletedSessions: savedDeletedSessions ? deduplicateById(JSON.parse(savedDeletedSessions)) : [],
         lineups: savedLineups ? deduplicateById(JSON.parse(savedLineups)) : [],
         activeLineupId: savedActiveLineupId || null,
@@ -1089,7 +1100,7 @@ export default function App() {
         seriesUrl: savedSeriesUrl || '',
         customFormations: savedCustomFormations ? deduplicateById(JSON.parse(savedCustomFormations)) : [],
         pinnedFormationIds: getPrefixedItem('pinned_formations', user) ? JSON.parse(getPrefixedItem('pinned_formations', user)!) : ['4-2-3-1', '4-4-2', '4-3-3'],
-        trainingSettings: savedSettings ? JSON.parse(savedSettings) : INITIAL_DATA.trainingSettings,
+        trainingSettings: parsedSettings,
         exerciseBank: savedExerciseBank ? normalizeExerciseBank(deduplicateById(JSON.parse(savedExerciseBank))) : [],
         exerciseBankCategories: savedExerciseBankCategories ? JSON.parse(savedExerciseBankCategories) : []
       };

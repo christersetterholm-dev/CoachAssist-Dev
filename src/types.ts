@@ -63,6 +63,7 @@ export interface Lineup {
     footballScale?: number;
     opponents: { id: string, x: number, y: number, number?: number | string, name?: string, role?: string }[];
     showOpponents: boolean;
+    showBlueTeam?: boolean;
     showPositionDescriptions?: boolean;
     opponentColor?: string;
     players?: LineupPlayer[];
@@ -82,6 +83,7 @@ export interface TacticalSavedBoard {
   footballScale?: number;
   elementScale?: number;
   showOpponents: boolean;
+  showBlueTeam?: boolean;
   showPositionDescriptions?: boolean;
   opponentColor?: string;
   pitchType?: string;

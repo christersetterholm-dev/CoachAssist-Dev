@@ -8,10 +8,13 @@ import jwt from 'jsonwebtoken';
 import multer from 'multer';
 import nodemailer from 'nodemailer';
 import { fileURLToPath } from 'url';
+import { createRequire } from 'module';
+
+const customRequire = typeof require !== 'undefined' ? require : createRequire(import.meta.url);
 
 let Database: any = null;
 try {
-  const BetterSqlite = require('better-sqlite3');
+  const BetterSqlite = customRequire('better-sqlite3');
   // Crucial: Test that the native C++ binary actually exists and instantiates without error.
   // In environments without C++ build tools (like cPanel shared hosting),
   // require('better-sqlite3') succeeds, but instantiating a DB throws:
@@ -439,16 +442,16 @@ function createFallbackDatabase(dataDir: string): any {
 }
 
 // Environment-safe way to define __dirname and __filename in both ESM (dev) and CJS (prod esbuild bundle)
-const _filename = typeof import.meta !== 'undefined' && import.meta.url
-  ? fileURLToPath(import.meta.url)
-  : __filename;
-const _dirname = typeof import.meta !== 'undefined' && import.meta.url
-  ? path.dirname(_filename)
-  : __dirname;
+const _filename = typeof __filename !== 'undefined'
+  ? __filename
+  : (typeof import.meta !== 'undefined' && import.meta.url ? fileURLToPath(import.meta.url) : '');
+const _dirname = typeof __dirname !== 'undefined'
+  ? __dirname
+  : (typeof import.meta !== 'undefined' && import.meta.url ? path.dirname(fileURLToPath(import.meta.url)) : process.cwd());
 
 // Environment variables for persistence on cloud platforms
 const isProduction = process.env.NODE_ENV === 'production' || _dirname.includes('dist') || _dirname.includes('\\dist');
-let DATA_DIR = process.env.DATA_DIR || (isProduction ? path.join(_dirname, '..') : process.cwd());
+let DATA_DIR = process.env.DATA_DIR || (isProduction && _dirname.includes('dist') ? path.join(_dirname, '..') : _dirname);
 
 try {
   fs.mkdirSync(DATA_DIR, { recursive: true });
@@ -4000,6 +4003,197 @@ async function startServer() {
     return res.status(404).send('server.cjs not found');
   });
 
+  // SSH Direct Deploy Endpoints for 1-Click Deployment from AI Studio
+  app.get('/api/deploy-ssh-config', (_req, res) => {
+    try {
+      const row = dbGetSystemDoc('system/ssh_deploy_config');
+      if (row && row.data) {
+        const parsed = JSON.parse(row.data);
+        // Do not return password or full key over the wire, just status
+        return res.json({
+          host: parsed.host || 'coachassist.setterholm.se',
+          port: parsed.port || 22,
+          username: parsed.username || 'setterho',
+          remotePath: parsed.remotePath || '/home/setterho/coachassist.setterholm.se',
+          hasSavedPassword: !!parsed.password,
+          hasSavedKey: !!parsed.privateKey,
+          authType: parsed.authType || (parsed.privateKey ? 'key' : 'password')
+        });
+      }
+      return res.json({
+        host: 'coachassist.setterholm.se',
+        port: 22,
+        username: 'setterho',
+        remotePath: '/home/setterho/coachassist.setterholm.se',
+        hasSavedPassword: false,
+        hasSavedKey: false,
+        authType: 'password'
+      });
+    } catch (e: any) {
+      return res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.post('/api/deploy-to-ssh', async (req, res) => {
+    const {
+      host = 'coachassist.setterholm.se',
+      port = 22,
+      username = 'setterho',
+      password,
+      privateKey,
+      authType = 'password',
+      remotePath = '/home/setterho/coachassist.setterholm.se',
+      action = 'full_deploy', // 'full_deploy' | 'restart_only'
+      saveConfig = true
+    } = req.body;
+
+    let finalPassword = password;
+    let finalKey = privateKey;
+
+    if (!finalPassword && !finalKey) {
+      try {
+        const row = dbGetSystemDoc('system/ssh_deploy_config');
+        if (row && row.data) {
+          const parsed = JSON.parse(row.data);
+          finalPassword = parsed.password;
+          finalKey = parsed.privateKey;
+        }
+      } catch (_) {}
+    }
+
+    if (!finalPassword && !finalKey) {
+      return res.status(400).json({ success: false, error: 'Inget SSH-lösenord eller SSH-nyckel angiven.' });
+    }
+
+    if (saveConfig) {
+      try {
+        dbSetSystemDoc('system/ssh_deploy_config', {
+          host,
+          port: Number(port),
+          username,
+          password: finalPassword || '',
+          privateKey: finalKey || '',
+          authType,
+          remotePath,
+          updatedAt: new Date().toISOString()
+        });
+      } catch (e) {
+        console.warn('Could not save SSH config:', e);
+      }
+    }
+
+    let SshClient: any;
+    try {
+      SshClient = require('ssh2').Client;
+    } catch (e: any) {
+      return res.status(500).json({ success: false, error: 'ssh2 modulen är inte tillgänglig: ' + e.message });
+    }
+
+    const logs: string[] = [];
+    const log = (msg: string) => {
+      console.log('[SSH Deploy]', msg);
+      logs.push(msg);
+    };
+
+    const conn = new SshClient();
+
+    conn.on('ready', () => {
+      log(`Ansluten via SSH till ${username}@${host}:${port}`);
+
+      if (action === 'restart_only') {
+        log('Kör omstartskommando (touch tmp/restart.txt)...');
+        const cmd = `mkdir -p "${remotePath}/tmp" && touch "${remotePath}/tmp/restart.txt"`;
+        conn.exec(cmd, (execErr: any, stream: any) => {
+          if (execErr) {
+            conn.end();
+            return res.status(500).json({ success: false, error: execErr.message, logs });
+          }
+          stream.on('close', (code: number) => {
+            conn.end();
+            if (code === 0) {
+              log('✅ Omstartstrigger skickad! Appen startar om på servern.');
+              return res.json({ success: true, message: 'Servern startades om framgångsrikt!', logs });
+            } else {
+              return res.status(500).json({ success: false, error: `Kommandot avslutades med kod ${code}`, logs });
+            }
+          });
+        });
+        return;
+      }
+
+      // Full deploy: upload bundle and unpack
+      const zipPath = path.resolve(process.cwd(), 'coachassist-production-bundle.zip');
+      if (!fs.existsSync(zipPath)) {
+        conn.end();
+        return res.status(500).json({ success: false, error: 'coachassist-production-bundle.zip hittades inte i AI Studio', logs });
+      }
+
+      log('Initierar SFTP för filöverföring...');
+      conn.sftp((err: any, sftp: any) => {
+        if (err) {
+          conn.end();
+          return res.status(500).json({ success: false, error: 'SFTP fel: ' + err.message, logs });
+        }
+
+        const remoteZip = path.posix.join(remotePath, 'coachassist-update.zip');
+        log(`Laddar upp produktionspaketet (${(fs.statSync(zipPath).size / (1024 * 1024)).toFixed(2)} MB)...`);
+
+        sftp.fastPut(zipPath, remoteZip, (uploadErr: any) => {
+          if (uploadErr) {
+            conn.end();
+            return res.status(500).json({ success: false, error: 'Överföringsfel: ' + uploadErr.message, logs });
+          }
+
+          log('Överföring slutförd! Packar upp filer på servern...');
+          const cmd = `unzip -qo "${remoteZip}" -d "${remotePath}" && rm -f "${remoteZip}" && mkdir -p "${remotePath}/tmp" && touch "${remotePath}/tmp/restart.txt"`;
+
+          conn.exec(cmd, (execErr: any, stream: any) => {
+            if (execErr) {
+              conn.end();
+              return res.status(500).json({ success: false, error: 'Körningsfel: ' + execErr.message, logs });
+            }
+
+            stream.on('close', (code: number) => {
+              conn.end();
+              if (code === 0) {
+                log('✅ [DEPLOY SUCCESSFUL] Alla filer uppackade och servern startades om!');
+                return res.json({
+                  success: true,
+                  message: 'Deploy slutförd! Applikationen är uppdaterad och omstartad på webbhotellet.',
+                  logs
+                });
+              } else {
+                return res.status(500).json({ success: false, error: `Unzip/restart avslutades med kod ${code}`, logs });
+              }
+            }).on('data', (data: any) => {
+              log(data.toString().trim());
+            }).stderr.on('data', (data: any) => {
+              log('[stderr] ' + data.toString().trim());
+            });
+          });
+        });
+      });
+    }).on('error', (err: any) => {
+      console.error('[SSH Deploy Error]', err);
+      return res.status(500).json({ success: false, error: 'SSH-anslutningen misslyckades: ' + err.message, logs });
+    });
+
+    const connOpts: any = {
+      host,
+      port: Number(port),
+      username,
+      readyTimeout: 30000
+    };
+
+    if (finalKey && (authType === 'key' || !finalPassword)) {
+      connOpts.privateKey = finalKey;
+    } else if (finalPassword) {
+      connOpts.password = finalPassword;
+    }
+
+    conn.connect(connOpts);
+  });
+
   // --- VITE AND SPA SERVING ---
 
   if (!isProduction) {
@@ -4031,7 +4225,9 @@ async function startServer() {
 
     app.use(vite.middlewares);
   } else {
-    const distPath = _dirname;
+    const distPath = (_dirname.endsWith('dist') || _dirname.endsWith('/dist') || _dirname.endsWith('\\dist'))
+      ? _dirname
+      : path.join(_dirname, 'dist');
     // Serve assets with absolute precision to prevent any rewrite or subfolder routing issues
     app.use('/assets', express.static(path.join(distPath, 'assets')));
     app.use(express.static(distPath));

@@ -6,7 +6,6 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const srcDir = path.join(__dirname, 'dist');
-const destDir = path.join(__dirname, 'public');
 
 function copyRecursiveSync(src, dest, skipIndexHtml = false) {
   const exists = fs.existsSync(src);
@@ -17,8 +16,8 @@ function copyRecursiveSync(src, dest, skipIndexHtml = false) {
       fs.mkdirSync(dest, { recursive: true });
     }
     fs.readdirSync(src).forEach((childItemName) => {
-      // Do not copy server files or source maps if we don't want to
-      if (childItemName === 'server.cjs' || childItemName === 'server.cjs.map') {
+      // Do not copy server files, zips, or source maps
+      if (childItemName === 'server.cjs' || childItemName === 'server.cjs.map' || childItemName.endsWith('.zip')) {
         return;
       }
       if (skipIndexHtml && childItemName === 'index.html') {
@@ -27,8 +26,7 @@ function copyRecursiveSync(src, dest, skipIndexHtml = false) {
       copyRecursiveSync(path.join(src, childItemName), path.join(dest, childItemName), skipIndexHtml);
     });
   } else {
-    // Check if the source file is not server.cjs
-    if (src.endsWith('server.cjs') || src.endsWith('server.cjs.map')) {
+    if (src.endsWith('server.cjs') || src.endsWith('server.cjs.map') || src.endsWith('.zip')) {
       return;
     }
     if (skipIndexHtml && src.endsWith('index.html')) {
@@ -38,21 +36,21 @@ function copyRecursiveSync(src, dest, skipIndexHtml = false) {
   }
 }
 
-console.log('Copying build output from dist to public and root directory for direct Apache/Passenger static hosting...');
+console.log('Synchronizing build output...');
 if (fs.existsSync(srcDir)) {
-  // 1. Copy to public/ (skip index.html so Vite dev server uses root index.html)
-  copyRecursiveSync(srcDir, destDir, true);
-  console.log('Successfully copied all assets to public/!');
-
-  // 2. Also copy assets directly to root assets/ so Apache can find them immediately
+  // 1. Synchronize root assets/ folder cleanly (for Apache/Passenger direct serving if used)
   const rootAssetsDir = path.join(__dirname, 'assets');
   const distAssetsDir = path.join(srcDir, 'assets');
   if (fs.existsSync(distAssetsDir)) {
+    if (fs.existsSync(rootAssetsDir)) {
+      fs.rmSync(rootAssetsDir, { recursive: true, force: true });
+    }
+    fs.mkdirSync(rootAssetsDir, { recursive: true });
     copyRecursiveSync(distAssetsDir, rootAssetsDir, false);
-    console.log('Successfully copied all assets to root assets/ for Apache!');
+    console.log('Successfully synchronized assets/ for static servers!');
   }
 
-  // 3. Copy to deploy/ folder so files are visible in AI Studio Code tree
+  // 2. Copy server.cjs and index.html to deploy/ folder
   const deployDir = path.join(__dirname, 'deploy');
   if (!fs.existsSync(deployDir)) {
     fs.mkdirSync(deployDir, { recursive: true });
@@ -65,7 +63,8 @@ if (fs.existsSync(srcDir)) {
   if (fs.existsSync(distIndex)) {
     fs.copyFileSync(distIndex, path.join(deployDir, 'index.html'));
   }
-  console.log('Successfully copied server.cjs and index.html to deploy/ folder!');
+  console.log('Successfully synchronized deploy/ folder!');
 } else {
   console.error('dist/ folder not found. Make sure vite build ran successfully.');
 }
+

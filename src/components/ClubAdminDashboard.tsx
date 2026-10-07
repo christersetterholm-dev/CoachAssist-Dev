@@ -242,6 +242,23 @@ export default function ClubAdminDashboard({
   const [isSyncingNow, setIsSyncingNow] = useState(false);
   const [importFile, setImportFile] = useState<File | null>(null);
   const [isImporting, setIsImporting] = useState(false);
+
+  // SSH Direct Deployment States
+  const [sshHost, setSshHost] = useState('coachassist.setterholm.se');
+  const [sshPort, setSshPort] = useState(22);
+  const [sshUser, setSshUser] = useState('setterho');
+  const [sshPassword, setSshPassword] = useState('');
+  const [sshPrivateKey, setSshPrivateKey] = useState('');
+  const [sshAuthType, setSshAuthType] = useState<'password' | 'key'>('password');
+  const [sshRemotePath, setSshRemotePath] = useState('/home/setterho/coachassist.setterholm.se');
+  const [hasSavedSshPassword, setHasSavedSshPassword] = useState(false);
+  const [hasSavedSshKey, setHasSavedSshKey] = useState(false);
+  const [isDeployingSsh, setIsDeployingSsh] = useState(false);
+  const [sshDeployLogs, setSshDeployLogs] = useState<string[]>([]);
+  const [sshDeployStatus, setSshDeployStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
+  const [sshDeployMessage, setSshDeployMessage] = useState('');
+  const [copiedOneLiner, setCopiedOneLiner] = useState(false);
+  const [showSshPasswordInput, setShowSshPasswordInput] = useState(false);
   
   // Loading & Action states
   const [isLoading, setIsLoading] = useState(false);
@@ -791,11 +808,85 @@ export default function ClubAdminDashboard({
     }
   };
 
+  const fetchSshConfig = async () => {
+    try {
+      const res = await fetch(getApiUrl('/api/deploy-ssh-config'));
+      if (res.ok) {
+        const data = await res.json();
+        if (data.host) setSshHost(data.host);
+        if (data.port) setSshPort(data.port);
+        if (data.username) setSshUser(data.username);
+        if (data.remotePath) setSshRemotePath(data.remotePath);
+        if (data.authType) setSshAuthType(data.authType);
+        setHasSavedSshPassword(!!data.hasSavedPassword);
+        setHasSavedSshKey(!!data.hasSavedKey);
+      }
+    } catch (e) {
+      console.error('Error fetching SSH config:', e);
+    }
+  };
+
   useEffect(() => {
     if (isRootAdmin && activeTab === 'database_env') {
       fetchDbConfig();
+      fetchSshConfig();
     }
   }, [isRootAdmin, activeTab]);
+
+  const handleDeploySsh = async (action: 'full_deploy' | 'restart_only') => {
+    const hasAuth = (sshAuthType === 'key' && (sshPrivateKey || hasSavedSshKey)) ||
+                    (sshAuthType === 'password' && (sshPassword || hasSavedSshPassword));
+
+    if (!hasAuth) {
+      alert(sshAuthType === 'key' ? 'Vänligen klistra in din privata SSH-nyckel.' : 'Vänligen fyll i ditt SSH-lösenord för att ansluta till webbhotellet.');
+      return;
+    }
+
+    setIsDeployingSsh(true);
+    setSshDeployStatus('loading');
+    setSshDeployMessage(action === 'restart_only' ? 'Startar om servern via SSH...' : 'Kopplar upp och överför produktionspaket via SSH/SFTP...');
+    setSshDeployLogs([]);
+
+    try {
+      const res = await fetch(getApiUrl('/api/deploy-to-ssh'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          host: sshHost,
+          port: Number(sshPort),
+          username: sshUser,
+          password: sshAuthType === 'password' ? (sshPassword || undefined) : undefined,
+          privateKey: sshAuthType === 'key' ? (sshPrivateKey || undefined) : undefined,
+          authType: sshAuthType,
+          remotePath: sshRemotePath,
+          action,
+          saveConfig: true
+        })
+      });
+
+      const data = await res.json();
+      if (data.logs && Array.isArray(data.logs)) {
+        setSshDeployLogs(data.logs);
+      }
+
+      if (res.ok && data.success) {
+        setSshDeployStatus('success');
+        setSshDeployMessage(data.message || (action === 'restart_only' ? 'Servern har startats om!' : 'Deploy slutförd och servern omstartad!'));
+        if (sshAuthType === 'password' && sshPassword) setHasSavedSshPassword(true);
+        if (sshAuthType === 'key' && sshPrivateKey) setHasSavedSshKey(true);
+        setSshPassword('');
+        setSshPrivateKey('');
+      } else {
+        setSshDeployStatus('error');
+        setSshDeployMessage(data.error || 'Deploy misslyckades.');
+      }
+    } catch (err: any) {
+      setSshDeployStatus('error');
+      setSshDeployMessage(err?.message || 'Nätverksfel vid anslutning till deploy-tjänsten.');
+    } finally {
+      setIsDeployingSsh(false);
+    }
+  };
 
   const handleSaveDbConfig = async (newMode: 'hybrid' | 'local_sqlite' | 'firestore_only') => {
     setDbConfigLoading(true);
@@ -3896,6 +3987,256 @@ export default function ClubAdminDashboard({
                 </a>
               </div>
             )}
+          </div>
+
+          {/* SSH Direct Deploy & Remote Automation Section */}
+          <div className="bg-white dark:bg-zinc-900 rounded-3xl border border-zinc-150 dark:border-zinc-800 shadow-xl p-6 sm:p-8 space-y-6">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-5 border-b border-zinc-100 dark:border-zinc-800">
+              <div className="flex items-center gap-3.5">
+                <div className="w-12 h-12 rounded-2xl bg-indigo-50 dark:bg-indigo-950/50 text-indigo-600 dark:text-indigo-400 flex items-center justify-center shrink-0">
+                  <Server size={24} />
+                </div>
+                <div>
+                  <h3 className="text-lg sm:text-xl font-black text-zinc-900 dark:text-white tracking-tight">
+                    Direktdeploy till Webbhotellet via SSH
+                  </h3>
+                  <p className="text-xs text-zinc-500 dark:text-zinc-400 font-medium mt-0.5">
+                    Skicka uppdateringar och starta om servern direkt härifrån med ett enda klick, utan att behöva ladda ner/upp filer manuellt.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* SSH Deploy Status / Messages */}
+            {sshDeployMessage && (
+              <div className={`p-4 rounded-2xl border text-xs font-bold flex items-center gap-2.5 ${
+                sshDeployStatus === 'success'
+                  ? 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-800 dark:text-emerald-200 border-emerald-200 dark:border-emerald-800'
+                  : sshDeployStatus === 'error'
+                  ? 'bg-red-50 dark:bg-red-950/40 text-red-800 dark:text-red-200 border-red-200 dark:border-red-800'
+                  : 'bg-indigo-50 dark:bg-indigo-950/40 text-indigo-800 dark:text-indigo-200 border-indigo-200 dark:border-indigo-800'
+              }`}>
+                {sshDeployStatus === 'loading' && <Loader2 size={16} className="animate-spin text-indigo-600 dark:text-indigo-400 shrink-0" />}
+                {sshDeployStatus === 'success' && <CheckCircle2 size={16} className="text-emerald-600 dark:text-emerald-400 shrink-0" />}
+                {sshDeployStatus === 'error' && <AlertTriangle size={16} className="text-red-600 dark:text-red-400 shrink-0" />}
+                <span>{sshDeployMessage}</span>
+              </div>
+            )}
+
+            {/* SSH Configuration Form */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              <div>
+                <label className="block text-[11px] font-black uppercase tracking-wider text-zinc-500 dark:text-zinc-400 mb-1.5">
+                  SSH Server / Värd
+                </label>
+                <input
+                  type="text"
+                  value={sshHost}
+                  onChange={(e) => setSshHost(e.target.value)}
+                  placeholder="coachassist.setterholm.se"
+                  className="w-full px-3.5 py-2.5 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl text-xs font-bold text-zinc-900 dark:text-white focus:outline-none focus:border-indigo-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-black uppercase tracking-wider text-zinc-500 dark:text-zinc-400 mb-1.5">
+                  SSH Port
+                </label>
+                <input
+                  type="number"
+                  value={sshPort}
+                  onChange={(e) => setSshPort(Number(e.target.value))}
+                  placeholder="22"
+                  className="w-full px-3.5 py-2.5 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl text-xs font-bold text-zinc-900 dark:text-white focus:outline-none focus:border-indigo-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-black uppercase tracking-wider text-zinc-500 dark:text-zinc-400 mb-1.5">
+                  SSH Användarnamn
+                </label>
+                <input
+                  type="text"
+                  value={sshUser}
+                  onChange={(e) => setSshUser(e.target.value)}
+                  placeholder="setterho"
+                  className="w-full px-3.5 py-2.5 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl text-xs font-bold text-zinc-900 dark:text-white focus:outline-none focus:border-indigo-500"
+                />
+              </div>
+
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => setSshAuthType('password')}
+                      className={`text-[10px] font-black uppercase px-2 py-0.5 rounded-md cursor-pointer transition-colors ${
+                        sshAuthType === 'password'
+                          ? 'bg-indigo-600 text-white'
+                          : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-500 hover:text-zinc-700'
+                      }`}
+                    >
+                      Lösenord
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setSshAuthType('key')}
+                      className={`text-[10px] font-black uppercase px-2 py-0.5 rounded-md cursor-pointer transition-colors ${
+                        sshAuthType === 'key'
+                          ? 'bg-indigo-600 text-white'
+                          : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-500 hover:text-zinc-700'
+                      }`}
+                    >
+                      SSH-Nyckel
+                    </button>
+                  </div>
+                  {((sshAuthType === 'password' && hasSavedSshPassword) || (sshAuthType === 'key' && hasSavedSshKey)) && (
+                    <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-extrabold flex items-center gap-1">
+                      <Check size={10} /> Sparad
+                    </span>
+                  )}
+                </div>
+
+                {sshAuthType === 'password' ? (
+                  <div className="relative">
+                    <input
+                      type={showSshPasswordInput ? 'text' : 'password'}
+                      value={sshPassword}
+                      onChange={(e) => setSshPassword(e.target.value)}
+                      placeholder={hasSavedSshPassword ? '•••••••••••• (Sparat)' : 'Ange SSH-lösenord'}
+                      className="w-full px-3.5 py-2.5 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl text-xs font-bold text-zinc-900 dark:text-white focus:outline-none focus:border-indigo-500 pr-10"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowSshPasswordInput(!showSshPasswordInput)}
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-zinc-600 text-[10px] font-bold cursor-pointer"
+                    >
+                      {showSshPasswordInput ? 'Dölj' : 'Visa'}
+                    </button>
+                  </div>
+                ) : (
+                  <div className="relative">
+                    <textarea
+                      rows={1}
+                      value={sshPrivateKey}
+                      onChange={(e) => setSshPrivateKey(e.target.value)}
+                      placeholder={hasSavedSshKey ? '-----BEGIN RSA/OPENSSH PRIVATE KEY----- (Sparad)' : 'Klistra in innehållet från ~/.ssh/coachassist'}
+                      className="w-full px-3.5 py-2.5 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl text-xs font-mono font-bold text-zinc-900 dark:text-white focus:outline-none focus:border-indigo-500 resize-y"
+                    />
+                  </div>
+                )}
+              </div>
+
+              <div className="sm:col-span-2 lg:col-span-4">
+                <label className="block text-[11px] font-black uppercase tracking-wider text-zinc-500 dark:text-zinc-400 mb-1.5">
+                  Målmapp på servern (Remote Path)
+                </label>
+                <input
+                  type="text"
+                  value={sshRemotePath}
+                  onChange={(e) => setSshRemotePath(e.target.value)}
+                  placeholder="/home/setterho/coachassist.setterholm.se"
+                  className="w-full px-3.5 py-2.5 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl text-xs font-mono font-bold text-zinc-900 dark:text-white focus:outline-none focus:border-indigo-500"
+                />
+              </div>
+            </div>
+
+            {/* Action Buttons */}
+            <div className="flex flex-wrap items-center gap-3 pt-2">
+              <button
+                type="button"
+                onClick={() => handleDeploySsh('full_deploy')}
+                disabled={isDeployingSsh}
+                className="px-6 py-3.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white font-extrabold text-xs rounded-2xl flex items-center gap-2.5 transition-all shadow-md shadow-indigo-500/20 active:scale-95 cursor-pointer"
+              >
+                {isDeployingSsh ? <Loader2 size={16} className="animate-spin" /> : <Upload size={16} />}
+                <span>🚀 Deploya allt direkt till servern</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => handleDeploySsh('restart_only')}
+                disabled={isDeployingSsh}
+                className="px-5 py-3.5 bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 disabled:opacity-50 text-zinc-800 dark:text-zinc-200 font-extrabold text-xs rounded-2xl flex items-center gap-2 transition-all cursor-pointer"
+              >
+                <RefreshCw size={14} className={isDeployingSsh ? 'animate-spin' : ''} />
+                <span>Endast starta om servern (touch restart.txt)</span>
+              </button>
+            </div>
+
+            {/* SSH Logs console */}
+            {sshDeployLogs.length > 0 && (
+              <div className="mt-4 p-4 bg-zinc-950 text-zinc-300 font-mono text-[11px] rounded-2xl border border-zinc-800 space-y-1 max-h-48 overflow-y-auto">
+                <div className="text-zinc-500 text-[10px] font-bold uppercase pb-1 border-b border-zinc-900 flex items-center justify-between">
+                  <span>SSH Logg</span>
+                  <span>{sshDeployLogs.length} rader</span>
+                </div>
+                {sshDeployLogs.map((logLine, idx) => (
+                  <div key={idx} className="leading-relaxed">
+                    {logLine.startsWith('✅') ? (
+                      <span className="text-emerald-400 font-bold">{logLine}</span>
+                    ) : logLine.startsWith('❌') || logLine.includes('fel') || logLine.includes('error') ? (
+                      <span className="text-red-400 font-bold">{logLine}</span>
+                    ) : (
+                      <span>{logLine}</span>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* 1-Line Server Command Fallback Box */}
+            <div className="p-4 rounded-2xl bg-zinc-50 dark:bg-zinc-950/60 border border-zinc-200 dark:border-zinc-850 space-y-2.5">
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-black uppercase tracking-wider text-zinc-600 dark:text-zinc-300 flex items-center gap-1.5">
+                  <Cpu size={14} className="text-indigo-500" />
+                  <span>Alternativ: Kör snabb-deploy i serverns SSH-terminal (1-radare)</span>
+                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const cmd = `curl -sSL "https://ais-dev-5rinf7gvwaklikkeip3eut-372119737616.europe-west3.run.app/api/download-production-bundle" -o bundle.zip && unzip -qo bundle.zip -d ~/coachassist.setterholm.se && mkdir -p ~/coachassist.setterholm.se/tmp && touch ~/coachassist.setterholm.se/tmp/restart.txt && rm -f bundle.zip && echo "✅ Klar! CoachAssist är uppdaterad och omstartad."`;
+                    navigator.clipboard.writeText(cmd);
+                    setCopiedOneLiner(true);
+                    setTimeout(() => setCopiedOneLiner(false), 2500);
+                  }}
+                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 font-bold text-[11px] hover:bg-indigo-100 transition-colors cursor-pointer"
+                >
+                  {copiedOneLiner ? <Check size={12} /> : <Copy size={12} />}
+                  <span>{copiedOneLiner ? 'Kopierat!' : 'Kopiera kommando'}</span>
+                </button>
+              </div>
+              <pre className="p-3 bg-zinc-900 text-emerald-400 text-[11px] font-mono rounded-xl overflow-x-auto whitespace-pre-wrap select-all">
+{`curl -sSL "https://ais-dev-5rinf7gvwaklikkeip3eut-372119737616.europe-west3.run.app/api/download-production-bundle" -o bundle.zip && unzip -qo bundle.zip -d ~/coachassist.setterholm.se && mkdir -p ~/coachassist.setterholm.se/tmp && touch ~/coachassist.setterholm.se/tmp/restart.txt && rm -f bundle.zip && echo "✅ Klar! CoachAssist är uppdaterad och omstartad."`}
+              </pre>
+            </div>
+          </div>
+
+          {/* Production Bundle & Export / Import Grid */}
+          <div className="bg-gradient-to-br from-indigo-900 to-slate-900 text-white rounded-3xl border border-indigo-700/50 shadow-xl p-6 sm:p-8 relative overflow-hidden">
+            <div className="relative z-10 flex flex-col md:flex-row items-start md:items-center justify-between gap-6">
+              <div className="space-y-2 max-w-2xl">
+                <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-indigo-500/20 border border-indigo-400/30 text-indigo-300 text-[11px] font-black uppercase tracking-wider">
+                  <Server size={13} />
+                  <span>Färdigbyggt Webbhotellspaket</span>
+                </div>
+                <h3 className="text-lg sm:text-xl font-black tracking-tight text-white">
+                  Ladda ner färdigt installationspaket (coachassist-production-bundle.zip)
+                </h3>
+                <p className="text-xs sm:text-sm text-indigo-200/90 leading-relaxed font-medium">
+                  Innehåller de färdigkompilerade produktionsfilerna (<code className="text-white font-mono bg-white/10 px-1 py-0.5 rounded text-xs">dist/server.cjs</code>, <code className="text-white font-mono bg-white/10 px-1 py-0.5 rounded text-xs">dist/index.html</code>, <code className="text-white font-mono bg-white/10 px-1 py-0.5 rounded text-xs">app.cjs</code>, <code className="text-white font-mono bg-white/10 px-1 py-0.5 rounded text-xs">.htaccess</code> och alla optimerade assets). Packa upp direkt i cPanel utan att behöva köra något bygge på webbhotellet.
+                </p>
+              </div>
+
+              <a
+                href="/api/download-production-bundle"
+                download="coachassist-production-bundle.zip"
+                className="inline-flex items-center justify-center gap-2.5 bg-emerald-500 hover:bg-emerald-400 text-zinc-950 font-black px-6 py-3.5 rounded-2xl text-xs sm:text-sm transition-all shadow-lg shadow-emerald-500/30 active:scale-95 shrink-0 cursor-pointer"
+              >
+                <Download size={18} />
+                <span>Ladda ner ZIP-paket (~20 MB)</span>
+              </a>
+            </div>
           </div>
 
           {/* Backup & Import & Manual Sync Section */}

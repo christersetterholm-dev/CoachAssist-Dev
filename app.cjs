@@ -2,14 +2,33 @@
 // It is written in CommonJS format (app.cjs) to prevent Phusion Passenger's loader 
 // from crashing with ERR_REQUIRE_ESM when loading an ES module.
 // It imports the bundled production server from the dist folder if it exists.
-// Otherwise, it starts an automatic build in the background and serves a dynamic build status page.
+// Otherwise, it auto-restores from deploy/ or starts an automatic background build.
 
 const fs = require('fs');
 const path = require('path');
 const { exec } = require('child_process');
 const http = require('http');
 
-const serverPath = path.join(__dirname, 'dist', 'server.cjs');
+const distDir = path.join(__dirname, 'dist');
+const serverPath = path.join(distDir, 'server.cjs');
+const deployServerPath = path.join(__dirname, 'deploy', 'server.cjs');
+const deployIndexPath = path.join(__dirname, 'deploy', 'index.html');
+
+// 1. If dist/server.cjs is missing but deploy/server.cjs exists, auto-restore immediately without needing a heavy build!
+if (!fs.existsSync(serverPath) && fs.existsSync(deployServerPath)) {
+  try {
+    if (!fs.existsSync(distDir)) {
+      fs.mkdirSync(distDir, { recursive: true });
+    }
+    fs.copyFileSync(deployServerPath, serverPath);
+    if (fs.existsSync(deployIndexPath) && !fs.existsSync(path.join(distDir, 'index.html'))) {
+      fs.copyFileSync(deployIndexPath, path.join(distDir, 'index.html'));
+    }
+    console.log('Restored dist/server.cjs and dist/index.html from deploy/ folder successfully.');
+  } catch (restoreErr) {
+    console.warn('Could not auto-restore from deploy/ folder:', restoreErr.message);
+  }
+}
 
 if (fs.existsSync(serverPath)) {
   console.log('Production server found. Starting Coach Assist...');
@@ -89,12 +108,11 @@ if (fs.existsSync(serverPath)) {
     buildLog = '';
     
     // Dynamically resolve the Node.js binary directory of the virtual environment
-    // and prepend it to process.env.PATH so that child processes find the same node/npm/npx
+    // Prepend it to process.env.PATH so that child processes find the same node/npm/npx
     const nodeBinDir = path.dirname(process.execPath);
     const customEnv = {
       ...process.env,
       PATH: nodeBinDir + (process.platform === 'win32' ? ';' : ':') + (process.env.PATH || ''),
-      NODE_OPTIONS: ((process.env.NODE_OPTIONS || '') + ' --max-old-space-size=1536').trim(),
       RAYON_NUM_THREADS: '1',
       UV_THREADPOOL_SIZE: '1',
       ESBUILD_WORKERS: '1'
@@ -390,13 +408,13 @@ if (fs.existsSync(serverPath)) {
               buildStatus === 'building'
                 ? '<p>Sidan laddas om automatiskt var 5:e sekund för att visa förloppet.</p>'
                 : `
-                <p>Något gick fel under byggprocessen. Om det står att "vite" eller andra kommandon inte finns beror det oftast på att en trasig eller felaktigt uppladdad <code>node_modules</code>-mapp blockerar processen. Klicka på "Gör en helt ren installation" nedan för att rensa gamla filer och installera allt på nytt.</p>
+                <p>Något gick fel under byggprocessen på webbhotellet. Om webbhotellet (t.ex. CloudLinux/cPanel) har strikta minnesgränser kan WebAssembly/Vite krascha vid bygge på servern. <strong>Lösning:</strong> Använd den färdiga produktionspaketeringen <code>coachassist-production-bundle.zip</code> (eller se till att mapparna <code>dist/</code> eller <code>deploy/</code> laddas upp) och klicka sedan på "Run NPM Install" i cPanel.</p>
                 <div style="display: flex; gap: 10px; margin-top: 1rem; flex-wrap: wrap;">
                   <form method="POST" action="/rebuild">
                     <button class="button" type="submit">Försök bygga igen</button>
                   </form>
                   <form method="POST" action="/clean-rebuild">
-                    <button class="button" style="background-color: #dc2626;" type="submit">Gör en helt ren installation (rekommenderas)</button>
+                    <button class="button" style="background-color: #dc2626;" type="submit">Gör en helt ren installation</button>
                   </form>
                 </div>
                 `

@@ -30,4 +30,3 @@ SetEnv DATABASE_MODE local_sqlite
   RewriteCond %{DOCUMENT_ROOT}/dist/assets/$1 -f
   RewriteRule ^assets/(.*)$ dist/assets/$1 [L]
 </IfModule>
-

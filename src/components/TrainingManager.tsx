@@ -747,7 +747,7 @@ export default function TrainingManager({
     prevShowSettingsRef.current = showSettings;
   }, [settings, showSettings]);
 
-  const effectiveIcsUrl = settings?.icsUrl || 'webcal://cal.laget.se/KSKSeniorer.ics';
+  const effectiveIcsUrl = (settings?.icsUrl || '').trim();
 
   const handleSyncCalendar = async (customUrl?: string, isSilent = false) => {
     const urlToUse = customUrl !== undefined ? customUrl : effectiveIcsUrl;
