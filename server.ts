@@ -3410,6 +3410,53 @@ async function startServer() {
         return res.status(404).json({ error: 'Not found' });
       }
       res.json(JSON.parse(row.data));
+    } else if (pathStr.startsWith('clubs/') && pathStr.includes('/pending_requests')) {
+      try {
+        const parts = pathStr.split('/');
+        const isCollection = parts.length === 3; // ['clubs', clubId, 'pending_requests']
+        if (isCollection) {
+          const clubId = parts[1];
+          let rows: any[] = db.prepare('SELECT data FROM system_docs WHERE path = ? OR path LIKE ?').all(pathStr, `${pathStr}/%`);
+          if (rows && rows.length > 0) {
+            const list: any[] = [];
+            for (const r of rows) {
+              try {
+                const parsed = JSON.parse(r.data);
+                if (Array.isArray(parsed)) list.push(...parsed);
+                else list.push(parsed);
+              } catch (_) {}
+            }
+            return res.json(list);
+          }
+          const globalRows: any[] = db.prepare("SELECT data FROM system_docs WHERE path = 'pending_user_requests' OR path LIKE 'pending_user_requests/%'").all();
+          if (globalRows && globalRows.length > 0) {
+            const matched: any[] = [];
+            for (const r of globalRows) {
+              try {
+                const parsed = JSON.parse(r.data);
+                if (Array.isArray(parsed)) {
+                  matched.push(...parsed.filter((item: any) => item.requestedClubId === clubId || item.clubId === clubId));
+                } else if (parsed && (parsed.requestedClubId === clubId || parsed.clubId === clubId)) {
+                  matched.push(parsed);
+                }
+              } catch (_) {}
+            }
+            if (matched.length > 0) {
+              return res.json(matched);
+            }
+          }
+          return res.json([]);
+        } else {
+          let row: any = db.prepare('SELECT data FROM system_docs WHERE path = ?').get(pathStr);
+          if (row && row.data) {
+            return res.json(JSON.parse(row.data));
+          }
+          return res.status(404).json({ error: 'Not found' });
+        }
+      } catch (err: any) {
+        console.error('Error handling club pending_requests:', err);
+        return res.json([]);
+      }
     } else if (pathStr.startsWith('clubs/')) {
       const authHeader = req.headers.authorization;
       if (!authHeader) return res.status(401).json({ error: 'Unauthorized' });
@@ -3640,6 +3687,23 @@ async function startServer() {
       } catch (e: any) {
         console.error('Error saving user data:', e);
         res.status(500).json({ error: 'Failed to save user data' });
+      }
+    } else if (pathStr.startsWith('clubs/') && pathStr.includes('/pending_requests')) {
+      try {
+        const serializedData = typeof data === 'string' ? data : JSON.stringify(data);
+        db.prepare(`
+          INSERT INTO system_docs (path, data, updatedAt)
+          VALUES (?, ?, ?)
+          ON CONFLICT(path) DO UPDATE SET data = excluded.data, updatedAt = excluded.updatedAt
+        `).run(pathStr, serializedData, Date.now());
+
+        setFirestoreDoc(`app_docs/${encodeURIComponent(pathStr)}`, { data: serializedData, updatedAt: Date.now() })
+          .catch(e => console.error('Firestore club pending request sync error:', e));
+
+        return res.json({ success: true });
+      } catch (e: any) {
+        console.error('Error saving club pending request:', e);
+        return res.status(500).json({ error: 'Failed to save pending request' });
       }
     } else if (pathStr.startsWith('clubs/')) {
       const authHeader = req.headers.authorization;
