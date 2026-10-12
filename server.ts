@@ -220,7 +220,24 @@ function createFallbackDatabase(dataDir: string): any {
 
         all: (...params: any[]) => {
           if (cleanSql.includes('FROM system_docs')) {
-            return Object.values(store.system_docs);
+            const allDocs = Object.values(store.system_docs);
+            if (cleanSql.includes('path = ? OR path LIKE ?')) {
+              const exact = String(params[0] || '');
+              const prefix = String(params[1] || '').replace(/%/g, '');
+              return allDocs.filter(d => d.path === exact || (prefix && d.path.startsWith(prefix)));
+            }
+            if (cleanSql.includes("path = 'pending_user_requests' OR path LIKE 'pending_user_requests/%'")) {
+              return allDocs.filter(d => d.path === 'pending_user_requests' || d.path.startsWith('pending_user_requests/'));
+            }
+            if (cleanSql.includes('path = ?')) {
+              const target = String(params[0] || '');
+              return allDocs.filter(d => d.path === target);
+            }
+            if (cleanSql.includes('path LIKE ?')) {
+              const prefix = String(params[0] || '').replace(/%/g, '');
+              return allDocs.filter(d => prefix && d.path.startsWith(prefix));
+            }
+            return allDocs;
           }
           if (cleanSql.includes('FROM users_data')) {
             return Object.values(store.users_data);
@@ -3416,17 +3433,29 @@ async function startServer() {
         const isCollection = parts.length === 3; // ['clubs', clubId, 'pending_requests']
         if (isCollection) {
           const clubId = parts[1];
+          const isValidRequest = (item: any) => {
+            return item && typeof item === 'object' &&
+              (item.uid || item.id) &&
+              (item.requestedRole || item.role) &&
+              (item.status === undefined || item.status === 'pending');
+          };
+
           let rows: any[] = db.prepare('SELECT data FROM system_docs WHERE path = ? OR path LIKE ?').all(pathStr, `${pathStr}/%`);
           if (rows && rows.length > 0) {
             const list: any[] = [];
             for (const r of rows) {
               try {
                 const parsed = JSON.parse(r.data);
-                if (Array.isArray(parsed)) list.push(...parsed);
-                else list.push(parsed);
+                if (Array.isArray(parsed)) {
+                  list.push(...parsed.filter(isValidRequest));
+                } else if (isValidRequest(parsed)) {
+                  list.push(parsed);
+                }
               } catch (_) {}
             }
-            return res.json(list);
+            if (list.length > 0) {
+              return res.json(list);
+            }
           }
           const globalRows: any[] = db.prepare("SELECT data FROM system_docs WHERE path = 'pending_user_requests' OR path LIKE 'pending_user_requests/%'").all();
           if (globalRows && globalRows.length > 0) {
@@ -3435,8 +3464,8 @@ async function startServer() {
               try {
                 const parsed = JSON.parse(r.data);
                 if (Array.isArray(parsed)) {
-                  matched.push(...parsed.filter((item: any) => item.requestedClubId === clubId || item.clubId === clubId));
-                } else if (parsed && (parsed.requestedClubId === clubId || parsed.clubId === clubId)) {
+                  matched.push(...parsed.filter((item: any) => isValidRequest(item) && (item.requestedClubId === clubId || item.clubId === clubId)));
+                } else if (isValidRequest(parsed) && (parsed.requestedClubId === clubId || parsed.clubId === clubId)) {
                   matched.push(parsed);
                 }
               } catch (_) {}
@@ -3589,10 +3618,21 @@ async function startServer() {
       }
     } else if (pathStr === 'pending_user_requests' || pathStr.startsWith('pending_user_requests/')) {
       try {
+        const isValidRequest = (item: any) => {
+          return item && typeof item === 'object' &&
+            (item.uid || item.id) &&
+            (item.requestedRole || item.role) &&
+            (item.status === undefined || item.status === 'pending');
+        };
+
         let row: any = db.prepare('SELECT data FROM system_docs WHERE path = ?').get(pathStr);
         if (row && row.data) {
           const parsed = typeof row.data === 'string' ? JSON.parse(row.data) : row.data;
-          return res.json(parsed);
+          if (Array.isArray(parsed)) {
+            return res.json(parsed.filter(isValidRequest));
+          } else if (isValidRequest(parsed)) {
+            return res.json(parsed);
+          }
         }
         return res.json([]);
       } catch (_) {

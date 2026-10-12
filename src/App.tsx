@@ -1345,12 +1345,29 @@ export default function App() {
       return;
     }
     try {
+      let count = 0;
       if (userProfile.activeClubId) {
         const snap = await getDocs(collection(db, 'clubs', userProfile.activeClubId, 'pending_requests'));
-        setPendingRequestsCount(snap.size);
+        snap.forEach(docSnap => {
+          if (docSnap.exists()) {
+            const data = docSnap.data() as any;
+            if (data && (data.uid || data.id) && (data.requestedRole || data.role || data.email)) {
+              count++;
+            }
+          }
+        });
+        setPendingRequestsCount(count);
       } else if (isRootAdmin) {
         const snap = await getDocs(collection(db, 'pending_user_requests'));
-        setPendingRequestsCount(snap.size);
+        snap.forEach(docSnap => {
+          if (docSnap.exists()) {
+            const data = docSnap.data() as any;
+            if (data && (data.uid || data.id) && (data.requestedRole || data.role || data.email)) {
+              count++;
+            }
+          }
+        });
+        setPendingRequestsCount(count);
       } else {
         setPendingRequestsCount(0);
       }

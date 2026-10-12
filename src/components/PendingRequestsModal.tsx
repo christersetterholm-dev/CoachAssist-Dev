@@ -45,7 +45,14 @@ export const PendingRequestsModal: React.FC<PendingRequestsModalProps> = ({
         let reqList: PendingUserRequest[] = [];
         reqsSnap.forEach(docSnap => {
           if (docSnap.exists()) {
-            reqList.push(docSnap.data() as PendingUserRequest);
+            const data = docSnap.data() as any;
+            if (data && (data.uid || data.id) && (data.requestedRole || data.role || data.email)) {
+              reqList.push({
+                ...data,
+                uid: data.uid || data.id,
+                id: data.id || data.uid
+              } as PendingUserRequest);
+            }
           }
         });
 
@@ -54,9 +61,13 @@ export const PendingRequestsModal: React.FC<PendingRequestsModalProps> = ({
           const globalSnap = await getDocs(collection(db, 'pending_user_requests'));
           globalSnap.forEach(docSnap => {
             if (docSnap.exists()) {
-              const data = docSnap.data() as PendingUserRequest;
-              if (data.requestedClubId === activeClubId) {
-                reqList.push(data);
+              const data = docSnap.data() as any;
+              if (data && (data.uid || data.id) && (data.requestedClubId === activeClubId || data.clubId === activeClubId) && (data.requestedRole || data.role || data.email)) {
+                reqList.push({
+                  ...data,
+                  uid: data.uid || data.id,
+                  id: data.id || data.uid
+                } as PendingUserRequest);
               }
             }
           });
@@ -343,7 +354,7 @@ export const PendingRequestsModal: React.FC<PendingRequestsModalProps> = ({
                         </span>
                       </div>
                       <span className="text-[10px] font-medium text-zinc-400">
-                        {new Date(req.createdAt).toLocaleDateString('sv-SE')}
+                        {req.createdAt && !isNaN(Number(req.createdAt)) ? new Date(Number(req.createdAt)).toLocaleDateString('sv-SE') : 'Nyligen'}
                       </span>
                     </div>
 
