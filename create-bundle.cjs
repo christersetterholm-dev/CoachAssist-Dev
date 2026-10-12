@@ -37,6 +37,17 @@ async function createProductionBundle() {
   console.log('Adding deploy/ folder to bundle...');
   addFolderToZip(path.join(__dirname, 'deploy'), zip.folder('deploy'));
 
+  console.log('Adding root icons, favicon, and manifest directly to root of ZIP...');
+  const publicDir = path.join(__dirname, 'public');
+  if (fs.existsSync(publicDir)) {
+    const publicItems = fs.readdirSync(publicDir);
+    for (const item of publicItems) {
+      if (item.endsWith('.png') || item.endsWith('.ico') || item.endsWith('.svg') || item.endsWith('.jpg') || item.endsWith('.webmanifest') || item.endsWith('.json')) {
+        zip.file(item, fs.readFileSync(path.join(publicDir, item)));
+      }
+    }
+  }
+
   console.log('Adding app.cjs, run-build.cjs, copy-build.js, package.json, and .htaccess to bundle...');
   if (fs.existsSync(path.join(__dirname, 'app.cjs'))) {
     zip.file('app.cjs', fs.readFileSync(path.join(__dirname, 'app.cjs')));
@@ -49,6 +60,9 @@ async function createProductionBundle() {
   }
   if (fs.existsSync(path.join(__dirname, 'package.json'))) {
     zip.file('package.json', fs.readFileSync(path.join(__dirname, 'package.json')));
+  }
+  if (fs.existsSync(path.join(__dirname, 'db_mode_config.json'))) {
+    zip.file('db_mode_config.json', fs.readFileSync(path.join(__dirname, 'db_mode_config.json')));
   }
   if (fs.existsSync(path.join(__dirname, '.htaccess'))) {
     const htaccessContent = fs.readFileSync(path.join(__dirname, '.htaccess'));

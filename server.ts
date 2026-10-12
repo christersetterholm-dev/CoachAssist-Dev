@@ -7,6 +7,7 @@ import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import multer from 'multer';
 import nodemailer from 'nodemailer';
+import https from 'https';
 import { fileURLToPath } from 'url';
 import { createRequire } from 'module';
 
@@ -91,6 +92,8 @@ function createFallbackDatabase(dataDir: string): any {
             let docPath = '';
             if (cleanSql.includes("path = 'system/jwt_secret'")) docPath = 'system/jwt_secret';
             else if (cleanSql.includes("path = 'system/db_config'")) docPath = 'system/db_config';
+            else if (cleanSql.includes("path = 'system/ssh_deploy_config'")) docPath = 'system/ssh_deploy_config';
+            else if (cleanSql.includes("path = 'system/pwa_icons'")) docPath = 'system/pwa_icons';
             else docPath = String(params[0] || '');
             const doc = store.system_docs[docPath];
             if (!doc) return undefined;
@@ -243,6 +246,22 @@ function createFallbackDatabase(dataDir: string): any {
             let pathVal = '', dataVal = '', updatedVal = Date.now();
             if (cleanSql.includes("'system/jwt_secret'")) {
               pathVal = 'system/jwt_secret';
+              dataVal = params[0];
+              updatedVal = params[1] || Date.now();
+            } else if (cleanSql.includes("'system/db_config'")) {
+              pathVal = 'system/db_config';
+              dataVal = params[0];
+              updatedVal = params[1] || Date.now();
+            } else if (cleanSql.includes("'system/ssh_deploy_config'")) {
+              pathVal = 'system/ssh_deploy_config';
+              dataVal = params[0];
+              updatedVal = params[1] || Date.now();
+            } else if (cleanSql.includes("'system/pwa_icons'")) {
+              pathVal = 'system/pwa_icons';
+              dataVal = params[0];
+              updatedVal = params[1] || Date.now();
+            } else if (params.length === 2) {
+              pathVal = String(params[0] || '');
               dataVal = params[0];
               updatedVal = params[1] || Date.now();
             } else {
@@ -726,8 +745,21 @@ try {
 
 const FIREBASE_API_KEY = firebaseConfig?.apiKey || '';
 
+const DB_CONFIG_FILE = path.join(DATA_DIR, 'db_mode_config.json');
+const ROOT_DB_CONFIG_FILE = path.join(_dirname, 'db_mode_config.json');
+
+function saveDiskDbConfig(config: any) {
+  try {
+    const dataStr = JSON.stringify(config, null, 2);
+    try { fs.writeFileSync(DB_CONFIG_FILE, dataStr, 'utf8'); } catch (_) {}
+    try { fs.writeFileSync(ROOT_DB_CONFIG_FILE, dataStr, 'utf8'); } catch (_) {}
+  } catch (err) {
+    console.warn('[DB Config] Could not write disk config file:', err);
+  }
+}
+
 let dbModeConfig = {
-  mode: process.env.DATABASE_MODE || 'hybrid', // 'hybrid' | 'local_sqlite' | 'firestore_only'
+  mode: process.env.DATABASE_MODE || 'local_sqlite', // 'hybrid' | 'local_sqlite' | 'firestore_only'
   customFirestoreProjectId: '',
   customFirestoreApiKey: '',
   customRemoteUrl: '',
@@ -735,13 +767,32 @@ let dbModeConfig = {
   updatedBy: 'system'
 };
 
-// Load saved database configuration from system_docs table in SQLite
+// 1. Load from persistent disk configuration file first if present
+try {
+  for (const filePath of [DB_CONFIG_FILE, ROOT_DB_CONFIG_FILE]) {
+    if (fs.existsSync(filePath)) {
+      const raw = fs.readFileSync(filePath, 'utf8');
+      const parsed = JSON.parse(raw);
+      if (parsed && parsed.mode) {
+        dbModeConfig = { ...dbModeConfig, ...parsed };
+        console.log(`[DB Config] Loaded persistent disk config from ${filePath}: mode = ${dbModeConfig.mode}`);
+        break;
+      }
+    }
+  }
+} catch (e) {
+  console.warn('[DB Config] Could not read disk config file:', e);
+}
+
+// 2. Load saved database configuration from system_docs table in SQLite / JSON DB
 try {
   const savedRow: any = db.prepare("SELECT data FROM system_docs WHERE path = 'system/db_config'").get();
   if (savedRow) {
     const parsed = typeof savedRow.data === 'string' ? JSON.parse(savedRow.data) : savedRow.data;
-    dbModeConfig = { ...dbModeConfig, ...parsed };
-    console.log(`[DB Config] Initialized database mode: ${dbModeConfig.mode}`);
+    if (parsed && parsed.mode) {
+      dbModeConfig = { ...dbModeConfig, ...parsed };
+      console.log(`[DB Config] Initialized database mode from DB: ${dbModeConfig.mode}`);
+    }
   }
 } catch (e) {
   console.warn('[DB Config] Could not read system/db_config from SQLite:', e);
@@ -887,133 +938,261 @@ async function setFirestoreDoc(docPath: string, data: Record<string, any>): Prom
 let customPwaIcons: {
   appName?: string;
   themeColor?: string;
+  updatedAt?: number;
   files: Record<string, string>;
+  logoSrc?: string;
 } | null = null;
 
-function applyCustomPwaIconsToDisk(iconsObj: { appName?: string; themeColor?: string; files: Record<string, string> }) {
-  const publicDir = path.join(process.cwd(), 'public');
-  const distDir = path.join(process.cwd(), 'dist');
+function applyCustomPwaIconsToDisk(iconsObj: { appName?: string; themeColor?: string; updatedAt?: number; files: Record<string, string>; logoSrc?: string }) {
+  const rootDir = process.cwd();
+  const publicDir = path.join(rootDir, 'public');
+  const distDir = path.join(rootDir, 'dist');
+  const deployDir = path.join(rootDir, 'deploy');
 
+  const targetDirs = [publicDir, distDir, rootDir, deployDir];
+
+  // 1. Write individual icon files to all relevant target directories
   for (const [fileName, dataUrl] of Object.entries(iconsObj.files)) {
     if (!dataUrl) continue;
     const base64Data = dataUrl.includes(',') ? dataUrl.split(',')[1] : dataUrl;
     const buffer = Buffer.from(base64Data, 'base64');
 
-    try {
-      if (fs.existsSync(publicDir)) {
-        fs.writeFileSync(path.join(publicDir, fileName), buffer);
+    for (const targetDir of targetDirs) {
+      try {
+        if (targetDir === rootDir || fs.existsSync(targetDir)) {
+          fs.writeFileSync(path.join(targetDir, fileName), buffer);
+        }
+      } catch (e) {
+        console.error(`Error saving ${fileName} to ${targetDir}:`, e);
       }
-    } catch (e) {
-      console.error(`Error saving ${fileName} to public:`, e);
     }
-
-    try {
-      if (fs.existsSync(distDir)) {
-        fs.writeFileSync(path.join(distDir, fileName), buffer);
-      }
-    } catch (e) {}
   }
 
-  if (iconsObj.appName || iconsObj.themeColor) {
-    const manifestObj = {
-      name: iconsObj.appName || 'CoachAssist',
-      short_name: iconsObj.appName || 'CoachAssist',
-      description: `${iconsObj.appName || 'CoachAssist'} PWA App`,
-      start_url: '/',
-      display: 'standalone',
-      orientation: 'portrait',
-      background_color: iconsObj.themeColor || '#4f46e5',
-      theme_color: iconsObj.themeColor || '#4f46e5',
-      icons: [
-        { src: '/icon-192.png', sizes: '192x192', type: 'image/png' },
-        { src: '/icon-512.png', sizes: '512x512', type: 'image/png' },
-        { src: '/icon-192x192.png', sizes: '192x192', type: 'image/png' },
-        { src: '/icon-512x512.png', sizes: '512x512', type: 'image/png' },
-        { src: '/icon-maskable-512x512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' }
-      ]
-    };
-    const manifestStr = JSON.stringify(manifestObj, null, 2);
-    try {
-      if (fs.existsSync(publicDir)) {
-        fs.writeFileSync(path.join(publicDir, 'manifest.webmanifest'), manifestStr, 'utf-8');
-      }
-    } catch (e) {}
-    try {
-      if (fs.existsSync(distDir)) {
-        fs.writeFileSync(path.join(distDir, 'manifest.webmanifest'), manifestStr, 'utf-8');
-        const assetsDir = path.join(distDir, 'assets');
-        if (fs.existsSync(assetsDir)) {
-          const files = fs.readdirSync(assetsDir);
-          for (const f of files) {
-            if (f.endsWith('.webmanifest')) {
-              fs.writeFileSync(path.join(assetsDir, f), manifestStr, 'utf-8');
-            }
-          }
+  // 1b. If icon-512 or icon-192 exists, generate an SVG wrapper so /icon.svg reflects the custom icon too
+  const mainIcon512 = iconsObj.files['icon-512x512.png'] || iconsObj.files['icon-192x192.png'];
+  if (mainIcon512) {
+    const svgContent = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512"><image href="${mainIcon512}" width="512" height="512"/></svg>`;
+    for (const targetDir of targetDirs) {
+      try {
+        if (targetDir === rootDir || fs.existsSync(targetDir)) {
+          fs.writeFileSync(path.join(targetDir, 'icon.svg'), svgContent, 'utf-8');
         }
-      }
-    } catch (e) {}
-
-    // Update HTML files on disk so index.html statically contains the new title & meta tags
-    if (iconsObj.appName) {
-      const appName = iconsObj.appName;
-      const themeColor = iconsObj.themeColor || '#4f46e5';
-
-      const updateHtmlFile = (filePath: string) => {
-        if (!fs.existsSync(filePath)) return;
-        try {
-          let content = fs.readFileSync(filePath, 'utf-8');
-          if (/<title>.*?<\/title>/gi.test(content)) {
-            content = content.replace(/<title>.*?<\/title>/gi, `<title>${appName}</title>`);
-          } else {
-            content = content.replace('</head>', `<title>${appName}</title></head>`);
-          }
-
-          if (/apple-mobile-web-app-title/gi.test(content)) {
-            content = content.replace(/<meta\s+name="apple-mobile-web-app-title"\s+content=".*?"\s*\/?>/gi, `<meta name="apple-mobile-web-app-title" content="${appName}" />`);
-          } else {
-            content = content.replace('</head>', `<meta name="apple-mobile-web-app-title" content="${appName}" /></head>`);
-          }
-
-          if (/application-name/gi.test(content)) {
-            content = content.replace(/<meta\s+name="application-name"\s+content=".*?"\s*\/?>/gi, `<meta name="application-name" content="${appName}" />`);
-          } else {
-            content = content.replace('</head>', `<meta name="application-name" content="${appName}" /></head>`);
-          }
-
-          if (/theme-color/gi.test(content)) {
-            content = content.replace(/<meta\s+name="theme-color"\s+content=".*?"\s*\/?>/gi, `<meta name="theme-color" content="${themeColor}" />`);
-          }
-
-          fs.writeFileSync(filePath, content, 'utf-8');
-        } catch (e) {
-          console.error(`Error updating HTML file at ${filePath}:`, e);
-        }
-      };
-
-      updateHtmlFile(path.join(process.cwd(), 'index.html'));
-      updateHtmlFile(path.join(publicDir, 'index.html'));
-      updateHtmlFile(path.join(distDir, 'index.html'));
+      } catch (_) {}
     }
+  }
+
+  // 2. Synchronize Web App Manifest across all locations
+  const v = iconsObj.updatedAt || Date.now();
+  const manifestAppName = (iconsObj.appName || 'KSK-appen').trim();
+  const themeColor = iconsObj.themeColor || '#4f46e5';
+
+  const manifestObj = {
+    id: '/',
+    name: manifestAppName,
+    short_name: manifestAppName.length > 12 ? manifestAppName.slice(0, 12) : manifestAppName,
+    description: `${manifestAppName} - Komplett tränings- och matchverktyg för fotbollscoachen.`,
+    start_url: '/',
+    scope: '/',
+    display: 'standalone',
+    orientation: 'portrait',
+    background_color: themeColor,
+    theme_color: themeColor,
+    categories: ['sports', 'utilities'],
+    lang: 'sv',
+    dir: 'ltr',
+    icons: [
+      { src: `/icon-192.png?v=${v}`, sizes: '192x192', type: 'image/png', purpose: 'any' },
+      { src: `/icon-512.png?v=${v}`, sizes: '512x512', type: 'image/png', purpose: 'any' },
+      { src: `/icon-192x192.png?v=${v}`, sizes: '192x192', type: 'image/png', purpose: 'any' },
+      { src: `/icon-512x512.png?v=${v}`, sizes: '512x512', type: 'image/png', purpose: 'any' },
+      { src: `/icon-maskable-512x512.png?v=${v}`, sizes: '512x512', type: 'image/png', purpose: 'maskable' },
+      { src: `/apple-touch-icon.png?v=${v}`, sizes: '180x180', type: 'image/png', purpose: 'any' }
+    ]
+  };
+  const manifestStr = JSON.stringify(manifestObj, null, 2);
+
+  for (const targetDir of targetDirs) {
+    try {
+      if (targetDir === rootDir || fs.existsSync(targetDir)) {
+        fs.writeFileSync(path.join(targetDir, 'manifest.webmanifest'), manifestStr, 'utf-8');
+      }
+    } catch (_) {}
+  }
+
+  // Also update any built manifest files inside dist/assets
+  try {
+    const assetsDir = path.join(distDir, 'assets');
+    if (fs.existsSync(assetsDir)) {
+      const files = fs.readdirSync(assetsDir);
+      for (const f of files) {
+        if (f.endsWith('.webmanifest')) {
+          fs.writeFileSync(path.join(assetsDir, f), manifestStr, 'utf-8');
+        }
+      }
+    }
+  } catch (_) {}
+
+  // 3. Update HTML files on disk (root, public, dist, deploy)
+  const updateHtmlFile = (filePath: string) => {
+    if (!fs.existsSync(filePath)) return;
+    try {
+      let content = fs.readFileSync(filePath, 'utf-8');
+
+      if (/<title>.*?<\/title>/gi.test(content)) {
+        content = content.replace(/<title>.*?<\/title>/gi, `<title>${manifestAppName}</title>`);
+      } else {
+        content = content.replace('</head>', `<title>${manifestAppName}</title></head>`);
+      }
+
+      if (/apple-mobile-web-app-title/gi.test(content)) {
+        content = content.replace(/<meta\s+name="apple-mobile-web-app-title"\s+content=".*?"\s*\/?>/gi, `<meta name="apple-mobile-web-app-title" content="${manifestAppName}" />`);
+      } else {
+        content = content.replace('</head>', `<meta name="apple-mobile-web-app-title" content="${manifestAppName}" /></head>`);
+      }
+
+      if (/application-name/gi.test(content)) {
+        content = content.replace(/<meta\s+name="application-name"\s+content=".*?"\s*\/?>/gi, `<meta name="application-name" content="${manifestAppName}" />`);
+      } else {
+        content = content.replace('</head>', `<meta name="application-name" content="${manifestAppName}" /></head>`);
+      }
+
+      if (/theme-color/gi.test(content)) {
+        content = content.replace(/<meta\s+name="theme-color"\s+content=".*?"\s*\/?>/gi, `<meta name="theme-color" content="${themeColor}" />`);
+      }
+
+      // CRITICAL: Remove the static icon.svg link so modern browsers do not prioritize the default SVG favicon over the custom PNG!
+      content = content.replace(/<link\s+rel="icon"\s+type="image\/svg\+xml"\s+href="[^"]*"\s*\/?>\s*/gi, '');
+
+      // Add version parameter to favicons & manifest
+      content = content.replace(/href="\/favicon-16x16\.png(\?v=\d+)?"/g, `href="/favicon-16x16.png?v=${v}"`);
+      content = content.replace(/href="\/favicon-32x32\.png(\?v=\d+)?"/g, `href="/favicon-32x32.png?v=${v}"`);
+      content = content.replace(/href="\/favicon\.png(\?v=\d+)?"/g, `href="/favicon.png?v=${v}"`);
+      content = content.replace(/href="\/apple-touch-icon\.png(\?v=\d+)?"/g, `href="/apple-touch-icon.png?v=${v}"`);
+      content = content.replace(/href="\/manifest\.webmanifest(\?v=\d+)?"/g, `href="/manifest.webmanifest?v=${v}"`);
+
+      fs.writeFileSync(filePath, content, 'utf-8');
+    } catch (e) {
+      console.error(`Error updating HTML file at ${filePath}:`, e);
+    }
+  };
+
+  updateHtmlFile(path.join(rootDir, 'index.html'));
+  updateHtmlFile(path.join(publicDir, 'index.html'));
+  updateHtmlFile(path.join(distDir, 'index.html'));
+  updateHtmlFile(path.join(deployDir, 'index.html'));
+  console.log('[PWA Icons] Successfully applied custom icons and manifest across all disk locations.');
+}
+
+// Save custom PWA icons to persistent local database (SQLite/JSON DB) and Firestore
+function savePwaIconsToDatabase(pwaData: { appName: string; themeColor: string; updatedAt: number; files: Record<string, string>; logoSrc?: string }) {
+  const serialized = JSON.stringify(pwaData);
+  const now = pwaData.updatedAt || Date.now();
+
+  // 1. Always save to local SQLite / JSON DB system_docs table (no size limit, zero dependency, survives restarts)
+  try {
+    db.prepare(`
+      INSERT INTO system_docs (path, data, updatedAt)
+      VALUES ('system/pwa_icons', ?, ?)
+      ON CONFLICT(path) DO UPDATE SET data = excluded.data, updatedAt = excluded.updatedAt
+    `).run(serialized, now);
+    console.log('[PWA Icons] Successfully saved custom PWA icons to SQLite/JSON DB.');
+  } catch (err: any) {
+    console.error('[PWA Icons] Error saving custom PWA icons to SQLite/JSON DB:', err?.message || err);
+  }
+
+  // 2. Also save to Firestore if configured, keeping payload safe (< 900KB)
+  try {
+    const { baseUrl, apiKey, projId } = getActiveFirestoreParams();
+    if (baseUrl && apiKey && projId) {
+      let firestoreFiles = pwaData.files;
+      // If full set is large, strip non-essential aliases to avoid 1MB document limit
+      if (Buffer.byteLength(JSON.stringify(firestoreFiles), 'utf8') > 850000) {
+        const slimFiles: Record<string, string> = {};
+        for (const [k, v] of Object.entries(pwaData.files)) {
+          if (!['apple-touch-icon-precomposed.png', 'favicon.png', 'icon-192.png', 'icon-512.png'].includes(k)) {
+            slimFiles[k] = v as string;
+          }
+        }
+        firestoreFiles = slimFiles;
+      }
+
+      setFirestoreDoc('app_docs/system_pwa_icons', {
+        appName: pwaData.appName,
+        themeColor: pwaData.themeColor,
+        files: JSON.stringify(firestoreFiles),
+        updatedAt: now
+      }).then(ok => {
+        if (ok) console.log('[PWA Icons] Synced custom PWA icons to Firestore.');
+      }).catch(e => console.warn('[PWA Icons] Firestore sync notice:', e?.message || e));
+    }
+  } catch (err: any) {
+    console.warn('[PWA Icons] Firestore background save notice:', err?.message || err);
   }
 }
 
-async function loadAndApplyPwaIconsFromFirestore() {
-  if (dbModeConfig.mode === 'local_sqlite') return;
+// Load and apply custom PWA icons on server startup
+async function loadAndApplyPwaIcons() {
+  // Step 1: Try loading from persistent SQLite / JSON DB
   try {
-    const docData = await getFirestoreDoc('app_docs/system_pwa_icons');
-    if (docData && docData.files) {
-      const filesMap = typeof docData.files === 'string' ? JSON.parse(docData.files) : docData.files;
-      customPwaIcons = {
-        appName: docData.appName,
-        themeColor: docData.themeColor,
-        files: filesMap
-      };
-      applyCustomPwaIconsToDisk(customPwaIcons);
-      console.log('[PWA Icons] Restored custom PWA icons from Firestore.');
+    const row: any = db.prepare("SELECT data FROM system_docs WHERE path = 'system/pwa_icons'").get();
+    if (row && row.data) {
+      const parsed = typeof row.data === 'string' ? JSON.parse(row.data) : row.data;
+      if (parsed && parsed.files && Object.keys(parsed.files).length > 0) {
+        customPwaIcons = {
+          appName: parsed.appName || 'KSK-appen',
+          themeColor: parsed.themeColor || '#4f46e5',
+          updatedAt: parsed.updatedAt || Date.now(),
+          files: parsed.files,
+          logoSrc: parsed.logoSrc
+        };
+        applyCustomPwaIconsToDisk(customPwaIcons);
+        console.log('[PWA Icons] Restored custom PWA icons from SQLite/JSON DB.');
+        return;
+      }
     }
-  } catch (err) {
-    console.error('[PWA Icons] Error restoring PWA icons from Firestore:', err);
+  } catch (err: any) {
+    console.warn('[PWA Icons] SQLite load notice:', err?.message || err);
   }
+
+  // Step 2: Fallback migration - Check Firestore directly (even in local_sqlite mode) to recover any previously saved icons
+  try {
+    const { projId, apiKey } = getActiveFirestoreParams();
+    const dbId = firebaseConfig?.firestoreDatabaseId || '(default)';
+    if (projId && apiKey) {
+      const url = `https://firestore.googleapis.com/v1/projects/${projId}/databases/${dbId}/documents/app_docs/system_pwa_icons?key=${apiKey}`;
+      const res = await axios.get(url, { validateStatus: s => s <= 500, timeout: 6000 });
+      if (res.status === 200 && res.data?.fields) {
+        const fields = fromFirestoreFields(res.data.fields);
+        if (fields && fields.files) {
+          const filesMap = typeof fields.files === 'string' ? JSON.parse(fields.files) : fields.files;
+          customPwaIcons = {
+            appName: fields.appName || 'KSK-appen',
+            themeColor: fields.themeColor || '#4f46e5',
+            updatedAt: fields.updatedAt || Date.now(),
+            files: filesMap,
+            logoSrc: fields.logoSrc
+          };
+          applyCustomPwaIconsToDisk(customPwaIcons);
+          console.log('[PWA Icons] Restored and migrated custom PWA icons from Firestore.');
+
+          // Cache immediately into SQLite so future startups don't need any network request
+          try {
+            db.prepare(`
+              INSERT INTO system_docs (path, data, updatedAt)
+              VALUES ('system/pwa_icons', ?, ?)
+              ON CONFLICT(path) DO UPDATE SET data = excluded.data, updatedAt = excluded.updatedAt
+            `).run(JSON.stringify(customPwaIcons), customPwaIcons.updatedAt);
+            console.log('[PWA Icons] Cached recovered Firestore icons into SQLite/JSON DB.');
+          } catch (_) {}
+          return;
+        }
+      }
+    }
+  } catch (err: any) {
+    console.warn('[PWA Icons] Startup Firestore recovery check notice:', err?.message || err);
+  }
+
+  console.log('[PWA Icons] Using standard default icons.');
 }
 
 async function loadAndApplyDbConfigFromFirestore() {
@@ -1030,6 +1209,7 @@ async function loadAndApplyDbConfigFromFirestore() {
       if (parsed && parsed.mode) {
         dbModeConfig = { ...dbModeConfig, ...parsed };
         console.log(`[DB Config] Restored database mode from Firestore on startup: ${dbModeConfig.mode}`);
+        saveDiskDbConfig(dbModeConfig);
         
         // Cache back to SQLite so local queries during startup use it
         try {
@@ -1055,16 +1235,17 @@ async function startServer() {
   // Restore JWT secret from Firestore or SQLite on startup
   await ensureJwtSecret();
 
-  // Restore custom PWA icons from Firestore on startup
-  loadAndApplyPwaIconsFromFirestore();
+  // Restore custom PWA icons from SQLite or Firestore on startup
+  await loadAndApplyPwaIcons();
 
   // Restore database configuration mode from Firestore on startup
   await loadAndApplyDbConfigFromFirestore();
 
-  // Helper to inject current PWA app name and theme color into server-rendered HTML
+  // Helper to inject current PWA app name, theme color, and versioned favicons into server-rendered HTML
   function injectPwaMetaToHtml(html: string): string {
     const appName = customPwaIcons?.appName || 'CoachAssist';
     const themeColor = customPwaIcons?.themeColor || '#4f46e5';
+    const v = customPwaIcons?.updatedAt || 1;
 
     let updated = html;
     if (/<title>.*?<\/title>/gi.test(updated)) {
@@ -1089,48 +1270,105 @@ async function startServer() {
       updated = updated.replace(/<meta\s+name="theme-color"\s+content=".*?"\s*\/?>/gi, `<meta name="theme-color" content="${themeColor}" />`);
     }
 
+    // When custom icons are active, remove the default SVG icon link so browsers strictly render the PNG favicon
+    if (customPwaIcons && customPwaIcons.files) {
+      updated = updated.replace(/<link\s+rel="icon"\s+type="image\/svg\+xml"\s+href="[^"]*"\s*\/?>\s*/gi, '');
+      updated = updated.replace(/href="\/favicon-16x16\.png(\?v=\d+)?"/g, `href="/favicon-16x16.png?v=${v}"`);
+      updated = updated.replace(/href="\/favicon-32x32\.png(\?v=\d+)?"/g, `href="/favicon-32x32.png?v=${v}"`);
+      updated = updated.replace(/href="\/favicon\.png(\?v=\d+)?"/g, `href="/favicon.png?v=${v}"`);
+      updated = updated.replace(/href="\/apple-touch-icon\.png(\?v=\d+)?"/g, `href="/apple-touch-icon.png?v=${v}"`);
+      updated = updated.replace(/href="\/manifest\.webmanifest(\?v=\d+)?"/g, `href="/manifest.webmanifest?v=${v}"`);
+    }
+
     return updated;
   }
 
   // --- CUSTOM PWA ICONS & MANIFEST SERVING MIDDLEWARE ---
   app.use((req, res, next) => {
-    const reqPath = req.path.replace(/^\//, '');
+    const rawPath = req.path.replace(/^\//, '');
+    const cleanPath = rawPath.split('?')[0];
 
-    if (customPwaIcons && customPwaIcons.files && customPwaIcons.files[reqPath]) {
-      const dataUrl = customPwaIcons.files[reqPath];
+    // 1. If custom generated icon exists in memory, serve it
+    if (customPwaIcons && customPwaIcons.files && customPwaIcons.files[cleanPath]) {
+      const dataUrl = customPwaIcons.files[cleanPath];
       const base64Data = dataUrl.replace(/^data:image\/\w+;base64,/, '');
       const imgBuffer = Buffer.from(base64Data, 'base64');
       res.setHeader('Content-Type', 'image/png');
-      res.setHeader('Cache-Control', 'public, max-age=86400');
+      res.setHeader('Cache-Control', 'public, max-age=120, stale-while-revalidate=600');
       return res.send(imgBuffer);
     }
 
+    // 1b. If custom icons active and icon.svg requested, serve SVG embedding the custom icon
+    if (customPwaIcons && customPwaIcons.files && (cleanPath === 'icon.svg' || cleanPath === 'favicon.svg')) {
+      const icon512 = customPwaIcons.files['icon-512x512.png'] || customPwaIcons.files['icon-192x192.png'];
+      if (icon512) {
+        const svgWrap = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512"><image href="${icon512}" width="512" height="512" /></svg>`;
+        res.setHeader('Content-Type', 'image/svg+xml; charset=utf-8');
+        res.setHeader('Cache-Control', 'public, max-age=120, stale-while-revalidate=600');
+        return res.send(svgWrap);
+      }
+    }
+
+    // 2. Direct static serving for icon and asset files from dist, public, or root
+    const iconMimes: Record<string, string> = {
+      '.png': 'image/png',
+      '.ico': 'image/x-icon',
+      '.svg': 'image/svg+xml',
+      '.jpg': 'image/jpeg',
+      '.jpeg': 'image/jpeg',
+      '.webp': 'image/webp'
+    };
+    const reqExt = path.extname(cleanPath).toLowerCase();
+    if (iconMimes[reqExt]) {
+      const candidatePaths = [
+        path.join(process.cwd(), 'dist', cleanPath),
+        path.join(process.cwd(), 'public', cleanPath),
+        path.join(process.cwd(), cleanPath)
+      ];
+      for (const cand of candidatePaths) {
+        if (fs.existsSync(cand) && fs.statSync(cand).isFile()) {
+          res.setHeader('Content-Type', iconMimes[reqExt]);
+          res.setHeader('Cache-Control', 'public, max-age=120, stale-while-revalidate=600');
+          return res.sendFile(cand);
+        }
+      }
+    }
+
+    // 3. Web App Manifest serving
     if (
-      reqPath === 'manifest.webmanifest' ||
-      reqPath === 'manifest.json' ||
-      reqPath.endsWith('.webmanifest') ||
-      reqPath.includes('manifest')
+      cleanPath === 'manifest.webmanifest' ||
+      cleanPath === 'manifest.json' ||
+      cleanPath.endsWith('.webmanifest') ||
+      cleanPath.includes('manifest')
     ) {
-      const appName = customPwaIcons?.appName || 'CoachAssist';
+      const appName = (customPwaIcons?.appName || 'KSK-appen').trim();
       const themeColor = customPwaIcons?.themeColor || '#4f46e5';
+      const v = customPwaIcons?.updatedAt || 1;
       const manifestObj = {
+        id: '/',
         name: appName,
-        short_name: appName,
-        description: `${appName} PWA App`,
+        short_name: appName.length > 12 ? appName.slice(0, 12) : appName,
+        description: `${appName} - Komplett tränings- och matchverktyg för fotbollscoachen.`,
         start_url: '/',
+        scope: '/',
         display: 'standalone',
         orientation: 'portrait',
         background_color: themeColor,
         theme_color: themeColor,
+        categories: ['sports', 'utilities'],
+        lang: 'sv',
+        dir: 'ltr',
         icons: [
-          { src: '/icon-192.png', sizes: '192x192', type: 'image/png' },
-          { src: '/icon-512.png', sizes: '512x512', type: 'image/png' },
-          { src: '/icon-192x192.png', sizes: '192x192', type: 'image/png' },
-          { src: '/icon-512x512.png', sizes: '512x512', type: 'image/png' },
-          { src: '/icon-maskable-512x512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' }
+          { src: `/icon-192.png?v=${v}`, sizes: '192x192', type: 'image/png', purpose: 'any' },
+          { src: `/icon-512.png?v=${v}`, sizes: '512x512', type: 'image/png', purpose: 'any' },
+          { src: `/icon-192x192.png?v=${v}`, sizes: '192x192', type: 'image/png', purpose: 'any' },
+          { src: `/icon-512x512.png?v=${v}`, sizes: '512x512', type: 'image/png', purpose: 'any' },
+          { src: `/icon-maskable-512x512.png?v=${v}`, sizes: '512x512', type: 'image/png', purpose: 'maskable' },
+          { src: `/apple-touch-icon.png?v=${v}`, sizes: '180x180', type: 'image/png', purpose: 'any' }
         ]
       };
-      res.setHeader('Content-Type', 'application/manifest+json');
+      res.setHeader('Content-Type', 'application/manifest+json; charset=utf-8');
+      res.setHeader('Cache-Control', 'public, max-age=120, stale-while-revalidate=600');
       return res.json(manifestObj);
     }
 
@@ -1174,8 +1412,14 @@ async function startServer() {
     const pathPart = url.split('?')[0];
     const segments = pathPart.split('/').filter(Boolean);
 
-    // If there are no segments or the first segment is a known root-level route, bypass
-    if (segments.length === 0 || ['api', 'assets', 'uploads', 'rebuild', 'favicon.ico'].includes(segments[0])) {
+    // CRITICAL: If there are no segments, or if path has a file extension (e.g. .png, .ico, .svg, .webmanifest, .js, .css), bypass subfolder routing!
+    const ext = path.extname(pathPart).toLowerCase();
+    if (
+      segments.length === 0 ||
+      ext !== '' ||
+      pathPart.includes('.') ||
+      ['api', 'assets', 'uploads', 'rebuild', 'favicon.ico'].includes(segments[0])
+    ) {
       return next();
     }
 
@@ -1282,6 +1526,9 @@ async function startServer() {
 
     const serialized = JSON.stringify(dbModeConfig);
 
+    // Save to persistent disk configuration file immediately
+    saveDiskDbConfig(dbModeConfig);
+
     try {
       db.prepare(`
         INSERT INTO system_docs (path, data, updatedAt)
@@ -1289,10 +1536,10 @@ async function startServer() {
         ON CONFLICT(path) DO UPDATE SET data = excluded.data, updatedAt = excluded.updatedAt
       `).run(serialized, dbModeConfig.updatedAt);
 
-      if (mode !== 'local_sqlite') {
-        setFirestoreDoc('app_docs/system_db_config', { data: serialized, updatedAt: dbModeConfig.updatedAt })
-          .catch(err => console.error('Error syncing system db config to firestore:', err));
-      }
+      // ALWAYS sync chosen configuration to Firestore so future Cloud Run deployments
+      // and container rebuilds remember that the user selected this database mode!
+      setFirestoreDoc('app_docs/system_db_config', { data: serialized, updatedAt: dbModeConfig.updatedAt })
+        .catch(err => console.error('Error syncing system db config to firestore:', err));
 
       console.log(`[DB Config] Updated database mode to: ${mode}`);
       res.json({ success: true, dbModeConfig });
@@ -3642,9 +3889,9 @@ async function startServer() {
   });
 
   // --- PWA ICONS DIRECT APPLICATION ENDPOINT ---
-  app.post('/api/pwa-icons', express.json({ limit: '15mb' }), async (req, res) => {
+  app.post('/api/pwa-icons', express.json({ limit: '25mb' }), async (req, res) => {
     try {
-      const { appName, themeColor, icons } = req.body;
+      const { appName, themeColor, icons, logoSrc } = req.body;
 
       let filesMap: Record<string, string> = customPwaIcons?.files || {};
       if (Array.isArray(icons) && icons.length > 0) {
@@ -3670,26 +3917,25 @@ async function startServer() {
         }
       }
 
+      const now = Date.now();
       customPwaIcons = {
-        appName: appName || 'CoachAssist',
+        appName: (appName || 'KSK-appen').trim(),
         themeColor: themeColor || '#4f46e5',
-        files: filesMap
+        updatedAt: now,
+        files: filesMap,
+        logoSrc: typeof logoSrc === 'string' && logoSrc.length < 500000 ? logoSrc : undefined
       };
 
-      // Apply to disk
+      // 1. Apply across disk locations (public, dist, root, deploy)
       applyCustomPwaIconsToDisk(customPwaIcons);
 
-      // Persist to Firestore so it persists across restarts
-      await setFirestoreDoc('app_docs/system_pwa_icons', {
-        appName: customPwaIcons.appName,
-        themeColor: customPwaIcons.themeColor,
-        files: JSON.stringify(filesMap),
-        updatedAt: Date.now()
-      });
+      // 2. Persist to SQLite / JSON DB and Firestore
+      savePwaIconsToDatabase(customPwaIcons);
 
       res.json({
         success: true,
-        message: 'Appens PWA-ikoner har uppdaterats och verkställts i appen!'
+        message: 'Appens PWA-ikoner har uppdaterats och sparats i databasen!',
+        updatedAt: now
       });
     } catch (err: any) {
       console.error('[PWA Icons] Error saving custom PWA icons:', err);
@@ -3702,7 +3948,10 @@ async function startServer() {
       res.json({
         appName: customPwaIcons.appName,
         themeColor: customPwaIcons.themeColor,
-        hasCustomIcons: true
+        hasCustomIcons: true,
+        updatedAt: customPwaIcons.updatedAt,
+        previewUrl: customPwaIcons.files['icon-512x512.png'] || customPwaIcons.files['icon-192x192.png'] || null,
+        logoSrc: customPwaIcons.logoSrc || null
       });
     } else {
       res.json({ hasCustomIcons: false });
@@ -3748,7 +3997,7 @@ async function startServer() {
       return res.status(400).json({ error: 'URL query parameter is required' });
     }
 
-    let fetchUrl = url.trim();
+    let fetchUrl = url.trim().replace(/^[!#\s"']+|["'\s]+$/g, '');
     if (fetchUrl.startsWith('webcal://')) {
       fetchUrl = 'https://' + fetchUrl.slice(9);
     } else if (!fetchUrl.startsWith('http://') && !fetchUrl.startsWith('https://')) {
@@ -3766,6 +4015,7 @@ async function startServer() {
         timeout: 15000,
         responseType: 'text',
         maxRedirects: 10,
+        httpsAgent: new https.Agent({ rejectUnauthorized: false }),
         headers: {
           'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
           'Accept': 'text/calendar, text/plain, */*',
@@ -3782,7 +4032,7 @@ async function startServer() {
         response = await doFetch(fetchUrl);
       } catch (firstErr: any) {
         if (url.trim().startsWith('webcal://') && fetchUrl.startsWith('https://')) {
-          const httpUrl = 'http://' + url.trim().slice(9);
+          const httpUrl = 'http://' + fetchUrl.slice(8);
           console.log(`[Calendar Proxy] HTTPS failed, trying HTTP fallback: ${httpUrl}`);
           response = await doFetch(httpUrl);
         } else {
@@ -3806,24 +4056,37 @@ async function startServer() {
   // Calendar ICS Feed endpoint for subscribing to a specific team's calendar
   const handleIcsFeed = async (req: express.Request, res: express.Response) => {
     try {
-      const clubId = (req.params.clubId || req.query.clubId || '').toString().trim();
-      const teamId = (req.params.teamId || req.query.teamId || 'club_global').toString().trim();
+      let clubId = (req.params.clubId || req.query.clubId || '').toString().trim();
+      let teamId = (req.params.teamId || req.query.teamId || '').toString().trim();
 
+      // If no clubId specified in generic feed URL, default to primary club & team if available
       if (!clubId) {
-        return res.status(400).send('Missing clubId query or path parameter');
+        clubId = 'club_xckk55vw2';
+        teamId = teamId || 'team_h4nibr38i';
+      }
+      if (!teamId) {
+        teamId = 'club_global';
       }
 
       // Fetch sessions for this club and team
       let sessionsData: any[] = [];
-      let clubName = 'CoachAssist';
-      let teamName = 'Lagets Kalender';
+      let clubName = 'Kungsgårdens SK';
+      let teamName = 'A-laget';
 
       // 1. Try fetching metadata for club/team name
       try {
-        const metaRow: any = db.prepare('SELECT data FROM clubs_data WHERE clubId = ? AND teamId = ? AND segment = ?').get(clubId, 'club_global', 'metadata');
+        let metaRow: any = db.prepare('SELECT data FROM clubs_data WHERE clubId = ? AND teamId = ? AND segment = ?').get(clubId, 'club_global', 'metadata');
+        let meta: any = null;
         if (metaRow) {
-          const meta = typeof metaRow.data === 'string' ? JSON.parse(metaRow.data) : metaRow.data;
-          if (meta.clubName) clubName = meta.clubName;
+          meta = typeof metaRow.data === 'string' ? JSON.parse(metaRow.data) : metaRow.data;
+        } else {
+          const fMeta = await getFirestoreDoc(`app_docs/clubs_${clubId}_club_global_metadata`);
+          if (fMeta && fMeta.data) {
+            meta = typeof fMeta.data === 'string' ? JSON.parse(fMeta.data) : fMeta.data;
+          }
+        }
+        if (meta) {
+          if (meta.clubName || meta.name) clubName = meta.clubName || meta.name;
           if (meta.teams && Array.isArray(meta.teams)) {
             const t = meta.teams.find((tm: any) => tm.id === teamId);
             if (t && t.name) teamName = t.name;
@@ -3843,7 +4106,10 @@ async function startServer() {
         }
       }
 
-      if (!Array.isArray(sessionsData)) {
+      // Handle both raw array and stored object structure: { sessions: [...], deletedSessions: [...] }
+      if (sessionsData && !Array.isArray(sessionsData) && Array.isArray((sessionsData as any).sessions)) {
+        sessionsData = (sessionsData as any).sessions;
+      } else if (!Array.isArray(sessionsData)) {
         sessionsData = [];
       }
 
@@ -4002,6 +4268,30 @@ async function startServer() {
     }
     return res.status(404).send('server.cjs not found');
   });
+
+  // Helper functions for persistent system configurations
+  function dbGetSystemDoc(docPath: string): { data: string; updatedAt: number } | null {
+    try {
+      const row: any = db.prepare('SELECT data, updatedAt FROM system_docs WHERE path = ?').get(docPath);
+      return row || null;
+    } catch {
+      return null;
+    }
+  }
+
+  function dbSetSystemDoc(docPath: string, data: any): void {
+    try {
+      const serialized = typeof data === 'string' ? data : JSON.stringify(data);
+      const now = Date.now();
+      db.prepare(`
+        INSERT INTO system_docs (path, data, updatedAt)
+        VALUES (?, ?, ?)
+        ON CONFLICT(path) DO UPDATE SET data = excluded.data, updatedAt = excluded.updatedAt
+      `).run(docPath, serialized, now);
+    } catch (e) {
+      console.warn(`[SystemDoc] Could not save ${docPath}:`, e);
+    }
+  }
 
   // SSH Direct Deploy Endpoints for 1-Click Deployment from AI Studio
   app.get('/api/deploy-ssh-config', (_req, res) => {
@@ -4228,11 +4518,15 @@ async function startServer() {
     const distPath = (_dirname.endsWith('dist') || _dirname.endsWith('/dist') || _dirname.endsWith('\\dist'))
       ? _dirname
       : path.join(_dirname, 'dist');
+    const publicPath = path.join(process.cwd(), 'public');
     // Serve assets with absolute precision to prevent any rewrite or subfolder routing issues
     app.use('/assets', express.static(path.join(distPath, 'assets')));
     app.use(express.static(distPath));
+    if (fs.existsSync(publicPath)) {
+      app.use(express.static(publicPath));
+    }
     app.get('*', (req, res) => {
-      // If a script, stylesheet, or source file was requested but not found, DO NOT return index.html (text/html)!
+      // If a script, stylesheet, image, font, manifest, or static asset was requested but not found, DO NOT return index.html (text/html)!
       if (
         req.path.startsWith('/assets/') ||
         req.path.startsWith('/src/') ||
@@ -4241,7 +4535,17 @@ async function startServer() {
         req.path.endsWith('.mjs') ||
         req.path.endsWith('.map') ||
         req.path.endsWith('.tsx') ||
-        req.path.endsWith('.ts')
+        req.path.endsWith('.ts') ||
+        req.path.endsWith('.png') ||
+        req.path.endsWith('.jpg') ||
+        req.path.endsWith('.jpeg') ||
+        req.path.endsWith('.webp') ||
+        req.path.endsWith('.svg') ||
+        req.path.endsWith('.ico') ||
+        req.path.endsWith('.webmanifest') ||
+        req.path.endsWith('.json') ||
+        req.path.endsWith('.woff') ||
+        req.path.endsWith('.woff2')
       ) {
         return res.status(404).type('text/plain').send('Asset not found');
       }

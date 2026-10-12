@@ -18,7 +18,11 @@ export async function syncTeamCalendar(
   existingSessions: TrainingSession[],
   forceOverwrite: boolean = false
 ): Promise<SyncResult> {
-  if (!icsUrl) {
+  let cleanUrl = (icsUrl || '').trim();
+  // Strip accidental leading characters like !, #, quotes
+  cleanUrl = cleanUrl.replace(/^[!#\s"']+|["'\s]+$/g, '').trim();
+
+  if (!cleanUrl) {
     return {
       success: false,
       message: 'Ingen kalenderlänk (webcal/ics) angiven.',
@@ -31,49 +35,95 @@ export async function syncTeamCalendar(
     };
   }
 
+  const cleanHttpUrl = cleanUrl.replace(/^webcal:\/\//i, 'https://');
+
   try {
     const cacheBuster = `&_t=${Date.now()}`;
     let icsData = '';
 
-    // First attempt: Call the backend /api/fetch-calendar proxy
-    let primarySuccess = false;
+    // 1. Direct fetch attempt: Services like laget.se (cal.laget.se) support direct browser fetch (Access-Control-Allow-Origin: *)
     try {
-      const response = await fetch(getApiUrl(`/api/fetch-calendar?url=${encodeURIComponent(icsUrl)}${cacheBuster}`), {
+      const directController = new AbortController();
+      const directTimer = setTimeout(() => directController.abort(), 6000);
+      const directRes = await fetch(cleanHttpUrl, {
+        signal: directController.signal,
         headers: {
-          'Cache-Control': 'no-cache, no-store, must-revalidate',
-          'Pragma': 'no-cache'
+          'Accept': 'text/calendar, text/plain, */*'
         }
       });
-      if (response.ok) {
-        icsData = await response.text();
-        primarySuccess = true;
+      clearTimeout(directTimer);
+      if (directRes.ok) {
+        const text = await directRes.text();
+        if (text && text.includes('BEGIN:VCALENDAR')) {
+          icsData = text;
+        }
       }
-    } catch (e) {
-      // Backend unavailable or network error
+    } catch (_) {
+      // Direct CORS fetch failed or not supported by remote host, proceed to backend proxy
     }
 
-    // Second attempt: If backend returned 404 or failed, try public CORS proxies so calendar sync works even on static/offline hosts
-    if (!primarySuccess || !icsData) {
-      const cleanHttpUrl = icsUrl.trim().replace(/^webcal:\/\//i, 'https://');
+    // 2. First-party Backend Proxy (/api/fetch-calendar)
+    if (!icsData) {
       try {
-        const fallback1 = await fetch(`https://corsproxy.io/?url=${encodeURIComponent(cleanHttpUrl)}`);
-        if (fallback1.ok) {
-          icsData = await fallback1.text();
-        } else {
-          throw new Error(`CorsProxy status: ${fallback1.status}`);
-        }
-      } catch (fb1Err) {
-        try {
-          const fallback2 = await fetch(`https://api.allorigins.win/raw?url=${encodeURIComponent(cleanHttpUrl)}`);
-          if (fallback2.ok) {
-            icsData = await fallback2.text();
-          } else {
-            throw new Error(`AllOrigins status: ${fallback2.status}`);
+        const proxyUrl = getApiUrl(`/api/fetch-calendar?url=${encodeURIComponent(cleanHttpUrl)}${cacheBuster}`);
+        const response = await fetch(proxyUrl, {
+          headers: {
+            'Cache-Control': 'no-cache, no-store, must-revalidate',
+            'Pragma': 'no-cache'
           }
-        } catch (fb2Err) {
-          throw new Error('Kunde inte nå kalendern (varken via servern eller reservproxy). Kontrollera kalenderlänken.');
+        });
+        if (response.ok) {
+          const text = await response.text();
+          if (text && text.includes('BEGIN:VCALENDAR')) {
+            icsData = text;
+          }
         }
+      } catch (_) {}
+
+      // Fallback: Try direct relative /api/fetch-calendar if getApiUrl had path prefix differences
+      if (!icsData && typeof window !== 'undefined' && window.location?.origin) {
+        try {
+          const directProxyUrl = `/api/fetch-calendar?url=${encodeURIComponent(cleanHttpUrl)}${cacheBuster}`;
+          const response = await fetch(directProxyUrl, {
+            headers: {
+              'Cache-Control': 'no-cache, no-store, must-revalidate',
+              'Pragma': 'no-cache'
+            }
+          });
+          if (response.ok) {
+            const text = await response.text();
+            if (text && text.includes('BEGIN:VCALENDAR')) {
+              icsData = text;
+            }
+          }
+        } catch (_) {}
       }
+    }
+
+    // 3. Fallback proxies if both direct and backend proxies failed (for static/offline hosting)
+    if (!icsData) {
+      const fallbackProxies = [
+        `https://api.allorigins.win/raw?url=${encodeURIComponent(cleanHttpUrl)}`
+      ];
+      for (const pUrl of fallbackProxies) {
+        try {
+          const fbCtrl = new AbortController();
+          const fbTimer = setTimeout(() => fbCtrl.abort(), 6000);
+          const fbRes = await fetch(pUrl, { signal: fbCtrl.signal });
+          clearTimeout(fbTimer);
+          if (fbRes.ok) {
+            const text = await fbRes.text();
+            if (text && text.includes('BEGIN:VCALENDAR')) {
+              icsData = text;
+              break;
+            }
+          }
+        } catch (_) {}
+      }
+    }
+
+    if (!icsData) {
+      throw new Error('Kunde inte nå kalendern (varken direkt eller via servern). Kontrollera att länken är giltig.');
     }
 
     const events = parseIcsCalendar(icsData);
@@ -280,13 +330,13 @@ export async function syncTeamCalendar(
     const addedCount = newSessionsToAdd.length;
     let message = '';
     if (addedCount === 0 && updatedCount === 0 && removedCount === 0) {
-      message = 'Kalendern är redan helt uppdaterad (inga ändringar hittades).';
+      message = `Kalendern är redan helt uppdaterad. Alla ${events.length} händelser från kalendern finns inlagda.`;
     } else {
       const parts: string[] = [];
       if (addedCount > 0) parts.push(`${addedCount} nya pass`);
       if (updatedCount > 0) parts.push(`${updatedCount} uppdaterade pass`);
-      if (removedCount > 0) parts.push(`${removedCount} borttagna/inställda pass`);
-      message = `Synkning klar! ${parts.join(', ')}.`;
+      if (removedCount > 0) parts.push(`${removedCount} borttagna pass`);
+      message = `Synkning klar! ${parts.join(', ')} (${events.length} händelser i kalendern).`;
     }
 
     return {

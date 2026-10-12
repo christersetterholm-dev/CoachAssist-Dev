@@ -33,6 +33,27 @@ if (!fs.existsSync(serverPath) && fs.existsSync(deployServerPath)) {
 if (fs.existsSync(serverPath)) {
   console.log('Production server found. Starting Coach Assist...');
   process.env.NODE_ENV = 'production'; // Force production mode
+
+  // Ensure persistent database mode from db_mode_config.json is active
+  if (!process.env.DATABASE_MODE) {
+    const configPaths = [
+      path.join(__dirname, 'db_mode_config.json'),
+      path.join(__dirname, 'data', 'db_mode_config.json')
+    ];
+    for (const p of configPaths) {
+      if (fs.existsSync(p)) {
+        try {
+          const cfg = JSON.parse(fs.readFileSync(p, 'utf8'));
+          if (cfg && cfg.mode) {
+            process.env.DATABASE_MODE = cfg.mode;
+            console.log(`[Passenger] Initialized process.env.DATABASE_MODE = "${cfg.mode}" from ${p}`);
+            break;
+          }
+        } catch (_) {}
+      }
+    }
+  }
+
   try {
     require('./dist/server.cjs');
   } catch (startupErr) {

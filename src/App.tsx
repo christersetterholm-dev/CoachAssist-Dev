@@ -1077,14 +1077,6 @@ export default function App() {
       let parsedSettings: TrainingSettings = savedSettings ? JSON.parse(savedSettings) : INITIAL_DATA.trainingSettings;
       let parsedSessions: TrainingSession[] = savedSessions ? normalizeSessionMoments(deduplicateById(JSON.parse(savedSessions))) : [];
 
-      if (!user && (parsedSettings?.icsUrl === 'webcal://cal.laget.se/KSKSeniorer.ics' || parsedSettings?.icsUrl === '')) {
-        parsedSettings = { ...parsedSettings, icsUrl: '' };
-        if (savedSettings && JSON.parse(savedSettings).icsUrl === 'webcal://cal.laget.se/KSKSeniorer.ics') {
-          // Clear any sessions that were auto-synced into guest cache
-          parsedSessions = [];
-        }
-      }
-
       const newState: CoachData = {
         squad: deduplicatedSquad,
         exercises: savedExercises ? deduplicateById(JSON.parse(savedExercises)) : [],

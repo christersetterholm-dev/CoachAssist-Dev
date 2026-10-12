@@ -63,6 +63,30 @@ if (fs.existsSync(srcDir)) {
   if (fs.existsSync(distIndex)) {
     fs.copyFileSync(distIndex, path.join(deployDir, 'index.html'));
   }
+
+  // 3. Ensure all icons and manifest from public/ are present in dist/, deploy/, and root
+  const publicDir = path.join(__dirname, 'public');
+  if (fs.existsSync(publicDir)) {
+    const publicFiles = fs.readdirSync(publicDir);
+    for (const file of publicFiles) {
+      if (file.endsWith('.png') || file.endsWith('.ico') || file.endsWith('.svg') || file.endsWith('.jpg') || file.endsWith('.webmanifest') || file.endsWith('.json')) {
+        const srcFile = path.join(publicDir, file);
+        // Copy to dist/
+        const targetDist = path.join(srcDir, file);
+        if (!fs.existsSync(targetDist)) {
+          fs.copyFileSync(srcFile, targetDist);
+        }
+        // Copy to deploy/
+        const targetDeploy = path.join(deployDir, file);
+        fs.copyFileSync(srcFile, targetDeploy);
+        // Copy to root
+        const targetRoot = path.join(__dirname, file);
+        fs.copyFileSync(srcFile, targetRoot);
+      }
+    }
+    console.log('Successfully synchronized PWA icons and manifest to root, dist, and deploy!');
+  }
+
   console.log('Successfully synchronized deploy/ folder!');
 } else {
   console.error('dist/ folder not found. Make sure vite build ran successfully.');

@@ -236,7 +236,11 @@ export default function ClubAdminDashboard({
     customRemoteUrl?: string;
     updatedAt?: number;
     updatedBy?: string;
-  }>({ mode: 'hybrid' });
+  }>({
+    mode: typeof window !== 'undefined' && localStorage.getItem('coachassist_preferred_db_mode')
+      ? (localStorage.getItem('coachassist_preferred_db_mode') as any)
+      : 'local_sqlite'
+  });
   const [dbConfigLoading, setDbConfigLoading] = useState(false);
   const [dbConfigMessage, setDbConfigMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [isSyncingNow, setIsSyncingNow] = useState(false);
@@ -904,6 +908,7 @@ export default function ClubAdminDashboard({
       });
       const data = await res.json();
       if (res.ok) {
+        try { localStorage.setItem('coachassist_preferred_db_mode', newMode); } catch (_) {}
         setDbConfig(prev => ({ ...prev, mode: newMode }));
         setDbConfigMessage({
           type: 'success',
@@ -4651,7 +4656,6 @@ export default function ClubAdminDashboard({
 
       {activeTab === 'pwa_icons' && (
         <PwaIconGenerator
-          initialLogoUrl="/icon.svg"
           clubName={selectedClub?.name || 'CoachAssist'}
         />
       )}

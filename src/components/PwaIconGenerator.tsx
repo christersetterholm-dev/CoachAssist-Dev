@@ -65,12 +65,17 @@ export default function PwaIconGenerator({ initialLogoUrl, clubName = 'CoachAssi
     fetch(getApiUrl('/api/pwa-icons'))
       .then(res => (res.ok ? res.json() : null))
       .then(data => {
-        if (data) {
+        if (data && data.hasCustomIcons) {
           if (data.appName) {
             setAppName(data.appName);
           }
           if (data.themeColor) {
             setBgColor(data.themeColor);
+          }
+          if (data.logoSrc) {
+            setLogoSrc(data.logoSrc);
+          } else if (data.previewUrl) {
+            setLogoSrc(data.previewUrl);
           }
         }
       })
@@ -80,7 +85,7 @@ export default function PwaIconGenerator({ initialLogoUrl, clubName = 'CoachAssi
   // Sync if clubName changes from props
   useEffect(() => {
     if (clubName && clubName !== 'CoachAssist') {
-      setAppName(clubName);
+      setAppName(prev => (prev === 'CoachAssist' ? clubName : prev));
     }
   }, [clubName]);
 
@@ -328,7 +333,8 @@ export default function PwaIconGenerator({ initialLogoUrl, clubName = 'CoachAssi
         body: JSON.stringify({
           appName: (appName || 'CoachAssist').trim(),
           themeColor: /^#[0-9a-fA-F]{6}$/.test(bgColor) ? bgColor.toLowerCase() : '#4f46e5',
-          icons: iconsPayload
+          icons: iconsPayload,
+          logoSrc: typeof logoSrc === 'string' && logoSrc.length < 500000 ? logoSrc : undefined
         })
       });
 
@@ -347,6 +353,7 @@ export default function PwaIconGenerator({ initialLogoUrl, clubName = 'CoachAssi
       if (response.ok && data.success) {
         const cleanName = (appName || 'CoachAssist').trim();
         const cleanColor = /^#[0-9a-fA-F]{6}$/.test(bgColor) ? bgColor.toLowerCase() : '#4f46e5';
+        const timestamp = Date.now();
 
         // Update DOM meta tags immediately
         document.title = cleanName;
@@ -381,11 +388,53 @@ export default function PwaIconGenerator({ initialLogoUrl, clubName = 'CoachAssi
           manifestLink.rel = 'manifest';
           document.head.appendChild(manifestLink);
         }
-        manifestLink.href = `/manifest.webmanifest?v=${Date.now()}`;
+        manifestLink.href = `/manifest.webmanifest?v=${timestamp}`;
+
+        // CRITICAL: Remove static SVG favicon link so browser does not prioritize the default CoachAssist SVG
+        const svgIconLinks = document.querySelectorAll('link[type="image/svg+xml"]');
+        svgIconLinks.forEach(el => el.remove());
+
+        // Update or inject live favicon and apple-touch-icon links
+        const icon32Data = previewDataUrls['favicon-32x32.png'] || `/favicon-32x32.png?v=${timestamp}`;
+        const icon16Data = previewDataUrls['favicon-16x16.png'] || `/favicon-16x16.png?v=${timestamp}`;
+        const appleIconData = previewDataUrls['apple-touch-icon.png'] || `/apple-touch-icon.png?v=${timestamp}`;
+
+        const setOrUpdateIconLink = (rel: string, sizes: string, href: string) => {
+          let link = document.querySelector(`link[rel="${rel}"][sizes="${sizes}"]`) as HTMLLinkElement;
+          if (!link) {
+            link = document.createElement('link');
+            link.rel = rel;
+            if (sizes) link.sizes = sizes;
+            link.type = 'image/png';
+            document.head.appendChild(link);
+          }
+          link.href = href;
+        };
+
+        setOrUpdateIconLink('icon', '32x32', icon32Data);
+        setOrUpdateIconLink('icon', '16x16', icon16Data);
+        setOrUpdateIconLink('icon', '48x48', icon32Data);
+
+        let appleLink = document.querySelector('link[rel="apple-touch-icon"]') as HTMLLinkElement;
+        if (!appleLink) {
+          appleLink = document.createElement('link');
+          appleLink.rel = 'apple-touch-icon';
+          document.head.appendChild(appleLink);
+        }
+        appleLink.href = appleIconData;
+
+        // Force browser tab to immediately refresh the favicon in the tab bar
+        const oldShortcuts = document.querySelectorAll('link[rel="shortcut icon"]');
+        oldShortcuts.forEach(el => el.remove());
+        const freshShortcut = document.createElement('link');
+        freshShortcut.rel = 'shortcut icon';
+        freshShortcut.type = 'image/png';
+        freshShortcut.href = icon32Data;
+        document.head.appendChild(freshShortcut);
 
         setApplyStatus({
           type: 'success',
-          message: `Appnamnet '${cleanName}' och ikonerna har sparats! När du eller en ledare nu sparar appen på mobilens hemskärm kommer '${cleanName}' upp som namn.`
+          message: `Appnamnet '${cleanName}' och ikonerna har sparats i appen och databasen! Både webbläsarfliken och hemskärmsikonen (iOS/Android) är nu uppdaterade.`
         });
       } else {
         throw new Error(data.error || 'Kunde inte uppdatera ikonerna i appen.');

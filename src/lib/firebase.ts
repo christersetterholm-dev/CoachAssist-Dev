@@ -32,7 +32,7 @@ export const getApiUrl = (path: string): string => {
   // Dynamically detect if we are hosted under a subfolder
   // If pathname is not "/" and has segments, the first segment can be our subfolder
   const segments = pathname.split('/').filter(Boolean);
-  if (segments.length > 0 && segments[0] !== 'api' && segments[0] !== 'uploads') {
+  if (segments.length > 0 && segments[0] !== 'api' && segments[0] !== 'uploads' && !segments[0].includes('.')) {
     return '/' + segments[0] + cleanPath;
   }
   
@@ -710,20 +710,25 @@ export const getDoc = async (docRef: { path: string }, options?: { forceRefresh?
 
     if (!res.ok) {
       if (res.status === 429) {
-        const errData = await res.json().catch(() => ({}));
+        let errData: any = {};
+        try {
+          const txt = await res.text();
+          errData = txt ? JSON.parse(txt) : {};
+        } catch (_) {}
         const quotaErr: any = new Error(errData.message || errData.error || "Quota exceeded for quota metric 'Free daily read units per project (free tier database)'");
         quotaErr.code = 'resource-exhausted';
         quotaErr.status = 429;
         quotaErr.upgradeUrl = errData.upgradeUrl;
         throw quotaErr;
       }
-      if (res.status === 404 || res.status === 401 || res.status === 403) {
-        return { exists: () => false, data: () => null };
-      }
       return { exists: () => false, data: () => null };
     }
 
-    const data = await res.json();
+    const text = await res.text();
+    if (!text || !text.trim()) {
+      return { exists: () => false, data: () => null };
+    }
+    const data = JSON.parse(text);
     return {
       exists: () => true,
       data: () => data
@@ -795,7 +800,11 @@ export const getDocs = async (collectionRef: { path: string }) => {
       return { docs: [], size: 0, empty: true, forEach: () => {} };
     }
 
-    const data = await res.json();
+    const text = await res.text();
+    if (!text || !text.trim()) {
+      return { docs: [], size: 0, empty: true, forEach: () => {} };
+    }
+    const data = JSON.parse(text);
     const items = Array.isArray(data) ? data : (data.requests || data.items || []);
     const docs = items.map((item: any) => ({
       id: item.id || item.userId || item.email,

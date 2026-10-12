@@ -9,9 +9,10 @@
       "data": "\"coachassist-production-jwt-stable-secret-2024-k98z\"",
       "updatedAt": 1790889077832
     },
-    "{\"mode\":\"firestore_only\",\"customFirestoreProjectId\":\"\",\"customFirestoreApiKey\":\"\",\"customRemoteUrl\":\"\",\"updatedAt\":1785941998732,\"updatedBy\":\"root_admin\"}": {
-      "path": "{\"mode\":\"firestore_only\",\"customFirestoreProjectId\":\"\",\"customFirestoreApiKey\":\"\",\"customRemoteUrl\":\"\",\"updatedAt\":1785941998732,\"updatedBy\":\"root_admin\"}",
-      "data": 1785941998732
+    "system/db_config": {
+      "path": "system/db_config",
+      "data": "{\"mode\":\"local_sqlite\",\"customFirestoreProjectId\":\"\",\"customFirestoreApiKey\":\"\",\"customRemoteUrl\":\"\",\"updatedAt\":1791467550824,\"updatedBy\":\"root_admin\"}",
+      "updatedAt": 1791467550824
     }
   },
   "password_resets": {},

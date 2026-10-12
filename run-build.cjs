@@ -131,6 +131,17 @@ if (esbuildResult.status !== 0) {
   }
 }
 
+// Sync compiled dist/server.cjs to deploy/server.cjs
+try {
+  if (fs.existsSync(distServer)) {
+    if (!fs.existsSync(deployDir)) fs.mkdirSync(deployDir, { recursive: true });
+    fs.copyFileSync(distServer, deployServer);
+    console.log('[Build] Synced dist/server.cjs -> deploy/server.cjs');
+  }
+} catch (syncErr) {
+  console.warn('[Build Warning] Could not sync to deploy/server.cjs:', syncErr.message);
+}
+
 // Step 4: Run create-bundle.cjs
 console.log('[Build 4/4] Updating production bundle zip...');
 try {

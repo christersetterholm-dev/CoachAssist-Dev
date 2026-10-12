@@ -41,11 +41,14 @@ var import_bcryptjs = __toESM(require("bcryptjs"), 1);
 var import_jsonwebtoken = __toESM(require("jsonwebtoken"), 1);
 var import_multer = __toESM(require("multer"), 1);
 var import_nodemailer = __toESM(require("nodemailer"), 1);
+var import_https = __toESM(require("https"), 1);
 var import_url = require("url");
+var import_module = require("module");
 var import_meta = {};
+var customRequire = typeof require !== "undefined" ? require : (0, import_module.createRequire)(import_meta.url);
 var Database = null;
 try {
-  const BetterSqlite = require("better-sqlite3");
+  const BetterSqlite = customRequire("better-sqlite3");
   const testDb = new BetterSqlite(":memory:");
   testDb.close();
   Database = BetterSqlite;
@@ -102,6 +105,8 @@ function createFallbackDatabase(dataDir) {
             let docPath = "";
             if (cleanSql.includes("path = 'system/jwt_secret'")) docPath = "system/jwt_secret";
             else if (cleanSql.includes("path = 'system/db_config'")) docPath = "system/db_config";
+            else if (cleanSql.includes("path = 'system/ssh_deploy_config'")) docPath = "system/ssh_deploy_config";
+            else if (cleanSql.includes("path = 'system/pwa_icons'")) docPath = "system/pwa_icons";
             else docPath = String(params[0] || "");
             const doc = store.system_docs[docPath];
             if (!doc) return void 0;
@@ -228,6 +233,22 @@ function createFallbackDatabase(dataDir) {
             let pathVal = "", dataVal = "", updatedVal = Date.now();
             if (cleanSql.includes("'system/jwt_secret'")) {
               pathVal = "system/jwt_secret";
+              dataVal = params[0];
+              updatedVal = params[1] || Date.now();
+            } else if (cleanSql.includes("'system/db_config'")) {
+              pathVal = "system/db_config";
+              dataVal = params[0];
+              updatedVal = params[1] || Date.now();
+            } else if (cleanSql.includes("'system/ssh_deploy_config'")) {
+              pathVal = "system/ssh_deploy_config";
+              dataVal = params[0];
+              updatedVal = params[1] || Date.now();
+            } else if (cleanSql.includes("'system/pwa_icons'")) {
+              pathVal = "system/pwa_icons";
+              dataVal = params[0];
+              updatedVal = params[1] || Date.now();
+            } else if (params.length === 2) {
+              pathVal = String(params[0] || "");
               dataVal = params[0];
               updatedVal = params[1] || Date.now();
             } else {
@@ -411,10 +432,10 @@ function createFallbackDatabase(dataDir) {
     }
   };
 }
-var _filename = typeof import_meta !== "undefined" && import_meta.url ? (0, import_url.fileURLToPath)(import_meta.url) : __filename;
-var _dirname = typeof import_meta !== "undefined" && import_meta.url ? import_path.default.dirname(_filename) : __dirname;
+var _filename = typeof __filename !== "undefined" ? __filename : typeof import_meta !== "undefined" && import_meta.url ? (0, import_url.fileURLToPath)(import_meta.url) : "";
+var _dirname = typeof __dirname !== "undefined" ? __dirname : typeof import_meta !== "undefined" && import_meta.url ? import_path.default.dirname((0, import_url.fileURLToPath)(import_meta.url)) : process.cwd();
 var isProduction = process.env.NODE_ENV === "production" || _dirname.includes("dist") || _dirname.includes("\\dist");
-var DATA_DIR = process.env.DATA_DIR || (isProduction ? import_path.default.join(_dirname, "..") : process.cwd());
+var DATA_DIR = process.env.DATA_DIR || (isProduction && _dirname.includes("dist") ? import_path.default.join(_dirname, "..") : _dirname);
 try {
   import_fs.default.mkdirSync(DATA_DIR, { recursive: true });
   import_fs.default.accessSync(DATA_DIR, import_fs.default.constants.W_OK);
@@ -662,8 +683,25 @@ try {
   console.error("Could not load firebase-applet-config.json:", e);
 }
 var FIREBASE_API_KEY = firebaseConfig?.apiKey || "";
+var DB_CONFIG_FILE = import_path.default.join(DATA_DIR, "db_mode_config.json");
+var ROOT_DB_CONFIG_FILE = import_path.default.join(_dirname, "db_mode_config.json");
+function saveDiskDbConfig(config) {
+  try {
+    const dataStr = JSON.stringify(config, null, 2);
+    try {
+      import_fs.default.writeFileSync(DB_CONFIG_FILE, dataStr, "utf8");
+    } catch (_) {
+    }
+    try {
+      import_fs.default.writeFileSync(ROOT_DB_CONFIG_FILE, dataStr, "utf8");
+    } catch (_) {
+    }
+  } catch (err) {
+    console.warn("[DB Config] Could not write disk config file:", err);
+  }
+}
 var dbModeConfig = {
-  mode: process.env.DATABASE_MODE || "hybrid",
+  mode: process.env.DATABASE_MODE || "local_sqlite",
   // 'hybrid' | 'local_sqlite' | 'firestore_only'
   customFirestoreProjectId: "",
   customFirestoreApiKey: "",
@@ -672,11 +710,28 @@ var dbModeConfig = {
   updatedBy: "system"
 };
 try {
+  for (const filePath of [DB_CONFIG_FILE, ROOT_DB_CONFIG_FILE]) {
+    if (import_fs.default.existsSync(filePath)) {
+      const raw = import_fs.default.readFileSync(filePath, "utf8");
+      const parsed = JSON.parse(raw);
+      if (parsed && parsed.mode) {
+        dbModeConfig = { ...dbModeConfig, ...parsed };
+        console.log(`[DB Config] Loaded persistent disk config from ${filePath}: mode = ${dbModeConfig.mode}`);
+        break;
+      }
+    }
+  }
+} catch (e) {
+  console.warn("[DB Config] Could not read disk config file:", e);
+}
+try {
   const savedRow = db.prepare("SELECT data FROM system_docs WHERE path = 'system/db_config'").get();
   if (savedRow) {
     const parsed = typeof savedRow.data === "string" ? JSON.parse(savedRow.data) : savedRow.data;
-    dbModeConfig = { ...dbModeConfig, ...parsed };
-    console.log(`[DB Config] Initialized database mode: ${dbModeConfig.mode}`);
+    if (parsed && parsed.mode) {
+      dbModeConfig = { ...dbModeConfig, ...parsed };
+      console.log(`[DB Config] Initialized database mode from DB: ${dbModeConfig.mode}`);
+    }
   }
 } catch (e) {
   console.warn("[DB Config] Could not read system/db_config from SQLite:", e);
@@ -808,119 +863,219 @@ async function setFirestoreDoc(docPath, data) {
 }
 var customPwaIcons = null;
 function applyCustomPwaIconsToDisk(iconsObj) {
-  const publicDir = import_path.default.join(process.cwd(), "public");
-  const distDir = import_path.default.join(process.cwd(), "dist");
+  const rootDir = process.cwd();
+  const publicDir = import_path.default.join(rootDir, "public");
+  const distDir = import_path.default.join(rootDir, "dist");
+  const deployDir = import_path.default.join(rootDir, "deploy");
+  const targetDirs = [publicDir, distDir, rootDir, deployDir];
   for (const [fileName, dataUrl] of Object.entries(iconsObj.files)) {
     if (!dataUrl) continue;
     const base64Data = dataUrl.includes(",") ? dataUrl.split(",")[1] : dataUrl;
     const buffer = Buffer.from(base64Data, "base64");
-    try {
-      if (import_fs.default.existsSync(publicDir)) {
-        import_fs.default.writeFileSync(import_path.default.join(publicDir, fileName), buffer);
+    for (const targetDir of targetDirs) {
+      try {
+        if (targetDir === rootDir || import_fs.default.existsSync(targetDir)) {
+          import_fs.default.writeFileSync(import_path.default.join(targetDir, fileName), buffer);
+        }
+      } catch (e) {
+        console.error(`Error saving ${fileName} to ${targetDir}:`, e);
       }
-    } catch (e) {
-      console.error(`Error saving ${fileName} to public:`, e);
-    }
-    try {
-      if (import_fs.default.existsSync(distDir)) {
-        import_fs.default.writeFileSync(import_path.default.join(distDir, fileName), buffer);
-      }
-    } catch (e) {
     }
   }
-  if (iconsObj.appName || iconsObj.themeColor) {
-    const manifestObj = {
-      name: iconsObj.appName || "CoachAssist",
-      short_name: iconsObj.appName || "CoachAssist",
-      description: `${iconsObj.appName || "CoachAssist"} PWA App`,
-      start_url: "/",
-      display: "standalone",
-      orientation: "portrait",
-      background_color: iconsObj.themeColor || "#4f46e5",
-      theme_color: iconsObj.themeColor || "#4f46e5",
-      icons: [
-        { src: "/icon-192.png", sizes: "192x192", type: "image/png" },
-        { src: "/icon-512.png", sizes: "512x512", type: "image/png" },
-        { src: "/icon-192x192.png", sizes: "192x192", type: "image/png" },
-        { src: "/icon-512x512.png", sizes: "512x512", type: "image/png" },
-        { src: "/icon-maskable-512x512.png", sizes: "512x512", type: "image/png", purpose: "maskable" }
-      ]
-    };
-    const manifestStr = JSON.stringify(manifestObj, null, 2);
-    try {
-      if (import_fs.default.existsSync(publicDir)) {
-        import_fs.default.writeFileSync(import_path.default.join(publicDir, "manifest.webmanifest"), manifestStr, "utf-8");
-      }
-    } catch (e) {
-    }
-    try {
-      if (import_fs.default.existsSync(distDir)) {
-        import_fs.default.writeFileSync(import_path.default.join(distDir, "manifest.webmanifest"), manifestStr, "utf-8");
-        const assetsDir = import_path.default.join(distDir, "assets");
-        if (import_fs.default.existsSync(assetsDir)) {
-          const files = import_fs.default.readdirSync(assetsDir);
-          for (const f of files) {
-            if (f.endsWith(".webmanifest")) {
-              import_fs.default.writeFileSync(import_path.default.join(assetsDir, f), manifestStr, "utf-8");
-            }
-          }
+  const mainIcon512 = iconsObj.files["icon-512x512.png"] || iconsObj.files["icon-192x192.png"];
+  if (mainIcon512) {
+    const svgContent = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512"><image href="${mainIcon512}" width="512" height="512"/></svg>`;
+    for (const targetDir of targetDirs) {
+      try {
+        if (targetDir === rootDir || import_fs.default.existsSync(targetDir)) {
+          import_fs.default.writeFileSync(import_path.default.join(targetDir, "icon.svg"), svgContent, "utf-8");
         }
+      } catch (_) {
       }
-    } catch (e) {
-    }
-    if (iconsObj.appName) {
-      const appName = iconsObj.appName;
-      const themeColor = iconsObj.themeColor || "#4f46e5";
-      const updateHtmlFile = (filePath) => {
-        if (!import_fs.default.existsSync(filePath)) return;
-        try {
-          let content = import_fs.default.readFileSync(filePath, "utf-8");
-          if (/<title>.*?<\/title>/gi.test(content)) {
-            content = content.replace(/<title>.*?<\/title>/gi, `<title>${appName}</title>`);
-          } else {
-            content = content.replace("</head>", `<title>${appName}</title></head>`);
-          }
-          if (/apple-mobile-web-app-title/gi.test(content)) {
-            content = content.replace(/<meta\s+name="apple-mobile-web-app-title"\s+content=".*?"\s*\/?>/gi, `<meta name="apple-mobile-web-app-title" content="${appName}" />`);
-          } else {
-            content = content.replace("</head>", `<meta name="apple-mobile-web-app-title" content="${appName}" /></head>`);
-          }
-          if (/application-name/gi.test(content)) {
-            content = content.replace(/<meta\s+name="application-name"\s+content=".*?"\s*\/?>/gi, `<meta name="application-name" content="${appName}" />`);
-          } else {
-            content = content.replace("</head>", `<meta name="application-name" content="${appName}" /></head>`);
-          }
-          if (/theme-color/gi.test(content)) {
-            content = content.replace(/<meta\s+name="theme-color"\s+content=".*?"\s*\/?>/gi, `<meta name="theme-color" content="${themeColor}" />`);
-          }
-          import_fs.default.writeFileSync(filePath, content, "utf-8");
-        } catch (e) {
-          console.error(`Error updating HTML file at ${filePath}:`, e);
-        }
-      };
-      updateHtmlFile(import_path.default.join(process.cwd(), "index.html"));
-      updateHtmlFile(import_path.default.join(publicDir, "index.html"));
-      updateHtmlFile(import_path.default.join(distDir, "index.html"));
     }
   }
-}
-async function loadAndApplyPwaIconsFromFirestore() {
-  if (dbModeConfig.mode === "local_sqlite") return;
+  const v = iconsObj.updatedAt || Date.now();
+  const manifestAppName = (iconsObj.appName || "KSK-appen").trim();
+  const themeColor = iconsObj.themeColor || "#4f46e5";
+  const manifestObj = {
+    id: "/",
+    name: manifestAppName,
+    short_name: manifestAppName.length > 12 ? manifestAppName.slice(0, 12) : manifestAppName,
+    description: `${manifestAppName} - Komplett tr\xE4nings- och matchverktyg f\xF6r fotbollscoachen.`,
+    start_url: "/",
+    scope: "/",
+    display: "standalone",
+    orientation: "portrait",
+    background_color: themeColor,
+    theme_color: themeColor,
+    categories: ["sports", "utilities"],
+    lang: "sv",
+    dir: "ltr",
+    icons: [
+      { src: `/icon-192.png?v=${v}`, sizes: "192x192", type: "image/png", purpose: "any" },
+      { src: `/icon-512.png?v=${v}`, sizes: "512x512", type: "image/png", purpose: "any" },
+      { src: `/icon-192x192.png?v=${v}`, sizes: "192x192", type: "image/png", purpose: "any" },
+      { src: `/icon-512x512.png?v=${v}`, sizes: "512x512", type: "image/png", purpose: "any" },
+      { src: `/icon-maskable-512x512.png?v=${v}`, sizes: "512x512", type: "image/png", purpose: "maskable" },
+      { src: `/apple-touch-icon.png?v=${v}`, sizes: "180x180", type: "image/png", purpose: "any" }
+    ]
+  };
+  const manifestStr = JSON.stringify(manifestObj, null, 2);
+  for (const targetDir of targetDirs) {
+    try {
+      if (targetDir === rootDir || import_fs.default.existsSync(targetDir)) {
+        import_fs.default.writeFileSync(import_path.default.join(targetDir, "manifest.webmanifest"), manifestStr, "utf-8");
+      }
+    } catch (_) {
+    }
+  }
   try {
-    const docData = await getFirestoreDoc("app_docs/system_pwa_icons");
-    if (docData && docData.files) {
-      const filesMap = typeof docData.files === "string" ? JSON.parse(docData.files) : docData.files;
-      customPwaIcons = {
-        appName: docData.appName,
-        themeColor: docData.themeColor,
-        files: filesMap
-      };
-      applyCustomPwaIconsToDisk(customPwaIcons);
-      console.log("[PWA Icons] Restored custom PWA icons from Firestore.");
+    const assetsDir = import_path.default.join(distDir, "assets");
+    if (import_fs.default.existsSync(assetsDir)) {
+      const files = import_fs.default.readdirSync(assetsDir);
+      for (const f of files) {
+        if (f.endsWith(".webmanifest")) {
+          import_fs.default.writeFileSync(import_path.default.join(assetsDir, f), manifestStr, "utf-8");
+        }
+      }
+    }
+  } catch (_) {
+  }
+  const updateHtmlFile = (filePath) => {
+    if (!import_fs.default.existsSync(filePath)) return;
+    try {
+      let content = import_fs.default.readFileSync(filePath, "utf-8");
+      if (/<title>.*?<\/title>/gi.test(content)) {
+        content = content.replace(/<title>.*?<\/title>/gi, `<title>${manifestAppName}</title>`);
+      } else {
+        content = content.replace("</head>", `<title>${manifestAppName}</title></head>`);
+      }
+      if (/apple-mobile-web-app-title/gi.test(content)) {
+        content = content.replace(/<meta\s+name="apple-mobile-web-app-title"\s+content=".*?"\s*\/?>/gi, `<meta name="apple-mobile-web-app-title" content="${manifestAppName}" />`);
+      } else {
+        content = content.replace("</head>", `<meta name="apple-mobile-web-app-title" content="${manifestAppName}" /></head>`);
+      }
+      if (/application-name/gi.test(content)) {
+        content = content.replace(/<meta\s+name="application-name"\s+content=".*?"\s*\/?>/gi, `<meta name="application-name" content="${manifestAppName}" />`);
+      } else {
+        content = content.replace("</head>", `<meta name="application-name" content="${manifestAppName}" /></head>`);
+      }
+      if (/theme-color/gi.test(content)) {
+        content = content.replace(/<meta\s+name="theme-color"\s+content=".*?"\s*\/?>/gi, `<meta name="theme-color" content="${themeColor}" />`);
+      }
+      content = content.replace(/<link\s+rel="icon"\s+type="image\/svg\+xml"\s+href="[^"]*"\s*\/?>\s*/gi, "");
+      content = content.replace(/href="\/favicon-16x16\.png(\?v=\d+)?"/g, `href="/favicon-16x16.png?v=${v}"`);
+      content = content.replace(/href="\/favicon-32x32\.png(\?v=\d+)?"/g, `href="/favicon-32x32.png?v=${v}"`);
+      content = content.replace(/href="\/favicon\.png(\?v=\d+)?"/g, `href="/favicon.png?v=${v}"`);
+      content = content.replace(/href="\/apple-touch-icon\.png(\?v=\d+)?"/g, `href="/apple-touch-icon.png?v=${v}"`);
+      content = content.replace(/href="\/manifest\.webmanifest(\?v=\d+)?"/g, `href="/manifest.webmanifest?v=${v}"`);
+      import_fs.default.writeFileSync(filePath, content, "utf-8");
+    } catch (e) {
+      console.error(`Error updating HTML file at ${filePath}:`, e);
+    }
+  };
+  updateHtmlFile(import_path.default.join(rootDir, "index.html"));
+  updateHtmlFile(import_path.default.join(publicDir, "index.html"));
+  updateHtmlFile(import_path.default.join(distDir, "index.html"));
+  updateHtmlFile(import_path.default.join(deployDir, "index.html"));
+  console.log("[PWA Icons] Successfully applied custom icons and manifest across all disk locations.");
+}
+function savePwaIconsToDatabase(pwaData) {
+  const serialized = JSON.stringify(pwaData);
+  const now = pwaData.updatedAt || Date.now();
+  try {
+    db.prepare(`
+      INSERT INTO system_docs (path, data, updatedAt)
+      VALUES ('system/pwa_icons', ?, ?)
+      ON CONFLICT(path) DO UPDATE SET data = excluded.data, updatedAt = excluded.updatedAt
+    `).run(serialized, now);
+    console.log("[PWA Icons] Successfully saved custom PWA icons to SQLite/JSON DB.");
+  } catch (err) {
+    console.error("[PWA Icons] Error saving custom PWA icons to SQLite/JSON DB:", err?.message || err);
+  }
+  try {
+    const { baseUrl, apiKey, projId } = getActiveFirestoreParams();
+    if (baseUrl && apiKey && projId) {
+      let firestoreFiles = pwaData.files;
+      if (Buffer.byteLength(JSON.stringify(firestoreFiles), "utf8") > 85e4) {
+        const slimFiles = {};
+        for (const [k, v] of Object.entries(pwaData.files)) {
+          if (!["apple-touch-icon-precomposed.png", "favicon.png", "icon-192.png", "icon-512.png"].includes(k)) {
+            slimFiles[k] = v;
+          }
+        }
+        firestoreFiles = slimFiles;
+      }
+      setFirestoreDoc("app_docs/system_pwa_icons", {
+        appName: pwaData.appName,
+        themeColor: pwaData.themeColor,
+        files: JSON.stringify(firestoreFiles),
+        updatedAt: now
+      }).then((ok) => {
+        if (ok) console.log("[PWA Icons] Synced custom PWA icons to Firestore.");
+      }).catch((e) => console.warn("[PWA Icons] Firestore sync notice:", e?.message || e));
     }
   } catch (err) {
-    console.error("[PWA Icons] Error restoring PWA icons from Firestore:", err);
+    console.warn("[PWA Icons] Firestore background save notice:", err?.message || err);
   }
+}
+async function loadAndApplyPwaIcons() {
+  try {
+    const row = db.prepare("SELECT data FROM system_docs WHERE path = 'system/pwa_icons'").get();
+    if (row && row.data) {
+      const parsed = typeof row.data === "string" ? JSON.parse(row.data) : row.data;
+      if (parsed && parsed.files && Object.keys(parsed.files).length > 0) {
+        customPwaIcons = {
+          appName: parsed.appName || "KSK-appen",
+          themeColor: parsed.themeColor || "#4f46e5",
+          updatedAt: parsed.updatedAt || Date.now(),
+          files: parsed.files,
+          logoSrc: parsed.logoSrc
+        };
+        applyCustomPwaIconsToDisk(customPwaIcons);
+        console.log("[PWA Icons] Restored custom PWA icons from SQLite/JSON DB.");
+        return;
+      }
+    }
+  } catch (err) {
+    console.warn("[PWA Icons] SQLite load notice:", err?.message || err);
+  }
+  try {
+    const { projId, apiKey } = getActiveFirestoreParams();
+    const dbId = firebaseConfig?.firestoreDatabaseId || "(default)";
+    if (projId && apiKey) {
+      const url = `https://firestore.googleapis.com/v1/projects/${projId}/databases/${dbId}/documents/app_docs/system_pwa_icons?key=${apiKey}`;
+      const res = await import_axios.default.get(url, { validateStatus: (s) => s <= 500, timeout: 6e3 });
+      if (res.status === 200 && res.data?.fields) {
+        const fields = fromFirestoreFields(res.data.fields);
+        if (fields && fields.files) {
+          const filesMap = typeof fields.files === "string" ? JSON.parse(fields.files) : fields.files;
+          customPwaIcons = {
+            appName: fields.appName || "KSK-appen",
+            themeColor: fields.themeColor || "#4f46e5",
+            updatedAt: fields.updatedAt || Date.now(),
+            files: filesMap,
+            logoSrc: fields.logoSrc
+          };
+          applyCustomPwaIconsToDisk(customPwaIcons);
+          console.log("[PWA Icons] Restored and migrated custom PWA icons from Firestore.");
+          try {
+            db.prepare(`
+              INSERT INTO system_docs (path, data, updatedAt)
+              VALUES ('system/pwa_icons', ?, ?)
+              ON CONFLICT(path) DO UPDATE SET data = excluded.data, updatedAt = excluded.updatedAt
+            `).run(JSON.stringify(customPwaIcons), customPwaIcons.updatedAt);
+            console.log("[PWA Icons] Cached recovered Firestore icons into SQLite/JSON DB.");
+          } catch (_) {
+          }
+          return;
+        }
+      }
+    }
+  } catch (err) {
+    console.warn("[PWA Icons] Startup Firestore recovery check notice:", err?.message || err);
+  }
+  console.log("[PWA Icons] Using standard default icons.");
 }
 async function loadAndApplyDbConfigFromFirestore() {
   if (process.env.DATABASE_MODE === "local_sqlite" || dbModeConfig.mode === "local_sqlite") {
@@ -934,6 +1089,7 @@ async function loadAndApplyDbConfigFromFirestore() {
       if (parsed && parsed.mode) {
         dbModeConfig = { ...dbModeConfig, ...parsed };
         console.log(`[DB Config] Restored database mode from Firestore on startup: ${dbModeConfig.mode}`);
+        saveDiskDbConfig(dbModeConfig);
         try {
           db.prepare(`
             INSERT INTO system_docs (path, data, updatedAt)
@@ -953,11 +1109,12 @@ async function startServer() {
   const app = (0, import_express.default)();
   const PORT = process.env.PORT || 3e3;
   await ensureJwtSecret();
-  loadAndApplyPwaIconsFromFirestore();
+  await loadAndApplyPwaIcons();
   await loadAndApplyDbConfigFromFirestore();
   function injectPwaMetaToHtml(html) {
     const appName = customPwaIcons?.appName || "CoachAssist";
     const themeColor = customPwaIcons?.themeColor || "#4f46e5";
+    const v = customPwaIcons?.updatedAt || 1;
     let updated = html;
     if (/<title>.*?<\/title>/gi.test(updated)) {
       updated = updated.replace(/<title>.*?<\/title>/gi, `<title>${appName}</title>`);
@@ -977,39 +1134,88 @@ async function startServer() {
     if (/theme-color/gi.test(updated)) {
       updated = updated.replace(/<meta\s+name="theme-color"\s+content=".*?"\s*\/?>/gi, `<meta name="theme-color" content="${themeColor}" />`);
     }
+    if (customPwaIcons && customPwaIcons.files) {
+      updated = updated.replace(/<link\s+rel="icon"\s+type="image\/svg\+xml"\s+href="[^"]*"\s*\/?>\s*/gi, "");
+      updated = updated.replace(/href="\/favicon-16x16\.png(\?v=\d+)?"/g, `href="/favicon-16x16.png?v=${v}"`);
+      updated = updated.replace(/href="\/favicon-32x32\.png(\?v=\d+)?"/g, `href="/favicon-32x32.png?v=${v}"`);
+      updated = updated.replace(/href="\/favicon\.png(\?v=\d+)?"/g, `href="/favicon.png?v=${v}"`);
+      updated = updated.replace(/href="\/apple-touch-icon\.png(\?v=\d+)?"/g, `href="/apple-touch-icon.png?v=${v}"`);
+      updated = updated.replace(/href="\/manifest\.webmanifest(\?v=\d+)?"/g, `href="/manifest.webmanifest?v=${v}"`);
+    }
     return updated;
   }
   app.use((req, res, next) => {
-    const reqPath = req.path.replace(/^\//, "");
-    if (customPwaIcons && customPwaIcons.files && customPwaIcons.files[reqPath]) {
-      const dataUrl = customPwaIcons.files[reqPath];
+    const rawPath = req.path.replace(/^\//, "");
+    const cleanPath = rawPath.split("?")[0];
+    if (customPwaIcons && customPwaIcons.files && customPwaIcons.files[cleanPath]) {
+      const dataUrl = customPwaIcons.files[cleanPath];
       const base64Data = dataUrl.replace(/^data:image\/\w+;base64,/, "");
       const imgBuffer = Buffer.from(base64Data, "base64");
       res.setHeader("Content-Type", "image/png");
-      res.setHeader("Cache-Control", "public, max-age=86400");
+      res.setHeader("Cache-Control", "public, max-age=120, stale-while-revalidate=600");
       return res.send(imgBuffer);
     }
-    if (reqPath === "manifest.webmanifest" || reqPath === "manifest.json" || reqPath.endsWith(".webmanifest") || reqPath.includes("manifest")) {
-      const appName = customPwaIcons?.appName || "CoachAssist";
+    if (customPwaIcons && customPwaIcons.files && (cleanPath === "icon.svg" || cleanPath === "favicon.svg")) {
+      const icon512 = customPwaIcons.files["icon-512x512.png"] || customPwaIcons.files["icon-192x192.png"];
+      if (icon512) {
+        const svgWrap = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512"><image href="${icon512}" width="512" height="512" /></svg>`;
+        res.setHeader("Content-Type", "image/svg+xml; charset=utf-8");
+        res.setHeader("Cache-Control", "public, max-age=120, stale-while-revalidate=600");
+        return res.send(svgWrap);
+      }
+    }
+    const iconMimes = {
+      ".png": "image/png",
+      ".ico": "image/x-icon",
+      ".svg": "image/svg+xml",
+      ".jpg": "image/jpeg",
+      ".jpeg": "image/jpeg",
+      ".webp": "image/webp"
+    };
+    const reqExt = import_path.default.extname(cleanPath).toLowerCase();
+    if (iconMimes[reqExt]) {
+      const candidatePaths = [
+        import_path.default.join(process.cwd(), "dist", cleanPath),
+        import_path.default.join(process.cwd(), "public", cleanPath),
+        import_path.default.join(process.cwd(), cleanPath)
+      ];
+      for (const cand of candidatePaths) {
+        if (import_fs.default.existsSync(cand) && import_fs.default.statSync(cand).isFile()) {
+          res.setHeader("Content-Type", iconMimes[reqExt]);
+          res.setHeader("Cache-Control", "public, max-age=120, stale-while-revalidate=600");
+          return res.sendFile(cand);
+        }
+      }
+    }
+    if (cleanPath === "manifest.webmanifest" || cleanPath === "manifest.json" || cleanPath.endsWith(".webmanifest") || cleanPath.includes("manifest")) {
+      const appName = (customPwaIcons?.appName || "KSK-appen").trim();
       const themeColor = customPwaIcons?.themeColor || "#4f46e5";
+      const v = customPwaIcons?.updatedAt || 1;
       const manifestObj = {
+        id: "/",
         name: appName,
-        short_name: appName,
-        description: `${appName} PWA App`,
+        short_name: appName.length > 12 ? appName.slice(0, 12) : appName,
+        description: `${appName} - Komplett tr\xE4nings- och matchverktyg f\xF6r fotbollscoachen.`,
         start_url: "/",
+        scope: "/",
         display: "standalone",
         orientation: "portrait",
         background_color: themeColor,
         theme_color: themeColor,
+        categories: ["sports", "utilities"],
+        lang: "sv",
+        dir: "ltr",
         icons: [
-          { src: "/icon-192.png", sizes: "192x192", type: "image/png" },
-          { src: "/icon-512.png", sizes: "512x512", type: "image/png" },
-          { src: "/icon-192x192.png", sizes: "192x192", type: "image/png" },
-          { src: "/icon-512x512.png", sizes: "512x512", type: "image/png" },
-          { src: "/icon-maskable-512x512.png", sizes: "512x512", type: "image/png", purpose: "maskable" }
+          { src: `/icon-192.png?v=${v}`, sizes: "192x192", type: "image/png", purpose: "any" },
+          { src: `/icon-512.png?v=${v}`, sizes: "512x512", type: "image/png", purpose: "any" },
+          { src: `/icon-192x192.png?v=${v}`, sizes: "192x192", type: "image/png", purpose: "any" },
+          { src: `/icon-512x512.png?v=${v}`, sizes: "512x512", type: "image/png", purpose: "any" },
+          { src: `/icon-maskable-512x512.png?v=${v}`, sizes: "512x512", type: "image/png", purpose: "maskable" },
+          { src: `/apple-touch-icon.png?v=${v}`, sizes: "180x180", type: "image/png", purpose: "any" }
         ]
       };
-      res.setHeader("Content-Type", "application/manifest+json");
+      res.setHeader("Content-Type", "application/manifest+json; charset=utf-8");
+      res.setHeader("Cache-Control", "public, max-age=120, stale-while-revalidate=600");
       return res.json(manifestObj);
     }
     const accept = req.headers.accept || "";
@@ -1045,7 +1251,8 @@ async function startServer() {
     const url = req.url;
     const pathPart = url.split("?")[0];
     const segments = pathPart.split("/").filter(Boolean);
-    if (segments.length === 0 || ["api", "assets", "uploads", "rebuild", "favicon.ico"].includes(segments[0])) {
+    const ext = import_path.default.extname(pathPart).toLowerCase();
+    if (segments.length === 0 || ext !== "" || pathPart.includes(".") || ["api", "assets", "uploads", "rebuild", "favicon.ico"].includes(segments[0])) {
       return next();
     }
     const subfolder = segments[0];
@@ -1068,52 +1275,9 @@ async function startServer() {
   });
   app.use(import_express.default.json({ limit: "50mb" }));
   app.use(import_express.default.urlencoded({ limit: "50mb", extended: true }));
-  app.get("/uploads/:filename", async (req, res) => {
-    const filename = import_path.default.basename(req.params.filename);
-    const fullPath = import_path.default.join(UPLOADS_DIR, filename);
-    res.setHeader("Access-Control-Allow-Origin", "*");
-    res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
-    res.setHeader("Cache-Control", "public, max-age=31536000");
-    if (import_fs.default.existsSync(fullPath)) {
-      return res.sendFile(fullPath);
-    }
-    try {
-      const row = db.prepare("SELECT mime_type, data_base64 FROM uploaded_files WHERE filename = ?").get(filename);
-      if (row && row.data_base64) {
-        const buffer = Buffer.from(row.data_base64, "base64");
-        try {
-          import_fs.default.writeFileSync(fullPath, buffer);
-        } catch (_) {
-        }
-        res.setHeader("Content-Type", row.mime_type || "image/jpeg");
-        return res.send(buffer);
-      }
-    } catch (err) {
-      console.error("Error fetching file from uploaded_files table:", err);
-    }
-    try {
-      const fDoc = await getFirestoreDoc(`server_uploads/${encodeURIComponent(filename)}`);
-      if (fDoc && fDoc.data_base64) {
-        const buffer = Buffer.from(fDoc.data_base64, "base64");
-        const mimeType = fDoc.mime_type || "image/jpeg";
-        try {
-          db.prepare(`
-            INSERT OR REPLACE INTO uploaded_files (filename, mime_type, data_base64, created_at)
-            VALUES (?, ?, ?, ?)
-          `).run(filename, mimeType, fDoc.data_base64, fDoc.created_at || Date.now());
-          import_fs.default.writeFileSync(fullPath, buffer);
-        } catch (_) {
-        }
-        res.setHeader("Content-Type", mimeType);
-        return res.send(buffer);
-      }
-    } catch (err) {
-      console.error("Error fetching file from Firestore server_uploads:", err);
-    }
-    res.status(404).send("File not found");
-  });
   app.use("/uploads", (req, res, next) => {
     res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
     next();
   }, import_express.default.static(UPLOADS_DIR));
   app.get("/api/health", (_req, res) => {
@@ -1121,9 +1285,18 @@ async function startServer() {
   });
   app.get("/api/system/db-config", (_req, res) => {
     let dbSize = 0;
+    let actualDbPath = DB_PATH;
+    let dbEngine = Database ? "sqlite" : "json_store";
     try {
-      if (import_fs.default.existsSync(DB_PATH)) {
+      const jsonDbPath = import_path.default.join(DATA_DIR, "coachassist_db.json");
+      if (import_fs.default.existsSync(DB_PATH) && import_fs.default.statSync(DB_PATH).size > 0) {
         dbSize = import_fs.default.statSync(DB_PATH).size;
+        actualDbPath = DB_PATH;
+        dbEngine = "sqlite";
+      } else if (import_fs.default.existsSync(jsonDbPath)) {
+        dbSize = import_fs.default.statSync(jsonDbPath).size;
+        actualDbPath = jsonDbPath;
+        dbEngine = "json_store";
       }
     } catch {
     }
@@ -1132,8 +1305,9 @@ async function startServer() {
     const firestoreUrl = projId ? dbId && dbId !== "(default)" ? `https://console.firebase.google.com/project/${projId}/firestore/databases/${dbId}/data` : `https://console.firebase.google.com/project/${projId}/firestore/data` : null;
     res.json({
       mode: dbModeConfig.mode,
-      dbPath: DB_PATH,
+      dbPath: actualDbPath,
       dbSize,
+      dbEngine,
       isProduction,
       firestoreConfigured: !!baseUrl,
       firestoreProjectId: projId || null,
@@ -1158,15 +1332,14 @@ async function startServer() {
     dbModeConfig.updatedAt = Date.now();
     dbModeConfig.updatedBy = "root_admin";
     const serialized = JSON.stringify(dbModeConfig);
+    saveDiskDbConfig(dbModeConfig);
     try {
       db.prepare(`
         INSERT INTO system_docs (path, data, updatedAt)
         VALUES ('system/db_config', ?, ?)
         ON CONFLICT(path) DO UPDATE SET data = excluded.data, updatedAt = excluded.updatedAt
       `).run(serialized, dbModeConfig.updatedAt);
-      if (mode !== "local_sqlite") {
-        setFirestoreDoc("app_docs/system_db_config", { data: serialized, updatedAt: dbModeConfig.updatedAt }).catch((err) => console.error("Error syncing system db config to firestore:", err));
-      }
+      setFirestoreDoc("app_docs/system_db_config", { data: serialized, updatedAt: dbModeConfig.updatedAt }).catch((err) => console.error("Error syncing system db config to firestore:", err));
       console.log(`[DB Config] Updated database mode to: ${mode}`);
       res.json({ success: true, dbModeConfig });
     } catch (e) {
@@ -3007,99 +3180,112 @@ async function startServer() {
       res.status(500).json({ error: "Failed to delete doc" });
     }
   });
-  const storageConfig = import_multer.default.diskStorage({
-    destination: (_req, _file, cb) => {
-      cb(null, UPLOADS_DIR);
-    },
-    filename: (_req, file, cb) => {
-      const ext = import_path.default.extname(file.originalname) || ".jpg";
-      const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
-      cb(null, "photo_" + uniqueSuffix + ext);
-    }
-  });
   const upload = (0, import_multer.default)({
-    storage: storageConfig,
-    limits: { fileSize: 10 * 1024 * 1024 }
-    // 10MB file size limit
+    storage: import_multer.default.memoryStorage(),
+    limits: { fileSize: 15 * 1024 * 1024 }
+    // 15MB file size limit
   });
   app.post("/api/upload", upload.any(), async (req, res) => {
     const files = req.files;
     if (!files || files.length === 0) {
-      return res.status(400).json({ error: "No file uploaded" });
+      return res.status(400).json({ error: "Ingen fil skickades med" });
     }
     const uploadedFile = files[0];
-    const filename = uploadedFile.filename;
+    const ext = import_path.default.extname(uploadedFile.originalname || "") || ".jpg";
+    const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
+    const filename = "photo_" + uniqueSuffix + ext;
     const fileUrl = `/uploads/${filename}`;
     try {
-      let fileBuffer = null;
-      if (uploadedFile.buffer) {
-        fileBuffer = uploadedFile.buffer;
-      } else if (uploadedFile.path && import_fs.default.existsSync(uploadedFile.path)) {
-        fileBuffer = import_fs.default.readFileSync(uploadedFile.path);
-      }
+      const fileBuffer = uploadedFile.buffer;
       if (fileBuffer) {
         const base64Data = fileBuffer.toString("base64");
         const mimeType = uploadedFile.mimetype || "image/jpeg";
-        db.prepare(`
-          INSERT OR REPLACE INTO uploaded_files (filename, mime_type, data_base64, created_at)
-          VALUES (?, ?, ?, ?)
-        `).run(filename, mimeType, base64Data, Date.now());
         try {
-          const synced = await setFirestoreDoc(`server_uploads/${encodeURIComponent(filename)}`, {
-            mime_type: mimeType,
-            data_base64: base64Data,
-            created_at: Date.now()
-          });
-          if (synced) {
-            console.log(`[Upload] Successfully synced upload ${filename} to Firestore server_uploads.`);
-          } else {
-            console.warn(`[Upload] Firestore sync returned false for ${filename}`);
+          db.prepare(`
+            INSERT OR REPLACE INTO uploaded_files (filename, mime_type, data_base64, created_at)
+            VALUES (?, ?, ?, ?)
+          `).run(filename, mimeType, base64Data, Date.now());
+        } catch (dbErr) {
+          console.error("[Upload] Error saving file to database table:", dbErr);
+        }
+        try {
+          if (!import_fs.default.existsSync(UPLOADS_DIR)) {
+            import_fs.default.mkdirSync(UPLOADS_DIR, { recursive: true });
           }
-        } catch (fErr) {
-          console.error("[Upload] Failed to sync upload to Firestore:", fErr);
+          import_fs.default.writeFileSync(import_path.default.join(UPLOADS_DIR, filename), fileBuffer);
+        } catch (diskErr) {
+          console.warn("[Upload] Note: could not write file to disk (saved in DB):", diskErr);
+        }
+        try {
+          const publicUploads = import_path.default.join(DATA_DIR, "public", "uploads");
+          if (import_fs.default.existsSync(import_path.default.join(DATA_DIR, "public"))) {
+            if (!import_fs.default.existsSync(publicUploads)) import_fs.default.mkdirSync(publicUploads, { recursive: true });
+            import_fs.default.writeFileSync(import_path.default.join(publicUploads, filename), fileBuffer);
+          }
+        } catch (_) {
+        }
+        if (dbModeConfig.mode !== "local_sqlite") {
+          try {
+            setFirestoreDoc(`server_uploads/${encodeURIComponent(filename)}`, {
+              mime_type: mimeType,
+              data_base64: base64Data,
+              created_at: Date.now()
+            }).catch((fErr) => console.warn("[Upload] Firestore sync error:", fErr));
+          } catch (_) {
+          }
         }
       }
     } catch (err) {
-      console.error("Failed to save uploaded file into SQLite persistence:", err);
+      console.error("Failed to process uploaded file:", err);
     }
     res.json({ url: fileUrl });
   });
   app.get("/uploads/:filename", async (req, res) => {
     const filename = import_path.default.basename(req.params.filename);
     const fullPath = import_path.default.join(UPLOADS_DIR, filename);
+    const publicPath = import_path.default.join(DATA_DIR, "public", "uploads", filename);
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
     if (import_fs.default.existsSync(fullPath)) {
-      return res.sendFile(fullPath, {
-        maxAge: "1y",
-        immutable: true
-      });
+      return res.sendFile(fullPath, { maxAge: "1y", immutable: true });
+    }
+    if (import_fs.default.existsSync(publicPath)) {
+      return res.sendFile(publicPath, { maxAge: "1y", immutable: true });
     }
     try {
       const row = db.prepare("SELECT mime_type, data_base64 FROM uploaded_files WHERE filename = ?").get(filename);
       if (row && row.data_base64) {
         const buffer = Buffer.from(row.data_base64, "base64");
-        import_fs.default.writeFile(fullPath, buffer, () => {
-        });
+        try {
+          if (!import_fs.default.existsSync(UPLOADS_DIR)) import_fs.default.mkdirSync(UPLOADS_DIR, { recursive: true });
+          import_fs.default.writeFile(fullPath, buffer, () => {
+          });
+        } catch (_) {
+        }
         res.setHeader("Content-Type", row.mime_type || "image/jpeg");
         res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
         return res.send(buffer);
       }
-      const doc = await getFirestoreDoc(`server_uploads/${encodeURIComponent(filename)}`);
-      if (doc && doc.data_base64) {
-        const mimeType = doc.mime_type || "image/jpeg";
-        const buffer = Buffer.from(doc.data_base64, "base64");
-        try {
-          db.prepare(`
-            INSERT OR REPLACE INTO uploaded_files (filename, mime_type, data_base64, created_at)
-            VALUES (?, ?, ?, ?)
-          `).run(filename, mimeType, doc.data_base64, Date.now());
-          import_fs.default.writeFile(fullPath, buffer, () => {
-          });
-        } catch (restoreErr) {
-          console.warn("[Upload Restore] Error restoring to SQLite/Disk:", restoreErr);
+      if (dbModeConfig.mode !== "local_sqlite") {
+        const doc = await getFirestoreDoc(`server_uploads/${encodeURIComponent(filename)}`);
+        if (doc && doc.data_base64) {
+          const mimeType = doc.mime_type || "image/jpeg";
+          const buffer = Buffer.from(doc.data_base64, "base64");
+          try {
+            db.prepare(`
+              INSERT OR REPLACE INTO uploaded_files (filename, mime_type, data_base64, created_at)
+              VALUES (?, ?, ?, ?)
+            `).run(filename, mimeType, doc.data_base64, Date.now());
+            if (!import_fs.default.existsSync(UPLOADS_DIR)) import_fs.default.mkdirSync(UPLOADS_DIR, { recursive: true });
+            import_fs.default.writeFile(fullPath, buffer, () => {
+            });
+          } catch (restoreErr) {
+            console.warn("[Upload Restore] Error restoring to SQLite/Disk:", restoreErr);
+          }
+          res.setHeader("Content-Type", mimeType);
+          res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+          return res.send(buffer);
         }
-        res.setHeader("Content-Type", mimeType);
-        res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
-        return res.send(buffer);
       }
     } catch (err) {
       console.error(`[Upload Fetch] Error retrieving /uploads/${filename}:`, err);
@@ -3122,9 +3308,9 @@ async function startServer() {
       res.status(500).json({ error: "Failed to delete file" });
     }
   });
-  app.post("/api/pwa-icons", import_express.default.json({ limit: "15mb" }), async (req, res) => {
+  app.post("/api/pwa-icons", import_express.default.json({ limit: "25mb" }), async (req, res) => {
     try {
-      const { appName, themeColor, icons } = req.body;
+      const { appName, themeColor, icons, logoSrc } = req.body;
       let filesMap = customPwaIcons?.files || {};
       if (Array.isArray(icons) && icons.length > 0) {
         filesMap = { ...filesMap };
@@ -3146,21 +3332,20 @@ async function startServer() {
           }
         }
       }
+      const now = Date.now();
       customPwaIcons = {
-        appName: appName || "CoachAssist",
+        appName: (appName || "KSK-appen").trim(),
         themeColor: themeColor || "#4f46e5",
-        files: filesMap
+        updatedAt: now,
+        files: filesMap,
+        logoSrc: typeof logoSrc === "string" && logoSrc.length < 5e5 ? logoSrc : void 0
       };
       applyCustomPwaIconsToDisk(customPwaIcons);
-      await setFirestoreDoc("app_docs/system_pwa_icons", {
-        appName: customPwaIcons.appName,
-        themeColor: customPwaIcons.themeColor,
-        files: JSON.stringify(filesMap),
-        updatedAt: Date.now()
-      });
+      savePwaIconsToDatabase(customPwaIcons);
       res.json({
         success: true,
-        message: "Appens PWA-ikoner har uppdaterats och verkst\xE4llts i appen!"
+        message: "Appens PWA-ikoner har uppdaterats och sparats i databasen!",
+        updatedAt: now
       });
     } catch (err) {
       console.error("[PWA Icons] Error saving custom PWA icons:", err);
@@ -3172,7 +3357,10 @@ async function startServer() {
       res.json({
         appName: customPwaIcons.appName,
         themeColor: customPwaIcons.themeColor,
-        hasCustomIcons: true
+        hasCustomIcons: true,
+        updatedAt: customPwaIcons.updatedAt,
+        previewUrl: customPwaIcons.files["icon-512x512.png"] || customPwaIcons.files["icon-192x192.png"] || null,
+        logoSrc: customPwaIcons.logoSrc || null
       });
     } else {
       res.json({ hasCustomIcons: false });
@@ -3208,7 +3396,7 @@ async function startServer() {
     if (!url || typeof url !== "string") {
       return res.status(400).json({ error: "URL query parameter is required" });
     }
-    let fetchUrl = url.trim();
+    let fetchUrl = url.trim().replace(/^[!#\s"']+|["'\s]+$/g, "");
     if (fetchUrl.startsWith("webcal://")) {
       fetchUrl = "https://" + fetchUrl.slice(9);
     } else if (!fetchUrl.startsWith("http://") && !fetchUrl.startsWith("https://")) {
@@ -3223,6 +3411,7 @@ async function startServer() {
         timeout: 15e3,
         responseType: "text",
         maxRedirects: 10,
+        httpsAgent: new import_https.default.Agent({ rejectUnauthorized: false }),
         headers: {
           "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
           "Accept": "text/calendar, text/plain, */*",
@@ -3238,7 +3427,7 @@ async function startServer() {
         response = await doFetch(fetchUrl);
       } catch (firstErr) {
         if (url.trim().startsWith("webcal://") && fetchUrl.startsWith("https://")) {
-          const httpUrl = "http://" + url.trim().slice(9);
+          const httpUrl = "http://" + fetchUrl.slice(8);
           console.log(`[Calendar Proxy] HTTPS failed, trying HTTP fallback: ${httpUrl}`);
           response = await doFetch(httpUrl);
         } else {
@@ -3259,19 +3448,31 @@ async function startServer() {
   });
   const handleIcsFeed = async (req, res) => {
     try {
-      const clubId = (req.params.clubId || req.query.clubId || "").toString().trim();
-      const teamId = (req.params.teamId || req.query.teamId || "club_global").toString().trim();
+      let clubId = (req.params.clubId || req.query.clubId || "").toString().trim();
+      let teamId = (req.params.teamId || req.query.teamId || "").toString().trim();
       if (!clubId) {
-        return res.status(400).send("Missing clubId query or path parameter");
+        clubId = "club_xckk55vw2";
+        teamId = teamId || "team_h4nibr38i";
+      }
+      if (!teamId) {
+        teamId = "club_global";
       }
       let sessionsData = [];
-      let clubName = "CoachAssist";
-      let teamName = "Lagets Kalender";
+      let clubName = "Kungsg\xE5rdens SK";
+      let teamName = "A-laget";
       try {
-        const metaRow = db.prepare("SELECT data FROM clubs_data WHERE clubId = ? AND teamId = ? AND segment = ?").get(clubId, "club_global", "metadata");
+        let metaRow = db.prepare("SELECT data FROM clubs_data WHERE clubId = ? AND teamId = ? AND segment = ?").get(clubId, "club_global", "metadata");
+        let meta = null;
         if (metaRow) {
-          const meta = typeof metaRow.data === "string" ? JSON.parse(metaRow.data) : metaRow.data;
-          if (meta.clubName) clubName = meta.clubName;
+          meta = typeof metaRow.data === "string" ? JSON.parse(metaRow.data) : metaRow.data;
+        } else {
+          const fMeta = await getFirestoreDoc(`app_docs/clubs_${clubId}_club_global_metadata`);
+          if (fMeta && fMeta.data) {
+            meta = typeof fMeta.data === "string" ? JSON.parse(fMeta.data) : fMeta.data;
+          }
+        }
+        if (meta) {
+          if (meta.clubName || meta.name) clubName = meta.clubName || meta.name;
           if (meta.teams && Array.isArray(meta.teams)) {
             const t = meta.teams.find((tm) => tm.id === teamId);
             if (t && t.name) teamName = t.name;
@@ -3288,7 +3489,9 @@ async function startServer() {
           sessionsData = typeof fDoc.data === "string" ? JSON.parse(fDoc.data) : fDoc.data;
         }
       }
-      if (!Array.isArray(sessionsData)) {
+      if (sessionsData && !Array.isArray(sessionsData) && Array.isArray(sessionsData.sessions)) {
+        sessionsData = sessionsData.sessions;
+      } else if (!Array.isArray(sessionsData)) {
         sessionsData = [];
       }
       const validSessions = sessionsData.filter((s) => s && s.title && !s.isIgnored);
@@ -3417,6 +3620,196 @@ async function startServer() {
     }
     return res.status(404).send("server.cjs not found");
   });
+  function dbGetSystemDoc(docPath) {
+    try {
+      const row = db.prepare("SELECT data, updatedAt FROM system_docs WHERE path = ?").get(docPath);
+      return row || null;
+    } catch {
+      return null;
+    }
+  }
+  function dbSetSystemDoc(docPath, data) {
+    try {
+      const serialized = typeof data === "string" ? data : JSON.stringify(data);
+      const now = Date.now();
+      db.prepare(`
+        INSERT INTO system_docs (path, data, updatedAt)
+        VALUES (?, ?, ?)
+        ON CONFLICT(path) DO UPDATE SET data = excluded.data, updatedAt = excluded.updatedAt
+      `).run(docPath, serialized, now);
+    } catch (e) {
+      console.warn(`[SystemDoc] Could not save ${docPath}:`, e);
+    }
+  }
+  app.get("/api/deploy-ssh-config", (_req, res) => {
+    try {
+      const row = dbGetSystemDoc("system/ssh_deploy_config");
+      if (row && row.data) {
+        const parsed = JSON.parse(row.data);
+        return res.json({
+          host: parsed.host || "coachassist.setterholm.se",
+          port: parsed.port || 22,
+          username: parsed.username || "setterho",
+          remotePath: parsed.remotePath || "/home/setterho/coachassist.setterholm.se",
+          hasSavedPassword: !!parsed.password,
+          hasSavedKey: !!parsed.privateKey,
+          authType: parsed.authType || (parsed.privateKey ? "key" : "password")
+        });
+      }
+      return res.json({
+        host: "coachassist.setterholm.se",
+        port: 22,
+        username: "setterho",
+        remotePath: "/home/setterho/coachassist.setterholm.se",
+        hasSavedPassword: false,
+        hasSavedKey: false,
+        authType: "password"
+      });
+    } catch (e) {
+      return res.status(500).json({ error: e.message });
+    }
+  });
+  app.post("/api/deploy-to-ssh", async (req, res) => {
+    const {
+      host = "coachassist.setterholm.se",
+      port = 22,
+      username = "setterho",
+      password,
+      privateKey,
+      authType = "password",
+      remotePath = "/home/setterho/coachassist.setterholm.se",
+      action = "full_deploy",
+      // 'full_deploy' | 'restart_only'
+      saveConfig = true
+    } = req.body;
+    let finalPassword = password;
+    let finalKey = privateKey;
+    if (!finalPassword && !finalKey) {
+      try {
+        const row = dbGetSystemDoc("system/ssh_deploy_config");
+        if (row && row.data) {
+          const parsed = JSON.parse(row.data);
+          finalPassword = parsed.password;
+          finalKey = parsed.privateKey;
+        }
+      } catch (_) {
+      }
+    }
+    if (!finalPassword && !finalKey) {
+      return res.status(400).json({ success: false, error: "Inget SSH-l\xF6senord eller SSH-nyckel angiven." });
+    }
+    if (saveConfig) {
+      try {
+        dbSetSystemDoc("system/ssh_deploy_config", {
+          host,
+          port: Number(port),
+          username,
+          password: finalPassword || "",
+          privateKey: finalKey || "",
+          authType,
+          remotePath,
+          updatedAt: (/* @__PURE__ */ new Date()).toISOString()
+        });
+      } catch (e) {
+        console.warn("Could not save SSH config:", e);
+      }
+    }
+    let SshClient;
+    try {
+      SshClient = require("ssh2").Client;
+    } catch (e) {
+      return res.status(500).json({ success: false, error: "ssh2 modulen \xE4r inte tillg\xE4nglig: " + e.message });
+    }
+    const logs = [];
+    const log = (msg) => {
+      console.log("[SSH Deploy]", msg);
+      logs.push(msg);
+    };
+    const conn = new SshClient();
+    conn.on("ready", () => {
+      log(`Ansluten via SSH till ${username}@${host}:${port}`);
+      if (action === "restart_only") {
+        log("K\xF6r omstartskommando (touch tmp/restart.txt)...");
+        const cmd = `mkdir -p "${remotePath}/tmp" && touch "${remotePath}/tmp/restart.txt"`;
+        conn.exec(cmd, (execErr, stream) => {
+          if (execErr) {
+            conn.end();
+            return res.status(500).json({ success: false, error: execErr.message, logs });
+          }
+          stream.on("close", (code) => {
+            conn.end();
+            if (code === 0) {
+              log("\u2705 Omstartstrigger skickad! Appen startar om p\xE5 servern.");
+              return res.json({ success: true, message: "Servern startades om framg\xE5ngsrikt!", logs });
+            } else {
+              return res.status(500).json({ success: false, error: `Kommandot avslutades med kod ${code}`, logs });
+            }
+          });
+        });
+        return;
+      }
+      const zipPath = import_path.default.resolve(process.cwd(), "coachassist-production-bundle.zip");
+      if (!import_fs.default.existsSync(zipPath)) {
+        conn.end();
+        return res.status(500).json({ success: false, error: "coachassist-production-bundle.zip hittades inte i AI Studio", logs });
+      }
+      log("Initierar SFTP f\xF6r fil\xF6verf\xF6ring...");
+      conn.sftp((err, sftp) => {
+        if (err) {
+          conn.end();
+          return res.status(500).json({ success: false, error: "SFTP fel: " + err.message, logs });
+        }
+        const remoteZip = import_path.default.posix.join(remotePath, "coachassist-update.zip");
+        log(`Laddar upp produktionspaketet (${(import_fs.default.statSync(zipPath).size / (1024 * 1024)).toFixed(2)} MB)...`);
+        sftp.fastPut(zipPath, remoteZip, (uploadErr) => {
+          if (uploadErr) {
+            conn.end();
+            return res.status(500).json({ success: false, error: "\xD6verf\xF6ringsfel: " + uploadErr.message, logs });
+          }
+          log("\xD6verf\xF6ring slutf\xF6rd! Packar upp filer p\xE5 servern...");
+          const cmd = `unzip -qo "${remoteZip}" -d "${remotePath}" && rm -f "${remoteZip}" && mkdir -p "${remotePath}/tmp" && touch "${remotePath}/tmp/restart.txt"`;
+          conn.exec(cmd, (execErr, stream) => {
+            if (execErr) {
+              conn.end();
+              return res.status(500).json({ success: false, error: "K\xF6rningsfel: " + execErr.message, logs });
+            }
+            stream.on("close", (code) => {
+              conn.end();
+              if (code === 0) {
+                log("\u2705 [DEPLOY SUCCESSFUL] Alla filer uppackade och servern startades om!");
+                return res.json({
+                  success: true,
+                  message: "Deploy slutf\xF6rd! Applikationen \xE4r uppdaterad och omstartad p\xE5 webbhotellet.",
+                  logs
+                });
+              } else {
+                return res.status(500).json({ success: false, error: `Unzip/restart avslutades med kod ${code}`, logs });
+              }
+            }).on("data", (data) => {
+              log(data.toString().trim());
+            }).stderr.on("data", (data) => {
+              log("[stderr] " + data.toString().trim());
+            });
+          });
+        });
+      });
+    }).on("error", (err) => {
+      console.error("[SSH Deploy Error]", err);
+      return res.status(500).json({ success: false, error: "SSH-anslutningen misslyckades: " + err.message, logs });
+    });
+    const connOpts = {
+      host,
+      port: Number(port),
+      username,
+      readyTimeout: 3e4
+    };
+    if (finalKey && (authType === "key" || !finalPassword)) {
+      connOpts.privateKey = finalKey;
+    } else if (finalPassword) {
+      connOpts.password = finalPassword;
+    }
+    conn.connect(connOpts);
+  });
   if (!isProduction) {
     const { createServer: createViteServer } = await import("vite");
     const vite = await createViteServer({
@@ -3443,11 +3836,15 @@ async function startServer() {
     });
     app.use(vite.middlewares);
   } else {
-    const distPath = _dirname;
+    const distPath = _dirname.endsWith("dist") || _dirname.endsWith("/dist") || _dirname.endsWith("\\dist") ? _dirname : import_path.default.join(_dirname, "dist");
+    const publicPath = import_path.default.join(process.cwd(), "public");
     app.use("/assets", import_express.default.static(import_path.default.join(distPath, "assets")));
     app.use(import_express.default.static(distPath));
+    if (import_fs.default.existsSync(publicPath)) {
+      app.use(import_express.default.static(publicPath));
+    }
     app.get("*", (req, res) => {
-      if (req.path.startsWith("/assets/") || req.path.startsWith("/src/") || req.path.endsWith(".js") || req.path.endsWith(".css") || req.path.endsWith(".mjs") || req.path.endsWith(".map") || req.path.endsWith(".tsx") || req.path.endsWith(".ts")) {
+      if (req.path.startsWith("/assets/") || req.path.startsWith("/src/") || req.path.endsWith(".js") || req.path.endsWith(".css") || req.path.endsWith(".mjs") || req.path.endsWith(".map") || req.path.endsWith(".tsx") || req.path.endsWith(".ts") || req.path.endsWith(".png") || req.path.endsWith(".jpg") || req.path.endsWith(".jpeg") || req.path.endsWith(".webp") || req.path.endsWith(".svg") || req.path.endsWith(".ico") || req.path.endsWith(".webmanifest") || req.path.endsWith(".json") || req.path.endsWith(".woff") || req.path.endsWith(".woff2")) {
         return res.status(404).type("text/plain").send("Asset not found");
       }
       const indexPath = import_path.default.join(distPath, "index.html");

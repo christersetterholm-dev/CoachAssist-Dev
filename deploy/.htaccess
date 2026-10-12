@@ -15,6 +15,17 @@ SetEnv DATABASE_MODE local_sqlite
 </IfModule>
 # DO NOT REMOVE OR MODIFY. CLOUDLINUX ENV VARS CONFIGURATION END
 
+# Ensure proper MIME types for PWA manifest and image assets
+<IfModule mod_mime.c>
+  AddType application/manifest+json .webmanifest
+  AddType application/json .json
+  AddType image/png .png
+  AddType image/svg+xml .svg
+  AddType image/x-icon .ico
+  AddType image/webp .webp
+  AddType image/jpeg .jpg .jpeg
+</IfModule>
+
 # Apache / LiteSpeed direct static file serving (clean and non-looping)
 <IfModule mod_rewrite.c>
   RewriteEngine On
@@ -26,8 +37,16 @@ SetEnv DATABASE_MODE local_sqlite
   RewriteCond %{REQUEST_FILENAME} -d
   RewriteRule ^ - [L]
 
-  # 2. If an asset inside dist/assets/ is requested via /assets/
+  # 2. If a file exists in dist/, serve it directly (e.g. /icon-192.png -> dist/icon-192.png, /manifest.webmanifest -> dist/manifest.webmanifest)
+  RewriteCond %{DOCUMENT_ROOT}/dist/$1 -f
+  RewriteRule ^(.*)$ dist/$1 [L]
+
+  # 3. If an asset inside dist/assets/ is requested via /assets/
   RewriteCond %{DOCUMENT_ROOT}/dist/assets/$1 -f
   RewriteRule ^assets/(.*)$ dist/assets/$1 [L]
+
+  # 4. If a file exists in public/, serve it directly
+  RewriteCond %{DOCUMENT_ROOT}/public/$1 -f
+  RewriteRule ^(.*)$ public/$1 [L]
 </IfModule>
 
