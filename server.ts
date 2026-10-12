@@ -1569,11 +1569,15 @@ async function startServer() {
   // Export Database Dump as JSON
   app.get('/api/system/db-export', (_req, res) => {
     try {
-      const users = db.prepare('SELECT id, email, created_at FROM users').all();
+      const users = db.prepare('SELECT id, email, username, password_hash, created_at, has_logged_in, temp_password, google_id, google_email, avatar_url, auth_provider FROM users').all();
       const users_data = db.prepare('SELECT userId, segment, data, updatedAt FROM users_data').all();
       const clubs_data = db.prepare('SELECT clubId, teamId, segment, data, updatedAt FROM clubs_data').all();
       const shared_leaderboards = db.prepare('SELECT id, data, updatedAt, coachUid FROM shared_leaderboards').all();
       const system_docs = db.prepare('SELECT path, data, updatedAt FROM system_docs').all();
+      let uploaded_files: any[] = [];
+      try {
+        uploaded_files = db.prepare('SELECT filename, mime_type, data_base64, created_at FROM uploaded_files').all();
+      } catch (_) {}
 
       const dump = {
         version: '1.0',
@@ -1584,7 +1588,8 @@ async function startServer() {
           users_data,
           clubs_data,
           shared_leaderboards,
-          system_docs
+          system_docs,
+          uploaded_files
         }
       };
 
@@ -1605,17 +1610,91 @@ async function startServer() {
     }
 
     try {
-      const { users = [], users_data = [], clubs_data = [], shared_leaderboards = [], system_docs = [] } = dump.tables;
+      const {
+        users = [],
+        users_data = [],
+        clubs_data = [],
+        shared_leaderboards = [],
+        system_docs = [],
+        uploaded_files = []
+      } = dump.tables;
+
+      const wipeBeforeImport = Boolean(req.query.wipe === 'true' || req.body.wipe === true);
 
       const transaction = db.transaction(() => {
-        // Users
-        const stmtUser = db.prepare(`
-          INSERT INTO users (id, email, password_hash, created_at)
-          VALUES (?, ?, ?, ?)
-          ON CONFLICT(id) DO UPDATE SET email = excluded.email
+        if (wipeBeforeImport) {
+          // If user requested a full restore/overwrite, clear application tables (preserve system configs unless in dump)
+          db.prepare('DELETE FROM users_data').run();
+          db.prepare('DELETE FROM users').run();
+          db.prepare('DELETE FROM clubs_data').run();
+          db.prepare('DELETE FROM shared_leaderboards').run();
+          db.prepare("DELETE FROM system_docs WHERE path NOT IN ('system/jwt_secret', 'system/db_config')").run();
+        }
+
+        // Map old user IDs from the dump to local user IDs if an account with that email already exists
+        const userIdMap = new Map<string, string>();
+
+        const stmtFindUserByEmail = db.prepare('SELECT id, email FROM users WHERE email = ?');
+        const stmtFindUserById = db.prepare('SELECT id, email FROM users WHERE id = ?');
+        const stmtInsertUser = db.prepare(`
+          INSERT INTO users (id, email, username, password_hash, created_at, has_logged_in, temp_password, google_id, google_email, avatar_url, auth_provider)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `);
+        const stmtUpdateUser = db.prepare(`
+          UPDATE users SET
+            username = COALESCE(?, username),
+            password_hash = CASE WHEN ? = 'imported_user' THEN password_hash ELSE ? END,
+            created_at = COALESCE(?, created_at),
+            has_logged_in = COALESCE(?, has_logged_in),
+            temp_password = COALESCE(?, temp_password),
+            avatar_url = COALESCE(?, avatar_url),
+            auth_provider = COALESCE(?, auth_provider)
+          WHERE id = ?
+        `);
+
         for (const u of users) {
-          stmtUser.run(u.id, u.email, u.password_hash || 'imported_user', u.created_at || Date.now());
+          const userEmail = (u.email || '').trim().toLowerCase();
+          if (!userEmail) continue;
+
+          const existingByEmail: any = stmtFindUserByEmail.get(userEmail);
+          const existingById: any = stmtFindUserById.get(u.id);
+
+          if (existingByEmail) {
+            // Email already exists in this database
+            userIdMap.set(u.id, existingByEmail.id);
+            stmtUpdateUser.run(
+              u.username || null,
+              u.password_hash || 'imported_user',
+              u.password_hash || 'imported_user',
+              u.created_at || null,
+              u.has_logged_in ?? null,
+              u.temp_password || null,
+              u.avatar_url || null,
+              u.auth_provider || null,
+              existingByEmail.id
+            );
+          } else if (existingById) {
+            // ID exists with another email: update user record
+            userIdMap.set(u.id, existingById.id);
+            db.prepare('UPDATE users SET email = ?, username = COALESCE(?, username) WHERE id = ?')
+              .run(userEmail, u.username || null, existingById.id);
+          } else {
+            // Clean insert
+            userIdMap.set(u.id, u.id);
+            stmtInsertUser.run(
+              u.id,
+              userEmail,
+              u.username || null,
+              u.password_hash || 'imported_user',
+              u.created_at || Date.now(),
+              u.has_logged_in || 0,
+              u.temp_password || null,
+              u.google_id || null,
+              u.google_email || null,
+              u.avatar_url || null,
+              u.auth_provider || 'local'
+            );
+          }
         }
 
         // Users data
@@ -1625,14 +1704,15 @@ async function startServer() {
           ON CONFLICT(userId, segment) DO UPDATE SET data = excluded.data, updatedAt = excluded.updatedAt
         `);
         for (const ud of users_data) {
+          const mappedUserId = userIdMap.get(ud.userId) || ud.userId;
           const rawData = typeof ud.data === 'string' ? ud.data : JSON.stringify(ud.data);
-          stmtUserData.run(ud.userId, ud.segment, rawData, ud.updatedAt || Date.now());
+          stmtUserData.run(mappedUserId, ud.segment, rawData, ud.updatedAt || Date.now());
         }
 
         // Clubs data
         const stmtClubData = db.prepare(`
           INSERT INTO clubs_data (clubId, teamId, segment, data, updatedAt)
-          VALUES (?, ?, ?, ?)
+          VALUES (?, ?, ?, ?, ?)
           ON CONFLICT(clubId, teamId, segment) DO UPDATE SET data = excluded.data, updatedAt = excluded.updatedAt
         `);
         for (const cd of clubs_data) {
@@ -1647,26 +1727,43 @@ async function startServer() {
           ON CONFLICT(id) DO UPDATE SET data = excluded.data, updatedAt = excluded.updatedAt
         `);
         for (const lb of shared_leaderboards) {
+          const mappedCoachUid = lb.coachUid ? (userIdMap.get(lb.coachUid) || lb.coachUid) : null;
           const rawData = typeof lb.data === 'string' ? lb.data : JSON.stringify(lb.data);
-          stmtLeaderboard.run(lb.id, rawData, lb.updatedAt || Date.now(), lb.coachUid || null);
+          stmtLeaderboard.run(lb.id, rawData, lb.updatedAt || Date.now(), mappedCoachUid);
         }
 
-        // System docs
+        // System docs (avoid overwriting system/db_config so the current mode choice is not accidentally altered)
         const stmtSysDoc = db.prepare(`
           INSERT INTO system_docs (path, data, updatedAt)
           VALUES (?, ?, ?)
           ON CONFLICT(path) DO UPDATE SET data = excluded.data, updatedAt = excluded.updatedAt
         `);
         for (const sd of system_docs) {
+          if (sd.path === 'system/db_config') continue; // Preserve user's local database selection
           const rawData = typeof sd.data === 'string' ? sd.data : JSON.stringify(sd.data);
           stmtSysDoc.run(sd.path, rawData, sd.updatedAt || Date.now());
+        }
+
+        // Uploaded files
+        if (Array.isArray(uploaded_files)) {
+          const stmtUpload = db.prepare(`
+            INSERT INTO uploaded_files (filename, mime_type, data_base64, created_at)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(filename) DO UPDATE SET mime_type = excluded.mime_type, data_base64 = excluded.data_base64
+          `);
+          for (const f of uploaded_files) {
+            stmtUpload.run(f.filename, f.mime_type, f.data_base64, f.created_at || Date.now());
+          }
         }
       });
 
       transaction();
 
       console.log('[DB Import] Successfully imported database dump.');
-      res.json({ success: true, importedRecords: users.length + users_data.length + clubs_data.length });
+      res.json({
+        success: true,
+        importedRecords: users.length + users_data.length + clubs_data.length + shared_leaderboards.length + system_docs.length
+      });
     } catch (e: any) {
       console.error('[DB Import] Error importing database:', e);
       res.status(500).json({ error: 'Kunde inte importera databasen: ' + e.message });
@@ -3327,7 +3424,7 @@ async function startServer() {
           });
         }
 
-        return res.status(404).json({ error: 'Not found' });
+        return res.json(null);
       } catch (e: any) {
         if (e.status === 429 || e.code === 'RESOURCE_EXHAUSTED') {
           return res.status(429).json({
@@ -3346,7 +3443,7 @@ async function startServer() {
       const segment = parts[3];
 
       if (userId === 'guest') {
-        return res.status(404).json({ error: 'Guest offline mode has no server database' });
+        return res.json(null);
       }
 
       if (userId !== 'guest') {
@@ -3412,7 +3509,7 @@ async function startServer() {
               upgradeUrl: getFirestoreQuotaUpgradeUrl()
             });
           }
-          return res.status(404).json({ error: 'Not found' });
+          return res.json(null);
         }
       }
       if (!row) {
@@ -3424,7 +3521,7 @@ async function startServer() {
             upgradeUrl: getFirestoreQuotaUpgradeUrl()
           });
         }
-        return res.status(404).json({ error: 'Not found' });
+        return res.json(null);
       }
       res.json(JSON.parse(row.data));
     } else if (pathStr.startsWith('clubs/') && pathStr.includes('/pending_requests')) {
@@ -3480,7 +3577,7 @@ async function startServer() {
           if (row && row.data) {
             return res.json(JSON.parse(row.data));
           }
-          return res.status(404).json({ error: 'Not found' });
+          return res.json(null);
         }
       } catch (err: any) {
         console.error('Error handling club pending_requests:', err);
@@ -3545,7 +3642,7 @@ async function startServer() {
                 upgradeUrl: getFirestoreQuotaUpgradeUrl()
               });
             }
-            return res.status(404).json({ error: 'Not found' });
+            return res.json(null);
           }
         }
         if (!row) {
@@ -3557,7 +3654,7 @@ async function startServer() {
               upgradeUrl: getFirestoreQuotaUpgradeUrl()
             });
           }
-          return res.status(404).json({ error: 'Not found' });
+          return res.json(null);
         }
         res.json(JSON.parse(row.data));
       } catch (e: any) {
@@ -3601,7 +3698,7 @@ async function startServer() {
               upgradeUrl: getFirestoreQuotaUpgradeUrl()
             });
           }
-          return res.status(404).json({ error: 'Not found' });
+          return res.json(null);
         }
         res.json(JSON.parse(row.data));
       } catch (e: any) {
@@ -3645,9 +3742,9 @@ async function startServer() {
         if (row && row.data) {
           return res.json(typeof row.data === 'string' ? JSON.parse(row.data) : row.data);
         }
-        return res.status(404).json({ error: 'Not found' });
+        return res.json(null);
       } catch (_) {
-        return res.status(404).json({ error: 'Not found' });
+        return res.json(null);
       }
     }
   });

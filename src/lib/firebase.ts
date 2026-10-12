@@ -729,6 +729,9 @@ export const getDoc = async (docRef: { path: string }, options?: { forceRefresh?
       return { exists: () => false, data: () => null };
     }
     const data = JSON.parse(text);
+    if (data === null || data === undefined || data._notFound || (typeof data === 'object' && data.error === 'Not found')) {
+      return { exists: () => false, data: () => null };
+    }
     return {
       exists: () => true,
       data: () => data
@@ -805,7 +808,7 @@ export const getDocs = async (collectionRef: { path: string }) => {
       return { docs: [], size: 0, empty: true, forEach: () => {} };
     }
     const data = JSON.parse(text);
-    const items = Array.isArray(data) ? data : (data.requests || data.items || []);
+    const items = Array.isArray(data) ? data : (data?.requests || data?.items || []);
     const docs = items.map((item: any) => ({
       id: item.id || item.userId || item.email,
       exists: () => true,

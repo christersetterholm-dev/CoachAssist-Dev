@@ -243,8 +243,8 @@ export default function ClubAdminDashboard({
   });
   const [dbConfigLoading, setDbConfigLoading] = useState(false);
   const [dbConfigMessage, setDbConfigMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
-  const [isSyncingNow, setIsSyncingNow] = useState(false);
   const [importFile, setImportFile] = useState<File | null>(null);
+  const [importWipeBeforeRestore, setImportWipeBeforeRestore] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
 
   // SSH Direct Deployment States
@@ -957,13 +957,18 @@ export default function ClubAdminDashboard({
       const res = await fetch(getApiUrl('/api/system/db-import'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(dump)
+        body: JSON.stringify({ ...dump, wipe: importWipeBeforeRestore })
       });
       const data = await res.json();
       if (res.ok) {
-        setDbConfigMessage({ type: 'success', text: `Säkerhetskopia importerad framgångsrikt! (${data.importedRecords} poster)` });
+        setDbConfigMessage({
+          type: 'success',
+          text: `Säkerhetskopia importerad framgångsrikt! (${data.importedRecords} poster lästes in). Ladda gärna om sidan för att visa alla uppdaterade klubbar och användare.`
+        });
         setImportFile(null);
+        setImportWipeBeforeRestore(false);
         fetchDbConfig();
+        loadClubs(true);
       } else {
         setDbConfigMessage({ type: 'error', text: data.error || 'Importen misslyckades.' });
       }
@@ -4284,14 +4289,25 @@ export default function ClubAdminDashboard({
                   </div>
 
                   {importFile && (
-                    <button
-                      type="submit"
-                      disabled={isImporting}
-                      className="w-full inline-flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold px-4 py-2.5 rounded-xl text-xs transition-all cursor-pointer disabled:opacity-50"
-                    >
-                      <Upload size={14} />
-                      <span>{isImporting ? 'Importerar data...' : 'Verkställ Import'}</span>
-                    </button>
+                    <div className="pt-1 space-y-2">
+                      <label className="flex items-center gap-2 cursor-pointer text-[11px] font-semibold text-zinc-700 dark:text-zinc-300 select-none">
+                        <input
+                          type="checkbox"
+                          checked={importWipeBeforeRestore}
+                          onChange={(e) => setImportWipeBeforeRestore(e.target.checked)}
+                          className="w-3.5 h-3.5 rounded text-emerald-600 focus:ring-emerald-500 border-zinc-300 dark:border-zinc-700 cursor-pointer"
+                        />
+                        <span>Rensa befintlig data före återställning (ersätt databasen helt)</span>
+                      </label>
+                      <button
+                        type="submit"
+                        disabled={isImporting}
+                        className="w-full inline-flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold px-4 py-2.5 rounded-xl text-xs transition-all cursor-pointer disabled:opacity-50"
+                      >
+                        <Upload size={14} />
+                        <span>{isImporting ? 'Importerar data...' : 'Verkställ Import'}</span>
+                      </button>
+                    </div>
                   )}
                 </form>
               </div>
