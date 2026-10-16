@@ -2483,16 +2483,19 @@ async function startServer() {
       return res.status(400).json({ error: 'Ogiltigt svar.' });
     }
     const access = registry.getClubAccess(db, user, clubId, await verifyIsRootAdmin(user));
-    const isOwn = access.memberIds.includes(memberId);
+    const baseMemberId = memberId.replace(/_leader$/, ''); // ledarrader i truppen har suffixet _leader
+    const isOwn = access.memberIds.includes(baseMemberId);
     if (!registry.isTeamCoach(access, teamId) && !(isOwn && registry.isTeamMember(access, teamId))) {
       return res.status(403).json({ error: 'Du kan bara svara för dig själv.' });
     }
-    const inTeam = db.prepare(`SELECT 1 FROM team_roles WHERE member_id = ? AND club_id = ? AND team_id = ?`).get(memberId, clubId, teamId);
-    if (!inTeam) return res.status(404).json({ error: 'Personen finns inte i laget.' });
     const sessRow: any = db.prepare(`SELECT data FROM clubs_data WHERE clubId = ? AND teamId = ? AND segment = 'sessions'`).get(clubId, teamId);
     const sessDoc = sessRow ? JSON.parse(sessRow.data) : null;
     const sessions: any[] = Array.isArray(sessDoc) ? sessDoc : (sessDoc?.sessions || []);
-    if (!sessions.some((s) => s && s.id === sessionId)) return res.status(404).json({ error: 'Aktiviteten finns inte.' });
+    const session = sessions.find((s) => s && s.id === sessionId);
+    if (!session) return res.status(404).json({ error: 'Aktiviteten finns inte.' });
+    const inTeam = db.prepare(`SELECT 1 FROM team_roles WHERE member_id = ? AND club_id = ? AND team_id = ?`).get(baseMemberId, clubId, teamId);
+    const isGuest = Array.isArray(session.guestPlayers) && session.guestPlayers.some((g: any) => g && g.id === memberId);
+    if (!inTeam && !(isGuest && registry.isTeamCoach(access, teamId))) return res.status(404).json({ error: 'Personen finns inte i laget.' });
 
     if (status === null) {
       db.prepare('DELETE FROM rsvps WHERE club_id = ? AND team_id = ? AND session_id = ? AND member_id = ?').run(clubId, teamId, sessionId, memberId);
@@ -2503,6 +2506,19 @@ async function startServer() {
     const updatedAt = Date.now();
     registry.upsertRsvp(db, { clubId, teamId, sessionId, memberId, status, comment: typeof comment === 'string' ? comment.slice(0, 500) : null, updatedAt, updatedBy });
     res.json({ success: true, rsvp: { status, ...(comment ? { comment } : {}), updatedAt, updatedBy } });
+  });
+
+  // Rensar alla svar för en aktivitet (tränare).
+  app.post('/api/rsvp/clear', requireAuthUser, async (req, res) => {
+    const user = (req as any).user;
+    const { clubId, teamId, sessionId } = req.body || {};
+    if (![clubId, teamId, sessionId].every((v) => typeof v === 'string' && v)) {
+      return res.status(400).json({ error: 'clubId, teamId och sessionId krävs.' });
+    }
+    const access = registry.getClubAccess(db, user, clubId, await verifyIsRootAdmin(user));
+    if (!registry.isTeamCoach(access, teamId)) return res.status(403).json({ error: 'Endast tränare kan rensa svar.' });
+    const r = db.prepare('DELETE FROM rsvps WHERE club_id = ? AND team_id = ? AND session_id = ?').run(clubId, teamId, sessionId);
+    res.json({ success: true, removed: Number(r.changes) });
   });
 
   // --- DOCUMENT STORE ENDPOINTS ---

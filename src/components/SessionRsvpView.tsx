@@ -34,6 +34,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { TrainingSession, SquadPlayer, RsvpStatus, PlayerRsvp, SessionRsvpConfig, UserProfile } from '../types';
 import { CachedImage } from './CachedImage';
 import { findSquadMatch } from '../lib/teamUtils';
+import { saveRsvp, clearRsvps } from '../lib/firebase';
 import { isMatchSession } from '../utils/sessionCategory';
 
 interface SessionRsvpViewProps {
@@ -103,6 +104,7 @@ export const SessionRsvpView: React.FC<SessionRsvpViewProps> = ({
   onUpdateSession,
   user,
   userRoles = [],
+  userProfile,
   adminUrl,
   onOpenLineup
 }) => {
@@ -381,6 +383,12 @@ export const SessionRsvpView: React.FC<SessionRsvpViewProps> = ({
 
   // Clear all RSVPs / registrations
   const handleClearRsvps = () => {
+    if (user && userProfile?.activeClubId && userProfile?.activeTeamId) {
+      clearRsvps({ clubId: userProfile.activeClubId, teamId: userProfile.activeTeamId, sessionId: session.id }).catch((err) => {
+        setSavedToast(err?.message || 'Svaren kunde inte rensas');
+        setTimeout(() => setSavedToast(null), 4000);
+      });
+    }
     onUpdateSession({
       ...session,
       rsvps: {},
@@ -423,6 +431,17 @@ export const SessionRsvpView: React.FC<SessionRsvpViewProps> = ({
       } else if (finalStatus === 'declined') {
         newAttendance = newAttendance.filter(id => id !== playerId);
       }
+    }
+
+    // Svaret sparas direkt på servern (egen rad per person), sedan uppdateras vyn.
+    const clubId = userProfile?.activeClubId;
+    const teamId = userProfile?.activeTeamId;
+    if (user && clubId && teamId) {
+      saveRsvp({ clubId, teamId, sessionId: session.id, memberId: playerId, status: finalStatus, comment: comment?.trim() || undefined })
+        .catch((err) => {
+          setSavedToast(err?.message || 'Svaret kunde inte sparas');
+          setTimeout(() => setSavedToast(null), 4000);
+        });
     }
 
     onUpdateSession({

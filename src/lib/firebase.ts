@@ -873,6 +873,30 @@ export const ref = (_storageObj: any, path: string) => {
   return { path };
 };
 
+// Svar på kallelse för en person. status null tar bort svaret.
+export const saveRsvp = async (body: { clubId: string; teamId: string; sessionId: string; memberId: string; status: string | null; comment?: string }) => {
+  const res = await fetch(getApiUrl('/api/rsvp'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
+    body: JSON.stringify(body),
+  });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(json.error || `Kunde inte spara svaret (${res.status})`);
+  return json;
+};
+
+// Tar bort alla svar för en aktivitet (endast tränare).
+export const clearRsvps = async (body: { clubId: string; teamId: string; sessionId: string }) => {
+  const res = await fetch(getApiUrl('/api/rsvp/clear'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
+    body: JSON.stringify(body),
+  });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(json.error || `Kunde inte rensa svaren (${res.status})`);
+  return json;
+};
+
 // Authorization-header för anrop som kräver inloggning (t.ex. bilduppladdning).
 export const getAuthHeader = (): Record<string, string> => {
   const token = localStorage.getItem('token');

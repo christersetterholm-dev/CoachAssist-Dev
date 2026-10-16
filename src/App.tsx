@@ -4,7 +4,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { SquadPlayer, Exercise, Team, PointsConfig, Period, PeriodStandings, Lineup, TrainingSession, TrainingSettings, CoachData, BankExercise, SessionMoment, UserProfile, ClubMember, ClubTeam, Club } from './types';
 import { auth, signInWithGoogle, db, handleFirestoreError, OperationType, getApiUrl, doc, onSnapshot, setDoc, getDoc, collection, getDocs, onAuthStateChanged, signOut, User, deleteObject } from './lib/firebase';
 import { calculateLeaderboard } from './lib/leaderboardUtils';
-import { syncSquadToClubMembers, getMergedSquadAndClubMembers, deduplicateSquad } from './lib/clubUtils';
+import { deduplicateSquad } from './lib/clubUtils';
 import { deduplicateSessionsList } from './utils/calendarSync';
 
 import GameSetup from './components/GameSetup';
@@ -1646,6 +1646,11 @@ export default function App() {
   // Internal helper to push all dirty data segments cleanly without toggling isSyncing
   const pushDirtySegments = async (forcePushAll = false, overrideData?: Partial<CoachData>) => {
     if (!user) return;
+    // Bara tränare och administratörer sparar lagets data. Spelare svarar på kallelser via /api/rsvp.
+    if (!(isRootAdmin || userRoles.includes('admin') || userRoles.includes('coach'))) {
+      setSessionActionCount(0);
+      return;
+    }
     const now = Date.now();
     const lastUpdatedBy = sessionIdRef.current;
 
@@ -1834,16 +1839,8 @@ export default function App() {
         activeExerciseId: targetActiveExerciseId,
       };
 
-      if (userProfile.activeClubId && userProfile.activeTeamId) {
-        const { mergedSquad } = await getMergedSquadAndClubMembers(
-          updatedState.squad,
-          userProfile.activeClubId,
-          userProfile.activeTeamId
-        );
-        updatedState.squad = mergedSquad;
-        syncSquadToClubMembers(mergedSquad, userProfile.activeClubId, userProfile.activeTeamId)
-          .catch(err => console.error("Error syncing squad in pullLatestData:", err));
-      }
+      // Truppen kommer direkt från medlemsregistret på servern; ingen synk behövs i klienten.
+      updatedState.squad = deduplicateSquad(updatedState.squad || []);
 
       setData(updatedState);
       lastCloudDataRef.current = updatedState;
@@ -2047,13 +2044,8 @@ export default function App() {
             };
           }
 
-          // Merge squad with club members assigned to this team
-          const { mergedSquad } = await getMergedSquadAndClubMembers(
-            loadedState.squad,
-            userProfile.activeClubId,
-            userProfile.activeTeamId
-          );
-          loadedState.squad = mergedSquad;
+          // Truppen kommer direkt från medlemsregistret på servern
+          loadedState.squad = deduplicateSquad(loadedState.squad || []);
         } else {
           // Private mode (single user with no active club/team selected)
           // Load local cache as fallback for missing segments or offline recovery
@@ -2215,16 +2207,8 @@ export default function App() {
           }
         }
 
-        if (userProfile.activeClubId && userProfile.activeTeamId) {
-          const { mergedSquad } = await getMergedSquadAndClubMembers(
-            loadedState.squad,
-            userProfile.activeClubId,
-            userProfile.activeTeamId
-          );
-          loadedState.squad = mergedSquad;
-          syncSquadToClubMembers(mergedSquad, userProfile.activeClubId, userProfile.activeTeamId)
-            .catch(err => console.error("Error syncing squad on initial load:", err));
-        }
+        // Truppen kommer direkt från medlemsregistret på servern; ingen synk behövs i klienten.
+        loadedState.squad = deduplicateSquad(loadedState.squad || []);
 
         if (isSubscribed) {
           setData(loadedState);
@@ -3693,10 +3677,6 @@ export default function App() {
     });
     setSessionActionCount(prev => prev + 1);
 
-    if (userProfile.activeClubId && userProfile.activeTeamId) {
-      syncSquadToClubMembers(cleanSquad, userProfile.activeClubId, userProfile.activeTeamId)
-        .catch(err => console.error("Error syncing squad to club members:", err));
-    }
   };
 
   const onUpdateSettings = (settings: TrainingSettings) => {

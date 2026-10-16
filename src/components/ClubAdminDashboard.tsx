@@ -6,7 +6,7 @@ import PwaIconGenerator from './PwaIconGenerator';
 import ImageCropper from './ImageCropper';
 import { CachedImage } from './CachedImage';
 import { syncTeamCalendar } from '../utils/calendarSync';
-import { deduplicateClubMembers, deduplicateSquad, syncAllTeamSquadsToClubMembers } from '../lib/clubUtils';
+import { deduplicateClubMembers, deduplicateSquad } from '../lib/clubUtils';
 import * as XLSX from 'xlsx';
 import Papa from 'papaparse';
 
@@ -972,15 +972,6 @@ export default function ClubAdminDashboard({
 
         setClubMetadata(metaData);
         setMembers(membersData);
-
-        // Auto-sync squad photos & player info from all team squads in this club
-        const teamIds = (metaData.teams || []).map(t => t.id);
-        if (teamIds.length > 0) {
-          const syncedMembers = await syncAllTeamSquadsToClubMembers(targetClubId, teamIds);
-          if (syncedMembers && syncedMembers.length > 0 && selectedClubIdRef.current === targetClubId) {
-            setMembers(syncedMembers);
-          }
-        }
       } catch (err) {
         console.error('Failed to load club details:', err);
       }
