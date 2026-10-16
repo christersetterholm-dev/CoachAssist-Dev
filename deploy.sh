@@ -74,8 +74,9 @@ rsync -az --delete -e "$SSH" dist/assets/ "$SERVER:$REMOTE_DIR/dist/assets/"
 rsync -az -e "$SSH" app.cjs package.json package-lock.json "$SERVER:$REMOTE_DIR/"
 NEW_PKG=$($SSH "$SERVER" "cat ~/$REMOTE_DIR/package.json | md5sum")
 
-if [[ "$OLD_PKG" != "$NEW_PKG" ]]; then
-  step "Beroenden har ändrats – kör npm install på servern"
+HAS_MODULES=$($SSH "$SERVER" "test -f ~/$REMOTE_DIR/node_modules/express/package.json && echo ja || echo nej")
+if [[ "$OLD_PKG" != "$NEW_PKG" || "$HAS_MODULES" != "ja" ]]; then
+  step "Installerar paket på servern (npm install)"
   if ! $SSH "$SERVER" "$ACTIVATE && cd ~/$REMOTE_DIR && npm install --omit=dev --no-audit --no-fund"; then
     echo "⚠️  npm install på servern misslyckades. Öppna cPanel > Setup Node.js App och klicka 'Run NPM Install'."
   fi
