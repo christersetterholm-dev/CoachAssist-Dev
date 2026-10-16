@@ -70,12 +70,14 @@ function askHidden(question: string): Promise<string> {
 }
 
 (async () => {
-  const pw1 = await askHidden('Nytt lösenord (minst 8 tecken, syns inte när du skriver): ');
+  // NEW_PASSWORD kan sättas för automatiserad körning (t.ex. tester).
+  const fromEnv = process.env.NEW_PASSWORD;
+  const pw1 = fromEnv ?? await askHidden('Nytt lösenord (minst 8 tecken, syns inte när du skriver): ');
   if (pw1.length < 8) {
     console.error('Lösenordet måste vara minst 8 tecken.');
     process.exit(1);
   }
-  const pw2 = await askHidden('Upprepa lösenordet: ');
+  const pw2 = fromEnv ?? await askHidden('Upprepa lösenordet: ');
   if (pw1 !== pw2) {
     console.error('Lösenorden matchar inte.');
     process.exit(1);

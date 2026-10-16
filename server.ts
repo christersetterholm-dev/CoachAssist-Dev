@@ -501,10 +501,7 @@ function createFallbackDatabase(dataDir: string): any {
   };
 }
 
-// Environment-safe way to define __dirname and __filename in both ESM (dev) and CJS (prod esbuild bundle)
-const _filename = typeof __filename !== 'undefined'
-  ? __filename
-  : (typeof import.meta !== 'undefined' && import.meta.url ? fileURLToPath(import.meta.url) : '');
+// Environment-safe way to define __dirname in both ESM (dev) and CJS (prod esbuild bundle)
 const _dirname = typeof __dirname !== 'undefined'
   ? __dirname
   : (typeof import.meta !== 'undefined' && import.meta.url ? path.dirname(fileURLToPath(import.meta.url)) : process.cwd());
@@ -698,7 +695,7 @@ if (!JWT_SECRET) {
   } catch (_) {}
 }
 
-export const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '30d';
+export const JWT_EXPIRES_IN = (process.env.JWT_EXPIRES_IN || '30d') as jwt.SignOptions['expiresIn'];
 
 export function verifyJwtToken(token: string): any {
   if (!token) {
@@ -747,7 +744,7 @@ export async function verifyIsRootAdmin(user: any): Promise<boolean> {
   const email = (user.email || user.google_email || '').trim().toLowerCase();
   if (isRootAdminEmail(email)) return true;
 
-  // Also check persistent root_admins_list in database or firestore if available
+  // Also check persistent root_admins_list in the database
   try {
     const row: any = db.prepare("SELECT data FROM system_docs WHERE path = 'admins/root_admins_list'").get();
     if (row && row.data) {
@@ -1089,231 +1086,6 @@ const resetRateLimiter = createRateLimiter({
   message: 'För många återställningsförsök. Vänligen vänta 15 minuter och försök igen.'
 });
 
-// --- FIRESTORE PERSISTENT BACKEND STORAGE (CLOUD RUN RESILIENCE) ---
-let firebaseConfig: any = null;
-try {
-  const configPath = path.join(_dirname, 'firebase-applet-config.json');
-  const altConfigPath = path.join(process.cwd(), 'firebase-applet-config.json');
-  if (fs.existsSync(configPath)) {
-    firebaseConfig = JSON.parse(fs.readFileSync(configPath, 'utf8'));
-  } else if (fs.existsSync(altConfigPath)) {
-    firebaseConfig = JSON.parse(fs.readFileSync(altConfigPath, 'utf8'));
-  }
-} catch (e) {
-  console.error('Could not load firebase-applet-config.json:', e);
-}
-
-const FIREBASE_API_KEY = firebaseConfig?.apiKey || '';
-
-const DB_CONFIG_FILE = path.join(DATA_DIR, 'db_mode_config.json');
-const ROOT_DB_CONFIG_FILE = path.join(_dirname, 'db_mode_config.json');
-
-function saveDiskDbConfig(config: any) {
-  try {
-    const dataStr = JSON.stringify(config, null, 2);
-    try { fs.writeFileSync(DB_CONFIG_FILE, dataStr, 'utf8'); } catch (_) {}
-    try { fs.writeFileSync(ROOT_DB_CONFIG_FILE, dataStr, 'utf8'); } catch (_) {}
-  } catch (err) {
-    console.warn('[DB Config] Could not write disk config file:', err);
-  }
-}
-
-let dbModeConfig = {
-  mode: process.env.DATABASE_MODE || 'local_sqlite', // 'hybrid' | 'local_sqlite' | 'firestore_only'
-  customFirestoreProjectId: '',
-  customFirestoreApiKey: '',
-  customRemoteUrl: '',
-  updatedAt: Date.now(),
-  updatedBy: 'system'
-};
-
-// 1. Load from persistent disk configuration file first if present
-try {
-  for (const filePath of [DB_CONFIG_FILE, ROOT_DB_CONFIG_FILE]) {
-    if (fs.existsSync(filePath)) {
-      const raw = fs.readFileSync(filePath, 'utf8');
-      const parsed = JSON.parse(raw);
-      if (parsed && parsed.mode) {
-        dbModeConfig = { ...dbModeConfig, ...parsed };
-        console.log(`[DB Config] Loaded persistent disk config from ${filePath}: mode = ${dbModeConfig.mode}`);
-        break;
-      }
-    }
-  }
-} catch (e) {
-  console.warn('[DB Config] Could not read disk config file:', e);
-}
-
-// 2. Load saved database configuration from system_docs table in SQLite / JSON DB
-try {
-  const savedRow: any = db.prepare("SELECT data FROM system_docs WHERE path = 'system/db_config'").get();
-  if (savedRow) {
-    const parsed = typeof savedRow.data === 'string' ? JSON.parse(savedRow.data) : savedRow.data;
-    if (parsed && parsed.mode) {
-      dbModeConfig = { ...dbModeConfig, ...parsed };
-      console.log(`[DB Config] Initialized database mode from DB: ${dbModeConfig.mode}`);
-    }
-  }
-} catch (e) {
-  console.warn('[DB Config] Could not read system/db_config from SQLite:', e);
-}
-
-function getActiveFirestoreParams() {
-  const projId = dbModeConfig.customFirestoreProjectId || firebaseConfig?.projectId;
-  const apiKey = dbModeConfig.customFirestoreApiKey || FIREBASE_API_KEY;
-  const dbId = firebaseConfig?.firestoreDatabaseId || '(default)';
-  const baseUrl = projId ? `https://firestore.googleapis.com/v1/projects/${projId}/databases/${dbId}/documents` : null;
-  return { baseUrl, apiKey, projId };
-}
-
-function toFirestoreFields(obj: Record<string, any>): Record<string, any> {
-  const fields: Record<string, any> = {};
-  for (const [key, val] of Object.entries(obj)) {
-    if (val === null || val === undefined) {
-      fields[key] = { nullValue: null };
-    } else if (typeof val === 'boolean') {
-      fields[key] = { booleanValue: val };
-    } else if (typeof val === 'number') {
-      if (Number.isInteger(val)) {
-        fields[key] = { integerValue: val.toString() };
-      } else {
-        fields[key] = { doubleValue: val };
-      }
-    } else if (typeof val === 'string') {
-      fields[key] = { stringValue: val };
-    } else if (typeof val === 'object') {
-      fields[key] = { stringValue: JSON.stringify(val) };
-    }
-  }
-  return fields;
-}
-
-function fromFirestoreFields(fields: Record<string, any>): Record<string, any> {
-  const result: Record<string, any> = {};
-  if (!fields) return result;
-  for (const [key, valObj] of Object.entries(fields)) {
-    if ('stringValue' in valObj) {
-      const str = valObj.stringValue;
-      if ((str.startsWith('{') && str.endsWith('}')) || (str.startsWith('[') && str.endsWith(']'))) {
-        try {
-          result[key] = JSON.parse(str);
-        } catch {
-          result[key] = str;
-        }
-      } else {
-        result[key] = str;
-      }
-    } else if ('integerValue' in valObj) {
-      result[key] = parseInt(valObj.integerValue, 10);
-    } else if ('doubleValue' in valObj) {
-      result[key] = valObj.doubleValue;
-    } else if ('booleanValue' in valObj) {
-      result[key] = valObj.booleanValue;
-    } else if ('nullValue' in valObj) {
-      result[key] = null;
-    } else if ('mapValue' in valObj) {
-      result[key] = fromFirestoreFields(valObj.mapValue.fields || {});
-    }
-  }
-  return result;
-}
-
-let firestoreQuotaExceededUntil = 0;
-let lastFirestoreQuotaMessage = '';
-
-function isFirestoreQuotaExceeded(): boolean {
-  return Date.now() < firestoreQuotaExceededUntil;
-}
-
-function getFirestoreQuotaUpgradeUrl(): string {
-  const { projId } = getActiveFirestoreParams();
-  const dbId = firebaseConfig?.firestoreDatabaseId || '(default)';
-  return `https://console.firebase.google.com/project/${projId}/firestore/databases/${dbId}/data?openUpgradeDialog=true`;
-}
-
-async function getFirestoreDoc(docPath: string): Promise<Record<string, any> | null> {
-  if (dbModeConfig.mode === 'local_sqlite') {
-    return null; // Standalone local SQLite mode: skip Firestore calls
-  }
-  const { baseUrl, apiKey } = getActiveFirestoreParams();
-  if (!baseUrl || !apiKey) return null;
-  try {
-    const encodedPath = docPath.split('/').map(encodeURIComponent).join('/');
-    const url = `${baseUrl}/${encodedPath}?key=${apiKey}`;
-    const res = await axios.get(url, { validateStatus: s => s <= 500, timeout: 5000 });
-    if (res.status === 200 && res.data?.fields) {
-      return fromFirestoreFields(res.data.fields);
-    }
-    if (res.status === 429) {
-      const msg = res.data?.error?.message || "Quota exceeded for quota metric 'Free daily read units per project (free tier database)'";
-      console.warn(`[Firestore Quota Exceeded 429] on GET for ${docPath}:`, msg);
-      firestoreQuotaExceededUntil = Date.now() + 60 * 1000;
-      lastFirestoreQuotaMessage = msg;
-      const err: any = new Error(msg);
-      err.status = 429;
-      err.code = 'RESOURCE_EXHAUSTED';
-      err.upgradeUrl = getFirestoreQuotaUpgradeUrl();
-      throw err;
-    }
-    return null;
-  } catch (e: any) {
-    if (e.status === 429 || e.code === 'RESOURCE_EXHAUSTED') {
-      throw e;
-    }
-    console.error(`Firestore GET error for ${docPath}:`, e.message);
-    return null;
-  }
-}
-
-async function setFirestoreDoc(docPath: string, data: Record<string, any>): Promise<boolean> {
-  if (dbModeConfig.mode === 'local_sqlite') {
-    return true; // Standalone local SQLite mode: local write succeeded
-  }
-  const { baseUrl, apiKey } = getActiveFirestoreParams();
-  if (!baseUrl || !apiKey) return false;
-  try {
-    const encodedPath = docPath.split('/').map(encodeURIComponent).join('/');
-    const url = `${baseUrl}/${encodedPath}?key=${apiKey}`;
-    const fields = toFirestoreFields(data);
-    const res = await axios.patch(url, { fields }, {
-      headers: { 'Content-Type': 'application/json' },
-      validateStatus: s => s <= 500,
-      timeout: 5000
-    });
-    if (res.status === 429) {
-      const msg = res.data?.error?.message || "Quota exceeded for quota metric 'Free daily read units per project (free tier database)'";
-      console.warn(`[Firestore Quota Exceeded 429] on PATCH for ${docPath}:`, msg);
-      firestoreQuotaExceededUntil = Date.now() + 60 * 1000;
-      lastFirestoreQuotaMessage = msg;
-      return false;
-    }
-    return res.status === 200;
-  } catch (e: any) {
-    console.error(`Firestore PATCH error for ${docPath}:`, e.message);
-    return false;
-  }
-}
-
-async function deleteFirestoreDoc(docPath: string): Promise<boolean> {
-  if (dbModeConfig.mode === 'local_sqlite') {
-    return true; // Standalone local SQLite mode
-  }
-  const { baseUrl, apiKey } = getActiveFirestoreParams();
-  if (!baseUrl || !apiKey) return false;
-  try {
-    const encodedPath = docPath.split('/').map(encodeURIComponent).join('/');
-    const url = `${baseUrl}/${encodedPath}?key=${apiKey}`;
-    const res = await axios.delete(url, {
-      validateStatus: s => s <= 500,
-      timeout: 5000
-    });
-    return res.status === 200 || res.status === 404;
-  } catch (e: any) {
-    console.error(`Firestore DELETE error for ${docPath}:`, e.message);
-    return false;
-  }
-}
-
 // --- CUSTOM PWA ICONS MANAGEMENT ---
 let customPwaIcons: {
   appName?: string;
@@ -1463,8 +1235,8 @@ function applyCustomPwaIconsToDisk(iconsObj: { appName?: string; themeColor?: st
   console.log('[PWA Icons] Successfully applied custom icons and manifest across all disk locations.');
 }
 
-// Save custom PWA icons to persistent local database (SQLite/JSON DB) and Firestore
-function savePwaIconsToDatabase(pwaData: { appName: string; themeColor: string; updatedAt: number; files: Record<string, string>; logoSrc?: string }) {
+// Save custom PWA icons to the database
+function savePwaIconsToDatabase(pwaData: { appName?: string; themeColor?: string; updatedAt?: number; files: Record<string, string>; logoSrc?: string }) {
   const serialized = JSON.stringify(pwaData);
   const now = pwaData.updatedAt || Date.now();
 
@@ -1480,34 +1252,6 @@ function savePwaIconsToDatabase(pwaData: { appName: string; themeColor: string; 
     console.error('[PWA Icons] Error saving custom PWA icons to SQLite/JSON DB:', err?.message || err);
   }
 
-  // 2. Also save to Firestore if configured, keeping payload safe (< 900KB)
-  try {
-    const { baseUrl, apiKey, projId } = getActiveFirestoreParams();
-    if (baseUrl && apiKey && projId) {
-      let firestoreFiles = pwaData.files;
-      // If full set is large, strip non-essential aliases to avoid 1MB document limit
-      if (Buffer.byteLength(JSON.stringify(firestoreFiles), 'utf8') > 850000) {
-        const slimFiles: Record<string, string> = {};
-        for (const [k, v] of Object.entries(pwaData.files)) {
-          if (!['apple-touch-icon-precomposed.png', 'favicon.png', 'icon-192.png', 'icon-512.png'].includes(k)) {
-            slimFiles[k] = v as string;
-          }
-        }
-        firestoreFiles = slimFiles;
-      }
-
-      setFirestoreDoc('app_docs/system_pwa_icons', {
-        appName: pwaData.appName,
-        themeColor: pwaData.themeColor,
-        files: JSON.stringify(firestoreFiles),
-        updatedAt: now
-      }).then(ok => {
-        if (ok) console.log('[PWA Icons] Synced custom PWA icons to Firestore.');
-      }).catch(e => console.warn('[PWA Icons] Firestore sync notice:', e?.message || e));
-    }
-  } catch (err: any) {
-    console.warn('[PWA Icons] Firestore background save notice:', err?.message || err);
-  }
 }
 
 // Load and apply custom PWA icons on server startup
@@ -1534,78 +1278,7 @@ async function loadAndApplyPwaIcons() {
     console.warn('[PWA Icons] SQLite load notice:', err?.message || err);
   }
 
-  // Step 2: Fallback migration - Check Firestore directly (even in local_sqlite mode) to recover any previously saved icons
-  try {
-    const { projId, apiKey } = getActiveFirestoreParams();
-    const dbId = firebaseConfig?.firestoreDatabaseId || '(default)';
-    if (projId && apiKey) {
-      const url = `https://firestore.googleapis.com/v1/projects/${projId}/databases/${dbId}/documents/app_docs/system_pwa_icons?key=${apiKey}`;
-      const res = await axios.get(url, { validateStatus: s => s <= 500, timeout: 6000 });
-      if (res.status === 200 && res.data?.fields) {
-        const fields = fromFirestoreFields(res.data.fields);
-        if (fields && fields.files) {
-          const filesMap = typeof fields.files === 'string' ? JSON.parse(fields.files) : fields.files;
-          customPwaIcons = {
-            appName: fields.appName || 'KSK-appen',
-            themeColor: fields.themeColor || '#4f46e5',
-            updatedAt: fields.updatedAt || Date.now(),
-            files: filesMap,
-            logoSrc: fields.logoSrc
-          };
-          applyCustomPwaIconsToDisk(customPwaIcons);
-          console.log('[PWA Icons] Restored and migrated custom PWA icons from Firestore.');
-
-          // Cache immediately into SQLite so future startups don't need any network request
-          try {
-            db.prepare(`
-              INSERT INTO system_docs (path, data, updatedAt)
-              VALUES ('system/pwa_icons', ?, ?)
-              ON CONFLICT(path) DO UPDATE SET data = excluded.data, updatedAt = excluded.updatedAt
-            `).run(JSON.stringify(customPwaIcons), customPwaIcons.updatedAt);
-            console.log('[PWA Icons] Cached recovered Firestore icons into SQLite/JSON DB.');
-          } catch (_) {}
-          return;
-        }
-      }
-    }
-  } catch (err: any) {
-    console.warn('[PWA Icons] Startup Firestore recovery check notice:', err?.message || err);
-  }
-
   console.log('[PWA Icons] Using standard default icons.');
-}
-
-async function loadAndApplyDbConfigFromFirestore() {
-  // If explicitly configured for standalone local mode, do not contact Firestore
-  if (process.env.DATABASE_MODE === 'local_sqlite' || dbModeConfig.mode === 'local_sqlite') {
-    console.log(`[DB Config] Standalone local database mode active (${dbModeConfig.mode}); Firestore sync skipped.`);
-    return;
-  }
-
-  try {
-    const docData = await getFirestoreDoc('app_docs/system_db_config');
-    if (docData && docData.data) {
-      const parsed = typeof docData.data === 'string' ? JSON.parse(docData.data) : docData.data;
-      if (parsed && parsed.mode) {
-        dbModeConfig = { ...dbModeConfig, ...parsed };
-        console.log(`[DB Config] Restored database mode from Firestore on startup: ${dbModeConfig.mode}`);
-        saveDiskDbConfig(dbModeConfig);
-        
-        // Cache back to SQLite so local queries during startup use it
-        try {
-          db.prepare(`
-            INSERT INTO system_docs (path, data, updatedAt)
-            VALUES ('system/db_config', ?, ?)
-            ON CONFLICT(path) DO UPDATE SET data = excluded.data, updatedAt = excluded.updatedAt
-          `).run(JSON.stringify(dbModeConfig), dbModeConfig.updatedAt || Date.now());
-        } catch (sqliteErr) {
-          console.error('[DB Config] Error caching restored database mode to SQLite:', sqliteErr);
-        }
-      }
-    }
-  } catch (err) {
-    console.error('[DB Config] Error restoring database mode from Firestore on startup:', err);
-  }
 }
 
 async function ensureTeamAndClubIntegrity() {
@@ -1712,14 +1385,10 @@ async function startServer() {
   const app = express();
   const PORT = process.env.PORT || 3000;
 
-  // Restore JWT secret from Firestore or SQLite on startup
   await ensureJwtSecret();
 
-  // Restore custom PWA icons from SQLite or Firestore on startup
+  // Restore custom PWA icons from the database on startup
   await loadAndApplyPwaIcons();
-
-  // Restore database configuration mode from Firestore on startup
-  await loadAndApplyDbConfigFromFirestore();
 
   // Verify and auto-repair club teams and root admin members
   await ensureTeamAndClubIntegrity();
@@ -1938,7 +1607,7 @@ async function startServer() {
   app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
   // CORS and static middleware for /uploads
-  app.use('/uploads', (req, res, next) => {
+  app.use('/uploads', (_req, res, next) => {
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
     next();
@@ -1946,12 +1615,12 @@ async function startServer() {
 
   // Health check endpoint
   app.get('/api/health', (_req, res) => {
-    res.json({ status: 'ok', db: 'sqlite', mode: dbModeConfig.mode });
+    res.json({ status: 'ok', db: Database ? 'sqlite' : 'json_store' });
   });
 
   // --- SYSTEM DATABASE & ENVIRONMENT ENDPOINTS (ROOT ADMIN) ---
 
-  // Get current DB Config and System Status
+  // Databasstatus (sökväg, storlek, motor)
   app.get('/api/system/db-config', requireRootAdmin, (_req, res) => {
     let dbSize = 0;
     let actualDbPath = DB_PATH;
@@ -1970,69 +1639,12 @@ async function startServer() {
       }
     } catch {}
 
-    const { baseUrl, projId } = getActiveFirestoreParams();
-    const dbId = firebaseConfig?.firestoreDatabaseId || '(default)';
-    const firestoreUrl = projId 
-      ? (dbId && dbId !== '(default)'
-          ? `https://console.firebase.google.com/project/${projId}/firestore/databases/${dbId}/data`
-          : `https://console.firebase.google.com/project/${projId}/firestore/data`)
-      : null;
-
     res.json({
-      mode: dbModeConfig.mode,
       dbPath: actualDbPath,
       dbSize,
       dbEngine,
-      isProduction,
-      firestoreConfigured: !!baseUrl,
-      firestoreProjectId: projId || null,
-      firestoreDatabaseId: dbId,
-      firestoreUrl,
-      customFirestoreProjectId: dbModeConfig.customFirestoreProjectId || '',
-      customFirestoreApiKey: dbModeConfig.customFirestoreApiKey || '',
-      customRemoteUrl: dbModeConfig.customRemoteUrl || '',
-      updatedAt: dbModeConfig.updatedAt,
-      updatedBy: dbModeConfig.updatedBy
+      isProduction
     });
-  });
-
-  // Update DB Config (Root Admin)
-  app.post('/api/system/db-config', requireRootAdmin, (req, res) => {
-    const { mode, customFirestoreProjectId, customFirestoreApiKey, customRemoteUrl } = req.body;
-    if (!mode || !['hybrid', 'local_sqlite', 'firestore_only'].includes(mode)) {
-      return res.status(400).json({ error: 'Ogiltigt databasläge. Välj hybrid, local_sqlite eller firestore_only.' });
-    }
-
-    dbModeConfig.mode = mode;
-    dbModeConfig.customFirestoreProjectId = (customFirestoreProjectId || '').trim();
-    dbModeConfig.customFirestoreApiKey = (customFirestoreApiKey || '').trim();
-    dbModeConfig.customRemoteUrl = (customRemoteUrl || '').trim();
-    dbModeConfig.updatedAt = Date.now();
-    dbModeConfig.updatedBy = 'root_admin';
-
-    const serialized = JSON.stringify(dbModeConfig);
-
-    // Save to persistent disk configuration file immediately
-    saveDiskDbConfig(dbModeConfig);
-
-    try {
-      db.prepare(`
-        INSERT INTO system_docs (path, data, updatedAt)
-        VALUES ('system/db_config', ?, ?)
-        ON CONFLICT(path) DO UPDATE SET data = excluded.data, updatedAt = excluded.updatedAt
-      `).run(serialized, dbModeConfig.updatedAt);
-
-      // ALWAYS sync chosen configuration to Firestore so future Cloud Run deployments
-      // and container rebuilds remember that the user selected this database mode!
-      setFirestoreDoc('app_docs/system_db_config', { data: serialized, updatedAt: dbModeConfig.updatedAt })
-        .catch(err => console.error('Error syncing system db config to firestore:', err));
-
-      console.log(`[DB Config] Updated database mode to: ${mode}`);
-      res.json({ success: true, dbModeConfig });
-    } catch (e: any) {
-      console.error('[DB Config] Failed to save database configuration:', e);
-      res.status(500).json({ error: 'Kunde inte spara databasinställningar' });
-    }
   });
 
   // Export Database Dump as JSON (Requires Root Admin)
@@ -2051,7 +1663,6 @@ async function startServer() {
       const dump = {
         version: '1.0',
         exportedAt: Date.now(),
-        dbMode: dbModeConfig.mode,
         tables: {
           users,
           users_data,
@@ -2239,48 +1850,6 @@ async function startServer() {
     }
   });
 
-  // Manual Sync between SQLite and Firestore (Requires Root Admin)
-  app.post('/api/system/db-sync-now', requireRootAdmin, async (_req, res) => {
-    if (dbModeConfig.mode === 'local_sqlite') {
-      return res.status(400).json({ error: 'Databasen är inställd på Fristående Lokal SQLite. Slå på Hybrid-läge först för att synka med molnet.' });
-    }
-
-    try {
-      let syncedCount = 0;
-
-      // Sync users_data
-      const userRows: any[] = db.prepare('SELECT userId, segment, data, updatedAt FROM users_data').all();
-      for (const row of userRows) {
-        const docPath = `app_docs/users_${row.userId}_data_${row.segment}`;
-        const rawData = typeof row.data === 'string' ? row.data : JSON.stringify(row.data);
-        await setFirestoreDoc(docPath, { data: rawData, updatedAt: row.updatedAt });
-        syncedCount++;
-      }
-
-      // Sync clubs_data
-      const clubRows: any[] = db.prepare('SELECT clubId, teamId, segment, data, updatedAt FROM clubs_data').all();
-      for (const row of clubRows) {
-        const docPath = `app_docs/clubs_${row.clubId}_teams_${row.teamId}_data_${row.segment}`;
-        const rawData = typeof row.data === 'string' ? row.data : JSON.stringify(row.data);
-        await setFirestoreDoc(docPath, { data: rawData, updatedAt: row.updatedAt });
-        syncedCount++;
-      }
-
-      // Sync uploaded_files
-      const fileRows: any[] = db.prepare('SELECT filename, mime_type, data_base64, created_at FROM uploaded_files').all();
-      for (const row of fileRows) {
-        const docPath = `server_uploads/${encodeURIComponent(row.filename)}`;
-        await setFirestoreDoc(docPath, { mime_type: row.mime_type, data_base64: row.data_base64, created_at: row.created_at || Date.now() });
-        syncedCount++;
-      }
-
-      res.json({ success: true, syncedCount, message: `Synkroniserade ${syncedCount} poster till Firestore.` });
-    } catch (e: any) {
-      console.error('Manual DB sync error:', e);
-      res.status(500).json({ error: 'Synkroniseringen misslyckades: ' + e.message });
-    }
-  });
-
   // --- AUTHENTICATION ENDPOINTS ---
 
   // Register
@@ -2308,13 +1877,6 @@ async function startServer() {
     try {
       // 1. Check if email already registered
       let existingByEmail = db.prepare('SELECT id, email FROM users WHERE LOWER(email) = ?').get(trimmedEmail);
-      if (!existingByEmail) {
-        const fUser = await getFirestoreDoc(`server_users/${encodeURIComponent(trimmedEmail)}`);
-        if (fUser && fUser.id) {
-          existingByEmail = fUser;
-        }
-      }
-
       if (existingByEmail) {
         return res.status(400).json({
           error: `E-postadressen '${trimmedEmail}' är redan registrerad i CoachAssist. Vänligen logga in eller återställ ditt lösenord om du glömt det.`
@@ -2324,13 +1886,6 @@ async function startServer() {
       // 2. Check if username already taken
       if (trimmedUsername) {
         let existingByUsername = db.prepare('SELECT id FROM users WHERE LOWER(username) = ?').get(trimmedUsername);
-        if (!existingByUsername) {
-          const fUser = await getFirestoreDoc(`server_usernames/${encodeURIComponent(trimmedUsername)}`);
-          if (fUser && fUser.id) {
-            existingByUsername = fUser;
-          }
-        }
-
         if (existingByUsername) {
           return res.status(400).json({
             error: `Användarnamnet '${trimmedUsername}' är tyvärr redan upptaget. Välj ett annat användarnamn.`
@@ -2349,31 +1904,6 @@ async function startServer() {
         passwordHash,
         createdAt
       );
-
-      // Asynchronously persist to Cloud Firestore
-      setFirestoreDoc(`server_users/${encodeURIComponent(trimmedEmail)}`, {
-        id: userId,
-        email: trimmedEmail,
-        username: trimmedUsername || null,
-        password_hash: passwordHash,
-        created_at: createdAt
-      }).catch(e => console.error('Firestore user save error:', e));
-
-      setFirestoreDoc(`server_user_ids/${encodeURIComponent(userId)}`, {
-        id: userId,
-        email: trimmedEmail,
-        username: trimmedUsername || null,
-        password_hash: passwordHash,
-        created_at: createdAt
-      }).catch(e => console.error('Firestore user_id save error:', e));
-
-      if (trimmedUsername) {
-        setFirestoreDoc(`server_usernames/${encodeURIComponent(trimmedUsername)}`, {
-          id: userId,
-          email: trimmedEmail,
-          username: trimmedUsername
-        }).catch(e => console.error('Firestore username save error:', e));
-      }
 
       const token = jwt.sign({ id: userId, email: trimmedEmail, username: trimmedUsername }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
       res.json({
@@ -2404,51 +1934,6 @@ async function startServer() {
     try {
       // Support matching all potential candidate rows for this email or username
       let candidates: any[] = db.prepare('SELECT * FROM users WHERE LOWER(email) = ? OR LOWER(username) = ?').all(loginInput, loginInput);
-
-      // If user not found in local SQLite (e.g. fresh container restart), restore from Cloud Firestore
-      if (candidates.length === 0) {
-        try {
-          let fUser = await getFirestoreDoc(`server_users/${encodeURIComponent(loginInput)}`);
-          if (!fUser || !fUser.id) {
-            const uMapping = await getFirestoreDoc(`server_usernames/${encodeURIComponent(loginInput)}`);
-            if (uMapping && uMapping.email) {
-              fUser = await getFirestoreDoc(`server_users/${encodeURIComponent(uMapping.email)}`);
-            } else if (uMapping && uMapping.id) {
-              fUser = await getFirestoreDoc(`server_user_ids/${encodeURIComponent(uMapping.id)}`);
-            }
-          }
-
-          if (fUser && fUser.id && fUser.password_hash) {
-            try {
-              db.prepare('INSERT OR REPLACE INTO users (id, email, username, password_hash, created_at) VALUES (?, ?, ?, ?, ?)').run(
-                fUser.id,
-                fUser.email || loginInput,
-                fUser.username || null,
-                fUser.password_hash,
-                fUser.created_at || Date.now()
-              );
-              candidates = [{
-                id: fUser.id,
-                email: fUser.email || loginInput,
-                username: fUser.username || null,
-                password_hash: fUser.password_hash,
-                created_at: fUser.created_at || Date.now()
-              }];
-            } catch (e) {
-              console.error('Error caching Firestore user to SQLite:', e);
-            }
-          }
-        } catch (fErr: any) {
-          if (fErr.status === 429 || fErr.code === 'RESOURCE_EXHAUSTED' || (fErr.message && fErr.message.toLowerCase().includes('quota'))) {
-            return res.status(429).json({
-              error: 'Firebase-databasens dagliga läskvot (50 000 anrop/dygn) har uppnåtts för idag. Ditt konto och all data är säkert sparade i Firebase! Inloggningen är pausad tills kvoten nollställs imorgon, eller tills databasen uppgraderas till Blaze i Firebase Console.',
-              code: 'RESOURCE_EXHAUSTED',
-              message: fErr.message,
-              upgradeUrl: getFirestoreQuotaUpgradeUrl()
-            });
-          }
-        }
-      }
 
       if (candidates.length === 0) {
         return res.status(400).json({ error: 'Fel e-post/användarnamn eller lösenord.' });
@@ -2483,16 +1968,6 @@ async function startServer() {
       if (!userRow.has_logged_in) {
         try {
           db.prepare('UPDATE users SET has_logged_in = 1, temp_password = NULL WHERE id = ?').run(userRow.id);
-          setFirestoreDoc(`server_users/${encodeURIComponent(userRow.email)}`, {
-            ...userRow,
-            has_logged_in: 1,
-            temp_password: null
-          }).catch(() => {});
-          setFirestoreDoc(`server_user_ids/${encodeURIComponent(userRow.id)}`, {
-            ...userRow,
-            has_logged_in: 1,
-            temp_password: null
-          }).catch(() => {});
         } catch (e) {
           console.error('Error updating login status:', e);
         }
@@ -2671,13 +2146,6 @@ async function startServer() {
       // Verify user exists
       let userRow: any = db.prepare('SELECT id, email, created_at FROM users WHERE email = ?').get(trimmedEmail);
       if (!userRow) {
-        const fUser = await getFirestoreDoc(`server_users/${encodeURIComponent(trimmedEmail)}`);
-        if (fUser && fUser.id) {
-          userRow = fUser;
-        }
-      }
-
-      if (!userRow) {
         return res.status(404).json({ error: 'Användarkontot kunde inte hittas.' });
       }
 
@@ -2692,21 +2160,6 @@ async function startServer() {
         newPasswordHash,
         userRow.created_at || Date.now()
       );
-
-      // Asynchronously update Firestore password hash
-      setFirestoreDoc(`server_users/${encodeURIComponent(trimmedEmail)}`, {
-        id: userRow.id,
-        email: trimmedEmail,
-        password_hash: newPasswordHash,
-        created_at: userRow.created_at || Date.now()
-      }).catch(e => console.error('Firestore reset password update error:', e));
-
-      setFirestoreDoc(`server_user_ids/${encodeURIComponent(userRow.id)}`, {
-        id: userRow.id,
-        email: trimmedEmail,
-        password_hash: newPasswordHash,
-        created_at: userRow.created_at || Date.now()
-      }).catch(e => console.error('Firestore reset password update error:', e));
 
       // Issue fresh authentication JWT token
       const token = jwt.sign({ id: userRow.id, email: userRow.email }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
@@ -2728,7 +2181,7 @@ async function startServer() {
   });
 
   // Get Auth Config (Google Client ID)
-  app.get('/api/auth/config', (req, res) => {
+  app.get('/api/auth/config', (_req, res) => {
     const googleClientId = process.env.GOOGLE_CLIENT_ID || process.env.VITE_GOOGLE_CLIENT_ID || '';
     res.json({
       googleClientId,
@@ -2812,67 +2265,9 @@ async function startServer() {
       // 1. Look up existing user by google_id
       let userRow: any = db.prepare('SELECT * FROM users WHERE google_id = ?').get(googleId);
 
-      // If not in SQLite, check Firestore
-      if (!userRow) {
-        const fGoogleUser = await getFirestoreDoc(`server_users_google/${encodeURIComponent(googleId)}`);
-        if (fGoogleUser && fGoogleUser.id) {
-          userRow = db.prepare('SELECT * FROM users WHERE id = ?').get(fGoogleUser.id);
-          if (!userRow) {
-            const fUser = (await getFirestoreDoc(`server_users/${encodeURIComponent(fGoogleUser.email)}`)) ||
-                          (await getFirestoreDoc(`server_user_ids/${encodeURIComponent(fGoogleUser.id)}`));
-            if (fUser && fUser.id) {
-              try {
-                db.prepare(`
-                  INSERT OR REPLACE INTO users (id, email, username, password_hash, google_id, google_email, avatar_url, auth_provider, created_at, has_logged_in)
-                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
-                `).run(
-                  fUser.id,
-                  fUser.email || email,
-                  fUser.username || null,
-                  fUser.password_hash || 'google_only_' + crypto.randomBytes(8).toString('hex'),
-                  googleId,
-                  email,
-                  picture,
-                  fUser.auth_provider || 'google',
-                  fUser.created_at || Date.now()
-                );
-                userRow = db.prepare('SELECT * FROM users WHERE id = ?').get(fUser.id);
-              } catch (e) {
-                console.error('Error caching Google user to SQLite:', e);
-              }
-            }
-          }
-        }
-      }
-
       // 2. If not found by google_id, look up by email to automatically link accounts
       if (!userRow) {
         userRow = db.prepare('SELECT * FROM users WHERE LOWER(email) = ?').get(email);
-        if (!userRow) {
-          const fUser = await getFirestoreDoc(`server_users/${encodeURIComponent(email)}`);
-          if (fUser && fUser.id) {
-            try {
-              db.prepare(`
-                INSERT OR REPLACE INTO users (id, email, username, password_hash, google_id, google_email, avatar_url, auth_provider, created_at, has_logged_in)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
-              `).run(
-                fUser.id,
-                fUser.email || email,
-                fUser.username || null,
-                fUser.password_hash || 'google_only_' + crypto.randomBytes(8).toString('hex'),
-                googleId,
-                email,
-                picture,
-                'both',
-                fUser.created_at || Date.now()
-              );
-              userRow = db.prepare('SELECT * FROM users WHERE id = ?').get(fUser.id);
-            } catch (e) {
-              console.error('Error caching email match to SQLite:', e);
-            }
-          }
-        }
-
         // If found by email, link google account
         if (userRow) {
           const hasRegularPwd = userRow.password_hash && !userRow.password_hash.startsWith('google_only_');
@@ -2924,37 +2319,6 @@ async function startServer() {
         };
       }
 
-      // Sync user data to Firestore
-      setFirestoreDoc(`server_users/${encodeURIComponent(userRow.email)}`, {
-        id: userRow.id,
-        email: userRow.email,
-        username: userRow.username || null,
-        google_id: googleId,
-        google_email: email,
-        avatar_url: userRow.avatar_url || picture,
-        auth_provider: userRow.auth_provider || 'google',
-        password_hash: userRow.password_hash,
-        created_at: userRow.created_at || Date.now(),
-        has_logged_in: 1
-      }).catch(e => console.error('Firestore google user sync error:', e));
-
-      setFirestoreDoc(`server_user_ids/${encodeURIComponent(userRow.id)}`, {
-        id: userRow.id,
-        email: userRow.email,
-        username: userRow.username || null,
-        google_id: googleId,
-        google_email: email,
-        avatar_url: userRow.avatar_url || picture,
-        auth_provider: userRow.auth_provider || 'google',
-        created_at: userRow.created_at || Date.now()
-      }).catch(e => console.error('Firestore user_id sync error:', e));
-
-      setFirestoreDoc(`server_users_google/${encodeURIComponent(googleId)}`, {
-        id: userRow.id,
-        email: userRow.email,
-        google_id: googleId
-      }).catch(e => console.error('Firestore google_id sync error:', e));
-
       const token = jwt.sign({ id: userRow.id, email: userRow.email, username: userRow.username }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
 
       res.json({
@@ -2971,14 +2335,6 @@ async function startServer() {
         }
       });
     } catch (error: any) {
-      if (error.status === 429 || error.code === 'RESOURCE_EXHAUSTED' || (error.message && error.message.toLowerCase().includes('quota'))) {
-        return res.status(429).json({
-          error: 'Firebase-databasens dagliga läskvot (50 000 anrop/dygn) har uppnåtts för idag. Ditt konto och all data är säkert sparade i Firebase! Inloggningen är pausad tills kvoten nollställs imorgon, eller tills databasen uppgraderas till Blaze i Firebase Console.',
-          code: 'RESOURCE_EXHAUSTED',
-          message: error.message,
-          upgradeUrl: getFirestoreQuotaUpgradeUrl()
-        });
-      }
       console.error('Google login endpoint error:', error);
       res.status(500).json({ error: 'Inloggning med Google misslyckades: ' + (error.message || error) });
     }
@@ -3014,13 +2370,6 @@ async function startServer() {
 
       // Check if this googleId is already linked to ANOTHER user
       let existingWithGoogle: any = db.prepare('SELECT id, email FROM users WHERE google_id = ? AND id != ?').get(googleId, userId);
-      if (!existingWithGoogle) {
-        const fGoogleUser = await getFirestoreDoc(`server_users_google/${encodeURIComponent(googleId)}`);
-        if (fGoogleUser && fGoogleUser.id && fGoogleUser.id !== userId) {
-          existingWithGoogle = fGoogleUser;
-        }
-      }
-
       if (existingWithGoogle) {
         return res.status(400).json({
           error: `Detta Google-konto (${googleEmail}) är redan kopplat till ett annat konto i CoachAssist.`
@@ -3042,36 +2391,6 @@ async function startServer() {
         newAuthProvider,
         userId
       );
-
-      // Persist to Firestore
-      setFirestoreDoc(`server_users/${encodeURIComponent(userRow.email)}`, {
-        id: userRow.id,
-        email: userRow.email,
-        username: userRow.username || null,
-        google_id: googleId,
-        google_email: googleEmail,
-        avatar_url: userRow.avatar_url || picture,
-        auth_provider: newAuthProvider,
-        password_hash: userRow.password_hash,
-        created_at: userRow.created_at || Date.now()
-      }).catch(() => {});
-
-      setFirestoreDoc(`server_user_ids/${encodeURIComponent(userRow.id)}`, {
-        id: userRow.id,
-        email: userRow.email,
-        username: userRow.username || null,
-        google_id: googleId,
-        google_email: googleEmail,
-        avatar_url: userRow.avatar_url || picture,
-        auth_provider: newAuthProvider,
-        created_at: userRow.created_at || Date.now()
-      }).catch(() => {});
-
-      setFirestoreDoc(`server_users_google/${encodeURIComponent(googleId)}`, {
-        id: userRow.id,
-        email: userRow.email,
-        google_id: googleId
-      }).catch(() => {});
 
       res.json({
         success: true,
@@ -3115,40 +2434,7 @@ async function startServer() {
         });
       }
 
-      const oldGoogleId = userRow.google_id;
-
       db.prepare("UPDATE users SET google_id = NULL, google_email = NULL, auth_provider = 'local' WHERE id = ?").run(userId);
-
-      // Update Firestore
-      setFirestoreDoc(`server_users/${encodeURIComponent(userRow.email)}`, {
-        id: userRow.id,
-        email: userRow.email,
-        username: userRow.username || null,
-        google_id: null,
-        google_email: null,
-        avatar_url: userRow.avatar_url || null,
-        auth_provider: 'local',
-        password_hash: userRow.password_hash,
-        created_at: userRow.created_at || Date.now()
-      }).catch(() => {});
-
-      setFirestoreDoc(`server_user_ids/${encodeURIComponent(userRow.id)}`, {
-        id: userRow.id,
-        email: userRow.email,
-        username: userRow.username || null,
-        google_id: null,
-        google_email: null,
-        avatar_url: userRow.avatar_url || null,
-        auth_provider: 'local',
-        created_at: userRow.created_at || Date.now()
-      }).catch(() => {});
-
-      if (oldGoogleId) {
-        setFirestoreDoc(`server_users_google/${encodeURIComponent(oldGoogleId)}`, {
-          id: null,
-          unlinkedAt: Date.now()
-        }).catch(() => {});
-      }
 
       res.json({
         success: true,
@@ -3174,38 +2460,6 @@ async function startServer() {
 
       const decoded: any = verifyJwtToken(token);
       let userRow: any = db.prepare('SELECT id, email, username, google_id, google_email, avatar_url, password_hash, auth_provider FROM users WHERE id = ?').get(decoded.id);
-
-      if (!userRow) {
-        // Attempt restore from Firestore
-        const fUser = (await getFirestoreDoc(`server_user_ids/${encodeURIComponent(decoded.id)}`)) ||
-                      (decoded.email ? await getFirestoreDoc(`server_users/${encodeURIComponent(decoded.email)}`) : null);
-        
-        const userEmail = fUser?.email || decoded.email || 'user@coachassist.app';
-        const username = fUser?.username || decoded.username || null;
-        const passwordHash = fUser?.password_hash || 'restored_session';
-        const createdAt = fUser?.created_at || Date.now();
-        const googleId = fUser?.google_id || null;
-        const googleEmail = fUser?.google_email || null;
-        const avatarUrl = fUser?.avatar_url || null;
-        const authProvider = fUser?.auth_provider || 'local';
-
-        try {
-          db.prepare('INSERT OR REPLACE INTO users (id, email, username, password_hash, google_id, google_email, avatar_url, auth_provider, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)').run(
-            decoded.id,
-            userEmail,
-            username,
-            passwordHash,
-            googleId,
-            googleEmail,
-            avatarUrl,
-            authProvider,
-            createdAt
-          );
-          userRow = { id: decoded.id, email: userEmail, username, google_id: googleId, google_email: googleEmail, avatar_url: avatarUrl, password_hash: passwordHash, auth_provider: authProvider };
-        } catch (e) {
-          console.error('Error auto-restoring user in SQLite:', e);
-        }
-      }
 
       if (!userRow) {
         return res.status(404).json({ error: 'Användaren hittades inte' });
@@ -3252,13 +2506,6 @@ async function startServer() {
 
       // Check if username is taken
       let existingByUsername = db.prepare('SELECT id FROM users WHERE LOWER(username) = ? AND id != ?').get(cleanUsername, userId);
-      if (!existingByUsername) {
-        const fUser = await getFirestoreDoc(`server_usernames/${encodeURIComponent(cleanUsername)}`);
-        if (fUser && fUser.id && fUser.id !== userId) {
-          existingByUsername = fUser;
-        }
-      }
-
       if (existingByUsername) {
         return res.status(400).json({ error: `Användarnamnet '${cleanUsername}' är tyvärr redan upptaget. Välj ett annat.` });
       }
@@ -3268,31 +2515,6 @@ async function startServer() {
 
       // Find user row for full email and hash
       let userRow: any = db.prepare('SELECT * FROM users WHERE id = ?').get(userId);
-
-      // Update Firestore
-      if (userRow) {
-        setFirestoreDoc(`server_users/${encodeURIComponent(userRow.email)}`, {
-          id: userId,
-          email: userRow.email,
-          username: cleanUsername,
-          password_hash: userRow.password_hash,
-          created_at: userRow.created_at || Date.now()
-        }).catch(() => {});
-
-        setFirestoreDoc(`server_user_ids/${encodeURIComponent(userId)}`, {
-          id: userId,
-          email: userRow.email,
-          username: cleanUsername,
-          password_hash: userRow.password_hash,
-          created_at: userRow.created_at || Date.now()
-        }).catch(() => {});
-      }
-
-      setFirestoreDoc(`server_usernames/${encodeURIComponent(cleanUsername)}`, {
-        id: userId,
-        email: userRow?.email || decoded.email,
-        username: cleanUsername
-      }).catch(() => {});
 
       const newToken = jwt.sign({ id: userId, email: userRow?.email || decoded.email, username: cleanUsername }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
 
@@ -3327,30 +2549,6 @@ async function startServer() {
 
       // Update in SQLite
       db.prepare('UPDATE users SET avatar_url = ? WHERE id = ?').run(cleanPhotoUrl, userId);
-
-      // Find user row for full email
-      let userRow: any = db.prepare('SELECT * FROM users WHERE id = ?').get(userId);
-
-      // Update in Firestore
-      if (userRow?.email) {
-        setFirestoreDoc(`server_users/${encodeURIComponent(userRow.email)}`, {
-          id: userId,
-          email: userRow.email,
-          username: userRow.username || null,
-          avatar_url: cleanPhotoUrl,
-          password_hash: userRow.password_hash,
-          created_at: userRow.created_at || Date.now()
-        }).catch(() => {});
-
-        setFirestoreDoc(`server_user_ids/${encodeURIComponent(userId)}`, {
-          id: userId,
-          email: userRow.email,
-          username: userRow.username || null,
-          avatar_url: cleanPhotoUrl,
-          password_hash: userRow.password_hash,
-          created_at: userRow.created_at || Date.now()
-        }).catch(() => {});
-      }
 
       res.json({
         success: true,
@@ -3388,20 +2586,6 @@ async function startServer() {
         userRow = db.prepare('SELECT * FROM users WHERE email = ?').get(decoded.email.trim().toLowerCase());
       }
 
-      // If user row not in local SQLite, restore from Firestore
-      if (!userRow) {
-        const fUser = (await getFirestoreDoc(`server_user_ids/${encodeURIComponent(userId)}`)) ||
-                      (decoded.email ? await getFirestoreDoc(`server_users/${encodeURIComponent(decoded.email.trim().toLowerCase())}`) : null);
-        if (fUser) {
-          userRow = {
-            id: fUser.id || userId,
-            email: fUser.email || decoded.email,
-            password_hash: fUser.password_hash,
-            created_at: fUser.created_at || Date.now()
-          };
-        }
-      }
-
       if (!userRow) {
         return res.status(404).json({ error: 'Användarkontot kunde inte hittas.' });
       }
@@ -3425,22 +2609,6 @@ async function startServer() {
         newPasswordHash,
         userRow.created_at || Date.now()
       );
-
-      // Asynchronously update Cloud Firestore
-      const trimmedEmail = userRow.email.trim().toLowerCase();
-      setFirestoreDoc(`server_users/${encodeURIComponent(trimmedEmail)}`, {
-        id: userRow.id,
-        email: trimmedEmail,
-        password_hash: newPasswordHash,
-        created_at: userRow.created_at || Date.now()
-      }).catch(e => console.error('Firestore change password update error:', e));
-
-      setFirestoreDoc(`server_user_ids/${encodeURIComponent(userRow.id)}`, {
-        id: userRow.id,
-        email: trimmedEmail,
-        password_hash: newPasswordHash,
-        created_at: userRow.created_at || Date.now()
-      }).catch(e => console.error('Firestore change password update error:', e));
 
       res.json({ success: true, message: 'Ditt lösenord har uppdaterats!' });
     } catch (error: any) {
@@ -3477,43 +2645,12 @@ async function startServer() {
 
       // Check if new email is taken by another account
       let existing = db.prepare('SELECT id FROM users WHERE email = ? AND id != ?').get(cleanNewEmail, userId);
-      if (!existing) {
-        const fUser = await getFirestoreDoc(`server_users/${encodeURIComponent(cleanNewEmail)}`);
-        if (fUser && fUser.id && fUser.id !== userId) {
-          existing = fUser;
-        }
-      }
-
       if (existing) {
         return res.status(400).json({ error: 'E-postadressen används redan av ett annat konto.' });
       }
 
-      // Find current user row
-      let userRow: any = db.prepare('SELECT * FROM users WHERE id = ?').get(userId);
-      if (!userRow) {
-        const fUser = await getFirestoreDoc(`server_user_ids/${encodeURIComponent(userId)}`);
-        if (fUser) {
-          userRow = fUser;
-        }
-      }
-
       // Update in SQLite
       db.prepare('UPDATE users SET email = ? WHERE id = ?').run(cleanNewEmail, userId);
-
-      // Update in Firestore
-      setFirestoreDoc(`server_user_ids/${encodeURIComponent(userId)}`, {
-        id: userId,
-        email: cleanNewEmail,
-        password_hash: userRow?.password_hash || '',
-        created_at: userRow?.created_at || Date.now()
-      }).catch(e => console.error('Firestore user_id email update error:', e));
-
-      setFirestoreDoc(`server_users/${encodeURIComponent(cleanNewEmail)}`, {
-        id: userId,
-        email: cleanNewEmail,
-        password_hash: userRow?.password_hash || '',
-        created_at: userRow?.created_at || Date.now()
-      }).catch(e => console.error('Firestore user email update error:', e));
 
       // Issue updated token
       const newToken = jwt.sign({ id: userId, email: cleanNewEmail }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
@@ -3668,35 +2805,6 @@ async function startServer() {
         `).run(targetUserId, finalEmail, cleanUsername, passwordHash, createdAt, hasLoggedIn, tempPassword);
       }
 
-      // Firestore Sync
-      setFirestoreDoc(`server_users/${encodeURIComponent(finalEmail)}`, {
-        id: targetUserId,
-        email: finalEmail,
-        username: cleanUsername,
-        password_hash: passwordHash,
-        has_logged_in: hasLoggedIn,
-        temp_password: tempPassword,
-        created_at: createdAt
-      }).catch(() => {});
-
-      setFirestoreDoc(`server_user_ids/${encodeURIComponent(targetUserId)}`, {
-        id: targetUserId,
-        email: finalEmail,
-        username: cleanUsername,
-        password_hash: passwordHash,
-        has_logged_in: hasLoggedIn,
-        temp_password: tempPassword,
-        created_at: createdAt
-      }).catch(() => {});
-
-      if (cleanUsername) {
-        setFirestoreDoc(`server_usernames/${encodeURIComponent(cleanUsername)}`, {
-          id: targetUserId,
-          email: finalEmail,
-          username: cleanUsername
-        }).catch(() => {});
-      }
-
       res.json({
         success: true,
         user: {
@@ -3829,35 +2937,6 @@ async function startServer() {
           db.prepare(`
             UPDATE users SET username = ?, password_hash = ?, temp_password = ? WHERE id = ?
           `).run(username, passwordHash, finalTempPassword, targetId);
-        }
-
-        // Firestore Sync
-        setFirestoreDoc(`server_users/${encodeURIComponent(email)}`, {
-          id: targetId,
-          email,
-          username,
-          password_hash: passwordHash,
-          has_logged_in: hasLoggedIn,
-          temp_password: finalTempPassword,
-          created_at: createdAt
-        }).catch(() => {});
-
-        setFirestoreDoc(`server_user_ids/${encodeURIComponent(targetId)}`, {
-          id: targetId,
-          email,
-          username,
-          password_hash: passwordHash,
-          has_logged_in: hasLoggedIn,
-          temp_password: finalTempPassword,
-          created_at: createdAt
-        }).catch(() => {});
-
-        if (username) {
-          setFirestoreDoc(`server_usernames/${encodeURIComponent(username)}`, {
-            id: targetId,
-            email,
-            username
-          }).catch(() => {});
         }
 
         generatedAccounts.push({
@@ -4020,7 +3099,7 @@ async function startServer() {
   }
 
   // GET all periods endpoint for reliable recovery across clubs and local state
-  app.get('/api/periods/all', (req, res) => {
+  app.get('/api/periods/all', (_req, res) => {
     try {
       const result = getConsolidatedPeriods();
       res.json({ success: true, ...result });
@@ -4030,7 +3109,7 @@ async function startServer() {
     }
   });
 
-  // --- DOCUMENTS SYNC ENDPOINTS (Firestore simulation) ---
+  // --- DOCUMENT STORE ENDPOINTS ---
 
   // GET Document Data
   app.get('/api/docs', async (req, res) => {
@@ -4051,69 +3130,8 @@ async function startServer() {
           }
         }
 
-        // Fallback: fetch from Firestore if not found or corrupted in SQLite
-        let fDoc = null;
-        let quotaExceeded = false;
-        try {
-          fDoc = await getFirestoreDoc(`app_docs/shared_leaderboards_${id}`);
-          if (!fDoc) {
-            fDoc = await getFirestoreDoc(`shared_leaderboards/${id}`);
-          }
-
-          // Retry once if Firestore is warming up or transient delay occurs
-          if (!fDoc) {
-            await new Promise(r => setTimeout(r, 600));
-            fDoc = await getFirestoreDoc(`app_docs/shared_leaderboards_${id}`) || await getFirestoreDoc(`shared_leaderboards/${id}`);
-          }
-        } catch (fErr: any) {
-          if (fErr.status === 429 || fErr.code === 'RESOURCE_EXHAUSTED' || (fErr.message && fErr.message.toLowerCase().includes('quota'))) {
-            quotaExceeded = true;
-          }
-        }
-
-        if (fDoc) {
-          let leaderboardObj: any = null;
-          if (fDoc.data) {
-            leaderboardObj = typeof fDoc.data === 'string' ? JSON.parse(fDoc.data) : fDoc.data;
-            if (leaderboardObj && leaderboardObj.data && (leaderboardObj.data.standings || leaderboardObj.data.name)) {
-              leaderboardObj = leaderboardObj.data;
-            }
-          } else if (fDoc.standings || fDoc.name) {
-            leaderboardObj = fDoc;
-          }
-
-          if (leaderboardObj) {
-            const rawData = JSON.stringify(leaderboardObj);
-            try {
-              db.prepare('INSERT OR REPLACE INTO shared_leaderboards (id, data, updatedAt, coachUid) VALUES (?, ?, ?, ?)').run(
-                id, rawData, Date.now(), fDoc.coachUid || leaderboardObj.coachUid || null
-              );
-            } catch (sqErr) {
-              console.warn('Could not cache shared leaderboard to SQLite:', sqErr);
-            }
-            return res.json(leaderboardObj);
-          }
-        }
-
-        if (quotaExceeded) {
-          return res.status(429).json({
-            error: 'Quota exceeded',
-            message: "Quota exceeded for quota metric 'Free daily read units per project (free tier database)'",
-            status: 'RESOURCE_EXHAUSTED',
-            upgradeUrl: getFirestoreQuotaUpgradeUrl()
-          });
-        }
-
         return res.json(null);
       } catch (e: any) {
-        if (e.status === 429 || e.code === 'RESOURCE_EXHAUSTED') {
-          return res.status(429).json({
-            error: 'Quota exceeded',
-            message: "Quota exceeded for quota metric 'Free daily read units per project (free tier database)'",
-            status: 'RESOURCE_EXHAUSTED',
-            upgradeUrl: getFirestoreQuotaUpgradeUrl()
-          });
-        }
         console.error('Error fetching shared leaderboard:', e);
         res.status(500).json({ error: 'Failed to fetch shared leaderboard' });
       }
@@ -4157,65 +3175,16 @@ async function startServer() {
         return res.json(consolidated);
       }
 
-      const isForce = req.query.force === 'true' || req.query.refresh === 'true';
-      let row: any = db.prepare('SELECT data, updatedAt FROM users_data WHERE userId = ? AND segment = ?').get(userId, segment);
-      let quotaExceeded = false;
-      
-      // If we have cached local data in SQLite and this is not a forced refresh, return it immediately to avoid eating Firestore read quota!
-      if (row && !isForce && dbModeConfig.mode !== 'firestore_only') {
-        try {
-          return res.json(typeof row.data === 'string' ? JSON.parse(row.data) : row.data);
-        } catch (parseErr) {
-          console.warn('Failed to parse cached SQLite user data, falling back to remote:', parseErr);
-        }
-      }
-
-      // Query Firestore only if cache miss (!row), forced refresh (isForce), or in firestore_only mode
-      if (dbModeConfig.mode === 'firestore_only' || isForce || !row) {
-        let fDoc: any = null;
-        try {
-          fDoc = await getFirestoreDoc(`app_docs/users_${userId}_data_${segment}`);
-        } catch (fErr: any) {
-          if (fErr.status === 429 || fErr.code === 'RESOURCE_EXHAUSTED' || (fErr.message && fErr.message.toLowerCase().includes('quota'))) {
-            quotaExceeded = true;
-          }
-        }
-        if (fDoc && fDoc.data) {
-          const remoteUpdatedAt = Number(fDoc.updatedAt) || 0;
-          const localUpdatedAt = Number(row?.updatedAt) || 0;
-          if (dbModeConfig.mode === 'firestore_only' || isForce || !row || remoteUpdatedAt >= localUpdatedAt) {
-            const rawData = typeof fDoc.data === 'string' ? fDoc.data : JSON.stringify(fDoc.data);
-            db.prepare(`
-              INSERT INTO users_data (userId, segment, data, updatedAt)
-              VALUES (?, ?, ?, ?)
-              ON CONFLICT(userId, segment) DO UPDATE SET data = excluded.data, updatedAt = excluded.updatedAt
-            `).run(userId, segment, rawData, remoteUpdatedAt || Date.now());
-            return res.json(typeof fDoc.data === 'string' ? JSON.parse(fDoc.data) : fDoc.data);
-          }
-        } else if (!row) {
-          if (quotaExceeded) {
-            return res.status(429).json({
-              error: 'Quota exceeded',
-              message: "Quota exceeded for quota metric 'Free daily read units per project (free tier database)'",
-              status: 'RESOURCE_EXHAUSTED',
-              upgradeUrl: getFirestoreQuotaUpgradeUrl()
-            });
-          }
-          return res.json(null);
-        }
-      }
+      const row: any = db.prepare('SELECT data, updatedAt FROM users_data WHERE userId = ? AND segment = ?').get(userId, segment);
       if (!row) {
-        if (quotaExceeded) {
-          return res.status(429).json({
-            error: 'Quota exceeded',
-            message: "Quota exceeded for quota metric 'Free daily read units per project (free tier database)'",
-            status: 'RESOURCE_EXHAUSTED',
-            upgradeUrl: getFirestoreQuotaUpgradeUrl()
-          });
-        }
         return res.json(null);
       }
-      res.json(JSON.parse(row.data));
+      try {
+        return res.json(typeof row.data === 'string' ? JSON.parse(row.data) : row.data);
+      } catch (parseErr) {
+        console.warn('Failed to parse SQLite user data:', parseErr);
+        return res.json(null);
+      }
     } else if (pathStr.startsWith('clubs/') && pathStr.includes('/pending_requests')) {
       try {
         const parts = pathStr.split('/');
@@ -4302,164 +3271,26 @@ async function startServer() {
           return res.json(consolidated);
         }
         
-        // If we have cached local data in SQLite and this is not a forced refresh, return it immediately to avoid eating Firestore read quota!
-        if (row && !isForce && dbModeConfig.mode !== 'firestore_only') {
-          try {
-            let parsed = typeof row.data === 'string' ? JSON.parse(row.data) : row.data;
-            if (segment === 'periods' && parsed && Array.isArray(parsed.periods)) {
-              try {
-                const decodedUser: any = verifyJwtToken(token);
-                const userRow: any = db.prepare('SELECT data FROM users_data WHERE userId = ? AND segment = ?').get(decodedUser.id, 'periods');
-                if (userRow && userRow.data) {
-                  const uParsed = typeof userRow.data === 'string' ? JSON.parse(userRow.data) : userRow.data;
-                  if (uParsed && Array.isArray(uParsed.periods)) {
-                    const existingMap = new Map<string, any>();
-                    parsed.periods.forEach((p: any) => { if (p && p.id) existingMap.set(p.id, p); });
-                    let merged = false;
-                    uParsed.periods.forEach((up: any) => {
-                      if (up && up.id && (!existingMap.has(up.id) || (up.endDate && !existingMap.get(up.id)?.endDate))) {
-                        parsed.periods.push(up);
-                        merged = true;
-                      }
-                    });
-                    if (merged) {
-                      db.prepare('UPDATE clubs_data SET data = ? WHERE clubId = ? AND teamId = ? AND segment = ?')
-                        .run(JSON.stringify(parsed), clubId, teamId, segment);
-                    }
-                  }
-                }
-              } catch (_) {}
-            }
-            return res.json(parsed);
-          } catch (parseErr) {
-            console.warn('Failed to parse cached SQLite clubs data, falling back to remote:', parseErr);
-          }
-        }
-
-        // Query Firestore only if cache miss (!row), forced refresh (isForce), or in firestore_only mode
-        if (dbModeConfig.mode === 'firestore_only' || isForce || !row) {
-          let fDoc: any = null;
-          try {
-            fDoc = await getFirestoreDoc(`app_docs/clubs_${clubId}_${teamId}_${segment}`);
-          } catch (fErr: any) {
-            if (fErr.status === 429 || fErr.code === 'RESOURCE_EXHAUSTED' || (fErr.message && fErr.message.toLowerCase().includes('quota'))) {
-              quotaExceeded = true;
-            }
-          }
-          if (fDoc && fDoc.data) {
-            const remoteUpdatedAt = Number(fDoc.updatedAt) || 0;
-            const localUpdatedAt = Number(row?.updatedAt) || 0;
-            if (dbModeConfig.mode === 'firestore_only' || isForce || !row || remoteUpdatedAt >= localUpdatedAt) {
-              const rawData = typeof fDoc.data === 'string' ? fDoc.data : JSON.stringify(fDoc.data);
-              db.prepare(`
-                INSERT INTO clubs_data (clubId, teamId, segment, data, updatedAt)
-                VALUES (?, ?, ?, ?, ?)
-                ON CONFLICT(clubId, teamId, segment) DO UPDATE SET data = excluded.data, updatedAt = excluded.updatedAt
-              `).run(clubId, teamId, segment, rawData, remoteUpdatedAt || Date.now());
-              return res.json(typeof fDoc.data === 'string' ? JSON.parse(fDoc.data) : fDoc.data);
-            }
-          } else if (!row) {
-            if (quotaExceeded) {
-              return res.status(429).json({
-                error: 'Quota exceeded',
-                message: "Quota exceeded for quota metric 'Free daily read units per project (free tier database)'",
-                status: 'RESOURCE_EXHAUSTED',
-                upgradeUrl: getFirestoreQuotaUpgradeUrl()
-              });
-            }
-            return res.json(null);
-          }
-        }
+        const row: any = db.prepare('SELECT data FROM clubs_data WHERE clubId = ? AND teamId = ? AND segment = ?').get(clubId, teamId, segment);
         if (!row) {
-          if (quotaExceeded) {
-            return res.status(429).json({
-              error: 'Quota exceeded',
-              message: "Quota exceeded for quota metric 'Free daily read units per project (free tier database)'",
-              status: 'RESOURCE_EXHAUSTED',
-              upgradeUrl: getFirestoreQuotaUpgradeUrl()
-            });
-          }
           return res.json(null);
         }
-        let parsed = typeof row.data === 'string' ? JSON.parse(row.data) : row.data;
-        if (segment === 'periods' && parsed && Array.isArray(parsed.periods)) {
-          try {
-            const decodedUser: any = verifyJwtToken(token);
-            const userRow: any = db.prepare('SELECT data FROM users_data WHERE userId = ? AND segment = ?').get(decodedUser.id, 'periods');
-            if (userRow && userRow.data) {
-              const uParsed = typeof userRow.data === 'string' ? JSON.parse(userRow.data) : userRow.data;
-              if (uParsed && Array.isArray(uParsed.periods)) {
-                const existingMap = new Map<string, any>();
-                parsed.periods.forEach((p: any) => { if (p && p.id) existingMap.set(p.id, p); });
-                let merged = false;
-                uParsed.periods.forEach((up: any) => {
-                  if (up && up.id && (!existingMap.has(up.id) || (up.endDate && !existingMap.get(up.id)?.endDate))) {
-                    parsed.periods.push(up);
-                    merged = true;
-                  }
-                });
-                if (merged) {
-                  db.prepare('UPDATE clubs_data SET data = ? WHERE clubId = ? AND teamId = ? AND segment = ?')
-                    .run(JSON.stringify(parsed), clubId, teamId, segment);
-                }
-              }
-            }
-          } catch (_) {}
-        }
-        res.json(parsed);
+        res.json(typeof row.data === 'string' ? JSON.parse(row.data) : row.data);
       } catch (e: any) {
         if (e.name === 'JsonWebTokenError' || e.name === 'TokenExpiredError' || e.message === 'Invalid token' || e.message === 'No token provided') {
           return res.status(401).json({ error: 'Unauthorized', message: 'Session expired, please log in again.' });
-        }
-        if (e.status === 429 || e.code === 'RESOURCE_EXHAUSTED') {
-          return res.status(429).json({
-            error: 'Quota exceeded',
-            message: "Quota exceeded for quota metric 'Free daily read units per project (free tier database)'",
-            status: 'RESOURCE_EXHAUSTED',
-            upgradeUrl: getFirestoreQuotaUpgradeUrl()
-          });
         }
         console.error('Error fetching club data:', e);
         res.status(500).json({ error: 'Failed to fetch club data', details: e?.message });
       }
     } else if (pathStr.startsWith('admins/')) {
       try {
-        let row: any = db.prepare('SELECT data FROM system_docs WHERE path = ?').get(pathStr);
-        let quotaExceeded = false;
+        const row: any = db.prepare('SELECT data FROM system_docs WHERE path = ?').get(pathStr);
         if (!row) {
-          let fDoc: any = null;
-          try {
-            fDoc = await getFirestoreDoc(`app_docs/admins_${encodeURIComponent(pathStr)}`);
-          } catch (fErr: any) {
-            if (fErr.status === 429 || fErr.code === 'RESOURCE_EXHAUSTED') {
-              quotaExceeded = true;
-            }
-          }
-          if (fDoc && fDoc.data) {
-            const rawData = typeof fDoc.data === 'string' ? fDoc.data : JSON.stringify(fDoc.data);
-            db.prepare('INSERT OR REPLACE INTO system_docs (path, data, updatedAt) VALUES (?, ?, ?)').run(pathStr, rawData, Date.now());
-            return res.json(typeof fDoc.data === 'string' ? JSON.parse(fDoc.data) : fDoc.data);
-          }
-          if (quotaExceeded) {
-            return res.status(429).json({
-              error: 'Quota exceeded',
-              message: "Quota exceeded for quota metric 'Free daily read units per project (free tier database)'",
-              status: 'RESOURCE_EXHAUSTED',
-              upgradeUrl: getFirestoreQuotaUpgradeUrl()
-            });
-          }
           return res.json(null);
         }
         res.json(JSON.parse(row.data));
       } catch (e: any) {
-        if (e.status === 429 || e.code === 'RESOURCE_EXHAUSTED') {
-          return res.status(429).json({
-            error: 'Quota exceeded',
-            message: "Quota exceeded for quota metric 'Free daily read units per project (free tier database)'",
-            status: 'RESOURCE_EXHAUSTED',
-            upgradeUrl: getFirestoreQuotaUpgradeUrl()
-          });
-        }
         console.error('Error fetching admin doc:', e);
         res.status(500).json({ error: 'Failed to fetch admin doc' });
       }
@@ -4517,12 +3348,6 @@ async function startServer() {
           VALUES (?, ?, ?, ?)
           ON CONFLICT(id) DO UPDATE SET data = excluded.data, updatedAt = excluded.updatedAt, coachUid = excluded.coachUid
         `).run(id, serializedData, Date.now(), coachUid);
-
-        // Sync to Firestore in background
-        Promise.all([
-          setFirestoreDoc(`app_docs/shared_leaderboards_${id}`, { data: serializedData, coachUid, updatedAt: Date.now() }),
-          setFirestoreDoc(`shared_leaderboards/${id}`, typeof cleanObj === 'object' ? cleanObj : JSON.parse(serializedData))
-        ]).catch(e => console.error('Firestore shared leaderboard sync error:', e));
 
         res.json({ success: true });
       } catch (e: any) {
@@ -4599,10 +3424,6 @@ async function startServer() {
           ON CONFLICT(userId, segment) DO UPDATE SET data = excluded.data, updatedAt = excluded.updatedAt
         `).run(userId, segment, serializedData, updateTimestamp);
 
-        // Replicate to Firestore in background without delaying client sync response
-        setFirestoreDoc(`app_docs/users_${userId}_data_${segment}`, { data: serializedData, updatedAt: updateTimestamp })
-          .catch(e => console.error('Firestore user data sync error:', e));
-
         res.json({ success: true, updatedAt: updateTimestamp });
       } catch (e: any) {
         console.error('Error saving user data:', e);
@@ -4616,9 +3437,6 @@ async function startServer() {
           VALUES (?, ?, ?)
           ON CONFLICT(path) DO UPDATE SET data = excluded.data, updatedAt = excluded.updatedAt
         `).run(pathStr, serializedData, Date.now());
-
-        setFirestoreDoc(`app_docs/${encodeURIComponent(pathStr)}`, { data: serializedData, updatedAt: Date.now() })
-          .catch(e => console.error('Firestore club pending request sync error:', e));
 
         return res.json({ success: true });
       } catch (e: any) {
@@ -4681,10 +3499,6 @@ async function startServer() {
           ON CONFLICT(clubId, teamId, segment) DO UPDATE SET data = excluded.data, updatedAt = excluded.updatedAt
         `).run(clubId, teamId, segment, serializedData, updateTimestamp);
 
-        // Replicate to Firestore in background without delaying client sync response
-        setFirestoreDoc(`app_docs/clubs_${clubId}_${teamId}_${segment}`, { data: serializedData, updatedAt: updateTimestamp })
-          .catch(e => console.error('Firestore club data sync error:', e));
-
         res.json({ success: true, updatedAt: updateTimestamp });
       } catch (e: any) {
         if (e.name === 'JsonWebTokenError' || e.name === 'TokenExpiredError' || e.message === 'Invalid token' || e.message === 'No token provided') {
@@ -4706,9 +3520,6 @@ async function startServer() {
           VALUES (?, ?, ?)
           ON CONFLICT(path) DO UPDATE SET data = excluded.data, updatedAt = excluded.updatedAt
         `).run(pathStr, serializedData, Date.now());
-
-        setFirestoreDoc(`app_docs/admins_${encodeURIComponent(pathStr)}`, { data: serializedData, updatedAt: Date.now() })
-          .catch(e => console.error('Firestore admin doc sync error:', e));
 
         res.json({ success: true });
       } catch (e: any) {
@@ -4734,9 +3545,6 @@ async function startServer() {
           VALUES (?, ?, ?)
           ON CONFLICT(path) DO UPDATE SET data = excluded.data, updatedAt = excluded.updatedAt
         `).run(pathStr, serializedData, Date.now());
-
-        setFirestoreDoc(`app_docs/${encodeURIComponent(pathStr)}`, { data: serializedData, updatedAt: Date.now() })
-          .catch(e => console.error('Firestore doc sync error:', e));
 
         res.json({ success: true });
       } catch (e: any) {
@@ -4781,7 +3589,7 @@ async function startServer() {
     limits: { fileSize: 15 * 1024 * 1024 } // 15MB file size limit
   });
 
-  // Upload image with in-memory buffer + local disk + SQLite database + Cloud Firestore persistence
+  // Upload image: stored on local disk and in the database
   app.post('/api/upload', requireAuthUser, upload.any(), async (req, res) => {
     const files = req.files as Express.Multer.File[];
     if (!files || files.length === 0) {
@@ -4847,22 +3655,6 @@ async function startServer() {
           }
         } catch (_) {}
 
-        // 3. Persist to Cloud Firestore only if not in standalone local_sqlite mode
-        if (dbModeConfig.mode !== 'local_sqlite') {
-          // Double check document size limit: Firestore limit is 1MB.
-          // Base64 string must not exceed 950KB to safely fit.
-          if (base64Data.length <= 950 * 1024) {
-            try {
-              setFirestoreDoc(`server_uploads/${encodeURIComponent(filename)}`, {
-                mime_type: mimeType,
-                data_base64: base64Data,
-                created_at: Date.now()
-              }).catch(fErr => console.warn('[Upload] Firestore sync error:', fErr));
-            } catch (_) {}
-          } else {
-            console.warn(`[Upload] File ${filename} exceeds Firestore single-doc limit (${base64Data.length} chars). Saved in SQLite and disk.`);
-          }
-        }
       }
     } catch (err) {
       console.error('Failed to process uploaded file:', err);
@@ -4871,7 +3663,7 @@ async function startServer() {
     res.json({ url: fileUrl });
   });
 
-  // Serving /uploads/:filename with 3-tier fallback (Disk -> SQLite/JSON Database -> Cloud Firestore)
+  // Serving /uploads/:filename (Disk -> database)
   app.get('/uploads/:filename', async (req, res) => {
     const filename = path.basename(req.params.filename);
     const fullPath = path.join(UPLOADS_DIR, filename);
@@ -4904,30 +3696,6 @@ async function startServer() {
         return res.send(buffer);
       }
 
-      // 3. Fallback to Cloud Firestore server_uploads collection (if not in local_sqlite mode)
-      if (dbModeConfig.mode !== 'local_sqlite') {
-        const doc = await getFirestoreDoc(`server_uploads/${encodeURIComponent(filename)}`);
-        if (doc && doc.data_base64) {
-          const mimeType = doc.mime_type || 'image/jpeg';
-          const buffer = Buffer.from(doc.data_base64, 'base64');
-
-          // Restore back to SQLite & Disk
-          try {
-            db.prepare(`
-              INSERT OR REPLACE INTO uploaded_files (filename, mime_type, data_base64, created_at)
-              VALUES (?, ?, ?, ?)
-            `).run(filename, mimeType, doc.data_base64, Date.now());
-            if (!fs.existsSync(UPLOADS_DIR)) fs.mkdirSync(UPLOADS_DIR, { recursive: true });
-            fs.writeFile(fullPath, buffer, () => {});
-          } catch (restoreErr) {
-            console.warn('[Upload Restore] Error restoring to SQLite/Disk:', restoreErr);
-          }
-
-          res.setHeader('Content-Type', mimeType);
-          res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
-          return res.send(buffer);
-        }
-      }
     } catch (err) {
       console.error(`[Upload Fetch] Error retrieving /uploads/${filename}:`, err);
     }
@@ -4935,7 +3703,7 @@ async function startServer() {
     res.status(404).send('File not found');
   });
 
-  // Delete image from disk, SQLite database, and Cloud Firestore
+  // Delete image from disk and database
   app.delete('/api/delete-file', requireAuthUser, async (req, res) => {
     const filePath = req.query.path as string;
     if (!filePath) return res.status(400).send('Path is required');
@@ -4968,19 +3736,7 @@ async function startServer() {
         console.warn('[Delete File] Could not delete from DB uploaded_files:', dbErr);
       }
 
-      // 3. Remove from Cloud Firestore server_uploads and storage_files
-      if (dbModeConfig.mode !== 'local_sqlite') {
-        try {
-          await deleteFirestoreDoc(`server_uploads/${encodeURIComponent(filename)}`);
-        } catch (fErr) {
-          console.warn('[Delete File] Could not delete from Firestore server_uploads:', fErr);
-        }
-        try {
-          await deleteFirestoreDoc(`storage_files/${encodeURIComponent(filename)}`);
-        } catch (_) {}
-      }
-
-      console.log(`[Delete File] Successfully deleted ${filename} from disk, SQLite and Firestore`);
+      console.log(`[Delete File] Successfully deleted ${filename} from disk and database`);
       res.json({ success: true, deleted: filename });
     } catch (e: any) {
       console.error('Error deleting file:', e);
@@ -4989,7 +3745,7 @@ async function startServer() {
   });
 
   // --- PWA ICONS DIRECT APPLICATION ENDPOINT ---
-  app.post('/api/pwa-icons', express.json({ limit: '25mb' }), async (req, res) => {
+  app.post('/api/pwa-icons', requireRootAdmin, express.json({ limit: '25mb' }), async (req, res) => {
     try {
       const { appName, themeColor, icons, logoSrc } = req.body;
 
@@ -5029,7 +3785,7 @@ async function startServer() {
       // 1. Apply across disk locations (public, dist, root, deploy)
       applyCustomPwaIconsToDisk(customPwaIcons);
 
-      // 2. Persist to SQLite / JSON DB and Firestore
+      // 2. Persist to the database
       savePwaIconsToDatabase(customPwaIcons);
 
       res.json({
@@ -5207,11 +3963,6 @@ async function startServer() {
         let meta: any = null;
         if (metaRow) {
           meta = typeof metaRow.data === 'string' ? JSON.parse(metaRow.data) : metaRow.data;
-        } else {
-          const fMeta = await getFirestoreDoc(`app_docs/clubs_${clubId}_club_global_metadata`);
-          if (fMeta && fMeta.data) {
-            meta = typeof fMeta.data === 'string' ? JSON.parse(fMeta.data) : fMeta.data;
-          }
         }
         if (meta) {
           if (meta.clubName || meta.name) clubName = meta.clubName || meta.name;
@@ -5226,12 +3977,6 @@ async function startServer() {
       let row: any = db.prepare('SELECT data FROM clubs_data WHERE clubId = ? AND teamId = ? AND segment = ?').get(clubId, teamId, 'sessions');
       if (row) {
         sessionsData = typeof row.data === 'string' ? JSON.parse(row.data) : row.data;
-      } else {
-        // Fallback to Firestore doc
-        const fDoc = await getFirestoreDoc(`app_docs/clubs_${clubId}_${teamId}_sessions`);
-        if (fDoc && fDoc.data) {
-          sessionsData = typeof fDoc.data === 'string' ? JSON.parse(fDoc.data) : fDoc.data;
-        }
       }
 
       // Handle both raw array and stored object structure: { sessions: [...], deletedSessions: [...] }
