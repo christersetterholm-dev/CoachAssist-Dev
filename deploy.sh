@@ -14,7 +14,6 @@ set -euo pipefail
 SERVER="setterho@setterholm.se"
 SSH_KEY="$HOME/.ssh/coachassist"
 REMOTE_DIR="coachassist.setterholm.se"           # relativt hemkatalogen på servern
-NODE_VENV="nodevenv/coachassist.setterholm.se/20/bin/activate"
 SITE_URL="https://coachassist.setterholm.se"
 
 SKIP_TESTS=false
@@ -48,6 +47,17 @@ npm run build --silent
 
 step "Ansluter till servern"
 $SSH "$SERVER" "test -d ~/$REMOTE_DIR" || { echo "❌ Hittar inte ~/$REMOTE_DIR på servern"; exit 1; }
+# Den Node-version Passenger använder står i serverns .htaccess (PassengerNodejs)
+NODE_BIN=$($SSH "$SERVER" "grep -m1 '^PassengerNodejs' ~/$REMOTE_DIR/.htaccess | sed -E 's/^PassengerNodejs[[:space:]]+\"?([^\"]+)\"?.*/\\1/'" 2>/dev/null || true)
+[[ -n "$NODE_BIN" ]] || { echo "❌ Hittar inte PassengerNodejs i ~/$REMOTE_DIR/.htaccess"; exit 1; }
+ACTIVATE="export PATH=\"$(dirname "$NODE_BIN"):\$PATH\""
+NODE_VERSION=$($SSH "$SERVER" "$NODE_BIN -v" 2>/dev/null || echo "okänd")
+echo "  Node på servern: $NODE_VERSION"
+if [[ ! "$NODE_VERSION" =~ ^v(2[3-9]|[3-9][0-9])\. && ! "$NODE_VERSION" =~ ^v22\.(1[3-9]|[2-9][0-9]) ]]; then
+  echo "❌ Appen kräver Node 22.13 eller senare på servern (för inbyggd SQLite)."
+  echo "   Välj Node 22 i cPanel > Setup Node.js App och kör sedan deploy igen."
+  exit 1
+fi
 
 step "Säkerhetskopierar databasen på servern"
 $SSH "$SERVER" 'cd ~/'"$REMOTE_DIR"' && mkdir -p backups && stamp=$(date +%Y%m%d-%H%M%S) && found=0
@@ -66,7 +76,7 @@ NEW_PKG=$($SSH "$SERVER" "cat ~/$REMOTE_DIR/package.json | md5sum")
 
 if [[ "$OLD_PKG" != "$NEW_PKG" ]]; then
   step "Beroenden har ändrats – kör npm install på servern"
-  if ! $SSH "$SERVER" "source ~/$NODE_VENV && cd ~/$REMOTE_DIR && npm install --omit=dev --no-audit --no-fund"; then
+  if ! $SSH "$SERVER" "$ACTIVATE && cd ~/$REMOTE_DIR && npm install --omit=dev --no-audit --no-fund"; then
     echo "⚠️  npm install på servern misslyckades. Öppna cPanel > Setup Node.js App och klicka 'Run NPM Install'."
   fi
 fi
