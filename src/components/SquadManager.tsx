@@ -1,7 +1,7 @@
 import React, { useState, useRef, useMemo } from 'react';
 import { UserPlus, Trash2, Edit2, X, Users, Upload, FileSpreadsheet, FileText, ClipboardList, Camera, Loader2, ArrowUpDown, Check, Search, AlertTriangle, Activity } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { storage, db, ref, uploadBytes, getDownloadURL, getApiUrl, doc, getDoc } from '../lib/firebase';
+import { storage, db, ref, uploadBytes, getDownloadURL, getApiUrl, getAuthHeader, doc, getDoc } from '../lib/firebase';
 import { SquadPlayer, ClubMember, ClubTeam, TrainingSession } from '../types';
 import { deduplicateSquad } from '../lib/clubUtils';
 import * as XLSX from 'xlsx';
@@ -481,6 +481,7 @@ export default function SquadManager({ squad, sessions = [], onUpdateSquad, acti
 
       const res = await fetch(getApiUrl('/api/upload'), {
         method: 'POST',
+        headers: getAuthHeader(),
         body: formData,
       });
 

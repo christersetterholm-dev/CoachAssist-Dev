@@ -778,6 +778,125 @@ export async function requireRootAdmin(req: express.Request, res: express.Respon
   next();
 }
 
+// Kräver en giltig inloggning (vilken användare som helst).
+export function requireAuthUser(req: express.Request, res: express.Response, next: express.NextFunction) {
+  const user = extractAuthUser(req);
+  if (!user) {
+    return res.status(401).json({ error: 'Inloggning krävs.' });
+  }
+  (req as any).user = user;
+  next();
+}
+
+// E-postadresser som ger root-admin-behörighet får inte tas i anspråk via
+// registrering, e-postbyte eller kontoadministration (bara via Google-inloggning
+// eller av kontot som redan äger adressen).
+export function isReservedAdminEmail(email?: string | null): boolean {
+  if (!email || typeof email !== 'string') return false;
+  const clean = email.trim().toLowerCase();
+  if (isRootAdminEmail(clean)) return true;
+  try {
+    const row: any = db.prepare("SELECT data FROM system_docs WHERE path = 'admins/root_admins_list'").get();
+    if (row && row.data) {
+      const parsed = typeof row.data === 'string' ? JSON.parse(row.data) : row.data;
+      if (parsed && Array.isArray(parsed.admins)) {
+        return parsed.admins.some((a: any) => (a.email || '').trim().toLowerCase() === clean);
+      }
+    }
+  } catch (_) {}
+  return false;
+}
+
+export function emailOwnedByOtherUser(email: string, userId: string): boolean {
+  try {
+    const row: any = db.prepare('SELECT id FROM users WHERE LOWER(email) = ?').get(email.trim().toLowerCase());
+    return !!row && row.id !== userId;
+  } catch (_) {
+    return false;
+  }
+}
+
+export interface MemberScope {
+  userIds: Set<string>;
+  emails: Set<string>;
+}
+
+// Samlar alla medlemmar i de klubbar där användaren är admin eller tränare.
+export function getManagedMemberScope(user: any): MemberScope {
+  const scope: MemberScope = { userIds: new Set(), emails: new Set() };
+  if (!user) return scope;
+  const callerId = String(user.id || '');
+  const callerEmail = String(user.email || '').trim().toLowerCase();
+
+  let rows: any[] = [];
+  try {
+    rows = db.prepare("SELECT clubId, data FROM clubs_data WHERE teamId = 'club_global' AND segment = 'members'").all();
+  } catch (_) {
+    return scope;
+  }
+
+  for (const row of rows) {
+    let parsed: any = null;
+    try { parsed = typeof row.data === 'string' ? JSON.parse(row.data) : row.data; } catch (_) { continue; }
+    const members: any[] = Array.isArray(parsed) ? parsed : (Array.isArray(parsed?.members) ? parsed.members : []);
+    const isManager = members.some((m: any) => {
+      if (!m) return false;
+      const sameUser = (callerId && m.userId === callerId) ||
+        (callerEmail && typeof m.email === 'string' && m.email.trim().toLowerCase() === callerEmail);
+      const roles: string[] = Array.isArray(m.roles) ? m.roles : [];
+      return sameUser && (roles.includes('admin') || roles.includes('coach'));
+    });
+    if (!isManager) continue;
+    for (const m of members) {
+      if (!m) continue;
+      if (m.userId) scope.userIds.add(String(m.userId));
+      if (typeof m.email === 'string' && m.email.trim()) scope.emails.add(m.email.trim().toLowerCase());
+    }
+  }
+  return scope;
+}
+
+export function isAccountClaimed(userRow: any): boolean {
+  if (!userRow) return false;
+  return userRow.has_logged_in === 1 ||
+    (!!userRow.password_hash && (!userRow.temp_password || String(userRow.temp_password).trim() === ''));
+}
+
+export interface AdminContext {
+  user: any;
+  isRoot: boolean;
+  scope: MemberScope | null; // null = obegränsad (root admin)
+}
+
+// Root admin får hantera alla konton. Klubbadmins och tränare får bara hantera
+// medlemmar i sina egna klubbar.
+export async function getAdminContext(req: express.Request): Promise<AdminContext | null> {
+  const user = extractAuthUser(req);
+  if (!user) return null;
+  const isRoot = await verifyIsRootAdmin(user);
+  return { user, isRoot, scope: isRoot ? null : getManagedMemberScope(user) };
+}
+
+export function isInScope(ctx: AdminContext, userId?: string | null, email?: string | null): boolean {
+  if (ctx.isRoot || !ctx.scope) return true;
+  if (userId && ctx.scope.userIds.has(String(userId))) return true;
+  if (email && ctx.scope.emails.has(String(email).trim().toLowerCase())) return true;
+  return false;
+}
+
+// Klubbadmins/tränare får bara röra konton som ännu inte aktiverats av
+// medlemmen själv (tillfälligt lösenord). Aktiverade konton ägs av användaren.
+export function canManageAccount(ctx: AdminContext, userRow: any, targetId: string, email?: string | null): boolean {
+  if (ctx.isRoot) return true;
+  if (userRow) {
+    if (isAccountClaimed(userRow)) return false;
+    if (isReservedAdminEmail(userRow.email)) return false;
+    return isInScope(ctx, userRow.id, userRow.email);
+  }
+  if (email && isReservedAdminEmail(email)) return false;
+  return isInScope(ctx, targetId, email);
+}
+
 async function ensureJwtSecret(): Promise<string> {
   return JWT_SECRET;
 }
@@ -2171,6 +2290,10 @@ async function startServer() {
     const trimmedEmail = email.trim().toLowerCase();
     const trimmedUsername = username ? username.trim().toLowerCase() : '';
 
+    if (isReservedAdminEmail(trimmedEmail)) {
+      return res.status(400).json({ error: 'Denna e-postadress är reserverad. Logga in med Google i stället.' });
+    }
+
     if (trimmedUsername) {
       if (!/^[a-zA-Z0-9_\.-]{3,20}$/.test(trimmedUsername)) {
         return res.status(400).json({
@@ -3345,6 +3468,10 @@ async function startServer() {
 
       const cleanNewEmail = newEmail.trim().toLowerCase();
 
+      if (isReservedAdminEmail(cleanNewEmail) && cleanNewEmail !== String(decoded.email || '').trim().toLowerCase()) {
+        return res.status(400).json({ error: 'Denna e-postadress är reserverad och kan inte användas.' });
+      }
+
       // Check if new email is taken by another account
       let existing = db.prepare('SELECT id FROM users WHERE email = ? AND id != ?').get(cleanNewEmail, userId);
       if (!existing) {
@@ -3406,18 +3533,28 @@ async function startServer() {
 
   // --- ADMIN USER MANAGEMENT ENDPOINTS ---
 
-  const checkAdminPermission = (req: express.Request): boolean => {
-    const user = extractAuthUser(req);
-    if (!user) return false;
-    return true;
+  // Returnerar admin-kontexten, eller skickar 401/403 och returnerar null.
+  const requireAdminContext = async (req: express.Request, res: express.Response): Promise<AdminContext | null> => {
+    const ctx = await getAdminContext(req);
+    if (!ctx) {
+      res.status(401).json({ error: 'Inloggning krävs.' });
+      return null;
+    }
+    if (!ctx.isRoot && ctx.scope && ctx.scope.userIds.size === 0 && ctx.scope.emails.size === 0) {
+      res.status(403).json({ error: 'Åtkomst nekad: Endast klubbadministratörer och tränare kan hantera konton.' });
+      return null;
+    }
+    return ctx;
   };
 
   // GET /api/admin/users - List registered accounts
   app.get('/api/admin/users', async (req, res) => {
-    if (!checkAdminPermission(req)) return res.status(401).json({ error: 'Unauthorized' });
+    const adminCtx = await requireAdminContext(req, res);
+    if (!adminCtx) return;
 
     try {
-      const usersRows = db.prepare('SELECT id, email, username, password_hash, has_logged_in, temp_password, created_at FROM users').all();
+      const allUsersRows = db.prepare('SELECT id, email, username, password_hash, has_logged_in, temp_password, created_at FROM users').all();
+      const usersRows = allUsersRows.filter((u: any) => isInScope(adminCtx, u.id, u.email));
 
       const result = usersRows.map((u: any) => {
         const isLogged = u.has_logged_in === 1 || (!!u.password_hash && (!u.temp_password || u.temp_password.trim() === ''));
@@ -3440,7 +3577,8 @@ async function startServer() {
 
   // POST /api/admin/users/update - Create or update single user credentials
   app.post('/api/admin/users/update', async (req, res) => {
-    if (!checkAdminPermission(req)) return res.status(401).json({ error: 'Unauthorized' });
+    const adminCtx = await requireAdminContext(req, res);
+    if (!adminCtx) return;
 
     try {
       const { userId, newEmail, newUsername, newPassword, resetLoggedInStatus } = req.body;
@@ -3450,6 +3588,20 @@ async function startServer() {
       const cleanUsername = newUsername ? newUsername.trim().toLowerCase() : null;
 
       let userRow: any = db.prepare('SELECT * FROM users WHERE id = ?').get(targetUserId);
+
+      if (!adminCtx.isRoot) {
+        if (!canManageAccount(adminCtx, userRow, targetUserId, cleanEmail)) {
+          return res.status(403).json({
+            error: userRow && isAccountClaimed(userRow)
+              ? 'Kontot är redan aktiverat av medlemmen och kan bara ändras av medlemmen själv eller av en root-administratör.'
+              : 'Åtkomst nekad: Kontot tillhör inte någon av dina klubbar.'
+          });
+        }
+      }
+
+      if (cleanEmail && isReservedAdminEmail(cleanEmail) && cleanEmail !== String(userRow?.email || '').trim().toLowerCase()) {
+        return res.status(400).json({ error: 'E-postadressen är reserverad och kan inte tilldelas detta konto.' });
+      }
 
       if (cleanUsername) {
         if (!/^[a-zA-Z0-9_\.-]{3,20}$/.test(cleanUsername)) {
@@ -3561,7 +3713,8 @@ async function startServer() {
 
   // POST /api/admin/users/bulk-generate - Bulk generate credentials for members
   app.post('/api/admin/users/bulk-generate', async (req, res) => {
-    if (!checkAdminPermission(req)) return res.status(401).json({ error: 'Unauthorized' });
+    const adminCtx = await requireAdminContext(req, res);
+    if (!adminCtx) return;
 
     try {
 
@@ -3624,6 +3777,27 @@ async function startServer() {
         if (emailOwner && emailOwner.id !== targetId) {
           userRow = emailOwner;
           targetId = emailOwner.id;
+        }
+
+        // Klubbadmins/tränare får inte ändra aktiverade konton, konton utanför
+        // sina klubbar eller reserverade admin-adresser.
+        if (!adminCtx.isRoot && !canManageAccount(adminCtx, userRow, targetId, email)) {
+          if (userRow && isAccountClaimed(userRow) && isInScope(adminCtx, userRow.id, userRow.email)) {
+            generatedAccounts.push({
+              memberId: m.id,
+              name: m.name || 'Medlem',
+              role: m.role || 'Spelare',
+              id: userRow.id,
+              email: userRow.email,
+              username: userRow.username || null,
+              hasLoggedIn: true,
+              tempPassword: null
+            });
+          }
+          continue;
+        }
+        if (isReservedAdminEmail(email) && (!userRow || String(userRow.email || '').trim().toLowerCase() !== email.trim().toLowerCase())) {
+          continue;
         }
 
         const username = (userRow?.username && userRow.username.trim() !== '') ? userRow.username : generateUsername(m.name || m.fullName || '', email, targetId);
@@ -4539,7 +4713,17 @@ async function startServer() {
         res.status(500).json({ error: 'Failed to save admin doc' });
       }
     } else {
-      // General document save fallback into system_docs
+      // General document save fallback into system_docs.
+      // Kräver inloggning. Endast förfrågningar om medlemskap får skrivas av vanliga
+      // användare; allt annat (t.ex. system/*) kräver root-admin.
+      const fallbackUser = extractAuthUser(req);
+      if (!fallbackUser) {
+        return res.status(401).json({ error: 'Inloggning krävs.' });
+      }
+      const isPendingUserRequest = /^pending_user_requests\/[^/]+$/.test(pathStr);
+      if (!isPendingUserRequest && !(await verifyIsRootAdmin(fallbackUser))) {
+        return res.status(403).json({ error: 'Åtkomst nekad.' });
+      }
       try {
         const serializedData = typeof data === 'string' ? data : JSON.stringify(data);
         db.prepare(`
@@ -4564,6 +4748,19 @@ async function startServer() {
     const pathStr = req.query.path as string;
     if (!pathStr) return res.status(400).send('Path is required');
 
+    // Kräver inloggning. Vanliga användare får bara ta bort förfrågningar om
+    // medlemskap; allt annat kräver root-admin.
+    const deleteUser = extractAuthUser(req);
+    if (!deleteUser) {
+      return res.status(401).json({ error: 'Inloggning krävs.' });
+    }
+    const isPendingRequestPath =
+      /^pending_user_requests\/[^/]+$/.test(pathStr) ||
+      /^clubs\/[^/]+\/pending_requests\/[^/]+$/.test(pathStr);
+    if (!isPendingRequestPath && !(await verifyIsRootAdmin(deleteUser))) {
+      return res.status(403).json({ error: 'Åtkomst nekad.' });
+    }
+
     try {
       db.prepare('DELETE FROM system_docs WHERE path = ?').run(pathStr);
       res.json({ success: true });
@@ -4582,7 +4779,7 @@ async function startServer() {
   });
 
   // Upload image with in-memory buffer + local disk + SQLite database + Cloud Firestore persistence
-  app.post('/api/upload', upload.any(), async (req, res) => {
+  app.post('/api/upload', requireAuthUser, upload.any(), async (req, res) => {
     const files = req.files as Express.Multer.File[];
     if (!files || files.length === 0) {
       return res.status(400).json({ error: 'Ingen fil skickades med' });
@@ -4736,7 +4933,7 @@ async function startServer() {
   });
 
   // Delete image from disk, SQLite database, and Cloud Firestore
-  app.delete('/api/delete-file', async (req, res) => {
+  app.delete('/api/delete-file', requireAuthUser, async (req, res) => {
     const filePath = req.query.path as string;
     if (!filePath) return res.status(400).send('Path is required');
 

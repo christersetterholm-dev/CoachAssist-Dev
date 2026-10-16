@@ -873,6 +873,12 @@ export const ref = (_storageObj: any, path: string) => {
   return { path };
 };
 
+// Authorization-header för anrop som kräver inloggning (t.ex. bilduppladdning).
+export const getAuthHeader = (): Record<string, string> => {
+  const token = localStorage.getItem('token');
+  return token && token !== 'null' && token !== 'undefined' ? { Authorization: `Bearer ${token}` } : {};
+};
+
 export const uploadBytes = async (storageRef: { path: string }, blob: Blob) => {
   const token = localStorage.getItem('token');
   const formData = new FormData();

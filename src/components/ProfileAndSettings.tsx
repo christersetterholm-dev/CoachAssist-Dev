@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { User, Phone, Fingerprint, Check, Save, AtSign, Lock, Key, Eye, EyeOff, ShieldCheck, AlertCircle, Landmark, Info, Link2, Unlink, Camera, Upload, Trash2, Loader2, VibrateOff } from 'lucide-react';
 import { UserProfile, Club, ClubMetadata, ClubMember } from '../types';
-import { db, getApiUrl, auth, linkGoogleAccount, unlinkGoogleAccount, storage, ref, uploadBytes, getDownloadURL, doc, getDoc, setDoc } from '../lib/firebase';
+import { db, getApiUrl, getAuthHeader, auth, linkGoogleAccount, unlinkGoogleAccount, storage, ref, uploadBytes, getDownloadURL, doc, getDoc, setDoc } from '../lib/firebase';
 import ImageCropper from './ImageCropper';
 
 interface ProfileAndSettingsProps {
@@ -200,6 +200,7 @@ export default function ProfileAndSettings({
 
       const res = await fetch(getApiUrl('/api/upload'), {
         method: 'POST',
+        headers: getAuthHeader(),
         body: formData,
       });
 
