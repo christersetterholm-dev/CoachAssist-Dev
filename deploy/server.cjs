@@ -29,6 +29,11 @@ var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: tru
 // server.ts
 var server_exports = {};
 __export(server_exports, {
+  JWT_EXPIRES_IN: () => JWT_EXPIRES_IN,
+  extractAuthUser: () => extractAuthUser,
+  isRootAdminEmail: () => isRootAdminEmail,
+  requireRootAdmin: () => requireRootAdmin,
+  verifyIsRootAdmin: () => verifyIsRootAdmin,
   verifyJwtToken: () => verifyJwtToken
 });
 module.exports = __toCommonJS(server_exports);
@@ -41,7 +46,10 @@ var import_bcryptjs = __toESM(require("bcryptjs"), 1);
 var import_jsonwebtoken = __toESM(require("jsonwebtoken"), 1);
 var import_multer = __toESM(require("multer"), 1);
 var import_nodemailer = __toESM(require("nodemailer"), 1);
+var import_http = __toESM(require("http"), 1);
 var import_https = __toESM(require("https"), 1);
+var import_dns = __toESM(require("dns"), 1);
+var import_net = __toESM(require("net"), 1);
 var import_url = require("url");
 var import_module = require("module");
 var import_meta = {};
@@ -56,6 +64,13 @@ try {
 } catch (err) {
   console.warn("[SQLite] better-sqlite3 native addon not usable (" + (err?.message || err) + "). Using zero-dependency persistent JSON database engine.");
   Database = null;
+}
+var sharpModule = null;
+try {
+  sharpModule = customRequire("sharp");
+  console.log("[Sharp] sharp image processing addon loaded successfully.");
+} catch (err) {
+  console.warn("[Sharp] sharp addon note:", err?.message || err);
 }
 function createFallbackDatabase(dataDir) {
   const storageFilePath = import_path.default.join(dataDir, "coachassist_db.json");
@@ -166,24 +181,24 @@ function createFallbackDatabase(dataDir) {
           if (cleanSql.includes("FROM users_data")) {
             const [userId, segment] = params;
             const key = `${userId}:::${segment}`;
-            const row = store.users_data[key];
-            if (!row) return void 0;
-            return { data: row.data, updatedAt: row.updatedAt };
+            const row2 = store.users_data[key];
+            if (!row2) return void 0;
+            return { data: row2.data, updatedAt: row2.updatedAt };
           }
           if (cleanSql.includes("FROM clubs_data")) {
             const [clubId, teamId, segment] = params;
             const key = `${clubId}:::${teamId}:::${segment}`;
-            const row = store.clubs_data[key];
-            if (!row) return void 0;
-            if (cleanSql.includes("SELECT data FROM")) return { data: row.data };
-            return { data: row.data, updatedAt: row.updatedAt };
+            const row2 = store.clubs_data[key];
+            if (!row2) return void 0;
+            if (cleanSql.includes("SELECT data FROM")) return { data: row2.data };
+            return { data: row2.data, updatedAt: row2.updatedAt };
           }
           if (cleanSql.includes("FROM shared_leaderboards")) {
             const id = String(params[0] || "");
-            const row = store.shared_leaderboards[id];
-            if (!row) return void 0;
-            if (cleanSql.includes("SELECT data FROM")) return { data: row.data };
-            return row;
+            const row2 = store.shared_leaderboards[id];
+            if (!row2) return void 0;
+            if (cleanSql.includes("SELECT data FROM")) return { data: row2.data };
+            return row2;
           }
           if (cleanSql.includes("FROM uploaded_files")) {
             const filename = String(params[0] || "");
@@ -209,7 +224,24 @@ function createFallbackDatabase(dataDir) {
         },
         all: (...params) => {
           if (cleanSql.includes("FROM system_docs")) {
-            return Object.values(store.system_docs);
+            const allDocs = Object.values(store.system_docs);
+            if (cleanSql.includes("path = ? OR path LIKE ?")) {
+              const exact = String(params[0] || "");
+              const prefix = String(params[1] || "").replace(/%/g, "");
+              return allDocs.filter((d) => d.path === exact || prefix && d.path.startsWith(prefix));
+            }
+            if (cleanSql.includes("path = 'pending_user_requests' OR path LIKE 'pending_user_requests/%'")) {
+              return allDocs.filter((d) => d.path === "pending_user_requests" || d.path.startsWith("pending_user_requests/"));
+            }
+            if (cleanSql.includes("path = ?")) {
+              const target = String(params[0] || "");
+              return allDocs.filter((d) => d.path === target);
+            }
+            if (cleanSql.includes("path LIKE ?")) {
+              const prefix = String(params[0] || "").replace(/%/g, "");
+              return allDocs.filter((d) => prefix && d.path.startsWith(prefix));
+            }
+            return allDocs;
           }
           if (cleanSql.includes("FROM users_data")) {
             return Object.values(store.users_data);
@@ -576,19 +608,36 @@ function initDatabase() {
   }
 }
 var db = initDatabase();
-var DEFAULT_JWT_SECRET = "coachassist-production-jwt-stable-secret-2024-k98z";
-var JWT_SECRET = process.env.JWT_SECRET || "";
+function isCompromisedSecret(secret) {
+  if (!secret) return true;
+  const hash = import_crypto.default.createHash("sha256").update(secret).digest("hex");
+  const blacklistedHashes = [
+    "f6a5e8e13a8a6b7fca2ae4fee98a4e00cf007a224d68274c9646da8a6e6ad2d1",
+    "2a8b1bdaf7f7e9caba40dce80f3cfc6af82efb4712b5ace24441f71d6b2229cb",
+    "c8d30878c15c702a9f8fabbb3c70b55113b411c2d90a7672d31579e05599996d"
+  ];
+  return blacklistedHashes.includes(hash);
+}
+var JWT_SECRET = (process.env.JWT_SECRET || "").trim();
+if (JWT_SECRET && isCompromisedSecret(JWT_SECRET)) {
+  console.warn("[Security Warning] JWT_SECRET matches a known compromised repository secret! Discarding it.");
+  JWT_SECRET = "";
+}
 try {
   if (!JWT_SECRET) {
-    const row = db.prepare("SELECT data FROM system_docs WHERE path = 'system/jwt_secret'").get();
-    if (row && row.data) {
-      JWT_SECRET = typeof row.data === "string" ? JSON.parse(row.data) : row.data;
+    const row2 = db.prepare("SELECT data FROM system_docs WHERE path = 'system/jwt_secret'").get();
+    if (row2 && row2.data) {
+      const stored = typeof row2.data === "string" ? JSON.parse(row2.data) : row2.data;
+      if (stored && typeof stored === "string" && !isCompromisedSecret(stored)) {
+        JWT_SECRET = stored;
+      }
     }
   }
 } catch (_) {
 }
 if (!JWT_SECRET) {
-  JWT_SECRET = DEFAULT_JWT_SECRET;
+  JWT_SECRET = import_crypto.default.randomBytes(32).toString("hex");
+  console.log("[Security] Generated a fresh random JWT_SECRET for this installation.");
   try {
     db.prepare("INSERT OR REPLACE INTO system_docs (path, data, updatedAt) VALUES ('system/jwt_secret', ?, ?)").run(
       JSON.stringify(JWT_SECRET),
@@ -597,35 +646,158 @@ if (!JWT_SECRET) {
   } catch (_) {
   }
 }
+var JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || "30d";
 function verifyJwtToken(token) {
   if (!token) {
-    const err2 = new Error("No token provided");
-    err2.name = "JsonWebTokenError";
-    throw err2;
+    const err = new Error("No token provided");
+    err.name = "JsonWebTokenError";
+    throw err;
   }
-  const candidateSecrets = [
-    JWT_SECRET,
-    DEFAULT_JWT_SECRET,
-    "45ab84c45ca71d2b2e293fdcf16b142607d8415b87af8954ce2fc799b6803275",
-    "coachassist-secure-jwt-secret-key-2024"
-  ];
-  for (const secret of candidateSecrets) {
-    if (!secret) continue;
-    try {
-      return import_jsonwebtoken.default.verify(token, secret);
-    } catch (_) {
+  return import_jsonwebtoken.default.verify(token, JWT_SECRET);
+}
+function extractAuthUser(req) {
+  const authHeader = req.headers.authorization;
+  let token = null;
+  if (authHeader) {
+    const authStr = Array.isArray(authHeader) ? authHeader[0] : authHeader;
+    const parts = authStr.split(" ");
+    token = parts.length > 1 ? parts[1] : parts[0];
+  } else if (req.query && typeof req.query.token === "string") {
+    token = req.query.token;
+  }
+  if (!token || token === "null" || token === "undefined") {
+    return null;
+  }
+  try {
+    const decoded = verifyJwtToken(token);
+    return decoded && (decoded.id || decoded.email) ? decoded : null;
+  } catch {
+    return null;
+  }
+}
+function isRootAdminEmail(email) {
+  if (!email || typeof email !== "string") return false;
+  const clean = email.trim().toLowerCase();
+  const envAdmins = (process.env.ADMIN_EMAILS || "christer.setterholm@gmail.com,christer@setterholm.se").split(",").map((e) => e.trim().toLowerCase()).filter(Boolean);
+  return envAdmins.includes(clean);
+}
+async function verifyIsRootAdmin(user) {
+  if (!user) return false;
+  const email = (user.email || user.google_email || "").trim().toLowerCase();
+  if (isRootAdminEmail(email)) return true;
+  try {
+    const row2 = db.prepare("SELECT data FROM system_docs WHERE path = 'admins/root_admins_list'").get();
+    if (row2 && row2.data) {
+      const parsed = typeof row2.data === "string" ? JSON.parse(row2.data) : row2.data;
+      if (parsed && Array.isArray(parsed.admins)) {
+        if (parsed.admins.some((a) => (a.email || "").trim().toLowerCase() === email)) {
+          return true;
+        }
+      }
     }
+  } catch (_) {
   }
-  const decoded = import_jsonwebtoken.default.decode(token);
-  if (decoded && decoded.id && (decoded.email || decoded.username)) {
-    return decoded;
+  return false;
+}
+async function requireRootAdmin(req, res, next) {
+  const user = extractAuthUser(req);
+  if (!user) {
+    return res.status(401).json({ error: "Inloggning kr\xE4vs. V\xE4nligen logga in som administrat\xF6r." });
   }
-  const err = new Error("Invalid token");
-  err.name = "JsonWebTokenError";
-  throw err;
+  const isRoot = await verifyIsRootAdmin(user);
+  if (!isRoot) {
+    return res.status(403).json({ error: "\xC5tkomst nekad: Endast administrat\xF6r har beh\xF6righet till denna \xE5tg\xE4rd." });
+  }
+  req.user = user;
+  next();
 }
 async function ensureJwtSecret() {
   return JWT_SECRET;
+}
+function isPrivateOrReservedIp(ip) {
+  let cleanIp = ip;
+  if (cleanIp.startsWith("::ffff:")) {
+    cleanIp = cleanIp.replace("::ffff:", "");
+  }
+  if (import_net.default.isIPv4(cleanIp)) {
+    const parts = cleanIp.split(".").map(Number);
+    if (parts.length !== 4 || parts.some(isNaN)) return true;
+    if (parts[0] === 0) return true;
+    if (parts[0] === 10) return true;
+    if (parts[0] === 100 && parts[1] >= 64 && parts[1] <= 127) return true;
+    if (parts[0] === 127) return true;
+    if (parts[0] === 169 && parts[1] === 254) return true;
+    if (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31) return true;
+    if (parts[0] === 192 && parts[1] === 0 && parts[2] === 0) return true;
+    if (parts[0] === 192 && parts[1] === 0 && parts[2] === 2) return true;
+    if (parts[0] === 192 && parts[1] === 168) return true;
+    if (parts[0] === 198 && (parts[1] === 18 || parts[1] === 19)) return true;
+    if (parts[0] === 198 && parts[1] === 51 && parts[2] === 100) return true;
+    if (parts[0] === 203 && parts[1] === 0 && parts[2] === 113) return true;
+    if (parts[0] >= 224) return true;
+    return false;
+  }
+  if (import_net.default.isIPv6(cleanIp)) {
+    const lower = cleanIp.toLowerCase();
+    if (lower === "::1" || lower === "0:0:0:0:0:0:0:1") return true;
+    if (lower === "::" || lower === "0:0:0:0:0:0:0:0") return true;
+    if (lower.startsWith("fc") || lower.startsWith("fd")) return true;
+    if (lower.startsWith("fe8") || lower.startsWith("fe9") || lower.startsWith("fea") || lower.startsWith("feb")) return true;
+    if (lower.startsWith("fec") || lower.startsWith("fed") || lower.startsWith("fee") || lower.startsWith("fef")) return true;
+    if (lower.startsWith("::") && lower.includes(".")) return true;
+    return false;
+  }
+  return true;
+}
+var safeDnsLookup = (hostname, options, callback) => {
+  import_dns.default.lookup(hostname, options, (err, address, family) => {
+    if (err) return callback(err);
+    const addresses = Array.isArray(address) ? address : [{ address, family }];
+    for (const item of addresses) {
+      const ip = typeof item === "string" ? item : item.address;
+      if (ip && isPrivateOrReservedIp(ip)) {
+        return callback(new Error(`SSRF blocked: IP-adress ${ip} \xE4r privat eller intern.`));
+      }
+    }
+    return callback(null, address, family);
+  });
+};
+var safeHttpAgent = new import_http.default.Agent({ lookup: safeDnsLookup });
+var safeHttpsAgent = new import_https.default.Agent({ lookup: safeDnsLookup });
+async function validateSafeExternalUrl(targetUrl) {
+  let parsed;
+  try {
+    parsed = new URL(targetUrl);
+  } catch {
+    return { valid: false, error: "Ogiltig URL-adress" };
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    return { valid: false, error: "Endast HTTP och HTTPS-protokoll st\xF6ds" };
+  }
+  const hostname = parsed.hostname.toLowerCase();
+  if (hostname === "localhost" || hostname === "127.0.0.1" || hostname === "0.0.0.0" || hostname === "::1" || hostname.endsWith(".localhost") || hostname.endsWith(".local") || hostname.endsWith(".internal") || hostname === "metadata.google.internal" || hostname === "metadata" || hostname === "instance-data") {
+    return { valid: false, error: "\xC5tkomst till lokala eller interna n\xE4tverksadresser \xE4r blockerad av s\xE4kerhetssk\xE4l (SSRF-skydd)." };
+  }
+  if (import_net.default.isIP(hostname)) {
+    if (isPrivateOrReservedIp(hostname)) {
+      return { valid: false, error: "\xC5tkomst till privata eller interna IP-adresser \xE4r blockerad (SSRF-skydd)." };
+    }
+    return { valid: true, urlObj: parsed };
+  }
+  try {
+    const addresses = await import_dns.default.promises.lookup(hostname, { all: true });
+    if (!addresses || addresses.length === 0) {
+      return { valid: false, error: "Kunde inte sl\xE5 upp dom\xE4nnamnet." };
+    }
+    for (const addr of addresses) {
+      if (isPrivateOrReservedIp(addr.address)) {
+        return { valid: false, error: `Dom\xE4nen ${hostname} pekar mot en privat eller reserverad IP-adress (${addr.address}) och kan inte anropas.` };
+      }
+    }
+  } catch (err) {
+    return { valid: false, error: `DNS-uppslagning misslyckades: ${err.message}` };
+  }
+  return { valid: true, urlObj: parsed };
 }
 var rateLimitMap = /* @__PURE__ */ new Map();
 setInterval(() => {
@@ -861,6 +1033,25 @@ async function setFirestoreDoc(docPath, data) {
     return false;
   }
 }
+async function deleteFirestoreDoc(docPath) {
+  if (dbModeConfig.mode === "local_sqlite") {
+    return true;
+  }
+  const { baseUrl, apiKey } = getActiveFirestoreParams();
+  if (!baseUrl || !apiKey) return false;
+  try {
+    const encodedPath = docPath.split("/").map(encodeURIComponent).join("/");
+    const url = `${baseUrl}/${encodedPath}?key=${apiKey}`;
+    const res = await import_axios.default.delete(url, {
+      validateStatus: (s) => s <= 500,
+      timeout: 5e3
+    });
+    return res.status === 200 || res.status === 404;
+  } catch (e) {
+    console.error(`Firestore DELETE error for ${docPath}:`, e.message);
+    return false;
+  }
+}
 var customPwaIcons = null;
 function applyCustomPwaIconsToDisk(iconsObj) {
   const rootDir = process.cwd();
@@ -1021,9 +1212,9 @@ function savePwaIconsToDatabase(pwaData) {
 }
 async function loadAndApplyPwaIcons() {
   try {
-    const row = db.prepare("SELECT data FROM system_docs WHERE path = 'system/pwa_icons'").get();
-    if (row && row.data) {
-      const parsed = typeof row.data === "string" ? JSON.parse(row.data) : row.data;
+    const row2 = db.prepare("SELECT data FROM system_docs WHERE path = 'system/pwa_icons'").get();
+    if (row2 && row2.data) {
+      const parsed = typeof row2.data === "string" ? JSON.parse(row2.data) : row2.data;
       if (parsed && parsed.files && Object.keys(parsed.files).length > 0) {
         customPwaIcons = {
           appName: parsed.appName || "KSK-appen",
@@ -1283,7 +1474,7 @@ async function startServer() {
   app.get("/api/health", (_req, res) => {
     res.json({ status: "ok", db: "sqlite", mode: dbModeConfig.mode });
   });
-  app.get("/api/system/db-config", (_req, res) => {
+  app.get("/api/system/db-config", requireRootAdmin, (_req, res) => {
     let dbSize = 0;
     let actualDbPath = DB_PATH;
     let dbEngine = Database ? "sqlite" : "json_store";
@@ -1320,7 +1511,7 @@ async function startServer() {
       updatedBy: dbModeConfig.updatedBy
     });
   });
-  app.post("/api/system/db-config", (req, res) => {
+  app.post("/api/system/db-config", requireRootAdmin, (req, res) => {
     const { mode, customFirestoreProjectId, customFirestoreApiKey, customRemoteUrl } = req.body;
     if (!mode || !["hybrid", "local_sqlite", "firestore_only"].includes(mode)) {
       return res.status(400).json({ error: "Ogiltigt databasl\xE4ge. V\xE4lj hybrid, local_sqlite eller firestore_only." });
@@ -1347,13 +1538,18 @@ async function startServer() {
       res.status(500).json({ error: "Kunde inte spara databasinst\xE4llningar" });
     }
   });
-  app.get("/api/system/db-export", (_req, res) => {
+  app.get("/api/system/db-export", requireRootAdmin, (_req, res) => {
     try {
-      const users = db.prepare("SELECT id, email, created_at FROM users").all();
+      const users = db.prepare("SELECT id, email, username, password_hash, created_at, has_logged_in, temp_password, google_id, google_email, avatar_url, auth_provider FROM users").all();
       const users_data = db.prepare("SELECT userId, segment, data, updatedAt FROM users_data").all();
       const clubs_data = db.prepare("SELECT clubId, teamId, segment, data, updatedAt FROM clubs_data").all();
       const shared_leaderboards = db.prepare("SELECT id, data, updatedAt, coachUid FROM shared_leaderboards").all();
       const system_docs = db.prepare("SELECT path, data, updatedAt FROM system_docs").all();
+      let uploaded_files = [];
+      try {
+        uploaded_files = db.prepare("SELECT filename, mime_type, data_base64, created_at FROM uploaded_files").all();
+      } catch (_) {
+      }
       const dump = {
         version: "1.0",
         exportedAt: Date.now(),
@@ -1363,7 +1559,8 @@ async function startServer() {
           users_data,
           clubs_data,
           shared_leaderboards,
-          system_docs
+          system_docs,
+          uploaded_files
         }
       };
       res.setHeader("Content-Type", "application/json");
@@ -1374,21 +1571,84 @@ async function startServer() {
       res.status(500).json({ error: "Kunde inte exportera databasen" });
     }
   });
-  app.post("/api/system/db-import", (req, res) => {
+  app.post("/api/system/db-import", requireRootAdmin, (req, res) => {
     const dump = req.body;
     if (!dump || !dump.tables) {
       return res.status(400).json({ error: "Ogiltigt s\xE4kerhetskopieformat" });
     }
     try {
-      const { users = [], users_data = [], clubs_data = [], shared_leaderboards = [], system_docs = [] } = dump.tables;
+      const {
+        users = [],
+        users_data = [],
+        clubs_data = [],
+        shared_leaderboards = [],
+        system_docs = [],
+        uploaded_files = []
+      } = dump.tables;
+      const wipeBeforeImport = Boolean(req.query.wipe === "true" || req.body.wipe === true);
       const transaction = db.transaction(() => {
-        const stmtUser = db.prepare(`
-          INSERT INTO users (id, email, password_hash, created_at)
-          VALUES (?, ?, ?, ?)
-          ON CONFLICT(id) DO UPDATE SET email = excluded.email
+        if (wipeBeforeImport) {
+          db.prepare("DELETE FROM users_data").run();
+          db.prepare("DELETE FROM users").run();
+          db.prepare("DELETE FROM clubs_data").run();
+          db.prepare("DELETE FROM shared_leaderboards").run();
+          db.prepare("DELETE FROM system_docs WHERE path NOT IN ('system/jwt_secret', 'system/db_config')").run();
+        }
+        const userIdMap = /* @__PURE__ */ new Map();
+        const stmtFindUserByEmail = db.prepare("SELECT id, email FROM users WHERE email = ?");
+        const stmtFindUserById = db.prepare("SELECT id, email FROM users WHERE id = ?");
+        const stmtInsertUser = db.prepare(`
+          INSERT INTO users (id, email, username, password_hash, created_at, has_logged_in, temp_password, google_id, google_email, avatar_url, auth_provider)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `);
+        const stmtUpdateUser = db.prepare(`
+          UPDATE users SET
+            username = COALESCE(?, username),
+            password_hash = CASE WHEN ? = 'imported_user' THEN password_hash ELSE ? END,
+            created_at = COALESCE(?, created_at),
+            has_logged_in = COALESCE(?, has_logged_in),
+            temp_password = COALESCE(?, temp_password),
+            avatar_url = COALESCE(?, avatar_url),
+            auth_provider = COALESCE(?, auth_provider)
+          WHERE id = ?
         `);
         for (const u of users) {
-          stmtUser.run(u.id, u.email, u.password_hash || "imported_user", u.created_at || Date.now());
+          const userEmail = (u.email || "").trim().toLowerCase();
+          if (!userEmail) continue;
+          const existingByEmail = stmtFindUserByEmail.get(userEmail);
+          const existingById = stmtFindUserById.get(u.id);
+          if (existingByEmail) {
+            userIdMap.set(u.id, existingByEmail.id);
+            stmtUpdateUser.run(
+              u.username || null,
+              u.password_hash || "imported_user",
+              u.password_hash || "imported_user",
+              u.created_at || null,
+              u.has_logged_in ?? null,
+              u.temp_password || null,
+              u.avatar_url || null,
+              u.auth_provider || null,
+              existingByEmail.id
+            );
+          } else if (existingById) {
+            userIdMap.set(u.id, existingById.id);
+            db.prepare("UPDATE users SET email = ?, username = COALESCE(?, username) WHERE id = ?").run(userEmail, u.username || null, existingById.id);
+          } else {
+            userIdMap.set(u.id, u.id);
+            stmtInsertUser.run(
+              u.id,
+              userEmail,
+              u.username || null,
+              u.password_hash || "imported_user",
+              u.created_at || Date.now(),
+              u.has_logged_in || 0,
+              u.temp_password || null,
+              u.google_id || null,
+              u.google_email || null,
+              u.avatar_url || null,
+              u.auth_provider || "local"
+            );
+          }
         }
         const stmtUserData = db.prepare(`
           INSERT INTO users_data (userId, segment, data, updatedAt)
@@ -1396,12 +1656,13 @@ async function startServer() {
           ON CONFLICT(userId, segment) DO UPDATE SET data = excluded.data, updatedAt = excluded.updatedAt
         `);
         for (const ud of users_data) {
+          const mappedUserId = userIdMap.get(ud.userId) || ud.userId;
           const rawData = typeof ud.data === "string" ? ud.data : JSON.stringify(ud.data);
-          stmtUserData.run(ud.userId, ud.segment, rawData, ud.updatedAt || Date.now());
+          stmtUserData.run(mappedUserId, ud.segment, rawData, ud.updatedAt || Date.now());
         }
         const stmtClubData = db.prepare(`
           INSERT INTO clubs_data (clubId, teamId, segment, data, updatedAt)
-          VALUES (?, ?, ?, ?)
+          VALUES (?, ?, ?, ?, ?)
           ON CONFLICT(clubId, teamId, segment) DO UPDATE SET data = excluded.data, updatedAt = excluded.updatedAt
         `);
         for (const cd of clubs_data) {
@@ -1414,8 +1675,9 @@ async function startServer() {
           ON CONFLICT(id) DO UPDATE SET data = excluded.data, updatedAt = excluded.updatedAt
         `);
         for (const lb of shared_leaderboards) {
+          const mappedCoachUid = lb.coachUid ? userIdMap.get(lb.coachUid) || lb.coachUid : null;
           const rawData = typeof lb.data === "string" ? lb.data : JSON.stringify(lb.data);
-          stmtLeaderboard.run(lb.id, rawData, lb.updatedAt || Date.now(), lb.coachUid || null);
+          stmtLeaderboard.run(lb.id, rawData, lb.updatedAt || Date.now(), mappedCoachUid);
         }
         const stmtSysDoc = db.prepare(`
           INSERT INTO system_docs (path, data, updatedAt)
@@ -1423,42 +1685,56 @@ async function startServer() {
           ON CONFLICT(path) DO UPDATE SET data = excluded.data, updatedAt = excluded.updatedAt
         `);
         for (const sd of system_docs) {
+          if (sd.path === "system/db_config") continue;
           const rawData = typeof sd.data === "string" ? sd.data : JSON.stringify(sd.data);
           stmtSysDoc.run(sd.path, rawData, sd.updatedAt || Date.now());
+        }
+        if (Array.isArray(uploaded_files)) {
+          const stmtUpload = db.prepare(`
+            INSERT INTO uploaded_files (filename, mime_type, data_base64, created_at)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(filename) DO UPDATE SET mime_type = excluded.mime_type, data_base64 = excluded.data_base64
+          `);
+          for (const f of uploaded_files) {
+            stmtUpload.run(f.filename, f.mime_type, f.data_base64, f.created_at || Date.now());
+          }
         }
       });
       transaction();
       console.log("[DB Import] Successfully imported database dump.");
-      res.json({ success: true, importedRecords: users.length + users_data.length + clubs_data.length });
+      res.json({
+        success: true,
+        importedRecords: users.length + users_data.length + clubs_data.length + shared_leaderboards.length + system_docs.length
+      });
     } catch (e) {
       console.error("[DB Import] Error importing database:", e);
       res.status(500).json({ error: "Kunde inte importera databasen: " + e.message });
     }
   });
-  app.post("/api/system/db-sync-now", async (_req, res) => {
+  app.post("/api/system/db-sync-now", requireRootAdmin, async (_req, res) => {
     if (dbModeConfig.mode === "local_sqlite") {
       return res.status(400).json({ error: "Databasen \xE4r inst\xE4lld p\xE5 Frist\xE5ende Lokal SQLite. Sl\xE5 p\xE5 Hybrid-l\xE4ge f\xF6rst f\xF6r att synka med molnet." });
     }
     try {
       let syncedCount = 0;
       const userRows = db.prepare("SELECT userId, segment, data, updatedAt FROM users_data").all();
-      for (const row of userRows) {
-        const docPath = `app_docs/users_${row.userId}_data_${row.segment}`;
-        const rawData = typeof row.data === "string" ? row.data : JSON.stringify(row.data);
-        await setFirestoreDoc(docPath, { data: rawData, updatedAt: row.updatedAt });
+      for (const row2 of userRows) {
+        const docPath = `app_docs/users_${row2.userId}_data_${row2.segment}`;
+        const rawData = typeof row2.data === "string" ? row2.data : JSON.stringify(row2.data);
+        await setFirestoreDoc(docPath, { data: rawData, updatedAt: row2.updatedAt });
         syncedCount++;
       }
       const clubRows = db.prepare("SELECT clubId, teamId, segment, data, updatedAt FROM clubs_data").all();
-      for (const row of clubRows) {
-        const docPath = `app_docs/clubs_${row.clubId}_teams_${row.teamId}_data_${row.segment}`;
-        const rawData = typeof row.data === "string" ? row.data : JSON.stringify(row.data);
-        await setFirestoreDoc(docPath, { data: rawData, updatedAt: row.updatedAt });
+      for (const row2 of clubRows) {
+        const docPath = `app_docs/clubs_${row2.clubId}_teams_${row2.teamId}_data_${row2.segment}`;
+        const rawData = typeof row2.data === "string" ? row2.data : JSON.stringify(row2.data);
+        await setFirestoreDoc(docPath, { data: rawData, updatedAt: row2.updatedAt });
         syncedCount++;
       }
       const fileRows = db.prepare("SELECT filename, mime_type, data_base64, created_at FROM uploaded_files").all();
-      for (const row of fileRows) {
-        const docPath = `server_uploads/${encodeURIComponent(row.filename)}`;
-        await setFirestoreDoc(docPath, { mime_type: row.mime_type, data_base64: row.data_base64, created_at: row.created_at || Date.now() });
+      for (const row2 of fileRows) {
+        const docPath = `server_uploads/${encodeURIComponent(row2.filename)}`;
+        await setFirestoreDoc(docPath, { mime_type: row2.mime_type, data_base64: row2.data_base64, created_at: row2.created_at || Date.now() });
         syncedCount++;
       }
       res.json({ success: true, syncedCount, message: `Synkroniserade ${syncedCount} poster till Firestore.` });
@@ -1539,7 +1815,7 @@ async function startServer() {
           username: trimmedUsername
         }).catch((e) => console.error("Firestore username save error:", e));
       }
-      const token = import_jsonwebtoken.default.sign({ id: userId, email: trimmedEmail, username: trimmedUsername }, JWT_SECRET, { expiresIn: "3650d" });
+      const token = import_jsonwebtoken.default.sign({ id: userId, email: trimmedEmail, username: trimmedUsername }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
       res.json({
         token,
         user: {
@@ -1631,7 +1907,7 @@ async function startServer() {
           console.error("Error updating login status:", e);
         }
       }
-      const token = import_jsonwebtoken.default.sign({ id: userRow.id, email: userRow.email, username: userRow.username }, JWT_SECRET, { expiresIn: "3650d" });
+      const token = import_jsonwebtoken.default.sign({ id: userRow.id, email: userRow.email, username: userRow.username }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
       res.json({
         token,
         user: {
@@ -1794,7 +2070,7 @@ async function startServer() {
         password_hash: newPasswordHash,
         created_at: userRow.created_at || Date.now()
       }).catch((e) => console.error("Firestore reset password update error:", e));
-      const token = import_jsonwebtoken.default.sign({ id: userRow.id, email: userRow.email }, JWT_SECRET, { expiresIn: "3650d" });
+      const token = import_jsonwebtoken.default.sign({ id: userRow.id, email: userRow.email }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
       res.json({
         message: "L\xF6senordet har \xE5terst\xE4llts!",
         token,
@@ -2005,7 +2281,7 @@ async function startServer() {
         email: userRow.email,
         google_id: googleId
       }).catch((e) => console.error("Firestore google_id sync error:", e));
-      const token = import_jsonwebtoken.default.sign({ id: userRow.id, email: userRow.email, username: userRow.username }, JWT_SECRET, { expiresIn: "3650d" });
+      const token = import_jsonwebtoken.default.sign({ id: userRow.id, email: userRow.email, username: userRow.username }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
       res.json({
         token,
         user: {
@@ -2291,7 +2567,7 @@ async function startServer() {
         username: cleanUsername
       }).catch(() => {
       });
-      const newToken = import_jsonwebtoken.default.sign({ id: userId, email: userRow?.email || decoded.email, username: cleanUsername }, JWT_SECRET, { expiresIn: "3650d" });
+      const newToken = import_jsonwebtoken.default.sign({ id: userId, email: userRow?.email || decoded.email, username: cleanUsername }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
       res.json({
         success: true,
         message: "Anv\xE4ndarnamnet har uppdaterats!",
@@ -2458,7 +2734,7 @@ async function startServer() {
         password_hash: userRow?.password_hash || "",
         created_at: userRow?.created_at || Date.now()
       }).catch((e) => console.error("Firestore user email update error:", e));
-      const newToken = import_jsonwebtoken.default.sign({ id: userId, email: cleanNewEmail }, JWT_SECRET, { expiresIn: "3650d" });
+      const newToken = import_jsonwebtoken.default.sign({ id: userId, email: cleanNewEmail }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
       res.json({
         token: newToken,
         user: {
@@ -2475,24 +2751,9 @@ async function startServer() {
     }
   });
   const checkAdminPermission = (req) => {
-    const authHeader = req.headers.authorization;
-    if (authHeader) {
-      try {
-        const authStr = Array.isArray(authHeader) ? authHeader[0] : authHeader;
-        const partsAuth = authStr.split(" ");
-        const token = partsAuth.length > 1 ? partsAuth[1] : partsAuth[0];
-        if (token && token !== "null" && token !== "undefined") {
-          const decoded = verifyJwtToken(token);
-          if (decoded && (decoded.id || decoded.email)) return true;
-        }
-      } catch (e) {
-      }
-    }
-    const userHeader = req.headers["x-user-email"] || req.headers["x-user-id"];
-    if (userHeader && userHeader.trim().length > 0 && userHeader !== "null" && userHeader !== "undefined") {
-      return true;
-    }
-    return false;
+    const user = extractAuthUser(req);
+    if (!user) return false;
+    return true;
   };
   app.get("/api/admin/users", async (req, res) => {
     if (!checkAdminPermission(req)) return res.status(401).json({ error: "Unauthorized" });
@@ -2745,16 +3006,152 @@ async function startServer() {
       res.status(500).json({ error: err?.message || "Kunde inte generera anv\xE4ndarkonton." });
     }
   });
+  function getConsolidatedPeriods(clubId, teamId, userId) {
+    const periodMap = /* @__PURE__ */ new Map();
+    let activePeriodId = null;
+    const ingestPeriod = (p) => {
+      if (!p || !p.id) return;
+      const existing = periodMap.get(p.id);
+      if (!existing) {
+        periodMap.set(p.id, { ...p });
+        if (p.isActive) activePeriodId = p.id;
+      } else {
+        const isClosed = Boolean(existing.endDate || p.endDate);
+        const endDate = p.endDate || existing.endDate;
+        const standings = Array.isArray(p.standings) && p.standings.length > 0 ? p.standings : Array.isArray(existing.standings) ? existing.standings : [];
+        const bonusPoints = Array.isArray(p.bonusPoints) && p.bonusPoints.length > 0 ? p.bonusPoints : Array.isArray(existing.bonusPoints) ? existing.bonusPoints : [];
+        const shareId = p.shareId || existing.shareId;
+        const isActive = isClosed ? false : p.isActive !== void 0 ? p.isActive : existing.isActive;
+        periodMap.set(p.id, {
+          ...existing,
+          ...p,
+          endDate: isClosed ? endDate : void 0,
+          isActive,
+          standings,
+          bonusPoints,
+          shareId
+        });
+        if (isActive) activePeriodId = p.id;
+      }
+    };
+    const parseAndIngest = (raw) => {
+      if (!raw) return;
+      try {
+        const parsed = typeof raw === "string" ? JSON.parse(raw) : raw;
+        if (Array.isArray(parsed)) {
+          parsed.forEach(ingestPeriod);
+        } else if (parsed && typeof parsed === "object") {
+          if (Array.isArray(parsed.periods)) {
+            parsed.periods.forEach(ingestPeriod);
+            if (parsed.currentPeriodId) activePeriodId = parsed.currentPeriodId;
+          } else if (parsed.id && (parsed.name || parsed.standings)) {
+            ingestPeriod(parsed);
+          }
+        }
+      } catch (_) {
+      }
+    };
+    try {
+      const clubRows = db.prepare("SELECT data FROM clubs_data WHERE segment = 'periods'").all();
+      clubRows.forEach((r) => parseAndIngest(r.data));
+    } catch (_) {
+    }
+    try {
+      const userRows = db.prepare("SELECT data FROM users_data WHERE segment = 'periods'").all();
+      userRows.forEach((r) => parseAndIngest(r.data));
+    } catch (_) {
+    }
+    try {
+      const sharedRows = db.prepare("SELECT id, data, updatedAt, coachUid FROM shared_leaderboards").all();
+      for (const sr of sharedRows) {
+        if (!sr) continue;
+        try {
+          const parsed = typeof sr.data === "string" ? JSON.parse(sr.data) : sr.data;
+          if (parsed) {
+            const id = parsed.id || sr.id;
+            const name = parsed.name || "Avslutad po\xE4ngliga";
+            const standings = Array.isArray(parsed.standings) ? parsed.standings : [];
+            const startDate = parsed.startDate || Number(sr.updatedAt) - 30 * 24 * 3600 * 1e3;
+            const endDate = parsed.endDate || Number(sr.updatedAt) || Date.now();
+            const bonusPoints = Array.isArray(parsed.bonusPoints) ? parsed.bonusPoints : [];
+            ingestPeriod({
+              id,
+              name,
+              startDate,
+              endDate,
+              isActive: false,
+              standings,
+              bonusPoints,
+              shareId: id
+            });
+          }
+        } catch (_) {
+        }
+      }
+    } catch (_) {
+    }
+    try {
+      const sysRows = db.prepare("SELECT data FROM system_docs WHERE path LIKE '%period%' OR path LIKE '%leaderboard%'").all();
+      sysRows.forEach((r) => parseAndIngest(r.data));
+    } catch (_) {
+    }
+    try {
+      const exerciseRows = db.prepare("SELECT data FROM clubs_data WHERE segment = 'exercises' UNION ALL SELECT data FROM users_data WHERE segment = 'exercises'").all();
+      for (const er of exerciseRows) {
+        try {
+          const parsed = typeof er.data === "string" ? JSON.parse(er.data) : er.data;
+          const exList = Array.isArray(parsed?.exercises) ? parsed.exercises : Array.isArray(parsed) ? parsed : [];
+          for (const ex of exList) {
+            if (ex && ex.periodId && !periodMap.has(ex.periodId)) {
+              const minDate = ex.finishedAt || ex.date || Date.now() - 30 * 24 * 3600 * 1e3;
+              const formattedDate = new Date(minDate).toLocaleDateString("sv-SE", { month: "short", year: "numeric" });
+              ingestPeriod({
+                id: ex.periodId,
+                name: `Avslutad po\xE4ngliga (${formattedDate})`,
+                startDate: minDate,
+                endDate: ex.finishedAt || ex.date || minDate,
+                isActive: false,
+                standings: []
+              });
+            }
+          }
+        } catch (_) {
+        }
+      }
+    } catch (_) {
+    }
+    const periods = Array.from(periodMap.values());
+    periods.sort((a, b) => {
+      if (a.isActive && !b.isActive) return -1;
+      if (!a.isActive && b.isActive) return 1;
+      const aTime = a.endDate || a.startDate || 0;
+      const bTime = b.endDate || b.startDate || 0;
+      return bTime - aTime;
+    });
+    return {
+      periods,
+      currentPeriodId: activePeriodId || (periods.find((p) => p.isActive)?.id || (periods[0]?.id || null))
+    };
+  }
+  app.get("/api/periods/all", (req, res) => {
+    try {
+      const result = getConsolidatedPeriods();
+      res.json({ success: true, ...result });
+    } catch (e) {
+      console.error("Error fetching consolidated periods:", e);
+      res.status(500).json({ error: "Failed to fetch consolidated periods" });
+    }
+  });
   app.get("/api/docs", async (req, res) => {
     const pathStr = req.query.path;
     if (!pathStr) return res.status(400).send("Path is required");
     if (pathStr.startsWith("shared_leaderboards/")) {
       const id = pathStr.split("/")[1];
       try {
-        let row = db.prepare("SELECT data FROM shared_leaderboards WHERE id = ?").get(id);
-        if (row) {
+        let row2 = db.prepare("SELECT data FROM shared_leaderboards WHERE id = ?").get(id);
+        if (row2) {
           try {
-            const parsed = typeof row.data === "string" ? JSON.parse(row.data) : row.data;
+            const parsed = typeof row2.data === "string" ? JSON.parse(row2.data) : row2.data;
             const leaderboardObj = parsed && parsed.data && (parsed.data.standings || parsed.data.name) ? parsed.data : parsed;
             return res.json(leaderboardObj);
           } catch (pErr) {
@@ -2762,7 +3159,7 @@ async function startServer() {
           }
         }
         let fDoc = null;
-        let quotaExceeded = false;
+        let quotaExceeded2 = false;
         try {
           fDoc = await getFirestoreDoc(`app_docs/shared_leaderboards_${id}`);
           if (!fDoc) {
@@ -2774,7 +3171,7 @@ async function startServer() {
           }
         } catch (fErr) {
           if (fErr.status === 429 || fErr.code === "RESOURCE_EXHAUSTED" || fErr.message && fErr.message.toLowerCase().includes("quota")) {
-            quotaExceeded = true;
+            quotaExceeded2 = true;
           }
         }
         if (fDoc) {
@@ -2802,7 +3199,7 @@ async function startServer() {
             return res.json(leaderboardObj);
           }
         }
-        if (quotaExceeded) {
+        if (quotaExceeded2) {
           return res.status(429).json({
             error: "Quota exceeded",
             message: "Quota exceeded for quota metric 'Free daily read units per project (free tier database)'",
@@ -2810,7 +3207,7 @@ async function startServer() {
             upgradeUrl: getFirestoreQuotaUpgradeUrl()
           });
         }
-        return res.status(404).json({ error: "Not found" });
+        return res.json(null);
       } catch (e) {
         if (e.status === 429 || e.code === "RESOURCE_EXHAUSTED") {
           return res.status(429).json({
@@ -2828,7 +3225,7 @@ async function startServer() {
       const userId = parts[1];
       const segment = parts[3];
       if (userId === "guest") {
-        return res.status(404).json({ error: "Guest offline mode has no server database" });
+        return res.json(null);
       }
       if (userId !== "guest") {
         const authHeader = req.headers.authorization;
@@ -2846,29 +3243,41 @@ async function startServer() {
           return res.status(401).json({ error: "Invalid session or token" });
         }
       }
-      const isForce = req.query.force === "true" || req.query.refresh === "true";
-      let row = db.prepare("SELECT data, updatedAt FROM users_data WHERE userId = ? AND segment = ?").get(userId, segment);
-      let quotaExceeded = false;
-      if (row && !isForce && dbModeConfig.mode !== "firestore_only") {
+      if (segment === "periods") {
+        const consolidated = getConsolidatedPeriods(void 0, void 0, userId);
         try {
-          return res.json(typeof row.data === "string" ? JSON.parse(row.data) : row.data);
+          db.prepare(`
+            INSERT INTO users_data (userId, segment, data, updatedAt)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(userId, segment) DO UPDATE SET data = excluded.data, updatedAt = excluded.updatedAt
+          `).run(userId, segment, JSON.stringify(consolidated), Date.now());
+        } catch (_) {
+        }
+        return res.json(consolidated);
+      }
+      const isForce2 = req.query.force === "true" || req.query.refresh === "true";
+      let row2 = db.prepare("SELECT data, updatedAt FROM users_data WHERE userId = ? AND segment = ?").get(userId, segment);
+      let quotaExceeded2 = false;
+      if (row2 && !isForce2 && dbModeConfig.mode !== "firestore_only") {
+        try {
+          return res.json(typeof row2.data === "string" ? JSON.parse(row2.data) : row2.data);
         } catch (parseErr) {
           console.warn("Failed to parse cached SQLite user data, falling back to remote:", parseErr);
         }
       }
-      if (dbModeConfig.mode === "firestore_only" || isForce || !row) {
+      if (dbModeConfig.mode === "firestore_only" || isForce2 || !row2) {
         let fDoc = null;
         try {
           fDoc = await getFirestoreDoc(`app_docs/users_${userId}_data_${segment}`);
         } catch (fErr) {
           if (fErr.status === 429 || fErr.code === "RESOURCE_EXHAUSTED" || fErr.message && fErr.message.toLowerCase().includes("quota")) {
-            quotaExceeded = true;
+            quotaExceeded2 = true;
           }
         }
         if (fDoc && fDoc.data) {
           const remoteUpdatedAt = Number(fDoc.updatedAt) || 0;
-          const localUpdatedAt = Number(row?.updatedAt) || 0;
-          if (dbModeConfig.mode === "firestore_only" || isForce || !row || remoteUpdatedAt >= localUpdatedAt) {
+          const localUpdatedAt = Number(row2?.updatedAt) || 0;
+          if (dbModeConfig.mode === "firestore_only" || isForce2 || !row2 || remoteUpdatedAt >= localUpdatedAt) {
             const rawData = typeof fDoc.data === "string" ? fDoc.data : JSON.stringify(fDoc.data);
             db.prepare(`
               INSERT INTO users_data (userId, segment, data, updatedAt)
@@ -2877,8 +3286,8 @@ async function startServer() {
             `).run(userId, segment, rawData, remoteUpdatedAt || Date.now());
             return res.json(typeof fDoc.data === "string" ? JSON.parse(fDoc.data) : fDoc.data);
           }
-        } else if (!row) {
-          if (quotaExceeded) {
+        } else if (!row2) {
+          if (quotaExceeded2) {
             return res.status(429).json({
               error: "Quota exceeded",
               message: "Quota exceeded for quota metric 'Free daily read units per project (free tier database)'",
@@ -2886,11 +3295,11 @@ async function startServer() {
               upgradeUrl: getFirestoreQuotaUpgradeUrl()
             });
           }
-          return res.status(404).json({ error: "Not found" });
+          return res.json(null);
         }
       }
-      if (!row) {
-        if (quotaExceeded) {
+      if (!row2) {
+        if (quotaExceeded2) {
           return res.status(429).json({
             error: "Quota exceeded",
             message: "Quota exceeded for quota metric 'Free daily read units per project (free tier database)'",
@@ -2898,27 +3307,35 @@ async function startServer() {
             upgradeUrl: getFirestoreQuotaUpgradeUrl()
           });
         }
-        return res.status(404).json({ error: "Not found" });
+        return res.json(null);
       }
-      res.json(JSON.parse(row.data));
+      res.json(JSON.parse(row2.data));
     } else if (pathStr.startsWith("clubs/") && pathStr.includes("/pending_requests")) {
       try {
         const parts = pathStr.split("/");
         const isCollection = parts.length === 3;
         if (isCollection) {
           const clubId = parts[1];
+          const isValidRequest = (item) => {
+            return item && typeof item === "object" && (item.uid || item.id) && (item.requestedRole || item.role) && (item.status === void 0 || item.status === "pending");
+          };
           let rows = db.prepare("SELECT data FROM system_docs WHERE path = ? OR path LIKE ?").all(pathStr, `${pathStr}/%`);
           if (rows && rows.length > 0) {
             const list = [];
             for (const r of rows) {
               try {
                 const parsed = JSON.parse(r.data);
-                if (Array.isArray(parsed)) list.push(...parsed);
-                else list.push(parsed);
+                if (Array.isArray(parsed)) {
+                  list.push(...parsed.filter(isValidRequest));
+                } else if (isValidRequest(parsed)) {
+                  list.push(parsed);
+                }
               } catch (_) {
               }
             }
-            return res.json(list);
+            if (list.length > 0) {
+              return res.json(list);
+            }
           }
           const globalRows = db.prepare("SELECT data FROM system_docs WHERE path = 'pending_user_requests' OR path LIKE 'pending_user_requests/%'").all();
           if (globalRows && globalRows.length > 0) {
@@ -2927,8 +3344,8 @@ async function startServer() {
               try {
                 const parsed = JSON.parse(r.data);
                 if (Array.isArray(parsed)) {
-                  matched.push(...parsed.filter((item) => item.requestedClubId === clubId || item.clubId === clubId));
-                } else if (parsed && (parsed.requestedClubId === clubId || parsed.clubId === clubId)) {
+                  matched.push(...parsed.filter((item) => isValidRequest(item) && (item.requestedClubId === clubId || item.clubId === clubId)));
+                } else if (isValidRequest(parsed) && (parsed.requestedClubId === clubId || parsed.clubId === clubId)) {
                   matched.push(parsed);
                 }
               } catch (_) {
@@ -2940,11 +3357,11 @@ async function startServer() {
           }
           return res.json([]);
         } else {
-          let row = db.prepare("SELECT data FROM system_docs WHERE path = ?").get(pathStr);
-          if (row && row.data) {
-            return res.json(JSON.parse(row.data));
+          let row2 = db.prepare("SELECT data FROM system_docs WHERE path = ?").get(pathStr);
+          if (row2 && row2.data) {
+            return res.json(JSON.parse(row2.data));
           }
-          return res.status(404).json({ error: "Not found" });
+          return res.json(null);
         }
       } catch (err) {
         console.error("Error handling club pending_requests:", err);
@@ -2962,12 +3379,48 @@ async function startServer() {
         const clubId = parts[1];
         const teamId = parts[3] || "club_global";
         const segment = parts[5] || parts[3] || "data";
-        const isForce = req.query.force === "true" || req.query.refresh === "true";
-        let row = db.prepare("SELECT data, updatedAt FROM clubs_data WHERE clubId = ? AND teamId = ? AND segment = ?").get(clubId, teamId, segment);
-        let quotaExceeded = false;
+        if (segment === "periods") {
+          const consolidated = getConsolidatedPeriods(clubId, teamId);
+          try {
+            db.prepare(`
+              INSERT INTO clubs_data (clubId, teamId, segment, data, updatedAt)
+              VALUES (?, ?, ?, ?, ?)
+              ON CONFLICT(clubId, teamId, segment) DO UPDATE SET data = excluded.data, updatedAt = excluded.updatedAt
+            `).run(clubId, teamId, segment, JSON.stringify(consolidated), Date.now());
+          } catch (_) {
+          }
+          return res.json(consolidated);
+        }
         if (row && !isForce && dbModeConfig.mode !== "firestore_only") {
           try {
-            return res.json(typeof row.data === "string" ? JSON.parse(row.data) : row.data);
+            let parsed2 = typeof row.data === "string" ? JSON.parse(row.data) : row.data;
+            if (segment === "periods" && parsed2 && Array.isArray(parsed2.periods)) {
+              try {
+                const decodedUser = verifyJwtToken(token);
+                const userRow = db.prepare("SELECT data FROM users_data WHERE userId = ? AND segment = ?").get(decodedUser.id, "periods");
+                if (userRow && userRow.data) {
+                  const uParsed = typeof userRow.data === "string" ? JSON.parse(userRow.data) : userRow.data;
+                  if (uParsed && Array.isArray(uParsed.periods)) {
+                    const existingMap = /* @__PURE__ */ new Map();
+                    parsed2.periods.forEach((p) => {
+                      if (p && p.id) existingMap.set(p.id, p);
+                    });
+                    let merged = false;
+                    uParsed.periods.forEach((up) => {
+                      if (up && up.id && (!existingMap.has(up.id) || up.endDate && !existingMap.get(up.id)?.endDate)) {
+                        parsed2.periods.push(up);
+                        merged = true;
+                      }
+                    });
+                    if (merged) {
+                      db.prepare("UPDATE clubs_data SET data = ? WHERE clubId = ? AND teamId = ? AND segment = ?").run(JSON.stringify(parsed2), clubId, teamId, segment);
+                    }
+                  }
+                }
+              } catch (_) {
+              }
+            }
+            return res.json(parsed2);
           } catch (parseErr) {
             console.warn("Failed to parse cached SQLite clubs data, falling back to remote:", parseErr);
           }
@@ -3002,7 +3455,7 @@ async function startServer() {
                 upgradeUrl: getFirestoreQuotaUpgradeUrl()
               });
             }
-            return res.status(404).json({ error: "Not found" });
+            return res.json(null);
           }
         }
         if (!row) {
@@ -3014,9 +3467,36 @@ async function startServer() {
               upgradeUrl: getFirestoreQuotaUpgradeUrl()
             });
           }
-          return res.status(404).json({ error: "Not found" });
+          return res.json(null);
         }
-        res.json(JSON.parse(row.data));
+        let parsed = typeof row.data === "string" ? JSON.parse(row.data) : row.data;
+        if (segment === "periods" && parsed && Array.isArray(parsed.periods)) {
+          try {
+            const decodedUser = verifyJwtToken(token);
+            const userRow = db.prepare("SELECT data FROM users_data WHERE userId = ? AND segment = ?").get(decodedUser.id, "periods");
+            if (userRow && userRow.data) {
+              const uParsed = typeof userRow.data === "string" ? JSON.parse(userRow.data) : userRow.data;
+              if (uParsed && Array.isArray(uParsed.periods)) {
+                const existingMap = /* @__PURE__ */ new Map();
+                parsed.periods.forEach((p) => {
+                  if (p && p.id) existingMap.set(p.id, p);
+                });
+                let merged = false;
+                uParsed.periods.forEach((up) => {
+                  if (up && up.id && (!existingMap.has(up.id) || up.endDate && !existingMap.get(up.id)?.endDate)) {
+                    parsed.periods.push(up);
+                    merged = true;
+                  }
+                });
+                if (merged) {
+                  db.prepare("UPDATE clubs_data SET data = ? WHERE clubId = ? AND teamId = ? AND segment = ?").run(JSON.stringify(parsed), clubId, teamId, segment);
+                }
+              }
+            }
+          } catch (_) {
+          }
+        }
+        res.json(parsed);
       } catch (e) {
         if (e.name === "JsonWebTokenError" || e.name === "TokenExpiredError" || e.message === "Invalid token" || e.message === "No token provided") {
           return res.status(401).json({ error: "Unauthorized", message: "Session expired, please log in again." });
@@ -3034,15 +3514,15 @@ async function startServer() {
       }
     } else if (pathStr.startsWith("admins/")) {
       try {
-        let row = db.prepare("SELECT data FROM system_docs WHERE path = ?").get(pathStr);
-        let quotaExceeded = false;
-        if (!row) {
+        let row2 = db.prepare("SELECT data FROM system_docs WHERE path = ?").get(pathStr);
+        let quotaExceeded2 = false;
+        if (!row2) {
           let fDoc = null;
           try {
             fDoc = await getFirestoreDoc(`app_docs/admins_${encodeURIComponent(pathStr)}`);
           } catch (fErr) {
             if (fErr.status === 429 || fErr.code === "RESOURCE_EXHAUSTED") {
-              quotaExceeded = true;
+              quotaExceeded2 = true;
             }
           }
           if (fDoc && fDoc.data) {
@@ -3050,7 +3530,7 @@ async function startServer() {
             db.prepare("INSERT OR REPLACE INTO system_docs (path, data, updatedAt) VALUES (?, ?, ?)").run(pathStr, rawData, Date.now());
             return res.json(typeof fDoc.data === "string" ? JSON.parse(fDoc.data) : fDoc.data);
           }
-          if (quotaExceeded) {
+          if (quotaExceeded2) {
             return res.status(429).json({
               error: "Quota exceeded",
               message: "Quota exceeded for quota metric 'Free daily read units per project (free tier database)'",
@@ -3058,9 +3538,9 @@ async function startServer() {
               upgradeUrl: getFirestoreQuotaUpgradeUrl()
             });
           }
-          return res.status(404).json({ error: "Not found" });
+          return res.json(null);
         }
-        res.json(JSON.parse(row.data));
+        res.json(JSON.parse(row2.data));
       } catch (e) {
         if (e.status === 429 || e.code === "RESOURCE_EXHAUSTED") {
           return res.status(429).json({
@@ -3075,10 +3555,17 @@ async function startServer() {
       }
     } else if (pathStr === "pending_user_requests" || pathStr.startsWith("pending_user_requests/")) {
       try {
-        let row = db.prepare("SELECT data FROM system_docs WHERE path = ?").get(pathStr);
-        if (row && row.data) {
-          const parsed = typeof row.data === "string" ? JSON.parse(row.data) : row.data;
-          return res.json(parsed);
+        const isValidRequest = (item) => {
+          return item && typeof item === "object" && (item.uid || item.id) && (item.requestedRole || item.role) && (item.status === void 0 || item.status === "pending");
+        };
+        let row2 = db.prepare("SELECT data FROM system_docs WHERE path = ?").get(pathStr);
+        if (row2 && row2.data) {
+          const parsed = typeof row2.data === "string" ? JSON.parse(row2.data) : row2.data;
+          if (Array.isArray(parsed)) {
+            return res.json(parsed.filter(isValidRequest));
+          } else if (isValidRequest(parsed)) {
+            return res.json(parsed);
+          }
         }
         return res.json([]);
       } catch (_) {
@@ -3086,13 +3573,13 @@ async function startServer() {
       }
     } else {
       try {
-        let row = db.prepare("SELECT data FROM system_docs WHERE path = ?").get(pathStr);
-        if (row && row.data) {
-          return res.json(typeof row.data === "string" ? JSON.parse(row.data) : row.data);
+        let row2 = db.prepare("SELECT data FROM system_docs WHERE path = ?").get(pathStr);
+        if (row2 && row2.data) {
+          return res.json(typeof row2.data === "string" ? JSON.parse(row2.data) : row2.data);
         }
-        return res.status(404).json({ error: "Not found" });
+        return res.json(null);
       } catch (_) {
-        return res.status(404).json({ error: "Not found" });
+        return res.json(null);
       }
     }
   });
@@ -3144,7 +3631,41 @@ async function startServer() {
             return res.status(401).json({ error: "Invalid session or token" });
           }
         }
-        const serializedData = JSON.stringify(data);
+        let finalDataToSave = data;
+        if (segment === "periods") {
+          const consolidated = getConsolidatedPeriods(void 0, void 0, userId);
+          const map = /* @__PURE__ */ new Map();
+          (consolidated.periods || []).forEach((p) => {
+            if (p && p.id) map.set(p.id, p);
+          });
+          const incomingList = Array.isArray(data?.periods) ? data.periods : Array.isArray(data) ? data : [];
+          incomingList.forEach((p) => {
+            if (!p || !p.id) return;
+            const existing = map.get(p.id);
+            if (!existing) {
+              map.set(p.id, p);
+            } else {
+              const isClosed = Boolean(existing.endDate || p.endDate);
+              const endDate = p.endDate || existing.endDate;
+              const standings = Array.isArray(p.standings) && p.standings.length > 0 ? p.standings : existing.standings;
+              const bonusPoints = Array.isArray(p.bonusPoints) && p.bonusPoints.length > 0 ? p.bonusPoints : existing.bonusPoints;
+              map.set(p.id, {
+                ...existing,
+                ...p,
+                endDate: isClosed ? endDate : void 0,
+                standings,
+                bonusPoints
+              });
+            }
+          });
+          const allPeriods = Array.from(map.values());
+          finalDataToSave = {
+            ...typeof data === "object" ? data : {},
+            periods: allPeriods,
+            currentPeriodId: data?.currentPeriodId || consolidated.currentPeriodId || allPeriods.find((p) => p.isActive)?.id || (allPeriods[0]?.id || null)
+          };
+        }
+        const serializedData = JSON.stringify(finalDataToSave);
         const updateTimestamp = Number(data?.updatedAt) || Date.now();
         db.prepare(`
           INSERT INTO users_data (userId, segment, data, updatedAt)
@@ -3183,7 +3704,41 @@ async function startServer() {
         const clubId = parts[1];
         const teamId = parts[3] || "club_global";
         const segment = parts[5] || parts[3] || "data";
-        const serializedData = JSON.stringify(data);
+        let finalDataToSave = data;
+        if (segment === "periods") {
+          const consolidated = getConsolidatedPeriods(clubId, teamId);
+          const map = /* @__PURE__ */ new Map();
+          (consolidated.periods || []).forEach((p) => {
+            if (p && p.id) map.set(p.id, p);
+          });
+          const incomingList = Array.isArray(data?.periods) ? data.periods : Array.isArray(data) ? data : [];
+          incomingList.forEach((p) => {
+            if (!p || !p.id) return;
+            const existing = map.get(p.id);
+            if (!existing) {
+              map.set(p.id, p);
+            } else {
+              const isClosed = Boolean(existing.endDate || p.endDate);
+              const endDate = p.endDate || existing.endDate;
+              const standings = Array.isArray(p.standings) && p.standings.length > 0 ? p.standings : existing.standings;
+              const bonusPoints = Array.isArray(p.bonusPoints) && p.bonusPoints.length > 0 ? p.bonusPoints : existing.bonusPoints;
+              map.set(p.id, {
+                ...existing,
+                ...p,
+                endDate: isClosed ? endDate : void 0,
+                standings,
+                bonusPoints
+              });
+            }
+          });
+          const allPeriods = Array.from(map.values());
+          finalDataToSave = {
+            ...typeof data === "object" ? data : {},
+            periods: allPeriods,
+            currentPeriodId: data?.currentPeriodId || consolidated.currentPeriodId || allPeriods.find((p) => p.isActive)?.id || (allPeriods[0]?.id || null)
+          };
+        }
+        const serializedData = JSON.stringify(finalDataToSave);
         const updateTimestamp = Number(data?.updatedAt) || Date.now();
         db.prepare(`
           INSERT INTO clubs_data (clubId, teamId, segment, data, updatedAt)
@@ -3200,8 +3755,10 @@ async function startServer() {
         res.status(500).json({ error: "Failed to save club data" });
       }
     } else if (pathStr.startsWith("admins/")) {
-      if (!checkAdminPermission(req)) {
-        return res.status(401).json({ error: "Unauthorized" });
+      const user = extractAuthUser(req);
+      const isRoot = await verifyIsRootAdmin(user);
+      if (!isRoot) {
+        return res.status(403).json({ error: "Unauthorized: Only root admin can modify admin documents" });
       }
       try {
         const serializedData = JSON.stringify(data);
@@ -3254,15 +3811,27 @@ async function startServer() {
       return res.status(400).json({ error: "Ingen fil skickades med" });
     }
     const uploadedFile = files[0];
-    const ext = import_path.default.extname(uploadedFile.originalname || "") || ".jpg";
+    let ext = (import_path.default.extname(uploadedFile.originalname || "") || ".jpg").toLowerCase();
+    let mimeType = uploadedFile.mimetype || "image/jpeg";
+    let fileBuffer = uploadedFile.buffer;
+    if (fileBuffer && sharpModule && (fileBuffer.length > 500 * 1024 || ext === ".heic" || ext === ".heif" || mimeType.includes("heic") || mimeType.includes("heif"))) {
+      try {
+        const compressed = await sharpModule(fileBuffer).rotate().resize(1600, 1600, { fit: "inside", withoutEnlargement: true }).jpeg({ quality: 82 }).toBuffer();
+        if (compressed && compressed.length > 0) {
+          fileBuffer = compressed;
+          mimeType = "image/jpeg";
+          ext = ".jpg";
+        }
+      } catch (sharpErr) {
+        console.warn("[Upload] Server image optimization note:", sharpErr?.message || sharpErr);
+      }
+    }
     const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
     const filename = "photo_" + uniqueSuffix + ext;
     const fileUrl = `/uploads/${filename}`;
     try {
-      const fileBuffer = uploadedFile.buffer;
       if (fileBuffer) {
         const base64Data = fileBuffer.toString("base64");
-        const mimeType = uploadedFile.mimetype || "image/jpeg";
         try {
           db.prepare(`
             INSERT OR REPLACE INTO uploaded_files (filename, mime_type, data_base64, created_at)
@@ -3288,13 +3857,17 @@ async function startServer() {
         } catch (_) {
         }
         if (dbModeConfig.mode !== "local_sqlite") {
-          try {
-            setFirestoreDoc(`server_uploads/${encodeURIComponent(filename)}`, {
-              mime_type: mimeType,
-              data_base64: base64Data,
-              created_at: Date.now()
-            }).catch((fErr) => console.warn("[Upload] Firestore sync error:", fErr));
-          } catch (_) {
+          if (base64Data.length <= 950 * 1024) {
+            try {
+              setFirestoreDoc(`server_uploads/${encodeURIComponent(filename)}`, {
+                mime_type: mimeType,
+                data_base64: base64Data,
+                created_at: Date.now()
+              }).catch((fErr) => console.warn("[Upload] Firestore sync error:", fErr));
+            } catch (_) {
+            }
+          } else {
+            console.warn(`[Upload] File ${filename} exceeds Firestore single-doc limit (${base64Data.length} chars). Saved in SQLite and disk.`);
           }
         }
       }
@@ -3316,16 +3889,16 @@ async function startServer() {
       return res.sendFile(publicPath, { maxAge: "1y", immutable: true });
     }
     try {
-      const row = db.prepare("SELECT mime_type, data_base64 FROM uploaded_files WHERE filename = ?").get(filename);
-      if (row && row.data_base64) {
-        const buffer = Buffer.from(row.data_base64, "base64");
+      const row2 = db.prepare("SELECT mime_type, data_base64 FROM uploaded_files WHERE filename = ?").get(filename);
+      if (row2 && row2.data_base64) {
+        const buffer = Buffer.from(row2.data_base64, "base64");
         try {
           if (!import_fs.default.existsSync(UPLOADS_DIR)) import_fs.default.mkdirSync(UPLOADS_DIR, { recursive: true });
           import_fs.default.writeFile(fullPath, buffer, () => {
           });
         } catch (_) {
         }
-        res.setHeader("Content-Type", row.mime_type || "image/jpeg");
+        res.setHeader("Content-Type", row2.mime_type || "image/jpeg");
         res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
         return res.send(buffer);
       }
@@ -3355,17 +3928,45 @@ async function startServer() {
     }
     res.status(404).send("File not found");
   });
-  app.delete("/api/delete-file", (req, res) => {
+  app.delete("/api/delete-file", async (req, res) => {
     const filePath = req.query.path;
     if (!filePath) return res.status(400).send("Path is required");
     try {
-      const filename = import_path.default.basename(filePath);
+      const cleanPath = decodeURIComponent(filePath).split("?")[0];
+      const filename = import_path.default.basename(cleanPath);
       const fullPath = import_path.default.join(UPLOADS_DIR, filename);
+      const publicPath = import_path.default.join(DATA_DIR, "public", "uploads", filename);
       if (import_fs.default.existsSync(fullPath)) {
-        import_fs.default.unlinkSync(fullPath);
+        try {
+          import_fs.default.unlinkSync(fullPath);
+        } catch (unlinkErr) {
+          console.warn("[Delete File] Could not unlink from UPLOADS_DIR:", unlinkErr);
+        }
       }
-      db.prepare("DELETE FROM uploaded_files WHERE filename = ?").run(filename);
-      res.json({ success: true });
+      if (import_fs.default.existsSync(publicPath)) {
+        try {
+          import_fs.default.unlinkSync(publicPath);
+        } catch (_) {
+        }
+      }
+      try {
+        db.prepare("DELETE FROM uploaded_files WHERE filename = ?").run(filename);
+      } catch (dbErr) {
+        console.warn("[Delete File] Could not delete from DB uploaded_files:", dbErr);
+      }
+      if (dbModeConfig.mode !== "local_sqlite") {
+        try {
+          await deleteFirestoreDoc(`server_uploads/${encodeURIComponent(filename)}`);
+        } catch (fErr) {
+          console.warn("[Delete File] Could not delete from Firestore server_uploads:", fErr);
+        }
+        try {
+          await deleteFirestoreDoc(`storage_files/${encodeURIComponent(filename)}`);
+        } catch (_) {
+        }
+      }
+      console.log(`[Delete File] Successfully deleted ${filename} from disk, SQLite and Firestore`);
+      res.json({ success: true, deleted: filename });
     } catch (e) {
       console.error("Error deleting file:", e);
       res.status(500).json({ error: "Failed to delete file" });
@@ -3434,18 +4035,32 @@ async function startServer() {
     if (!url || typeof url !== "string") {
       return res.status(400).send("URL query parameter is required");
     }
+    const validation = await validateSafeExternalUrl(url);
+    if (!validation.valid || !validation.urlObj) {
+      console.warn(`[Proxy SSRF Blocked] URL: ${url} - Reason: ${validation.error}`);
+      return res.status(403).send(`\xC5tkomst nekad: ${validation.error}`);
+    }
     try {
-      console.log(`[Proxy] Fetching: ${url}`);
+      console.log(`[Proxy] Fetching verified image from: ${url}`);
       const response = await (0, import_axios.default)({
         method: "get",
-        url,
+        url: validation.urlObj.toString(),
         responseType: "stream",
         timeout: 1e4,
+        maxContentLength: 15 * 1024 * 1024,
+        maxRedirects: 5,
+        httpAgent: safeHttpAgent,
+        httpsAgent: safeHttpsAgent,
         headers: {
-          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+          "Accept": "image/*,*/*"
         }
       });
-      res.setHeader("Content-Type", String(response.headers["content-type"] || "image/jpeg"));
+      const contentType = String(response.headers["content-type"] || "image/jpeg");
+      if (!contentType.startsWith("image/") && !contentType.startsWith("application/octet-stream")) {
+        return res.status(400).send("Endast bildresurser kan h\xE4mtas via denna bildproxy.");
+      }
+      res.setHeader("Content-Type", contentType);
       res.setHeader("Access-Control-Allow-Origin", "*");
       res.setHeader("Cache-Control", "public, max-age=86400");
       response.data.pipe(res);
@@ -3465,6 +4080,11 @@ async function startServer() {
     } else if (!fetchUrl.startsWith("http://") && !fetchUrl.startsWith("https://")) {
       fetchUrl = "https://" + fetchUrl;
     }
+    const validation = await validateSafeExternalUrl(fetchUrl);
+    if (!validation.valid || !validation.urlObj) {
+      console.warn(`[Calendar Proxy SSRF Blocked] URL: ${fetchUrl} - Reason: ${validation.error}`);
+      return res.status(403).json({ error: `\xC5tkomst nekad: ${validation.error}` });
+    }
     const doFetch = async (targetUrl) => {
       const parsedUrl = new URL(targetUrl);
       parsedUrl.searchParams.set("_nocache", Date.now().toString());
@@ -3472,9 +4092,11 @@ async function startServer() {
         method: "get",
         url: parsedUrl.toString(),
         timeout: 15e3,
+        maxContentLength: 5 * 1024 * 1024,
         responseType: "text",
-        maxRedirects: 10,
-        httpsAgent: new import_https.default.Agent({ rejectUnauthorized: false }),
+        maxRedirects: 5,
+        httpAgent: safeHttpAgent,
+        httpsAgent: safeHttpsAgent,
         headers: {
           "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
           "Accept": "text/calendar, text/plain, */*",
@@ -3484,15 +4106,20 @@ async function startServer() {
       });
     };
     try {
-      console.log(`[Calendar Proxy] Fetching fresh calendar from: ${fetchUrl}`);
+      console.log(`[Calendar Proxy] Fetching verified calendar from: ${fetchUrl}`);
       let response;
       try {
         response = await doFetch(fetchUrl);
       } catch (firstErr) {
         if (url.trim().startsWith("webcal://") && fetchUrl.startsWith("https://")) {
           const httpUrl = "http://" + fetchUrl.slice(8);
-          console.log(`[Calendar Proxy] HTTPS failed, trying HTTP fallback: ${httpUrl}`);
-          response = await doFetch(httpUrl);
+          const httpVal = await validateSafeExternalUrl(httpUrl);
+          if (httpVal.valid) {
+            console.log(`[Calendar Proxy] HTTPS failed, trying HTTP fallback: ${httpUrl}`);
+            response = await doFetch(httpUrl);
+          } else {
+            throw firstErr;
+          }
         } else {
           throw firstErr;
         }
@@ -3543,9 +4170,9 @@ async function startServer() {
         }
       } catch (e) {
       }
-      let row = db.prepare("SELECT data FROM clubs_data WHERE clubId = ? AND teamId = ? AND segment = ?").get(clubId, teamId, "sessions");
-      if (row) {
-        sessionsData = typeof row.data === "string" ? JSON.parse(row.data) : row.data;
+      let row2 = db.prepare("SELECT data FROM clubs_data WHERE clubId = ? AND teamId = ? AND segment = ?").get(clubId, teamId, "sessions");
+      if (row2) {
+        sessionsData = typeof row2.data === "string" ? JSON.parse(row2.data) : row2.data;
       } else {
         const fDoc = await getFirestoreDoc(`app_docs/clubs_${clubId}_${teamId}_sessions`);
         if (fDoc && fDoc.data) {
@@ -3665,7 +4292,7 @@ async function startServer() {
   app.get("/api/calendar/events.ics", handleIcsFeed);
   app.get("/api/calendar/:clubId/:teamId/events.ics", handleIcsFeed);
   app.get("/api/calendar/:clubId/events.ics", handleIcsFeed);
-  app.get("/api/download-production-bundle", (_req, res) => {
+  app.get("/api/download-production-bundle", requireRootAdmin, (_req, res) => {
     const zipPath = import_path.default.resolve(process.cwd(), "coachassist-production-bundle.zip");
     if (import_fs.default.existsSync(zipPath)) {
       res.setHeader("Content-Type", "application/zip");
@@ -3674,7 +4301,7 @@ async function startServer() {
     }
     return res.status(404).send("Bundle not found");
   });
-  app.get("/api/download-server-cjs", (_req, res) => {
+  app.get("/api/download-server-cjs", requireRootAdmin, (_req, res) => {
     const serverPath = import_path.default.resolve(process.cwd(), "dist", "server.cjs");
     if (import_fs.default.existsSync(serverPath)) {
       res.setHeader("Content-Type", "application/javascript");
@@ -3685,8 +4312,8 @@ async function startServer() {
   });
   function dbGetSystemDoc(docPath) {
     try {
-      const row = db.prepare("SELECT data, updatedAt FROM system_docs WHERE path = ?").get(docPath);
-      return row || null;
+      const row2 = db.prepare("SELECT data, updatedAt FROM system_docs WHERE path = ?").get(docPath);
+      return row2 || null;
     } catch {
       return null;
     }
@@ -3704,11 +4331,11 @@ async function startServer() {
       console.warn(`[SystemDoc] Could not save ${docPath}:`, e);
     }
   }
-  app.get("/api/deploy-ssh-config", (_req, res) => {
+  app.get("/api/deploy-ssh-config", requireRootAdmin, (_req, res) => {
     try {
-      const row = dbGetSystemDoc("system/ssh_deploy_config");
-      if (row && row.data) {
-        const parsed = JSON.parse(row.data);
+      const row2 = dbGetSystemDoc("system/ssh_deploy_config");
+      if (row2 && row2.data) {
+        const parsed = JSON.parse(row2.data);
         return res.json({
           host: parsed.host || "coachassist.setterholm.se",
           port: parsed.port || 22,
@@ -3732,7 +4359,7 @@ async function startServer() {
       return res.status(500).json({ error: e.message });
     }
   });
-  app.post("/api/deploy-to-ssh", async (req, res) => {
+  app.post("/api/deploy-to-ssh", requireRootAdmin, async (req, res) => {
     const {
       host = "coachassist.setterholm.se",
       port = 22,
@@ -3749,9 +4376,9 @@ async function startServer() {
     let finalKey = privateKey;
     if (!finalPassword && !finalKey) {
       try {
-        const row = dbGetSystemDoc("system/ssh_deploy_config");
-        if (row && row.data) {
-          const parsed = JSON.parse(row.data);
+        const row2 = dbGetSystemDoc("system/ssh_deploy_config");
+        if (row2 && row2.data) {
+          const parsed = JSON.parse(row2.data);
           finalPassword = parsed.password;
           finalKey = parsed.privateKey;
         }
@@ -3936,6 +4563,11 @@ startServer().catch((err) => {
 });
 // Annotate the CommonJS export names for ESM import in node:
 0 && (module.exports = {
+  JWT_EXPIRES_IN,
+  extractAuthUser,
+  isRootAdminEmail,
+  requireRootAdmin,
+  verifyIsRootAdmin,
   verifyJwtToken
 });
 //# sourceMappingURL=server.cjs.map

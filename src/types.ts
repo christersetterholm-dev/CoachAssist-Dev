@@ -100,11 +100,20 @@ export interface Team {
   playerIds: string[];
 }
 
+export interface PeriodStandingHistoryItem {
+  date: number;
+  exerciseName: string;
+  points: number;
+  isBonus?: boolean;
+  sessionTitle?: string;
+}
+
 export interface PeriodStandings {
   playerId: string;
   playerName: string;
   points: number;
   photoUrl?: string | null;
+  history?: PeriodStandingHistoryItem[];
 }
 
 export interface BonusPoint {

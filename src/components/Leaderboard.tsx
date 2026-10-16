@@ -1,21 +1,23 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Trophy, Share2, Crown, Star, ChevronDown, Eye, EyeOff, Plus, Lock, Trash2, Loader2, Edit2, Check, User } from 'lucide-react';
+import { Trophy, Share2, Crown, Star, ChevronDown, Eye, EyeOff, Plus, Lock, Trash2, Loader2, Edit2, Check, User, Calendar, Play } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { SquadPlayer, Exercise, Period, PeriodStandings } from '../types';
-import { db, auth, handleFirestoreError, OperationType, doc, getDoc, setDoc } from '../lib/firebase';
+import { SquadPlayer, Exercise, Period, PeriodStandings, TrainingSession } from '../types';
+import { db, auth, handleFirestoreError, OperationType, doc, getDoc, setDoc, getApiUrl } from '../lib/firebase';
 import { calculateLeaderboard } from '../lib/leaderboardUtils';
 import { CachedImage } from './CachedImage';
 
 interface LeaderboardProps {
   squad: SquadPlayer[];
   exercises: Exercise[];
+  sessions?: TrainingSession[];
   periods: Period[];
   currentPeriodId: string | null;
-  onClosePeriod: (name: string, standings: PeriodStandings[]) => void;
+  onClosePeriod: (name: string, standings: PeriodStandings[], periodId?: string, endDate?: number) => void;
   onStartNewPeriod: () => void;
   onDeletePeriod: (id: string) => void;
   onCreatePeriod: (name: string) => void;
   onSwitchPeriod: (id: string) => void;
+  onReactivatePeriod?: (id: string) => void;
   onRenamePeriod: (id: string, newName: string) => void;
   onUpdatePeriod: (id: string, updates: Partial<Period>) => void;
   sharedId?: string | null;
@@ -26,6 +28,7 @@ interface LeaderboardProps {
 export default function Leaderboard({ 
   squad, 
   exercises, 
+  sessions = [],
   periods, 
   currentPeriodId, 
   onClosePeriod, 
@@ -33,6 +36,7 @@ export default function Leaderboard({
   onDeletePeriod,
   onCreatePeriod,
   onSwitchPeriod,
+  onReactivatePeriod,
   onRenamePeriod,
   onUpdatePeriod,
   sharedId,
@@ -45,8 +49,14 @@ export default function Leaderboard({
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showRenameModal, setShowRenameModal] = useState(false);
+  const [showEditEndDateModal, setShowEditEndDateModal] = useState(false);
   const [newPeriodName, setNewPeriodName] = useState('');
   const [renameValue, setRenameValue] = useState('');
+  const [editEndDateValue, setEditEndDateValue] = useState('');
+  const [closeDateValue, setCloseDateValue] = useState(() => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  });
   const [isSharing, setIsSharing] = useState(false);
   const [showBonusModal, setShowBonusModal] = useState(false);
   const [bonusData, setBonusData] = useState<{ playerId: string, points: number, reason: string }>({
@@ -102,6 +112,24 @@ export default function Leaderboard({
     }
   }, [currentPeriodId, sharedId]);
 
+  // Auto-recover missing archived periods from server if list only has current
+  useEffect(() => {
+    if (!sharedId && periods.filter(p => p.endDate || !p.isActive).length === 0) {
+      fetch(getApiUrl('/api/periods/all'))
+        .then(r => r.json())
+        .then(data => {
+          if (data && data.success && Array.isArray(data.periods) && data.periods.length > 0) {
+            data.periods.forEach((p: Period) => {
+              if (p && p.id && !periods.some(ep => ep.id === p.id)) {
+                onUpdatePeriod(p.id, p);
+              }
+            });
+          }
+        })
+        .catch(() => {});
+    }
+  }, [periods, sharedId, onUpdatePeriod]);
+
   // Effect to keep shared leaderboard in sync
   useEffect(() => {
     const period = periods.find(p => p.id === selectedPeriodId);
@@ -109,7 +137,7 @@ export default function Leaderboard({
       const syncShared = async () => {
         const path = `shared_leaderboards/${period.shareId}`;
         try {
-          const stats = calculateLeaderboard(squad, exercises, selectedPeriodId, periods);
+          const stats = calculateLeaderboard(squad, exercises, selectedPeriodId, periods, sessions);
           const dataToUpdate = {
             id: period.shareId,
             name: period.name,
@@ -136,26 +164,35 @@ export default function Leaderboard({
       const timeoutId = setTimeout(syncShared, 30000); // Debounce increased to 30 seconds to prevent rapid write spam while viewing leaderboards
       return () => clearTimeout(timeoutId);
     }
-  }, [squad, exercises, selectedPeriodId, periods, sharedId, userUid]);
+  }, [squad, exercises, selectedPeriodId, periods, sharedId, userUid, sessions]);
 
-  // Get the relevant exercises for the selected view
-  const playerStats = calculateLeaderboard(squad, exercises, selectedPeriodId, periods);
+  // Get the calculated stats and exercise history for the selected view
+  const playerStats = calculateLeaderboard(squad, exercises, selectedPeriodId, periods, sessions);
 
-  // For historical periods, we might want to use the saved standings instead of recalculating
-  // but recalculating is fine if the exercises are still there.
+  // For historical / closed periods, merge saved standings snapshot with full competition history
   const selectedPeriod = periods.find(p => p.id === selectedPeriodId);
-  const displayStats = (selectedPeriod && selectedPeriod.endDate) 
-    ? selectedPeriod.standings.map(s => {
-        const squadPlayer = squad.find(p => p.id === s.playerId);
-        return {
-          id: s.playerId,
-          name: s.playerName,
-          role: squadPlayer?.role || 'player',
-          photoUrl: s.photoUrl || squadPlayer?.photoUrl || null,
-          totalPoints: s.points,
-          history: [] // History might not be available for archived periods if exercises are deleted, but here they are kept
-        };
-      }).sort((a, b) => b.totalPoints - a.totalPoints)
+  const isPeriodClosed = !!selectedPeriod?.endDate;
+
+  const displayStats = isPeriodClosed
+    ? (selectedPeriod.standings && selectedPeriod.standings.length > 0
+        ? selectedPeriod.standings.map(s => {
+            const squadPlayer = squad.find(p => p.id === s.playerId);
+            const calc = playerStats.find(p => p.id === s.playerId);
+            // Use snapshot history if available, or fall back to calculated history from exercises
+            const history = (s.history && s.history.length > 0)
+              ? s.history
+              : (calc?.history || []);
+            return {
+              id: s.playerId,
+              name: s.playerName,
+              role: (s as any).role || squadPlayer?.role || calc?.role || 'player',
+              photoUrl: s.photoUrl || squadPlayer?.photoUrl || calc?.photoUrl || null,
+              totalPoints: s.points !== undefined ? s.points : (calc?.totalPoints || 0),
+              history
+            };
+          }).sort((a, b) => b.totalPoints - a.totalPoints)
+        : playerStats
+      )
     : playerStats;
 
   const handleCreateConfirm = () => {
@@ -171,6 +208,15 @@ export default function Leaderboard({
     setShowRenameModal(false);
   };
 
+  const handleReactivateConfirm = (periodId: string) => {
+    if (onReactivatePeriod) {
+      onReactivatePeriod(periodId);
+    } else {
+      onUpdatePeriod(periodId, { isActive: true, endDate: undefined });
+      onSwitchPeriod(periodId);
+    }
+  };
+
   const handleCloseConfirm = () => {
     if (selectedPeriodId === 'current') return;
     const standings: PeriodStandings[] = playerStats
@@ -179,10 +225,19 @@ export default function Leaderboard({
         playerId: p.id,
         playerName: p.name,
         points: p.totalPoints,
-        photoUrl: p.photoUrl || null
+        photoUrl: p.photoUrl || null,
+        history: p.history || []
       }));
     
-    onClosePeriod('', standings); // Name is already set for the period
+    let endTimestamp = Date.now();
+    if (closeDateValue) {
+      const [y, m, d] = closeDateValue.split('-').map(Number);
+      if (!isNaN(y) && !isNaN(m) && !isNaN(d)) {
+        endTimestamp = new Date(y, m - 1, d, 12, 0, 0).getTime();
+      }
+    }
+    
+    onClosePeriod('', standings, selectedPeriodId, endTimestamp);
     setShowCloseModal(false);
   };
 
@@ -390,12 +445,16 @@ export default function Leaderboard({
       return 'Inga poäng registrerade';
     }
     const period = periods.find(p => p.id === selectedPeriodId);
-    return period?.endDate ? 'Slutställning' : 'Inga poäng än';
+    return period?.endDate ? 'Slutställning (0 poäng)' : 'Inga poäng än';
   };
+
+  const periodExerciseCount = exercises.filter(e => 
+    e.isFinished && (e.periodId === selectedPeriodId || (selectedPeriod?.isActive && !e.periodId))
+  ).length;
 
   return (
     <div className="max-w-4xl lg:max-w-5xl xl:max-w-6xl 2xl:max-w-7xl mx-auto p-4 sm:p-6 pb-16">
-      <div className="flex flex-col mb-8 gap-6">
+      <div className="flex flex-col mb-8 gap-4">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div className="flex items-center gap-3">
             {!sharedId ? (
@@ -443,7 +502,7 @@ export default function Leaderboard({
                 </h1>
               )}
 
-            {finalStats.some((p: any) => p.history.length > 0) && (
+            {finalStats.some((p: any) => p.history && p.history.length > 0) && (
               <button
                 onClick={toggleAll}
                 className="flex items-center gap-2 bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300 px-3 py-1.5 sm:px-4 sm:py-2 rounded-xl font-bold border border-zinc-200 dark:border-zinc-700 hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-all shadow-sm text-sm flex-shrink-0"
@@ -479,9 +538,24 @@ export default function Leaderboard({
                   </button>
                 )}
 
+                {selectedPeriodId !== 'current' && periods.find(p => p.id === selectedPeriodId)?.endDate && (
+                  <button
+                    onClick={() => handleReactivateConfirm(selectedPeriodId)}
+                    className="flex items-center gap-2 bg-green-600 text-white px-4 py-2 rounded-xl font-bold hover:bg-green-700 transition-all shadow-sm text-sm"
+                    title="Aktivera tävlingen igen så att nya tävlingsmoment kan registreras"
+                  >
+                    <Play size={16} fill="currentColor" />
+                    <span>Aktivera igen</span>
+                  </button>
+                )}
+
                 {selectedPeriodId !== 'current' && !periods.find(p => p.id === selectedPeriodId)?.endDate && (
                   <button
-                    onClick={() => setShowCloseModal(true)}
+                    onClick={() => {
+                      const d = new Date();
+                      setCloseDateValue(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`);
+                      setShowCloseModal(true);
+                    }}
                     className="flex items-center gap-2 bg-zinc-900 dark:bg-white text-white dark:text-zinc-900 px-4 py-2 rounded-xl font-bold hover:bg-zinc-800 dark:hover:bg-zinc-100 transition-all shadow-sm text-sm"
                   >
                     <Lock size={18} />
@@ -525,6 +599,59 @@ export default function Leaderboard({
             )}
           </div>
         </div>
+
+        {/* Competition status & info pill */}
+        {selectedPeriod && (
+          <div className="flex flex-wrap items-center gap-2">
+            {selectedPeriod.endDate ? (
+              <div className="inline-flex flex-wrap items-center gap-2 px-3 py-1.5 rounded-2xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800/60 text-amber-800 dark:text-amber-300 text-xs font-bold shadow-2xs">
+                <div className="flex items-center gap-1.5">
+                  <Lock size={13} className="shrink-0" />
+                  <span>Avslutad tävling • Slutställning</span>
+                  <span className="font-extrabold underline decoration-amber-400 decoration-2 underline-offset-2">
+                    {new Date(selectedPeriod.endDate).toLocaleDateString('sv-SE', { day: 'numeric', month: 'short', year: 'numeric' })}
+                  </span>
+                </div>
+                {!sharedId && (
+                  <div className="flex items-center gap-1.5 ml-1">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const d = new Date(selectedPeriod.endDate!);
+                        setEditEndDateValue(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`);
+                        setShowEditEndDateModal(true);
+                      }}
+                      className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-amber-100 hover:bg-amber-200 dark:bg-amber-900/60 dark:hover:bg-amber-800/60 text-amber-900 dark:text-amber-200 font-bold transition-all text-[11px] cursor-pointer"
+                      title="Ändra datum då tävlingen avslutades"
+                    >
+                      <Calendar size={11} />
+                      <span>Ändra datum</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleReactivateConfirm(selectedPeriod.id)}
+                      className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-lg bg-green-600 hover:bg-green-700 text-white font-black transition-all text-[11px] shadow-2xs active:scale-95 cursor-pointer"
+                      title="Öppna och aktivera denna tävling igen"
+                    >
+                      <Play size={10} fill="currentColor" />
+                      <span>Aktivera igen</span>
+                    </button>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-green-50 dark:bg-green-950/40 border border-green-200 dark:border-green-800/60 text-green-800 dark:text-green-300 text-xs font-bold shadow-2xs">
+                <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
+                <span>Pågående tävling</span>
+              </span>
+            )}
+            {periodExerciseCount > 0 && (
+              <span className="text-xs font-semibold text-zinc-500 dark:text-zinc-400">
+                • {periodExerciseCount} {periodExerciseCount === 1 ? 'tävlingsmoment' : 'tävlingsmoment'}
+              </span>
+            )}
+          </div>
+        )}
       </div>
 
       <div className="space-y-4">
@@ -610,23 +737,31 @@ export default function Leaderboard({
                     <div className="bg-zinc-50 dark:bg-zinc-950/50 px-4 py-3 border-t border-zinc-100 dark:border-zinc-800">
                       <div className="flex flex-wrap gap-x-6 gap-y-3">
                         {player.history.map((h, hIdx) => (
-                            <div key={`${hIdx}-${h.date}-${h.exerciseName}`} className="flex items-center group relative overflow-hidden">
+                            <div key={`${hIdx}-${h.date}-${h.exerciseName}`} className="flex items-center group relative overflow-hidden bg-white/60 dark:bg-zinc-900/60 border border-zinc-200/50 dark:border-zinc-800/50 rounded-xl px-2.5 py-1.5 shadow-2xs">
                               <div className="flex flex-col gap-0.5">
-                                <span className="text-[10px] font-bold text-zinc-400 uppercase">
-                                  {new Date(h.date).toLocaleDateString('sv-SE', { day: 'numeric', month: 'short' })}
-                                </span>
+                                <div className="flex items-center gap-1.5 text-[10px] font-bold text-zinc-400 uppercase">
+                                  <span>{new Date(h.date).toLocaleDateString('sv-SE', { day: 'numeric', month: 'short' })}</span>
+                                  {h.sessionTitle && (
+                                    <>
+                                      <span className="text-zinc-300 dark:text-zinc-700">•</span>
+                                      <span className="text-indigo-600 dark:text-indigo-400 font-semibold lowercase first-letter:uppercase truncate max-w-[140px]" title={h.sessionTitle}>
+                                        {h.sessionTitle}
+                                      </span>
+                                    </>
+                                  )}
+                                </div>
                                 <div className="flex items-center gap-1.5">
                                   {h.isBonus ? (
-                                    <Star size={10} className="text-amber-500" fill="currentColor" />
+                                    <Star size={11} className="text-amber-500 shrink-0" fill="currentColor" />
                                   ) : (
-                                    <div className="w-1.5 h-1.5 rounded-full bg-indigo-500"></div>
+                                    <div className="w-1.5 h-1.5 rounded-full bg-indigo-500 shrink-0"></div>
                                   )}
                                   <span className="text-xs font-bold text-zinc-700 dark:text-zinc-300">
                                     {h.exerciseName}: <span className={h.isBonus ? 'text-amber-600 dark:text-amber-400' : 'text-indigo-600 dark:text-indigo-400'}>+{h.points}</span>
                                   </span>
                                 </div>
                               </div>
-                              {h.isBonus && !sharedId && (
+                              {h.isBonus && !sharedId && !selectedPeriod?.endDate && (
                                 <button
                                   onClick={(e) => {
                                     e.stopPropagation();
@@ -634,6 +769,7 @@ export default function Leaderboard({
                                     if (bp) handleRemoveBonus(bp.id);
                                   }}
                                   className="ml-2 p-1 text-zinc-300 hover:text-red-500 transition-colors opacity-100 sm:opacity-0 sm:group-hover:opacity-100"
+                                  title="Ta bort bonuspoäng"
                                 >
                                   <Trash2 size={12} />
                                 </button>
@@ -796,9 +932,26 @@ export default function Leaderboard({
                 <Lock size={32} />
               </div>
               <h3 className="text-xl font-bold text-zinc-900 dark:text-white mb-2 text-center">Avsluta tävling?</h3>
-              <p className="text-zinc-500 dark:text-zinc-400 mb-6 text-center">
-                Detta arkiverar poängställningen för "{periods.find(p => p.id === selectedPeriodId)?.name}". Du kan fortfarande se resultatet senare, men inga nya tävlingsmoment kan läggas till i denna tävling.
+              <p className="text-zinc-500 dark:text-zinc-400 mb-4 text-center text-sm">
+                Detta arkiverar poängställningen för "{periods.find(p => p.id === selectedPeriodId)?.name}". Du kan fortfarande se resultatet senare och aktivera tävlingen igen om du önskar.
               </p>
+              
+              <div className="space-y-4 mb-4 text-left">
+                <div>
+                  <label className="block text-[10px] font-bold text-zinc-400 uppercase tracking-wider mb-1.5">
+                    Avslutsdatum
+                  </label>
+                  <input
+                    type="date"
+                    value={closeDateValue}
+                    onChange={(e) => setCloseDateValue(e.target.value)}
+                    className="w-full px-4 py-3 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-white focus:ring-2 focus:ring-indigo-500 outline-none transition-all font-bold text-sm"
+                  />
+                  <p className="text-[11px] text-zinc-400 mt-1">
+                    Välj det datum då tävlingen officiellt avslutades.
+                  </p>
+                </div>
+              </div>
               
               <div className="flex flex-col gap-3 pt-2">
                 <button
@@ -813,6 +966,70 @@ export default function Leaderboard({
                 >
                   Avbryt
                 </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Edit End Date Modal */}
+      <AnimatePresence>
+        {showEditEndDateModal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+            onClick={() => setShowEditEndDateModal(false)}
+          >
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="bg-white dark:bg-zinc-900 rounded-3xl p-8 max-w-sm w-full shadow-2xl border border-zinc-100 dark:border-zinc-800"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="w-16 h-16 bg-amber-100 dark:bg-amber-900/30 rounded-2xl flex items-center justify-center text-amber-600 dark:text-amber-400 mb-6 mx-auto">
+                <Calendar size={32} />
+              </div>
+              <h3 className="text-xl font-bold text-zinc-900 dark:text-white mb-2 text-center">Ändra avslutsdatum</h3>
+              <p className="text-zinc-500 dark:text-zinc-400 mb-6 text-center text-sm">
+                Välj det datum då tävlingen "{periods.find(p => p.id === selectedPeriodId)?.name}" avslutades.
+              </p>
+              
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-[10px] font-bold text-zinc-400 uppercase tracking-wider mb-2">Avslutsdatum</label>
+                  <input
+                    type="date"
+                    value={editEndDateValue}
+                    onChange={(e) => setEditEndDateValue(e.target.value)}
+                    className="w-full px-4 py-3 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-white focus:ring-2 focus:ring-amber-500 outline-none transition-all font-bold text-sm"
+                  />
+                </div>
+                
+                <div className="flex flex-col gap-3 pt-2">
+                  <button
+                    onClick={() => {
+                      if (!editEndDateValue) return;
+                      const [y, m, d] = editEndDateValue.split('-').map(Number);
+                      if (!isNaN(y) && !isNaN(m) && !isNaN(d)) {
+                        const newTimestamp = new Date(y, m - 1, d, 12, 0, 0).getTime();
+                        onUpdatePeriod(selectedPeriodId, { endDate: newTimestamp });
+                      }
+                      setShowEditEndDateModal(false);
+                    }}
+                    className="w-full py-4 bg-amber-500 hover:bg-amber-600 text-white rounded-2xl font-bold transition-all shadow-lg shadow-amber-100 dark:shadow-none"
+                  >
+                    Spara datum
+                  </button>
+                  <button
+                    onClick={() => setShowEditEndDateModal(false)}
+                    className="w-full py-4 bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300 rounded-2xl font-bold hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-all"
+                  >
+                    Avbryt
+                  </button>
+                </div>
               </div>
             </motion.div>
           </motion.div>

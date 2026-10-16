@@ -1,9 +1,11 @@
 import React, { useState, useRef, useMemo } from 'react';
 import { Search, Plus, Trash2, Edit2, Library, Clock, ExternalLink, Upload, Loader2, Save, X, FolderHeart, Check, Calendar, ChevronRight, Image as ImageIcon, ChevronDown, ChevronUp, Layout } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { storage, ref, uploadBytesResumable, getDownloadURL } from '../lib/firebase';
+import { storage, ref, uploadBytesResumable, getDownloadURL, deleteObject } from '../lib/firebase';
 import { BankExercise, TrainingSession, SquadPlayer } from '../types';
 import TacticalBoardModal from './TacticalBoardModal';
+import { optimizeImageForUpload } from '../utils/imageOptimizer';
+import { CachedImage } from './CachedImage';
 
 interface ExerciseBankViewProps {
   exerciseBank?: BankExercise[];
@@ -252,7 +254,19 @@ export default function ExerciseBankView({
     setIsModalOpen(true);
   };
 
-  const handleSave = (e: React.FormEvent) => {
+  const handleRemoveFormImage = async (indexToRemove: number) => {
+    const targetUrl = formImageUrls[indexToRemove];
+    setFormImageUrls(prev => prev.filter((_, i) => i !== indexToRemove));
+    if (targetUrl && (targetUrl.includes('/uploads/') || targetUrl.includes('photo_'))) {
+      try {
+        await deleteObject(targetUrl);
+      } catch (err) {
+        console.warn('Could not delete image from storage:', err);
+      }
+    }
+  };
+
+  const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!formName.trim()) return;
 
@@ -260,6 +274,21 @@ export default function ExerciseBankView({
 
     const firstImg = formImageUrls[0] || formImageUrl.trim() || undefined;
     const finalUrls = formImageUrls.length > 0 ? formImageUrls : (formImageUrl.trim() ? [formImageUrl.trim()] : []);
+
+    // Clean up images that were deleted from an existing exercise
+    if (editingExercise) {
+      const prevImgs = getExerciseImages(editingExercise);
+      const removedImgs = prevImgs.filter(oldUrl => !finalUrls.includes(oldUrl));
+      for (const oldUrl of removedImgs) {
+        if (oldUrl && (oldUrl.includes('/uploads/') || oldUrl.includes('photo_'))) {
+          try {
+            await deleteObject(oldUrl);
+          } catch (delErr) {
+            console.warn('Error deleting old exercise image:', delErr);
+          }
+        }
+      }
+    }
 
     const dataPayload = {
       name: formName.trim(),
@@ -289,8 +318,20 @@ export default function ExerciseBankView({
 
   const handleDelete = (id: string, name: string) => {
     const confirm = window.confirm(`Är du säker på att du vill ta bort "${name}" från övningsbanken?`);
-    if (confirm && onRemoveBankExercise) {
-      onRemoveBankExercise(id);
+    if (confirm) {
+      // Clean up all images associated with this exercise from storage/disk/firestore
+      const targetEx = exerciseBank.find(e => e.id === id);
+      if (targetEx) {
+        const allImgs = getExerciseImages(targetEx);
+        for (const imgUrl of allImgs) {
+          if (imgUrl && (imgUrl.includes('/uploads/') || imgUrl.includes('photo_'))) {
+            deleteObject(imgUrl).catch(e => console.warn('Could not delete image on exercise removal:', e));
+          }
+        }
+      }
+      if (onRemoveBankExercise) {
+        onRemoveBankExercise(id);
+      }
     }
   };
 
@@ -300,35 +341,40 @@ export default function ExerciseBankView({
 
     const filesArray = Array.from(files) as File[];
     setIsUploading(true);
-    setUploadProgress(10);
+    setUploadProgress(5);
 
     try {
-      const uploadPromises = filesArray.map(async (file) => {
-        if (file.size > 5 * 1024 * 1024) {
-          console.warn(`Filen ${file.name} är för stor (max 5MB)`);
+      const uploadPromises = filesArray.map(async (rawFile, idx) => {
+        try {
+          // 1. Convert HEIC to JPEG if needed, and resize/compress to web-friendly JPEG (<400KB)
+          setUploadProgress(10 + Math.round((idx / filesArray.length) * 30));
+          const optimizedFile = await optimizeImageForUpload(rawFile);
+
+          const cleanName = optimizedFile.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+          const fileName = `${Date.now()}_${idx}_${cleanName}`;
+          const storageRef = ref(storage, `moments/bank_exercises/${fileName}`);
+          const uploadTask = uploadBytesResumable(storageRef, optimizedFile);
+
+          return new Promise<string | null>((resolve, reject) => {
+            uploadTask.on('state_changed',
+              (snapshot) => {
+                const progress = (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
+                setUploadProgress(progress);
+              },
+              (error) => {
+                console.error("Upload error", error);
+                reject(error);
+              },
+              async () => {
+                const downloadURL = await getDownloadURL(uploadTask.snapshot.ref);
+                resolve(downloadURL);
+              }
+            );
+          });
+        } catch (fileErr) {
+          console.error(`Error processing file ${rawFile.name}:`, fileErr);
           return null;
         }
-
-        const fileName = `${Date.now()}_${file.name}`;
-        const storageRef = ref(storage, `moments/bank_exercises/${fileName}`);
-        const uploadTask = uploadBytesResumable(storageRef, file);
-
-        return new Promise<string | null>((resolve, reject) => {
-          uploadTask.on('state_changed',
-            (snapshot) => {
-              const progress = (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
-              setUploadProgress(progress);
-            },
-            (error) => {
-              console.error("Upload error", error);
-              reject(error);
-            },
-            async () => {
-              const downloadURL = await getDownloadURL(uploadTask.snapshot.ref);
-              resolve(downloadURL);
-            }
-          );
-        });
       });
 
       const results = await Promise.all(uploadPromises);
@@ -336,6 +382,8 @@ export default function ExerciseBankView({
 
       if (filteredResults.length > 0) {
         setFormImageUrls(prev => [...prev, ...filteredResults]);
+      } else {
+        alert("Kunde inte läsa eller ladda upp den valda bilden. Kontrollera formatet och försök igen.");
       }
       setIsUploading(false);
     } catch (error) {
@@ -362,7 +410,7 @@ export default function ExerciseBankView({
   return (
     <div id="exercise-bank-container" className="space-y-6">
       {/* Header and Controls */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white dark:bg-zinc-800 p-4 rounded-2xl border border-zinc-200/50 dark:border-zinc-700/50 shadow-sm">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white dark:bg-zinc-800 p-4 rounded-2xl border border-zinc-200 dark:border-zinc-700 shadow-sm">
         <div className="flex-1 relative">
           <Search size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-zinc-400 pointer-events-none" />
           <input
@@ -370,12 +418,12 @@ export default function ExerciseBankView({
             placeholder="Sök bland övningar..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="w-full bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 pl-10 pr-4 py-2.5 rounded-xl text-sm focus:outline-none focus:ring-1 focus:ring-indigo-500 text-zinc-800 dark:text-zinc-100 transition-colors placeholder:text-zinc-400"
+            className="w-full bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 pl-10 pr-4 py-2.5 rounded-xl text-sm focus:outline-none focus:ring-1 focus:ring-indigo-500 text-zinc-900 dark:text-zinc-100 transition-colors placeholder:text-zinc-400 dark:placeholder:text-zinc-500"
           />
           {search && (
             <button 
               onClick={() => setSearch('')}
-              className="absolute right-3.5 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-zinc-650 dark:hover:text-zinc-200 rounded-full"
+              className="absolute right-3.5 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 rounded-full"
             >
               <X size={14} />
             </button>
@@ -401,7 +449,7 @@ export default function ExerciseBankView({
               className={`px-4 py-2 rounded-xl text-xs font-bold uppercase tracking-wider transition-all border ${
                 selectedCategory === category
                   ? 'bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 border-zinc-900 dark:border-zinc-100 shadow-sm'
-                  : 'bg-white dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-750 border-zinc-200 dark:border-zinc-700'
+                  : 'bg-white dark:bg-zinc-800 text-zinc-700 dark:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-700 border-zinc-200 dark:border-zinc-700'
               }`}
             >
               {category}
@@ -411,21 +459,21 @@ export default function ExerciseBankView({
 
         <button
           onClick={() => setIsCategoryModalOpen(true)}
-          className="flex items-center justify-center gap-1.5 px-4 py-2 bg-zinc-50 dark:bg-zinc-900 text-zinc-650 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 border border-zinc-200 dark:border-zinc-700/60 rounded-xl text-xs font-bold uppercase tracking-wider transition-all self-start md:self-auto shadow-sm"
+          className="flex items-center justify-center gap-1.5 px-4 py-2 bg-zinc-50 dark:bg-zinc-900 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-xl text-xs font-bold uppercase tracking-wider transition-all self-start md:self-auto shadow-sm"
         >
-          <FolderHeart size={14} className="text-zinc-550" />
+          <FolderHeart size={14} className="text-zinc-500 dark:text-zinc-400" />
           <span>Kategorier</span>
         </button>
       </div>
 
       {/* Exercises List */}
       {filteredExercises.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-16 px-4 bg-white dark:bg-zinc-800 rounded-3xl border border-zinc-200/50 dark:border-zinc-700/50 shadow-sm text-center">
-          <div className="p-4 bg-indigo-50 dark:bg-indigo-950/40 text-indigo-505 dark:text-indigo-400 rounded-full mb-4">
+        <div className="flex flex-col items-center justify-center py-16 px-4 bg-white dark:bg-zinc-800 rounded-3xl border border-zinc-200 dark:border-zinc-700 shadow-sm text-center">
+          <div className="p-4 bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 rounded-full mb-4">
             <Library size={32} />
           </div>
-          <h3 className="text-zinc-800 dark:text-zinc-100 font-bold text-base mb-1">Inga övningar hittades</h3>
-          <p className="text-zinc-400 dark:text-zinc-500 text-sm max-w-sm">
+          <h3 className="text-zinc-900 dark:text-zinc-100 font-bold text-base mb-1">Inga övningar hittades</h3>
+          <p className="text-zinc-500 dark:text-zinc-400 text-sm max-w-sm">
             {search || selectedCategory !== 'Alla' 
               ? 'Försök ändra din sökning eller klicka på en annan kategori.'
               : 'Skapa din första övning i banken genom att klicka på knappen ovan för att komma igång!'}
@@ -445,8 +493,8 @@ export default function ExerciseBankView({
                   key={ex.id}
                   className={`bg-white dark:bg-zinc-800 rounded-2xl border transition-all duration-300 flex flex-col overflow-hidden group hover:shadow-md relative ${
                     isSelected
-                      ? 'border-indigo-500 dark:border-indigo-400 ring-2 ring-indigo-500/15 dark:ring-indigo-400/15 shadow-md shadow-indigo-50/20'
-                      : 'border-zinc-200/50 dark:border-zinc-700/50 shadow-sm'
+                      ? 'border-indigo-500 dark:border-indigo-400 ring-2 ring-indigo-500/20 dark:ring-indigo-400/20 shadow-md'
+                      : 'border-zinc-200 dark:border-zinc-700 shadow-sm'
                   }`}
                 >
                   {/* Select Checkbox Indicator */}
@@ -459,8 +507,8 @@ export default function ExerciseBankView({
                       }}
                       className={`w-6 h-6 rounded-full border flex items-center justify-center transition-all ${
                         isSelected
-                          ? 'bg-indigo-600 border-indigo-600 dark:bg-indigo-500 dark:border-indigo-500 text-white shadow-sm shadow-indigo-150'
-                          : 'bg-white/90 dark:bg-zinc-900/90 backdrop-blur-sm border-zinc-300 dark:border-zinc-650 hover:border-indigo-500 hover:scale-105 active:scale-95 text-transparent'
+                          ? 'bg-indigo-600 border-indigo-600 dark:bg-indigo-500 dark:border-indigo-500 text-white shadow-sm'
+                          : 'bg-white/90 dark:bg-zinc-900/90 backdrop-blur-sm border-zinc-300 dark:border-zinc-600 hover:border-indigo-500 hover:scale-105 active:scale-95 text-transparent'
                       }`}
                       title={isSelected ? "Avmarkera övning" : "Markera övning"}
                     >
@@ -480,12 +528,11 @@ export default function ExerciseBankView({
                             setViewingImageInfo({ urls: cardImages, index: 0 });
                           }
                         }}
-                        className="w-full h-36 relative overflow-hidden bg-zinc-100 dark:bg-zinc-900 border-b border-zinc-100 dark:border-zinc-750 cursor-zoom-in group/thumb"
+                        className="w-full h-36 relative overflow-hidden bg-zinc-100 dark:bg-zinc-900 border-b border-zinc-100 dark:border-zinc-700 cursor-zoom-in group/thumb"
                       >
-                        <img
+                        <CachedImage
                           src={cardThumb}
                           alt={ex.name}
-                          referrerPolicy="no-referrer"
                           className="w-full h-full object-cover transition-transform duration-500 group-hover/thumb:scale-[1.03]"
                         />
                         {cardImages.length > 1 && (
@@ -510,35 +557,35 @@ export default function ExerciseBankView({
                     {getExerciseImages(ex).length === 0 && (
                       <div className="flex flex-wrap gap-1 mb-2.5 max-w-[85%]">
                         {getExerciseCategories(ex).map(cat => (
-                          <span key={cat} className="bg-zinc-100 dark:bg-zinc-900 text-zinc-650 dark:text-zinc-455 px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider border border-zinc-200/35 dark:border-zinc-800/80">
+                          <span key={cat} className="bg-zinc-100 dark:bg-zinc-700/60 text-zinc-700 dark:text-zinc-200 px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider border border-zinc-200 dark:border-zinc-700">
                             {cat}
                           </span>
                         ))}
                       </div>
                     )}
 
-                    <h4 className="text-zinc-800 dark:text-zinc-100 font-bold text-base line-clamp-2 leading-tight group-hover:text-indigo-650 dark:group-hover:text-indigo-400 transition-colors pr-6">
+                    <h4 className="text-zinc-900 dark:text-zinc-50 font-bold text-base line-clamp-2 leading-tight group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors pr-6">
                       {ex.name}
                     </h4>
 
-                    <div className="flex items-center gap-1.5 text-zinc-400 dark:text-zinc-500 text-xs mt-1.5 font-semibold">
+                    <div className="flex items-center gap-1.5 text-zinc-500 dark:text-zinc-400 text-xs mt-1.5 font-medium">
                       <Clock size={13} />
                       <span>Rekommenderad tid: {ex.duration || 15} min</span>
                     </div>
 
                     {ex.description && (
-                      <p className="text-zinc-400 dark:text-zinc-500 text-xs mt-3 line-clamp-3 leading-relaxed">
+                      <p className="text-zinc-600 dark:text-zinc-300 text-xs mt-3 line-clamp-3 leading-relaxed">
                         {ex.description}
                       </p>
                     )}
 
-                    <div className="mt-auto pt-4 flex items-center justify-between gap-1.5 border-t border-zinc-100 dark:border-zinc-750/50">
+                    <div className="mt-auto pt-4 flex items-center justify-between gap-1.5 border-t border-zinc-100 dark:border-zinc-700">
                       {ex.externalLink ? (
                         <a
                           href={ex.externalLink}
                           target="_blank"
                           rel="noopener noreferrer"
-                          className="flex items-center gap-1 text-zinc-400 hover:text-indigo-650 dark:hover:text-indigo-400 text-xs font-semibold transition-colors"
+                          className="flex items-center gap-1 text-zinc-500 dark:text-zinc-400 hover:text-indigo-600 dark:hover:text-indigo-400 text-xs font-medium transition-colors"
                         >
                           <ExternalLink size={13} />
                           Läs mer
@@ -551,7 +598,7 @@ export default function ExerciseBankView({
                         <button
                           type="button"
                           onClick={() => handleAddSingleToSession(ex)}
-                          className="p-1 px-1.5 hover:bg-indigo-50 dark:hover:bg-indigo-950/30 text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 dark:hover:text-indigo-300 rounded-lg text-[11px] font-black uppercase tracking-wider flex items-center gap-0.5 transition-all"
+                          className="p-1 px-1.5 bg-indigo-50/70 hover:bg-indigo-100 dark:bg-indigo-950/50 dark:hover:bg-indigo-900/60 text-indigo-600 dark:text-indigo-400 rounded-lg text-[11px] font-black uppercase tracking-wider flex items-center gap-0.5 transition-all"
                           title="Lägg till i träningspass"
                         >
                           <Plus size={13} />
@@ -560,7 +607,7 @@ export default function ExerciseBankView({
                         <button
                           type="button"
                           onClick={() => setTacticalBoardExercise(ex)}
-                          className="p-1 px-1.5 hover:bg-emerald-50 dark:hover:bg-emerald-950/30 text-emerald-600 dark:text-emerald-400 hover:text-emerald-700 dark:hover:text-emerald-300 rounded-lg text-[11px] font-black uppercase tracking-wider flex items-center gap-0.5 transition-all"
+                          className="p-1 px-1.5 bg-emerald-50/70 hover:bg-emerald-100 dark:bg-emerald-950/50 dark:hover:bg-emerald-900/60 text-emerald-700 dark:text-emerald-300 rounded-lg text-[11px] font-black uppercase tracking-wider flex items-center gap-0.5 transition-all"
                           title="Öppna rittavla"
                         >
                           <Layout size={11} />
@@ -569,7 +616,7 @@ export default function ExerciseBankView({
                         <button
                           type="button"
                           onClick={() => handleOpenEdit(ex)}
-                          className="p-1 px-1.5 hover:bg-zinc-50 dark:hover:bg-zinc-750 text-zinc-500 hover:text-zinc-850 dark:hover:text-zinc-200 rounded-lg text-[11px] font-black uppercase tracking-wider flex items-center gap-0.5 transition-all"
+                          className="p-1 px-1.5 bg-zinc-100/80 hover:bg-zinc-200 dark:bg-zinc-700/60 dark:hover:bg-zinc-700 text-zinc-700 dark:text-zinc-200 rounded-lg text-[11px] font-black uppercase tracking-wider flex items-center gap-0.5 transition-all"
                           title="Redigera övning"
                         >
                           <Edit2 size={11} />
@@ -578,7 +625,7 @@ export default function ExerciseBankView({
                         <button
                           type="button"
                           onClick={() => handleDelete(ex.id, ex.name)}
-                          className="p-1 px-1.5 hover:bg-red-50 dark:hover:bg-red-955/20 text-zinc-400 hover:text-red-500 rounded-lg text-[11px] font-black uppercase tracking-wider flex items-center gap-0.5 transition-all"
+                          className="p-1 px-1.5 hover:bg-red-50 dark:hover:bg-red-950/40 text-zinc-400 hover:text-red-500 dark:hover:text-red-400 rounded-lg text-[11px] font-black uppercase tracking-wider flex items-center gap-0.5 transition-all"
                           title="Ta bort övning"
                         >
                           <Trash2 size={11} />
@@ -600,10 +647,10 @@ export default function ExerciseBankView({
             initial={{ opacity: 0, y: 50, scale: 0.95 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 50, scale: 0.95 }}
-            className="fixed bottom-[84px] sm:bottom-[88px] left-1/2 -translate-x-1/2 z-[45] bg-zinc-900 dark:bg-zinc-50 text-white dark:text-zinc-900 px-5 py-3.5 rounded-2xl shadow-2xl flex items-center gap-3.5 border border-zinc-800 dark:border-zinc-200 w-[92%] max-w-md justify-between animate-in fade-in slide-in-from-bottom-5 duration-200"
+            className="fixed bottom-[84px] sm:bottom-[88px] left-1/2 -translate-x-1/2 z-[45] bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 px-5 py-3.5 rounded-2xl shadow-2xl flex items-center gap-3.5 border border-zinc-800 dark:border-zinc-300 w-[92%] max-w-md justify-between animate-in fade-in slide-in-from-bottom-5 duration-200"
           >
             <div className="flex items-center gap-3">
-              <span className="w-5 h-5 rounded-full bg-indigo-650 text-white text-[10px] flex items-center justify-center font-black">
+              <span className="w-5 h-5 rounded-full bg-indigo-600 text-white text-[10px] flex items-center justify-center font-black">
                 {selectedExerciseIds.size}
               </span>
               <span className="text-xs font-black uppercase tracking-wider">
@@ -613,13 +660,13 @@ export default function ExerciseBankView({
             <div className="flex items-center gap-2">
               <button
                 onClick={clearSelection}
-                className="text-xs font-black uppercase tracking-wider px-3 py-1.5 rounded-lg text-zinc-400 dark:text-zinc-500 hover:bg-zinc-800 dark:hover:bg-zinc-100 transition-colors"
+                className="text-xs font-black uppercase tracking-wider px-3 py-1.5 rounded-lg text-zinc-400 dark:text-zinc-600 hover:bg-zinc-800 dark:hover:bg-zinc-200 transition-colors"
               >
                 Avbryt
               </button>
               <button
                 onClick={handlePlanMultiple}
-                className="flex items-center gap-1 bg-indigo-600 dark:bg-indigo-500 hover:bg-indigo-750 dark:hover:bg-indigo-600 text-white dark:text-white px-3.5 py-1.5 rounded-xl text-xs font-black uppercase tracking-wider transition-all shadow-md active:scale-95"
+                className="flex items-center gap-1 bg-indigo-600 hover:bg-indigo-700 dark:bg-indigo-600 dark:hover:bg-indigo-700 text-white px-3.5 py-1.5 rounded-xl text-xs font-black uppercase tracking-wider transition-all shadow-md active:scale-95"
               >
                 <Plus size={14} className="stroke-[3]" />
                 Planera
@@ -637,11 +684,11 @@ export default function ExerciseBankView({
               initial={{ opacity: 0, scale: 0.95, y: 15 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.95, y: 15 }}
-              className="bg-white dark:bg-zinc-850 w-full max-w-lg rounded-3xl shadow-2xl overflow-hidden border border-zinc-200/80 dark:border-zinc-750"
+              className="bg-white dark:bg-zinc-800 w-full max-w-lg rounded-3xl shadow-2xl overflow-hidden border border-zinc-200 dark:border-zinc-700"
             >
-              <div className="flex items-center justify-between bg-zinc-55 dark:bg-zinc-900/50 px-6 py-4.5 border-b border-zinc-150 dark:border-zinc-750">
+              <div className="flex items-center justify-between bg-zinc-50 dark:bg-zinc-900 px-6 py-4.5 border-b border-zinc-200 dark:border-zinc-700">
                 <div className="flex items-center gap-2">
-                  <span className="p-1.5 bg-indigo-50 dark:bg-indigo-950/40 text-indigo-600 dark:text-indigo-400 rounded-lg">
+                  <span className="p-1.5 bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 rounded-lg">
                     <Calendar size={18} />
                   </span>
                   <h3 className="text-zinc-900 dark:text-white font-black text-base uppercase tracking-wider">
@@ -654,7 +701,7 @@ export default function ExerciseBankView({
                       setShowAddToSessionModal(false);
                       setExercisesToAddToSession([]);
                     }}
-                    className="p-1.5 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-400 dark:text-zinc-500 rounded-full transition-colors"
+                    className="p-1.5 hover:bg-zinc-100 dark:hover:bg-zinc-700 text-zinc-400 dark:text-zinc-400 rounded-full transition-colors"
                   >
                     <X size={18} />
                   </button>
@@ -666,20 +713,20 @@ export default function ExerciseBankView({
                   <motion.div
                     initial={{ scale: 0.6, opacity: 0 }}
                     animate={{ scale: 1, opacity: 1 }}
-                    className="w-16 h-16 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-500 rounded-full flex items-center justify-center shadow-lg"
+                    className="w-16 h-16 bg-emerald-50 dark:bg-emerald-950/60 text-emerald-500 rounded-full flex items-center justify-center shadow-lg"
                   >
                     <Check size={36} className="stroke-[3]" />
                   </motion.div>
                   <h4 className="text-zinc-900 dark:text-white text-lg font-black uppercase tracking-wider">
                     Övningar tillagda!
                   </h4>
-                  <p className="text-zinc-500 dark:text-zinc-400 text-sm max-w-sm">
+                  <p className="text-zinc-600 dark:text-zinc-300 text-sm max-w-sm">
                     Kopierade {exercisesToAddToSession.length} {exercisesToAddToSession.length === 1 ? 'övning' : 'övningar'} till passet <span className="font-extrabold text-indigo-600 dark:text-indigo-400">"{lastSelectedSessionTitle}"</span>.
                   </p>
                 </div>
               ) : (
                 <div className="p-6 space-y-5">
-                  <p className="text-zinc-500 dark:text-zinc-400 text-xs font-semibold">
+                  <p className="text-zinc-600 dark:text-zinc-300 text-xs font-semibold">
                     Välj vilket träningspass du vill lägga till de <span className="font-extrabold text-zinc-900 dark:text-white">{exercisesToAddToSession.length}</span> valda {exercisesToAddToSession.length === 1 ? 'övningen' : 'övningarna'} till:
                   </p>
 
@@ -691,18 +738,18 @@ export default function ExerciseBankView({
                       placeholder="Sök pass..."
                       value={sessionSearchQuery}
                       onChange={(e) => setSessionSearchQuery(e.target.value)}
-                      className="w-full bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 pl-9 pr-4 py-2 rounded-xl text-sm focus:outline-none focus:ring-1 focus:ring-indigo-500 text-zinc-805 dark:text-zinc-100 transition-colors"
+                      className="w-full bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 pl-9 pr-4 py-2 rounded-xl text-sm focus:outline-none focus:ring-1 focus:ring-indigo-500 text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400 dark:placeholder:text-zinc-500 transition-colors"
                     />
                   </div>
 
                   {/* Sessions Scroll List */}
                   <div className="max-h-64 overflow-y-auto space-y-1.5 pr-1 scrollbar-thin scrollbar-thumb-zinc-200 dark:scrollbar-thumb-zinc-700">
                     {sessions.length === 0 ? (
-                      <div className="py-8 text-center text-zinc-400 text-sm">
+                      <div className="py-8 text-center text-zinc-400 dark:text-zinc-400 text-sm">
                         Inga träningspass tillgängliga.
                       </div>
                     ) : sortedSessions.length === 0 ? (
-                      <div className="py-8 text-center text-zinc-400 text-sm">
+                      <div className="py-8 text-center text-zinc-400 dark:text-zinc-400 text-sm">
                         Inga träningspass matchar din sökning.
                       </div>
                     ) : (
@@ -710,13 +757,13 @@ export default function ExerciseBankView({
                         <button
                           key={session.id}
                           onClick={() => handleSelectTargetSession(session)}
-                          className="w-full text-left p-3.5 bg-zinc-50 hover:bg-indigo-50/40 dark:bg-zinc-900/40 dark:hover:bg-indigo-950/20 border border-zinc-150 dark:border-zinc-800 rounded-xl flex items-center justify-between gap-3 group transition-all"
+                          className="w-full text-left p-3.5 bg-zinc-50 hover:bg-indigo-50/60 dark:bg-zinc-900/60 dark:hover:bg-indigo-950/40 border border-zinc-200 dark:border-zinc-700 rounded-xl flex items-center justify-between gap-3 group transition-all"
                         >
                           <div className="flex-1 min-w-0">
-                            <h4 className="text-zinc-800 dark:text-zinc-100 font-black text-sm group-hover:text-indigo-650 dark:group-hover:text-indigo-400 transition-colors truncate">
+                            <h4 className="text-zinc-900 dark:text-zinc-100 font-bold text-sm group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors truncate">
                               {session.title}
                             </h4>
-                            <p className="text-xs text-zinc-405 dark:text-zinc-500 mt-0.5 flex items-center gap-1.5 font-bold">
+                            <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5 flex items-center gap-1.5 font-medium">
                               <span>{formatDate(session.date)}</span>
                               <span>•</span>
                               <span>{session.startTime}{session.endTime ? `-${session.endTime}` : ''}</span>
@@ -741,7 +788,7 @@ export default function ExerciseBankView({
                         setShowAddToSessionModal(false);
                         setExercisesToAddToSession([]);
                       }}
-                      className="px-5 py-2.5 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-700 dark:text-zinc-300 rounded-xl text-xs font-black uppercase tracking-wider transition-colors"
+                      className="px-5 py-2.5 bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-700 dark:hover:bg-zinc-600 text-zinc-700 dark:text-zinc-200 rounded-xl text-xs font-black uppercase tracking-wider transition-colors"
                     >
                       Stäng
                     </button>
@@ -763,18 +810,18 @@ export default function ExerciseBankView({
               exit={{ opacity: 0, scale: 0.95, y: 15 }}
               className="bg-white dark:bg-zinc-800 w-full max-w-md rounded-3xl shadow-xl overflow-hidden border border-zinc-200 dark:border-zinc-700"
             >
-              <div className="flex items-center justify-between bg-zinc-50 dark:bg-zinc-900/50 px-6 py-4 border-b border-zinc-200/50 dark:border-zinc-700/50">
+              <div className="flex items-center justify-between bg-zinc-50 dark:bg-zinc-900 px-6 py-4 border-b border-zinc-200 dark:border-zinc-700">
                 <div className="flex items-center gap-2">
-                  <span className="p-1.5 bg-indigo-50 dark:bg-indigo-950/50 text-indigo-600 dark:text-indigo-400 rounded-lg">
+                  <span className="p-1.5 bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 rounded-lg">
                     <FolderHeart size={16} />
                   </span>
-                  <h3 className="text-zinc-800 dark:text-zinc-100 font-bold text-base">
+                  <h3 className="text-zinc-900 dark:text-zinc-100 font-bold text-base">
                     Hantera egna kategorier
                   </h3>
                 </div>
                 <button
                   onClick={() => setIsCategoryModalOpen(false)}
-                  className="p-1.5 hover:bg-zinc-100 dark:hover:bg-zinc-805 text-zinc-400 dark:text-zinc-500 rounded-full transition-colors"
+                  className="p-1.5 hover:bg-zinc-100 dark:hover:bg-zinc-700 text-zinc-400 dark:text-zinc-400 rounded-full transition-colors"
                 >
                   <X size={18} />
                 </button>
@@ -793,7 +840,7 @@ export default function ExerciseBankView({
                   }}
                   className="space-y-2"
                 >
-                  <label className="text-zinc-500 dark:text-zinc-400 text-xs font-bold uppercase tracking-wider block">
+                  <label className="text-zinc-700 dark:text-zinc-300 text-xs font-bold uppercase tracking-wider block">
                     Skapa ny kategori
                   </label>
                   <div className="flex gap-2">
@@ -803,7 +850,7 @@ export default function ExerciseBankView({
                       onChange={(e) => setNewCategoryInput(e.target.value)}
                       placeholder="t.ex. Smålagsspel, Nickar..."
                       maxLength={30}
-                      className="flex-1 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 px-4 py-2.5 rounded-xl text-sm focus:outline-none focus:ring-1 focus:ring-indigo-500 text-zinc-800 dark:text-zinc-200"
+                      className="flex-1 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 px-4 py-2.5 rounded-xl text-sm focus:outline-none focus:ring-1 focus:ring-indigo-500 text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400 dark:placeholder:text-zinc-500"
                     />
                     <button
                       type="submit"
@@ -817,18 +864,18 @@ export default function ExerciseBankView({
 
                 {/* Category Lists */}
                 <div className="space-y-2">
-                  <label className="text-zinc-500 dark:text-zinc-400 text-xs font-bold uppercase tracking-wider block">
+                  <label className="text-zinc-700 dark:text-zinc-300 text-xs font-bold uppercase tracking-wider block">
                     Dina egna kategorier
                   </label>
                   {exerciseBankCategories.length === 0 ? (
-                    <p className="text-zinc-400 dark:text-zinc-500 text-xs italic py-2">
+                    <p className="text-zinc-400 dark:text-zinc-400 text-xs italic py-2">
                       Du har inte skapat några egna kategorier än.
                     </p>
                   ) : (
-                    <div className="max-h-56 overflow-y-auto divide-y divide-zinc-100 dark:divide-zinc-750/55 rounded-xl border border-zinc-200 dark:border-zinc-700">
+                    <div className="max-h-56 overflow-y-auto divide-y divide-zinc-200 dark:divide-zinc-700 rounded-xl border border-zinc-200 dark:border-zinc-700">
                       {exerciseBankCategories.map(cat => (
-                        <div key={cat} className="flex items-center justify-between px-4 py-2.5 bg-zinc-50/50 dark:bg-zinc-900/10">
-                          <span className="text-sm font-medium text-zinc-700 dark:text-zinc-300">{cat}</span>
+                        <div key={cat} className="flex items-center justify-between px-4 py-2.5 bg-zinc-50/60 dark:bg-zinc-900/40">
+                          <span className="text-sm font-medium text-zinc-800 dark:text-zinc-200">{cat}</span>
                           <button
                             type="button"
                             onClick={() => {
@@ -840,7 +887,7 @@ export default function ExerciseBankView({
                                 }
                               }
                             }}
-                            className="p-1 hover:bg-red-50 dark:hover:bg-red-955/30 text-zinc-400 hover:text-red-500 rounded-lg transition-colors"
+                            className="p-1 hover:bg-red-50 dark:hover:bg-red-950/40 text-zinc-400 hover:text-red-500 dark:hover:text-red-400 rounded-lg transition-colors"
                             title="Ta bort kategori"
                           >
                             <Trash2 size={14} />
@@ -851,11 +898,11 @@ export default function ExerciseBankView({
                   )}
                 </div>
 
-                <div className="pt-2 border-t border-zinc-100 dark:border-zinc-750/50 text-right">
+                <div className="pt-2 border-t border-zinc-200 dark:border-zinc-700 text-right">
                   <button
                     type="button"
                     onClick={() => setIsCategoryModalOpen(false)}
-                    className="px-5 py-2.5 bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-700 dark:hover:bg-zinc-650 text-zinc-700 dark:text-zinc-300 rounded-xl text-xs font-bold uppercase tracking-wider transition-colors animate-none"
+                    className="px-5 py-2.5 bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-700 dark:hover:bg-zinc-600 text-zinc-700 dark:text-zinc-200 rounded-xl text-xs font-bold uppercase tracking-wider transition-colors animate-none"
                   >
                     Stäng
                   </button>
@@ -876,18 +923,18 @@ export default function ExerciseBankView({
               exit={{ opacity: 0, scale: 0.95, y: 15 }}
               className="bg-white dark:bg-zinc-800 w-full max-w-lg rounded-3xl shadow-xl overflow-hidden border border-zinc-200 dark:border-zinc-700"
             >
-              <div className="flex items-center justify-between bg-zinc-50 dark:bg-zinc-900/50 px-6 py-4 border-b border-zinc-200/50 dark:border-zinc-700/50">
+              <div className="flex items-center justify-between bg-zinc-50 dark:bg-zinc-900 px-6 py-4 border-b border-zinc-200 dark:border-zinc-700">
                 <div className="flex items-center gap-2">
-                  <span className="p-1.5 bg-indigo-50 dark:bg-indigo-950/50 text-indigo-600 dark:text-indigo-400 rounded-lg">
+                  <span className="p-1.5 bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 rounded-lg">
                     <FolderHeart size={16} />
                   </span>
-                  <h3 className="text-zinc-800 dark:text-zinc-100 font-bold text-base">
+                  <h3 className="text-zinc-900 dark:text-zinc-100 font-bold text-base">
                     {editingExercise ? 'Redigera övning' : 'Skapa övning i banken'}
                   </h3>
                 </div>
                 <button
                   onClick={() => setIsModalOpen(false)}
-                  className="p-1.5 hover:bg-zinc-100 dark:hover:bg-zinc-805 text-zinc-400 dark:text-zinc-500 rounded-full transition-colors"
+                  className="p-1.5 hover:bg-zinc-100 dark:hover:bg-zinc-700 text-zinc-400 dark:text-zinc-400 rounded-full transition-colors"
                 >
                   <X size={18} />
                 </button>
@@ -896,7 +943,7 @@ export default function ExerciseBankView({
               <form onSubmit={handleSave} className="p-6 space-y-4 max-h-[75vh] overflow-y-auto">
                 {/* Name */}
                 <div className="space-y-1.5">
-                  <label className="text-zinc-500 dark:text-zinc-400 text-xs font-bold uppercase tracking-wider">
+                  <label className="text-zinc-700 dark:text-zinc-300 text-xs font-bold uppercase tracking-wider">
                     Övningsnamn *
                   </label>
                   <input
@@ -905,14 +952,14 @@ export default function ExerciseBankView({
                     value={formName}
                     onChange={(e) => setFormName(e.target.value)}
                     placeholder="t.ex. Kvadraten, Spelvändning..."
-                    className="w-full bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 px-4 py-2.5 rounded-xl text-sm focus:outline-none focus:ring-1 focus:ring-indigo-500 text-zinc-800 dark:text-zinc-155"
+                    className="w-full bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 px-4 py-2.5 rounded-xl text-sm focus:outline-none focus:ring-1 focus:ring-indigo-500 text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400 dark:placeholder:text-zinc-500"
                   />
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   {/* Duration */}
                   <div className="space-y-1.5">
-                    <label className="text-zinc-500 dark:text-zinc-400 text-xs font-bold uppercase tracking-wider">
+                    <label className="text-zinc-700 dark:text-zinc-300 text-xs font-bold uppercase tracking-wider">
                       Tid budget (min) *
                     </label>
                     <input
@@ -921,20 +968,20 @@ export default function ExerciseBankView({
                       min={1}
                       value={formDuration}
                       onChange={(e) => setFormDuration(Number(e.target.value) || 15)}
-                      className="w-full bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 px-4 py-2.5 rounded-xl text-sm focus:outline-none focus:ring-1 focus:ring-indigo-500 text-zinc-800 dark:text-zinc-155"
+                      className="w-full bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 px-4 py-2.5 rounded-xl text-sm focus:outline-none focus:ring-1 focus:ring-indigo-500 text-zinc-900 dark:text-zinc-100"
                     />
                   </div>
                 </div>
 
                 {/* Categories / Tags Selection */}
                 <div className="space-y-2 pt-1">
-                  <label className="text-zinc-500 dark:text-zinc-400 text-xs font-bold uppercase tracking-wider block">
+                  <label className="text-zinc-700 dark:text-zinc-300 text-xs font-bold uppercase tracking-wider block">
                     Välj kategorier / etiketter (många möjliga) *
                   </label>
-                  <p className="text-[11px] text-zinc-400 dark:text-zinc-500">
+                  <p className="text-[11px] text-zinc-500 dark:text-zinc-400">
                     Klicka på etiketterna nedan för att välja vilka kategorier övningen tillhör.
                   </p>
-                  <div className="flex flex-wrap gap-1.5 p-3 bg-zinc-50 dark:bg-zinc-900/60 rounded-2xl border border-zinc-200/65 dark:border-zinc-700/60 max-h-48 overflow-y-auto">
+                  <div className="flex flex-wrap gap-1.5 p-3 bg-zinc-50 dark:bg-zinc-900/60 rounded-2xl border border-zinc-200 dark:border-zinc-700 max-h-48 overflow-y-auto">
                     {assignmentCategoriesList.map(cat => {
                       const isSelected = formCategories.includes(cat);
                       return (
@@ -948,10 +995,10 @@ export default function ExerciseBankView({
                               setFormCategories(prev => [...prev, cat]);
                             }
                           }}
-                          className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all border flex items-center gap-1 cursor-pointer select-none ${
+                          className={`px-3 py-1.5 rounded-xl text-xs transition-all border flex items-center gap-1 cursor-pointer select-none ${
                             isSelected
-                              ? 'bg-indigo-600 dark:bg-indigo-500 border-indigo-600 dark:border-indigo-500 text-white shadow-sm font-black'
-                              : 'bg-white dark:bg-zinc-850 hover:bg-zinc-100 dark:hover:bg-zinc-800 border-zinc-200 dark:border-zinc-700 text-zinc-650 dark:text-zinc-350'
+                              ? 'bg-indigo-600 dark:bg-indigo-500 border-indigo-600 dark:border-indigo-500 text-white shadow-sm font-bold'
+                              : 'bg-white dark:bg-zinc-800 hover:bg-zinc-100 dark:hover:bg-zinc-700 border-zinc-200 dark:border-zinc-700 text-zinc-700 dark:text-zinc-200 font-medium'
                           }`}
                         >
                           <span>{cat}</span>
@@ -964,7 +1011,7 @@ export default function ExerciseBankView({
 
                 {/* Description */}
                 <div className="space-y-1.5">
-                  <label className="text-zinc-500 dark:text-zinc-400 text-xs font-bold uppercase tracking-wider">
+                  <label className="text-zinc-700 dark:text-zinc-300 text-xs font-bold uppercase tracking-wider">
                     Beskrivning / Instruktioner
                   </label>
                   <textarea
@@ -972,34 +1019,32 @@ export default function ExerciseBankView({
                     value={formDescription}
                     onChange={(e) => setFormDescription(e.target.value)}
                     placeholder="Instruktioner för övningen..."
-                    className="w-full bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 px-4 py-2.5 rounded-xl text-sm focus:outline-none focus:ring-1 focus:ring-indigo-500 text-zinc-800 dark:text-zinc-155 resize-none placeholder:text-zinc-400"
+                    className="w-full bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 px-4 py-2.5 rounded-xl text-sm focus:outline-none focus:ring-1 focus:ring-indigo-500 text-zinc-900 dark:text-zinc-100 resize-none placeholder:text-zinc-400 dark:placeholder:text-zinc-500"
                   />
                 </div>
 
                 {/* Image Upload/Link */}
                 <div className="space-y-1.5">
-                  <label className="text-zinc-500 dark:text-zinc-400 text-xs font-bold uppercase tracking-wider block">
+                  <label className="text-zinc-700 dark:text-zinc-300 text-xs font-bold uppercase tracking-wider block">
                     Övningsbilder ({formImageUrls.length})
                   </label>
 
                   {/* Thumbnails grid */}
                   {formImageUrls.length > 0 && (
-                    <div className="flex flex-wrap gap-2 p-3 bg-zinc-50 dark:bg-zinc-900/40 rounded-2xl border border-zinc-150 dark:border-zinc-750/80">
+                    <div className="flex flex-wrap gap-2 p-3 bg-zinc-50 dark:bg-zinc-900/60 rounded-2xl border border-zinc-200 dark:border-zinc-700">
                       {formImageUrls.map((url, idx) => (
-                        <div key={idx} className="relative group w-20 h-20 rounded-xl overflow-hidden border border-zinc-200 dark:border-zinc-750 shadow-sm shrink-0 bg-white dark:bg-zinc-800">
-                          <img src={url} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                        <div key={idx} className="relative group w-20 h-20 rounded-xl overflow-hidden border border-zinc-200 dark:border-zinc-700 shadow-sm shrink-0 bg-white dark:bg-zinc-800">
+                          <CachedImage src={url} alt={`Bild ${idx + 1}`} className="w-full h-full object-cover" />
                           <button
                             type="button"
-                            onClick={() => {
-                              setFormImageUrls(prev => prev.filter((_, i) => i !== idx));
-                            }}
-                            className="absolute top-1 right-1 p-1 bg-black/60 hover:bg-black/80 text-white rounded-full transition-colors opacity-90 group-hover:opacity-100"
+                            onClick={() => handleRemoveFormImage(idx)}
+                            className="absolute top-1 right-1 p-1 bg-black/70 hover:bg-red-600 text-white rounded-full transition-colors opacity-90 group-hover:opacity-100"
                             title="Ta bort bild"
                           >
-                            <X size={10} />
+                            <X size={12} />
                           </button>
                           {idx === 0 && (
-                            <span className="absolute bottom-1 left-1 px-1 bg-indigo-650 text-white text-[8px] font-black uppercase rounded">
+                            <span className="absolute bottom-1 left-1 px-1 bg-indigo-600 text-white text-[8px] font-black uppercase rounded">
                               Huvudbild
                             </span>
                           )}
@@ -1016,7 +1061,7 @@ export default function ExerciseBankView({
                         value={formImageUrl}
                         onChange={(e) => setFormImageUrl(e.target.value)}
                         placeholder="Klistra in en bildlänk..."
-                        className="flex-1 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 px-4 py-2.5 rounded-xl text-sm focus:outline-none focus:ring-1 focus:ring-indigo-500 text-zinc-805 dark:text-zinc-100"
+                        className="flex-1 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 px-4 py-2.5 rounded-xl text-sm focus:outline-none focus:ring-1 focus:ring-indigo-500 text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400 dark:placeholder:text-zinc-500"
                         onKeyDown={(e) => {
                           if (e.key === 'Enter') {
                             e.preventDefault();
@@ -1036,7 +1081,7 @@ export default function ExerciseBankView({
                               setFormImageUrl('');
                             }
                           }}
-                          className="bg-zinc-100 dark:bg-zinc-750 hover:bg-zinc-250 dark:hover:bg-zinc-700 px-3.5 rounded-xl text-xs font-bold transition-colors text-zinc-700 dark:text-zinc-300"
+                          className="bg-zinc-100 dark:bg-zinc-700 hover:bg-zinc-200 dark:hover:bg-zinc-600 px-3.5 rounded-xl text-xs font-bold transition-colors text-zinc-700 dark:text-zinc-200"
                         >
                           Lägg till
                         </button>
@@ -1045,7 +1090,7 @@ export default function ExerciseBankView({
                         type="button"
                         onClick={() => fileInputRef.current?.click()}
                         disabled={isUploading}
-                        className="flex items-center justify-center gap-1.5 bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/40 dark:hover:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 px-4 rounded-xl text-xs font-bold uppercase tracking-wider transition-colors disabled:opacity-50 border border-indigo-100/30"
+                        className="flex items-center justify-center gap-1.5 bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/60 dark:hover:bg-indigo-900/60 text-indigo-600 dark:text-indigo-400 px-4 rounded-xl text-xs font-bold uppercase tracking-wider transition-colors disabled:opacity-50 border border-indigo-200 dark:border-indigo-800"
                       >
                         {isUploading ? (
                           <Loader2 size={14} className="animate-spin" />
@@ -1057,18 +1102,23 @@ export default function ExerciseBankView({
                     </div>
 
                     {isUploading && (
-                      <div className="w-full bg-zinc-100 dark:bg-zinc-900 rounded-full h-1.5 overflow-hidden">
-                        <div
-                          className="bg-indigo-650 h-full transition-all duration-300"
-                          style={{ width: `${uploadProgress}%` }}
-                        />
+                      <div className="space-y-1">
+                        <div className="w-full bg-zinc-200 dark:bg-zinc-700 rounded-full h-1.5 overflow-hidden">
+                          <div
+                            className="bg-indigo-600 dark:bg-indigo-500 h-full transition-all duration-300"
+                            style={{ width: `${uploadProgress}%` }}
+                          />
+                        </div>
+                        <p className="text-[10px] text-zinc-500 dark:text-zinc-400 text-center">
+                          Optimerar och laddar upp bild...
+                        </p>
                       </div>
                     )}
 
                     <input
                       type="file"
                       ref={fileInputRef}
-                      accept="image/*"
+                      accept="image/*, .heic, .HEIC, .heif, .HEIF, .png, .jpg, .jpeg, .webp"
                       multiple
                       onChange={handleFileUpload}
                       className="hidden"
@@ -1078,7 +1128,7 @@ export default function ExerciseBankView({
 
                 {/* External Link */}
                 <div className="space-y-1.5">
-                  <label className="text-zinc-500 dark:text-zinc-400 text-xs font-bold uppercase tracking-wider">
+                  <label className="text-zinc-700 dark:text-zinc-300 text-xs font-bold uppercase tracking-wider">
                     Länk till video (t.ex. youtube) eller mer info
                   </label>
                   <input
@@ -1086,16 +1136,16 @@ export default function ExerciseBankView({
                     value={formExternalLink}
                     onChange={(e) => setFormExternalLink(e.target.value)}
                     placeholder="https://www.youtube.com/... eller liknande"
-                    className="w-full bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 px-4 py-2.5 rounded-xl text-sm focus:outline-none focus:ring-1 focus:ring-indigo-500 text-zinc-800 dark:text-zinc-155"
+                    className="w-full bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 px-4 py-2.5 rounded-xl text-sm focus:outline-none focus:ring-1 focus:ring-indigo-500 text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400 dark:placeholder:text-zinc-500"
                   />
                 </div>
 
                 {/* Tactical Boards Whiteboard Section */}
                 <div className="space-y-1.5 pt-1">
-                  <label className="text-zinc-500 dark:text-zinc-400 text-xs font-bold uppercase tracking-wider block">
+                  <label className="text-zinc-700 dark:text-zinc-300 text-xs font-bold uppercase tracking-wider block">
                     Rittavlor ({formTacticalBoards.length})
                   </label>
-                  <p className="text-[11px] text-zinc-400 dark:text-zinc-500">
+                  <p className="text-[11px] text-zinc-500 dark:text-zinc-400">
                     Skapa och rita illustrationer eller taktiska genomgångar för övningen.
                   </p>
                   <div className="flex items-center gap-2">
@@ -1104,7 +1154,7 @@ export default function ExerciseBankView({
                       onClick={() => {
                         setIsFormTacticalBoardOpen(true);
                       }}
-                      className="flex items-center gap-1.5 px-4 py-2.5 bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/25 dark:hover:bg-emerald-950/45 text-emerald-750 dark:text-emerald-400 rounded-xl text-xs font-black uppercase tracking-wider transition-all border border-emerald-200 dark:border-emerald-900/40 active:scale-95"
+                      className="flex items-center gap-1.5 px-4 py-2.5 bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/50 dark:hover:bg-emerald-900/60 text-emerald-700 dark:text-emerald-300 rounded-xl text-xs font-black uppercase tracking-wider transition-all border border-emerald-200 dark:border-emerald-800 active:scale-95"
                     >
                       <Layout size={14} />
                       <span>{formTacticalBoards.length > 0 ? 'Öppna rittavlor' : 'Skapa rittavla'}</span>
@@ -1113,17 +1163,17 @@ export default function ExerciseBankView({
                 </div>
 
                 {/* Footer Buttons */}
-                <div className="pt-4 flex gap-3 border-t border-zinc-100 dark:border-zinc-750/50">
+                <div className="pt-4 flex gap-3 border-t border-zinc-200 dark:border-zinc-700">
                   <button
                     type="button"
                     onClick={() => setIsModalOpen(false)}
-                    className="flex-1 py-3 border border-zinc-250 dark:border-zinc-700 hover:bg-zinc-50 dark:hover:bg-zinc-750 text-zinc-650 dark:text-zinc-350 rounded-xl text-sm font-bold transition-colors"
+                    className="flex-1 py-3 border border-zinc-300 dark:border-zinc-700 hover:bg-zinc-100 dark:hover:bg-zinc-700 text-zinc-700 dark:text-zinc-300 rounded-xl text-sm font-bold transition-colors"
                   >
                     Avbryt
                   </button>
                   <button
                     type="submit"
-                    className="flex-1 py-3 bg-indigo-600 dark:bg-indigo-500 text-white hover:bg-indigo-750 dark:hover:bg-indigo-600 rounded-xl text-sm font-bold flex items-center justify-center gap-2 shadow-md transition-all active:scale-[0.98]"
+                    className="flex-1 py-3 bg-indigo-600 dark:bg-indigo-500 text-white hover:bg-indigo-700 dark:hover:bg-indigo-600 rounded-xl text-sm font-bold flex items-center justify-center gap-2 shadow-md transition-all active:scale-[0.98]"
                   >
                     <Save size={16} />
                     Spara
@@ -1160,11 +1210,10 @@ export default function ExerciseBankView({
               </button>
               
               <div className="relative w-full h-[60vh] sm:h-[70vh] rounded-2xl overflow-hidden shadow-2xl bg-zinc-900 border border-white/10 flex items-center justify-center group">
-                <img 
+                <CachedImage 
                   src={viewingImageInfo.urls[viewingImageInfo.index]} 
                   alt="Fullskärmsbild" 
                   className="max-w-full max-h-full object-contain"
-                  referrerPolicy="no-referrer"
                 />
 
                 {viewingImageInfo.urls.length > 1 && (

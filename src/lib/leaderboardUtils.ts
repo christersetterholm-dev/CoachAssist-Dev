@@ -1,23 +1,24 @@
-import { SquadPlayer, Exercise, Period } from '../types';
+import { SquadPlayer, Exercise, Period, TrainingSession, PeriodStandingHistoryItem } from '../types';
 
 export interface PlayerStats extends SquadPlayer {
   totalPoints: number;
-  history: {
-    date: number;
-    exerciseName: string;
-    points: number;
-    isBonus?: boolean;
-  }[];
+  history: PeriodStandingHistoryItem[];
 }
 
 export function calculateLeaderboard(
   squad: SquadPlayer[],
   exercises: Exercise[],
   periodId: string | 'current',
-  periods: Period[] = []
+  periods: Period[] = [],
+  sessions: TrainingSession[] = []
 ): PlayerStats[] {
+  // Resolve effective period ID
+  const effectivePeriodId = periodId === 'current'
+    ? (periods.find(p => p.isActive)?.id || periods[0]?.id || 'current')
+    : periodId;
+
   // Find the relevant period for bonus points
-  const currentPeriod = periods.find(p => p.id === periodId);
+  const currentPeriod = periods.find(p => p.id === effectivePeriodId || p.id === periodId);
   const bonusPoints = currentPeriod?.bonusPoints || [];
 
   // Get the relevant exercises for the selected view
@@ -25,7 +26,12 @@ export function calculateLeaderboard(
     if (!e.isFinished) return false;
     
     // If viewing a specific period, match against its ID
-    return e.periodId === periodId;
+    if (e.periodId) {
+      return e.periodId === effectivePeriodId || e.periodId === periodId;
+    }
+
+    // Legacy exercises without periodId match if this is current or only period
+    return periodId === 'current' || (periods.length === 1 && periods[0].id === effectivePeriodId);
   });
 
   // Calculate total points for each player based on relevant exercises
@@ -46,7 +52,7 @@ export function calculateLeaderboard(
       return inExercise || hasBonus;
     })
     .map(player => {
-    const history: { date: number; exerciseName: string; points: number; isBonus?: boolean }[] = [];
+    const history: PeriodStandingHistoryItem[] = [];
     let totalPoints = 0;
 
     // Add points from exercises
@@ -72,10 +78,26 @@ export function calculateLeaderboard(
 
       if (pointsAwarded > 0) {
         totalPoints += pointsAwarded;
+
+        // Resolve session / activity title if exercise is linked
+        let sessionTitle: string | undefined;
+        if (exercise.sessionId) {
+          const sess = sessions.find(s => s.id === exercise.sessionId);
+          if (sess) {
+            sessionTitle = sess.title || (sess.type === 'match' ? 'Match' : 'Träningspass');
+          }
+        } else {
+          const sess = sessions.find(s => s.moments?.some(m => m.exerciseId === exercise.id));
+          if (sess) {
+            sessionTitle = sess.title || (sess.type === 'match' ? 'Match' : 'Träningspass');
+          }
+        }
+
         history.push({
           date: exercise.finishedAt || exercise.date,
           exerciseName: exercise.name,
-          points: pointsAwarded
+          points: pointsAwarded,
+          sessionTitle
         });
       }
     });

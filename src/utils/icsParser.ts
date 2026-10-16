@@ -22,6 +22,7 @@ export function parseIcsCalendar(icsData: string): ParsedIcsEvent[] {
   
   let currentEvent: {
     externalId?: string;
+    recurrenceId?: string;
     title?: string;
     dtStartRaw?: string;
     dtEndRaw?: string;
@@ -93,7 +94,7 @@ export function parseIcsCalendar(icsData: string): ParsedIcsEvent[] {
       currentEvent = {};
     } else if (trimmed === 'END:VEVENT') {
       if (currentEvent) {
-        const { externalId, title, dtStartRaw, dtEndRaw, description, location, status, rawCategory } = currentEvent;
+        const { externalId, recurrenceId, title, dtStartRaw, dtEndRaw, description, location, status, rawCategory } = currentEvent;
         if (dtStartRaw) {
           const startInfo = parseDateTime(dtStartRaw);
           const endInfo = dtEndRaw ? parseDateTime(dtEndRaw) : null;
@@ -137,8 +138,13 @@ export function parseIcsCalendar(icsData: string): ParsedIcsEvent[] {
             const sanitizedTitle = finalTitle.toLowerCase().replace(/[^a-z0-9]/g, '');
             const fallbackId = `ics-${startInfo.timestamp}-${startInfo.timeStr}-${sanitizedTitle}`;
 
+            let eventExternalId = externalId ? externalId.trim() : fallbackId;
+            if (recurrenceId && externalId) {
+              eventExternalId = `${eventExternalId}_rec_${recurrenceId.trim().replace(/[^a-zA-Z0-9]/g, '')}`;
+            }
+
             events.push({
-              externalId: externalId ? externalId.trim() : fallbackId,
+              externalId: eventExternalId,
               title: finalTitle,
               date: startInfo.timestamp,
               startTime: startInfo.timeStr || '18:00',
@@ -163,7 +169,9 @@ export function parseIcsCalendar(icsData: string): ParsedIcsEvent[] {
       const key = keyPart.split(';')[0].toUpperCase();
       
       if (key === 'UID') {
-        currentEvent.externalId = valuePart.trim();
+        currentEvent.externalId = valuePart.replace(/^["'\s]+|["'\s\r\n]+$/g, '').trim();
+      } else if (key === 'RECURRENCE-ID') {
+        currentEvent.recurrenceId = valuePart.replace(/^["'\s]+|["'\s\r\n]+$/g, '').trim();
       } else if (key === 'STATUS') {
         currentEvent.status = valuePart.trim().toUpperCase();
       } else if (key === 'CATEGORIES' || key === 'CATEGORY') {

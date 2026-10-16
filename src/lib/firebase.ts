@@ -942,8 +942,12 @@ export const deleteObject = async (refObj: any) => {
     headers['Authorization'] = `Bearer ${token}`;
   }
 
+  // Support both ref objects { path: '...' }, { url: '...' }, and direct string URLs
+  const rawPath = typeof refObj === 'string' ? refObj : (refObj?.path || refObj?.url || '');
+  if (!rawPath) return;
+
   try {
-    await fetch(getApiUrl(`/api/delete-file?path=${encodeURIComponent(refObj.path)}`), {
+    await fetch(getApiUrl(`/api/delete-file?path=${encodeURIComponent(rawPath)}`), {
       method: 'DELETE',
       headers
     });

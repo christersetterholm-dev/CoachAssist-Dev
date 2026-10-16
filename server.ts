@@ -7,7 +7,10 @@ import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import multer from 'multer';
 import nodemailer from 'nodemailer';
+import http from 'http';
 import https from 'https';
+import dns from 'dns';
+import net from 'net';
 import { fileURLToPath } from 'url';
 import { createRequire } from 'module';
 
@@ -27,6 +30,14 @@ try {
 } catch (err: any) {
   console.warn('[SQLite] better-sqlite3 native addon not usable (' + (err?.message || err) + '). Using zero-dependency persistent JSON database engine.');
   Database = null;
+}
+
+let sharpModule: any = null;
+try {
+  sharpModule = customRequire('sharp');
+  console.log('[Sharp] sharp image processing addon loaded successfully.');
+} catch (err: any) {
+  console.warn('[Sharp] sharp addon note:', err?.message || err);
 }
 
 // Zero-dependency file-backed JSON database engine for environments where native C++ SQLite bindings cannot run
@@ -630,21 +641,42 @@ function initDatabase(): any {
 
 const db = initDatabase();
 
-// Persistent or env-based JWT secret
-const DEFAULT_JWT_SECRET = 'coachassist-production-jwt-stable-secret-2024-k98z';
-let JWT_SECRET = process.env.JWT_SECRET || '';
+// --- SECURE JWT INITIALIZATION & CONSTANTS ---
+// Block all previously leaked repository secrets using SHA-256 hashes to prevent scanners from detecting raw strings
+function isCompromisedSecret(secret: string): boolean {
+  if (!secret) return true;
+  const hash = crypto.createHash('sha256').update(secret).digest('hex');
+  const blacklistedHashes = [
+    'f6a5e8e13a8a6b7fca2ae4fee98a4e00cf007a224d68274c9646da8a6e6ad2d1',
+    '2a8b1bdaf7f7e9caba40dce80f3cfc6af82efb4712b5ace24441f71d6b2229cb',
+    'c8d30878c15c702a9f8fabbb3c70b55113b411c2d90a7672d31579e05599996d'
+  ];
+  return blacklistedHashes.includes(hash);
+}
+
+let JWT_SECRET = (process.env.JWT_SECRET || '').trim();
+
+if (JWT_SECRET && isCompromisedSecret(JWT_SECRET)) {
+  console.warn('[Security Warning] JWT_SECRET matches a known compromised repository secret! Discarding it.');
+  JWT_SECRET = '';
+}
 
 try {
   if (!JWT_SECRET) {
     const row: any = db.prepare("SELECT data FROM system_docs WHERE path = 'system/jwt_secret'").get();
     if (row && row.data) {
-      JWT_SECRET = typeof row.data === 'string' ? JSON.parse(row.data) : row.data;
+      const stored = typeof row.data === 'string' ? JSON.parse(row.data) : row.data;
+      if (stored && typeof stored === 'string' && !isCompromisedSecret(stored)) {
+        JWT_SECRET = stored;
+      }
     }
   }
 } catch (_) {}
 
 if (!JWT_SECRET) {
-  JWT_SECRET = DEFAULT_JWT_SECRET;
+  // Generate a cryptographically secure 256-bit random hex secret unique to this instance
+  JWT_SECRET = crypto.randomBytes(32).toString('hex');
+  console.log('[Security] Generated a fresh random JWT_SECRET for this installation.');
   try {
     db.prepare("INSERT OR REPLACE INTO system_docs (path, data, updatedAt) VALUES ('system/jwt_secret', ?, ?)").run(
       JSON.stringify(JWT_SECRET),
@@ -653,40 +685,219 @@ if (!JWT_SECRET) {
   } catch (_) {}
 }
 
+export const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '30d';
+
 export function verifyJwtToken(token: string): any {
   if (!token) {
     const err: any = new Error('No token provided');
     err.name = 'JsonWebTokenError';
     throw err;
   }
-  const candidateSecrets = [
-    JWT_SECRET,
-    DEFAULT_JWT_SECRET,
-    '45ab84c45ca71d2b2e293fdcf16b142607d8415b87af8954ce2fc799b6803275',
-    'coachassist-secure-jwt-secret-key-2024'
-  ];
+  return jwt.verify(token, JWT_SECRET);
+}
 
-  for (const secret of candidateSecrets) {
-    if (!secret) continue;
-    try {
-      return jwt.verify(token, secret);
-    } catch (_) {}
+export function extractAuthUser(req: express.Request): any | null {
+  const authHeader = req.headers.authorization;
+  let token: string | null = null;
+  if (authHeader) {
+    const authStr = Array.isArray(authHeader) ? authHeader[0] : authHeader;
+    const parts = authStr.split(' ');
+    token = parts.length > 1 ? parts[1] : parts[0];
+  } else if (req.query && typeof req.query.token === 'string') {
+    token = req.query.token;
   }
 
-  // Graceful fallback: If token was signed by a transient ephemeral key across restarts,
-  // decode payload to preserve active user session seamlessly.
-  const decoded: any = jwt.decode(token);
-  if (decoded && decoded.id && (decoded.email || decoded.username)) {
-    return decoded;
+  if (!token || token === 'null' || token === 'undefined') {
+    return null;
   }
 
-  const err: any = new Error('Invalid token');
-  err.name = 'JsonWebTokenError';
-  throw err;
+  try {
+    const decoded: any = verifyJwtToken(token);
+    return decoded && (decoded.id || decoded.email) ? decoded : null;
+  } catch {
+    return null;
+  }
+}
+
+export function isRootAdminEmail(email?: string | null): boolean {
+  if (!email || typeof email !== 'string') return false;
+  const clean = email.trim().toLowerCase();
+  const envAdmins = (process.env.ADMIN_EMAILS || 'christer.setterholm@gmail.com,christer@setterholm.se')
+    .split(',')
+    .map(e => e.trim().toLowerCase())
+    .filter(Boolean);
+  return envAdmins.includes(clean);
+}
+
+export async function verifyIsRootAdmin(user: any): Promise<boolean> {
+  if (!user) return false;
+  const email = (user.email || user.google_email || '').trim().toLowerCase();
+  if (isRootAdminEmail(email)) return true;
+
+  // Also check persistent root_admins_list in database or firestore if available
+  try {
+    const row: any = db.prepare("SELECT data FROM system_docs WHERE path = 'admins/root_admins_list'").get();
+    if (row && row.data) {
+      const parsed = typeof row.data === 'string' ? JSON.parse(row.data) : row.data;
+      if (parsed && Array.isArray(parsed.admins)) {
+        if (parsed.admins.some((a: any) => (a.email || '').trim().toLowerCase() === email)) {
+          return true;
+        }
+      }
+    }
+  } catch (_) {}
+
+  return false;
+}
+
+export async function requireRootAdmin(req: express.Request, res: express.Response, next: express.NextFunction) {
+  const user = extractAuthUser(req);
+  if (!user) {
+    return res.status(401).json({ error: 'Inloggning krävs. Vänligen logga in som administratör.' });
+  }
+
+  const isRoot = await verifyIsRootAdmin(user);
+  if (!isRoot) {
+    return res.status(403).json({ error: 'Åtkomst nekad: Endast administratör har behörighet till denna åtgärd.' });
+  }
+
+  (req as any).user = user;
+  next();
 }
 
 async function ensureJwtSecret(): Promise<string> {
   return JWT_SECRET;
+}
+
+// --- SSRF (Server-Side Request Forgery) DEFENSE & VALIDATION ---
+
+function isPrivateOrReservedIp(ip: string): boolean {
+  let cleanIp = ip;
+  if (cleanIp.startsWith('::ffff:')) {
+    cleanIp = cleanIp.replace('::ffff:', '');
+  }
+
+  if (net.isIPv4(cleanIp)) {
+    const parts = cleanIp.split('.').map(Number);
+    if (parts.length !== 4 || parts.some(isNaN)) return true;
+
+    // 0.0.0.0/8 (Current network)
+    if (parts[0] === 0) return true;
+    // 10.0.0.0/8 (Private network)
+    if (parts[0] === 10) return true;
+    // 100.64.0.0/10 (Shared address space / Carrier-grade NAT)
+    if (parts[0] === 100 && parts[1] >= 64 && parts[1] <= 127) return true;
+    // 127.0.0.0/8 (Loopback)
+    if (parts[0] === 127) return true;
+    // 169.254.0.0/16 (Link-local, AWS/GCP/Azure instance metadata service!)
+    if (parts[0] === 169 && parts[1] === 254) return true;
+    // 172.16.0.0/12 (Private network)
+    if (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31) return true;
+    // 192.0.0.0/24 (IETF Protocol Assignments)
+    if (parts[0] === 192 && parts[1] === 0 && parts[2] === 0) return true;
+    // 192.0.2.0/24 (TEST-NET-1)
+    if (parts[0] === 192 && parts[1] === 0 && parts[2] === 2) return true;
+    // 192.168.0.0/16 (Private network)
+    if (parts[0] === 192 && parts[1] === 168) return true;
+    // 198.18.0.0/15 (Network benchmark tests)
+    if (parts[0] === 198 && (parts[1] === 18 || parts[1] === 19)) return true;
+    // 198.51.100.0/24 (TEST-NET-2)
+    if (parts[0] === 198 && parts[1] === 51 && parts[2] === 100) return true;
+    // 203.0.113.0/24 (TEST-NET-3)
+    if (parts[0] === 203 && parts[1] === 0 && parts[2] === 113) return true;
+    // 224.0.0.0/4 (Multicast) & 240.0.0.0/4 (Reserved)
+    if (parts[0] >= 224) return true;
+    return false;
+  }
+
+  if (net.isIPv6(cleanIp)) {
+    const lower = cleanIp.toLowerCase();
+    // Loopback
+    if (lower === '::1' || lower === '0:0:0:0:0:0:0:1') return true;
+    // Unspecified
+    if (lower === '::' || lower === '0:0:0:0:0:0:0:0') return true;
+    // Unique Local Addresses (fc00::/7)
+    if (lower.startsWith('fc') || lower.startsWith('fd')) return true;
+    // Link-local unicast (fe80::/10)
+    if (lower.startsWith('fe8') || lower.startsWith('fe9') || lower.startsWith('fea') || lower.startsWith('feb')) return true;
+    // Site-local (fec0::/10)
+    if (lower.startsWith('fec') || lower.startsWith('fed') || lower.startsWith('fee') || lower.startsWith('fef')) return true;
+    // IPv4-compatible IPv6
+    if (lower.startsWith('::') && lower.includes('.')) return true;
+    return false;
+  }
+
+  return true;
+}
+
+const safeDnsLookup = (hostname: string, options: any, callback: (err: Error | null, address?: any, family?: any) => void) => {
+  dns.lookup(hostname, options, (err, address, family) => {
+    if (err) return callback(err);
+    const addresses = Array.isArray(address) ? address : [{ address, family }];
+    for (const item of addresses) {
+      const ip = typeof item === 'string' ? item : item.address;
+      if (ip && isPrivateOrReservedIp(ip)) {
+        return callback(new Error(`SSRF blocked: IP-adress ${ip} är privat eller intern.`));
+      }
+    }
+    return callback(null, address, family);
+  });
+};
+
+const safeHttpAgent = new http.Agent({ lookup: safeDnsLookup });
+const safeHttpsAgent = new https.Agent({ lookup: safeDnsLookup });
+
+async function validateSafeExternalUrl(targetUrl: string): Promise<{ valid: boolean; error?: string; urlObj?: URL }> {
+  let parsed: URL;
+  try {
+    parsed = new URL(targetUrl);
+  } catch {
+    return { valid: false, error: 'Ogiltig URL-adress' };
+  }
+
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    return { valid: false, error: 'Endast HTTP och HTTPS-protokoll stöds' };
+  }
+
+  const hostname = parsed.hostname.toLowerCase();
+  
+  if (
+    hostname === 'localhost' ||
+    hostname === '127.0.0.1' ||
+    hostname === '0.0.0.0' ||
+    hostname === '::1' ||
+    hostname.endsWith('.localhost') ||
+    hostname.endsWith('.local') ||
+    hostname.endsWith('.internal') ||
+    hostname === 'metadata.google.internal' ||
+    hostname === 'metadata' ||
+    hostname === 'instance-data'
+  ) {
+    return { valid: false, error: 'Åtkomst till lokala eller interna nätverksadresser är blockerad av säkerhetsskäl (SSRF-skydd).' };
+  }
+
+  if (net.isIP(hostname)) {
+    if (isPrivateOrReservedIp(hostname)) {
+      return { valid: false, error: 'Åtkomst till privata eller interna IP-adresser är blockerad (SSRF-skydd).' };
+    }
+    return { valid: true, urlObj: parsed };
+  }
+
+  try {
+    const addresses = await dns.promises.lookup(hostname, { all: true });
+    if (!addresses || addresses.length === 0) {
+      return { valid: false, error: 'Kunde inte slå upp domännamnet.' };
+    }
+    for (const addr of addresses) {
+      if (isPrivateOrReservedIp(addr.address)) {
+        return { valid: false, error: `Domänen ${hostname} pekar mot en privat eller reserverad IP-adress (${addr.address}) och kan inte anropas.` };
+      }
+    }
+  } catch (err: any) {
+    return { valid: false, error: `DNS-uppslagning misslyckades: ${err.message}` };
+  }
+
+  return { valid: true, urlObj: parsed };
 }
 
 // Rate Limiting Middleware
@@ -947,6 +1158,26 @@ async function setFirestoreDoc(docPath: string, data: Record<string, any>): Prom
     return res.status === 200;
   } catch (e: any) {
     console.error(`Firestore PATCH error for ${docPath}:`, e.message);
+    return false;
+  }
+}
+
+async function deleteFirestoreDoc(docPath: string): Promise<boolean> {
+  if (dbModeConfig.mode === 'local_sqlite') {
+    return true; // Standalone local SQLite mode
+  }
+  const { baseUrl, apiKey } = getActiveFirestoreParams();
+  if (!baseUrl || !apiKey) return false;
+  try {
+    const encodedPath = docPath.split('/').map(encodeURIComponent).join('/');
+    const url = `${baseUrl}/${encodedPath}?key=${apiKey}`;
+    const res = await axios.delete(url, {
+      validateStatus: s => s <= 500,
+      timeout: 5000
+    });
+    return res.status === 200 || res.status === 404;
+  } catch (e: any) {
+    console.error(`Firestore DELETE error for ${docPath}:`, e.message);
     return false;
   }
 }
@@ -1483,7 +1714,7 @@ async function startServer() {
   // --- SYSTEM DATABASE & ENVIRONMENT ENDPOINTS (ROOT ADMIN) ---
 
   // Get current DB Config and System Status
-  app.get('/api/system/db-config', (_req, res) => {
+  app.get('/api/system/db-config', requireRootAdmin, (_req, res) => {
     let dbSize = 0;
     let actualDbPath = DB_PATH;
     let dbEngine = Database ? 'sqlite' : 'json_store';
@@ -1528,7 +1759,7 @@ async function startServer() {
   });
 
   // Update DB Config (Root Admin)
-  app.post('/api/system/db-config', (req, res) => {
+  app.post('/api/system/db-config', requireRootAdmin, (req, res) => {
     const { mode, customFirestoreProjectId, customFirestoreApiKey, customRemoteUrl } = req.body;
     if (!mode || !['hybrid', 'local_sqlite', 'firestore_only'].includes(mode)) {
       return res.status(400).json({ error: 'Ogiltigt databasläge. Välj hybrid, local_sqlite eller firestore_only.' });
@@ -1566,8 +1797,8 @@ async function startServer() {
     }
   });
 
-  // Export Database Dump as JSON
-  app.get('/api/system/db-export', (_req, res) => {
+  // Export Database Dump as JSON (Requires Root Admin)
+  app.get('/api/system/db-export', requireRootAdmin, (_req, res) => {
     try {
       const users = db.prepare('SELECT id, email, username, password_hash, created_at, has_logged_in, temp_password, google_id, google_email, avatar_url, auth_provider FROM users').all();
       const users_data = db.prepare('SELECT userId, segment, data, updatedAt FROM users_data').all();
@@ -1602,8 +1833,8 @@ async function startServer() {
     }
   });
 
-  // Import Database Dump from JSON
-  app.post('/api/system/db-import', (req, res) => {
+  // Import Database Dump from JSON (Requires Root Admin)
+  app.post('/api/system/db-import', requireRootAdmin, (req, res) => {
     const dump = req.body;
     if (!dump || !dump.tables) {
       return res.status(400).json({ error: 'Ogiltigt säkerhetskopieformat' });
@@ -1770,8 +2001,8 @@ async function startServer() {
     }
   });
 
-  // Manual Sync between SQLite and Firestore
-  app.post('/api/system/db-sync-now', async (_req, res) => {
+  // Manual Sync between SQLite and Firestore (Requires Root Admin)
+  app.post('/api/system/db-sync-now', requireRootAdmin, async (_req, res) => {
     if (dbModeConfig.mode === 'local_sqlite') {
       return res.status(400).json({ error: 'Databasen är inställd på Fristående Lokal SQLite. Slå på Hybrid-läge först för att synka med molnet.' });
     }
@@ -1902,7 +2133,7 @@ async function startServer() {
         }).catch(e => console.error('Firestore username save error:', e));
       }
 
-      const token = jwt.sign({ id: userId, email: trimmedEmail, username: trimmedUsername }, JWT_SECRET, { expiresIn: '3650d' });
+      const token = jwt.sign({ id: userId, email: trimmedEmail, username: trimmedUsername }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
       res.json({
         token,
         user: {
@@ -2004,7 +2235,7 @@ async function startServer() {
         }
       }
 
-      const token = jwt.sign({ id: userRow.id, email: userRow.email, username: userRow.username }, JWT_SECRET, { expiresIn: '3650d' });
+      const token = jwt.sign({ id: userRow.id, email: userRow.email, username: userRow.username }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
       res.json({
         token,
         user: {
@@ -2215,7 +2446,7 @@ async function startServer() {
       }).catch(e => console.error('Firestore reset password update error:', e));
 
       // Issue fresh authentication JWT token
-      const token = jwt.sign({ id: userRow.id, email: userRow.email }, JWT_SECRET, { expiresIn: '3650d' });
+      const token = jwt.sign({ id: userRow.id, email: userRow.email }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
 
       res.json({
         message: 'Lösenordet har återställts!',
@@ -2461,7 +2692,7 @@ async function startServer() {
         google_id: googleId
       }).catch(e => console.error('Firestore google_id sync error:', e));
 
-      const token = jwt.sign({ id: userRow.id, email: userRow.email, username: userRow.username }, JWT_SECRET, { expiresIn: '3650d' });
+      const token = jwt.sign({ id: userRow.id, email: userRow.email, username: userRow.username }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
 
       res.json({
         token,
@@ -2800,7 +3031,7 @@ async function startServer() {
         username: cleanUsername
       }).catch(() => {});
 
-      const newToken = jwt.sign({ id: userId, email: userRow?.email || decoded.email, username: cleanUsername }, JWT_SECRET, { expiresIn: '3650d' });
+      const newToken = jwt.sign({ id: userId, email: userRow?.email || decoded.email, username: cleanUsername }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
 
       res.json({
         success: true,
@@ -3018,7 +3249,7 @@ async function startServer() {
       }).catch(e => console.error('Firestore user email update error:', e));
 
       // Issue updated token
-      const newToken = jwt.sign({ id: userId, email: cleanNewEmail }, JWT_SECRET, { expiresIn: '3650d' });
+      const newToken = jwt.sign({ id: userId, email: cleanNewEmail }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
 
       res.json({
         token: newToken,
@@ -3039,25 +3270,9 @@ async function startServer() {
   // --- ADMIN USER MANAGEMENT ENDPOINTS ---
 
   const checkAdminPermission = (req: express.Request): boolean => {
-    const authHeader = req.headers.authorization;
-    if (authHeader) {
-      try {
-        const authStr = Array.isArray(authHeader) ? authHeader[0] : authHeader;
-        const partsAuth = authStr.split(' ');
-        const token = partsAuth.length > 1 ? partsAuth[1] : partsAuth[0];
-        if (token && token !== 'null' && token !== 'undefined') {
-          const decoded: any = verifyJwtToken(token);
-          if (decoded && (decoded.id || decoded.email)) return true;
-        }
-      } catch (e) {
-        // Token invalid or expired
-      }
-    }
-    const userHeader = (req.headers['x-user-email'] || req.headers['x-user-id']) as string;
-    if (userHeader && userHeader.trim().length > 0 && userHeader !== 'null' && userHeader !== 'undefined') {
-      return true;
-    }
-    return false;
+    const user = extractAuthUser(req);
+    if (!user) return false;
+    return true;
   };
 
   // GET /api/admin/users - List registered accounts
@@ -3350,6 +3565,157 @@ async function startServer() {
     }
   });
 
+  // --- PERIODS & LEADERBOARDS CONSOLIDATION HELPER ---
+  function getConsolidatedPeriods(clubId?: string, teamId?: string, userId?: string): { periods: any[]; currentPeriodId: string | null } {
+    const periodMap = new Map<string, any>();
+    let activePeriodId: string | null = null;
+
+    const ingestPeriod = (p: any) => {
+      if (!p || !p.id) return;
+      const existing = periodMap.get(p.id);
+      if (!existing) {
+        periodMap.set(p.id, { ...p });
+        if (p.isActive) activePeriodId = p.id;
+      } else {
+        const isClosed = Boolean(existing.endDate || p.endDate);
+        const endDate = p.endDate || existing.endDate;
+        const standings = (Array.isArray(p.standings) && p.standings.length > 0)
+          ? p.standings
+          : (Array.isArray(existing.standings) ? existing.standings : []);
+        const bonusPoints = (Array.isArray(p.bonusPoints) && p.bonusPoints.length > 0)
+          ? p.bonusPoints
+          : (Array.isArray(existing.bonusPoints) ? existing.bonusPoints : []);
+        const shareId = p.shareId || existing.shareId;
+        const isActive = isClosed ? false : (p.isActive !== undefined ? p.isActive : existing.isActive);
+
+        periodMap.set(p.id, {
+          ...existing,
+          ...p,
+          endDate: isClosed ? endDate : undefined,
+          isActive,
+          standings,
+          bonusPoints,
+          shareId
+        });
+        if (isActive) activePeriodId = p.id;
+      }
+    };
+
+    const parseAndIngest = (raw: any) => {
+      if (!raw) return;
+      try {
+        const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
+        if (Array.isArray(parsed)) {
+          parsed.forEach(ingestPeriod);
+        } else if (parsed && typeof parsed === 'object') {
+          if (Array.isArray(parsed.periods)) {
+            parsed.periods.forEach(ingestPeriod);
+            if (parsed.currentPeriodId) activePeriodId = parsed.currentPeriodId;
+          } else if (parsed.id && (parsed.name || parsed.standings)) {
+            ingestPeriod(parsed);
+          }
+        }
+      } catch (_) {}
+    };
+
+    // 1. Ingest all records from clubs_data WHERE segment = 'periods'
+    try {
+      const clubRows: any[] = db.prepare("SELECT data FROM clubs_data WHERE segment = 'periods'").all();
+      clubRows.forEach(r => parseAndIngest(r.data));
+    } catch (_) {}
+
+    // 2. Ingest all records from users_data WHERE segment = 'periods'
+    try {
+      const userRows: any[] = db.prepare("SELECT data FROM users_data WHERE segment = 'periods'").all();
+      userRows.forEach(r => parseAndIngest(r.data));
+    } catch (_) {}
+
+    // 3. Ingest all shared_leaderboards
+    try {
+      const sharedRows: any[] = db.prepare("SELECT id, data, updatedAt, coachUid FROM shared_leaderboards").all();
+      for (const sr of sharedRows) {
+        if (!sr) continue;
+        try {
+          const parsed = typeof sr.data === 'string' ? JSON.parse(sr.data) : sr.data;
+          if (parsed) {
+            const id = parsed.id || sr.id;
+            const name = parsed.name || 'Avslutad poängliga';
+            const standings = Array.isArray(parsed.standings) ? parsed.standings : [];
+            const startDate = parsed.startDate || Number(sr.updatedAt) - 30 * 24 * 3600 * 1000;
+            const endDate = parsed.endDate || Number(sr.updatedAt) || Date.now();
+            const bonusPoints = Array.isArray(parsed.bonusPoints) ? parsed.bonusPoints : [];
+            ingestPeriod({
+              id,
+              name,
+              startDate,
+              endDate,
+              isActive: false,
+              standings,
+              bonusPoints,
+              shareId: id
+            });
+          }
+        } catch (_) {}
+      }
+    } catch (_) {}
+
+    // 4. Ingest system_docs matching period/leaderboard
+    try {
+      const sysRows: any[] = db.prepare("SELECT data FROM system_docs WHERE path LIKE '%period%' OR path LIKE '%leaderboard%'").all();
+      sysRows.forEach(r => parseAndIngest(r.data));
+    } catch (_) {}
+
+    // 5. Ingest exercises to recover missing periods
+    try {
+      const exerciseRows: any[] = db.prepare("SELECT data FROM clubs_data WHERE segment = 'exercises' UNION ALL SELECT data FROM users_data WHERE segment = 'exercises'").all();
+      for (const er of exerciseRows) {
+        try {
+          const parsed = typeof er.data === 'string' ? JSON.parse(er.data) : er.data;
+          const exList = Array.isArray(parsed?.exercises) ? parsed.exercises : (Array.isArray(parsed) ? parsed : []);
+          for (const ex of exList) {
+            if (ex && ex.periodId && !periodMap.has(ex.periodId)) {
+              const minDate = ex.finishedAt || ex.date || Date.now() - 30 * 24 * 3600 * 1000;
+              const formattedDate = new Date(minDate).toLocaleDateString('sv-SE', { month: 'short', year: 'numeric' });
+              ingestPeriod({
+                id: ex.periodId,
+                name: `Avslutad poängliga (${formattedDate})`,
+                startDate: minDate,
+                endDate: ex.finishedAt || ex.date || minDate,
+                isActive: false,
+                standings: []
+              });
+            }
+          }
+        } catch (_) {}
+      }
+    } catch (_) {}
+
+    const periods = Array.from(periodMap.values());
+    periods.sort((a, b) => {
+      if (a.isActive && !b.isActive) return -1;
+      if (!a.isActive && b.isActive) return 1;
+      const aTime = a.endDate || a.startDate || 0;
+      const bTime = b.endDate || b.startDate || 0;
+      return bTime - aTime;
+    });
+
+    return {
+      periods,
+      currentPeriodId: activePeriodId || (periods.find(p => p.isActive)?.id || (periods[0]?.id || null))
+    };
+  }
+
+  // GET all periods endpoint for reliable recovery across clubs and local state
+  app.get('/api/periods/all', (req, res) => {
+    try {
+      const result = getConsolidatedPeriods();
+      res.json({ success: true, ...result });
+    } catch (e: any) {
+      console.error('Error fetching consolidated periods:', e);
+      res.status(500).json({ error: 'Failed to fetch consolidated periods' });
+    }
+  });
+
   // --- DOCUMENTS SYNC ENDPOINTS (Firestore simulation) ---
 
   // GET Document Data
@@ -3463,6 +3829,18 @@ async function startServer() {
           console.error('Error verifying token for user data:', e);
           return res.status(401).json({ error: 'Invalid session or token' });
         }
+      }
+
+      if (segment === 'periods') {
+        const consolidated = getConsolidatedPeriods(undefined, undefined, userId);
+        try {
+          db.prepare(`
+            INSERT INTO users_data (userId, segment, data, updatedAt)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(userId, segment) DO UPDATE SET data = excluded.data, updatedAt = excluded.updatedAt
+          `).run(userId, segment, JSON.stringify(consolidated), Date.now());
+        } catch (_) {}
+        return res.json(consolidated);
       }
 
       const isForce = req.query.force === 'true' || req.query.refresh === 'true';
@@ -3598,14 +3976,47 @@ async function startServer() {
         const teamId = parts[3] || 'club_global';
         const segment = parts[5] || parts[3] || 'data';
 
-        const isForce = req.query.force === 'true' || req.query.refresh === 'true';
-        let row: any = db.prepare('SELECT data, updatedAt FROM clubs_data WHERE clubId = ? AND teamId = ? AND segment = ?').get(clubId, teamId, segment);
-        let quotaExceeded = false;
+        if (segment === 'periods') {
+          const consolidated = getConsolidatedPeriods(clubId, teamId);
+          try {
+            db.prepare(`
+              INSERT INTO clubs_data (clubId, teamId, segment, data, updatedAt)
+              VALUES (?, ?, ?, ?, ?)
+              ON CONFLICT(clubId, teamId, segment) DO UPDATE SET data = excluded.data, updatedAt = excluded.updatedAt
+            `).run(clubId, teamId, segment, JSON.stringify(consolidated), Date.now());
+          } catch (_) {}
+          return res.json(consolidated);
+        }
         
         // If we have cached local data in SQLite and this is not a forced refresh, return it immediately to avoid eating Firestore read quota!
         if (row && !isForce && dbModeConfig.mode !== 'firestore_only') {
           try {
-            return res.json(typeof row.data === 'string' ? JSON.parse(row.data) : row.data);
+            let parsed = typeof row.data === 'string' ? JSON.parse(row.data) : row.data;
+            if (segment === 'periods' && parsed && Array.isArray(parsed.periods)) {
+              try {
+                const decodedUser: any = verifyJwtToken(token);
+                const userRow: any = db.prepare('SELECT data FROM users_data WHERE userId = ? AND segment = ?').get(decodedUser.id, 'periods');
+                if (userRow && userRow.data) {
+                  const uParsed = typeof userRow.data === 'string' ? JSON.parse(userRow.data) : userRow.data;
+                  if (uParsed && Array.isArray(uParsed.periods)) {
+                    const existingMap = new Map<string, any>();
+                    parsed.periods.forEach((p: any) => { if (p && p.id) existingMap.set(p.id, p); });
+                    let merged = false;
+                    uParsed.periods.forEach((up: any) => {
+                      if (up && up.id && (!existingMap.has(up.id) || (up.endDate && !existingMap.get(up.id)?.endDate))) {
+                        parsed.periods.push(up);
+                        merged = true;
+                      }
+                    });
+                    if (merged) {
+                      db.prepare('UPDATE clubs_data SET data = ? WHERE clubId = ? AND teamId = ? AND segment = ?')
+                        .run(JSON.stringify(parsed), clubId, teamId, segment);
+                    }
+                  }
+                }
+              } catch (_) {}
+            }
+            return res.json(parsed);
           } catch (parseErr) {
             console.warn('Failed to parse cached SQLite clubs data, falling back to remote:', parseErr);
           }
@@ -3656,7 +4067,32 @@ async function startServer() {
           }
           return res.json(null);
         }
-        res.json(JSON.parse(row.data));
+        let parsed = typeof row.data === 'string' ? JSON.parse(row.data) : row.data;
+        if (segment === 'periods' && parsed && Array.isArray(parsed.periods)) {
+          try {
+            const decodedUser: any = verifyJwtToken(token);
+            const userRow: any = db.prepare('SELECT data FROM users_data WHERE userId = ? AND segment = ?').get(decodedUser.id, 'periods');
+            if (userRow && userRow.data) {
+              const uParsed = typeof userRow.data === 'string' ? JSON.parse(userRow.data) : userRow.data;
+              if (uParsed && Array.isArray(uParsed.periods)) {
+                const existingMap = new Map<string, any>();
+                parsed.periods.forEach((p: any) => { if (p && p.id) existingMap.set(p.id, p); });
+                let merged = false;
+                uParsed.periods.forEach((up: any) => {
+                  if (up && up.id && (!existingMap.has(up.id) || (up.endDate && !existingMap.get(up.id)?.endDate))) {
+                    parsed.periods.push(up);
+                    merged = true;
+                  }
+                });
+                if (merged) {
+                  db.prepare('UPDATE clubs_data SET data = ? WHERE clubId = ? AND teamId = ? AND segment = ?')
+                    .run(JSON.stringify(parsed), clubId, teamId, segment);
+                }
+              }
+            }
+          } catch (_) {}
+        }
+        res.json(parsed);
       } catch (e: any) {
         if (e.name === 'JsonWebTokenError' || e.name === 'TokenExpiredError' || e.message === 'Invalid token' || e.message === 'No token provided') {
           return res.status(401).json({ error: 'Unauthorized', message: 'Session expired, please log in again.' });
@@ -3808,7 +4244,40 @@ async function startServer() {
           }
         }
 
-        const serializedData = JSON.stringify(data);
+        let finalDataToSave = data;
+        if (segment === 'periods') {
+          const consolidated = getConsolidatedPeriods(undefined, undefined, userId);
+          const map = new Map<string, any>();
+          (consolidated.periods || []).forEach((p: any) => { if (p && p.id) map.set(p.id, p); });
+          const incomingList = Array.isArray(data?.periods) ? data.periods : (Array.isArray(data) ? data : []);
+          incomingList.forEach((p: any) => {
+            if (!p || !p.id) return;
+            const existing = map.get(p.id);
+            if (!existing) {
+              map.set(p.id, p);
+            } else {
+              const isClosed = Boolean(existing.endDate || p.endDate);
+              const endDate = p.endDate || existing.endDate;
+              const standings = (Array.isArray(p.standings) && p.standings.length > 0) ? p.standings : existing.standings;
+              const bonusPoints = (Array.isArray(p.bonusPoints) && p.bonusPoints.length > 0) ? p.bonusPoints : existing.bonusPoints;
+              map.set(p.id, {
+                ...existing,
+                ...p,
+                endDate: isClosed ? endDate : undefined,
+                standings,
+                bonusPoints
+              });
+            }
+          });
+          const allPeriods = Array.from(map.values());
+          finalDataToSave = {
+            ...(typeof data === 'object' ? data : {}),
+            periods: allPeriods,
+            currentPeriodId: data?.currentPeriodId || consolidated.currentPeriodId || allPeriods.find(p => p.isActive)?.id || (allPeriods[0]?.id || null)
+          };
+        }
+
+        const serializedData = JSON.stringify(finalDataToSave);
         const updateTimestamp = Number(data?.updatedAt) || Date.now();
         db.prepare(`
           INSERT INTO users_data (userId, segment, data, updatedAt)
@@ -3857,7 +4326,40 @@ async function startServer() {
         const teamId = parts[3] || 'club_global';
         const segment = parts[5] || parts[3] || 'data';
 
-        const serializedData = JSON.stringify(data);
+        let finalDataToSave = data;
+        if (segment === 'periods') {
+          const consolidated = getConsolidatedPeriods(clubId, teamId);
+          const map = new Map<string, any>();
+          (consolidated.periods || []).forEach((p: any) => { if (p && p.id) map.set(p.id, p); });
+          const incomingList = Array.isArray(data?.periods) ? data.periods : (Array.isArray(data) ? data : []);
+          incomingList.forEach((p: any) => {
+            if (!p || !p.id) return;
+            const existing = map.get(p.id);
+            if (!existing) {
+              map.set(p.id, p);
+            } else {
+              const isClosed = Boolean(existing.endDate || p.endDate);
+              const endDate = p.endDate || existing.endDate;
+              const standings = (Array.isArray(p.standings) && p.standings.length > 0) ? p.standings : existing.standings;
+              const bonusPoints = (Array.isArray(p.bonusPoints) && p.bonusPoints.length > 0) ? p.bonusPoints : existing.bonusPoints;
+              map.set(p.id, {
+                ...existing,
+                ...p,
+                endDate: isClosed ? endDate : undefined,
+                standings,
+                bonusPoints
+              });
+            }
+          });
+          const allPeriods = Array.from(map.values());
+          finalDataToSave = {
+            ...(typeof data === 'object' ? data : {}),
+            periods: allPeriods,
+            currentPeriodId: data?.currentPeriodId || consolidated.currentPeriodId || allPeriods.find(p => p.isActive)?.id || (allPeriods[0]?.id || null)
+          };
+        }
+
+        const serializedData = JSON.stringify(finalDataToSave);
         const updateTimestamp = Number(data?.updatedAt) || Date.now();
         db.prepare(`
           INSERT INTO clubs_data (clubId, teamId, segment, data, updatedAt)
@@ -3878,8 +4380,10 @@ async function startServer() {
         res.status(500).json({ error: 'Failed to save club data' });
       }
     } else if (pathStr.startsWith('admins/')) {
-      if (!checkAdminPermission(req)) {
-        return res.status(401).json({ error: 'Unauthorized' });
+      const user = extractAuthUser(req);
+      const isRoot = await verifyIsRootAdmin(user);
+      if (!isRoot) {
+        return res.status(403).json({ error: 'Unauthorized: Only root admin can modify admin documents' });
       }
       try {
         const serializedData = JSON.stringify(data);
@@ -3947,16 +4451,35 @@ async function startServer() {
       return res.status(400).json({ error: 'Ingen fil skickades med' });
     }
     const uploadedFile = files[0];
-    const ext = path.extname(uploadedFile.originalname || '') || '.jpg';
+    let ext = (path.extname(uploadedFile.originalname || '') || '.jpg').toLowerCase();
+    let mimeType = uploadedFile.mimetype || 'image/jpeg';
+    let fileBuffer = uploadedFile.buffer;
+
+    // Server-side image optimization: if image is large or HEIC/HEIF and sharp is available
+    if (fileBuffer && sharpModule && (fileBuffer.length > 500 * 1024 || ext === '.heic' || ext === '.heif' || mimeType.includes('heic') || mimeType.includes('heif'))) {
+      try {
+        const compressed = await sharpModule(fileBuffer)
+          .rotate() // auto-orient based on EXIF
+          .resize(1600, 1600, { fit: 'inside', withoutEnlargement: true })
+          .jpeg({ quality: 82 })
+          .toBuffer();
+        if (compressed && compressed.length > 0) {
+          fileBuffer = compressed;
+          mimeType = 'image/jpeg';
+          ext = '.jpg';
+        }
+      } catch (sharpErr: any) {
+        console.warn('[Upload] Server image optimization note:', sharpErr?.message || sharpErr);
+      }
+    }
+
     const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
     const filename = 'photo_' + uniqueSuffix + ext;
     const fileUrl = `/uploads/${filename}`;
 
     try {
-      const fileBuffer = uploadedFile.buffer;
       if (fileBuffer) {
         const base64Data = fileBuffer.toString('base64');
-        const mimeType = uploadedFile.mimetype || 'image/jpeg';
 
         // 1. Always persist to local SQLite/JSON database table `uploaded_files`
         try {
@@ -3989,13 +4512,19 @@ async function startServer() {
 
         // 3. Persist to Cloud Firestore only if not in standalone local_sqlite mode
         if (dbModeConfig.mode !== 'local_sqlite') {
-          try {
-            setFirestoreDoc(`server_uploads/${encodeURIComponent(filename)}`, {
-              mime_type: mimeType,
-              data_base64: base64Data,
-              created_at: Date.now()
-            }).catch(fErr => console.warn('[Upload] Firestore sync error:', fErr));
-          } catch (_) {}
+          // Double check document size limit: Firestore limit is 1MB.
+          // Base64 string must not exceed 950KB to safely fit.
+          if (base64Data.length <= 950 * 1024) {
+            try {
+              setFirestoreDoc(`server_uploads/${encodeURIComponent(filename)}`, {
+                mime_type: mimeType,
+                data_base64: base64Data,
+                created_at: Date.now()
+              }).catch(fErr => console.warn('[Upload] Firestore sync error:', fErr));
+            } catch (_) {}
+          } else {
+            console.warn(`[Upload] File ${filename} exceeds Firestore single-doc limit (${base64Data.length} chars). Saved in SQLite and disk.`);
+          }
         }
       }
     } catch (err) {
@@ -4069,20 +4598,53 @@ async function startServer() {
     res.status(404).send('File not found');
   });
 
-  // Delete image
-  app.delete('/api/delete-file', (req, res) => {
+  // Delete image from disk, SQLite database, and Cloud Firestore
+  app.delete('/api/delete-file', async (req, res) => {
     const filePath = req.query.path as string;
     if (!filePath) return res.status(400).send('Path is required');
 
     try {
-      const filename = path.basename(filePath);
+      // Clean filename: remove url parameters or full url domain
+      const cleanPath = decodeURIComponent(filePath).split('?')[0];
+      const filename = path.basename(cleanPath);
       const fullPath = path.join(UPLOADS_DIR, filename);
+      const publicPath = path.join(DATA_DIR, 'public', 'uploads', filename);
 
+      // 1. Remove from local disk uploads folder
       if (fs.existsSync(fullPath)) {
-        fs.unlinkSync(fullPath);
+        try {
+          fs.unlinkSync(fullPath);
+        } catch (unlinkErr) {
+          console.warn('[Delete File] Could not unlink from UPLOADS_DIR:', unlinkErr);
+        }
       }
-      db.prepare('DELETE FROM uploaded_files WHERE filename = ?').run(filename);
-      res.json({ success: true });
+      if (fs.existsSync(publicPath)) {
+        try {
+          fs.unlinkSync(publicPath);
+        } catch (_) {}
+      }
+
+      // 2. Remove from local SQLite / JSON store
+      try {
+        db.prepare('DELETE FROM uploaded_files WHERE filename = ?').run(filename);
+      } catch (dbErr) {
+        console.warn('[Delete File] Could not delete from DB uploaded_files:', dbErr);
+      }
+
+      // 3. Remove from Cloud Firestore server_uploads and storage_files
+      if (dbModeConfig.mode !== 'local_sqlite') {
+        try {
+          await deleteFirestoreDoc(`server_uploads/${encodeURIComponent(filename)}`);
+        } catch (fErr) {
+          console.warn('[Delete File] Could not delete from Firestore server_uploads:', fErr);
+        }
+        try {
+          await deleteFirestoreDoc(`storage_files/${encodeURIComponent(filename)}`);
+        } catch (_) {}
+      }
+
+      console.log(`[Delete File] Successfully deleted ${filename} from disk, SQLite and Firestore`);
+      res.json({ success: true, deleted: filename });
     } catch (e: any) {
       console.error('Error deleting file:', e);
       res.status(500).json({ error: 'Failed to delete file' });
@@ -4161,26 +4723,42 @@ async function startServer() {
 
   // --- PRE-EXISTING PROXY ENDPOINTS ---
 
-  // Proxy endpoint to bypass CORS for image exports
+  // Proxy endpoint to bypass CORS for image exports (Protected against SSRF)
   app.get('/api/proxy', async (req, res) => {
     const { url } = req.query;
     if (!url || typeof url !== 'string') {
       return res.status(400).send('URL query parameter is required');
     }
 
+    const validation = await validateSafeExternalUrl(url);
+    if (!validation.valid || !validation.urlObj) {
+      console.warn(`[Proxy SSRF Blocked] URL: ${url} - Reason: ${validation.error}`);
+      return res.status(403).send(`Åtkomst nekad: ${validation.error}`);
+    }
+
     try {
-      console.log(`[Proxy] Fetching: ${url}`);
+      console.log(`[Proxy] Fetching verified image from: ${url}`);
       const response = await axios({
         method: 'get',
-        url: url,
+        url: validation.urlObj.toString(),
         responseType: 'stream',
         timeout: 10000,
+        maxContentLength: 15 * 1024 * 1024,
+        maxRedirects: 5,
+        httpAgent: safeHttpAgent,
+        httpsAgent: safeHttpsAgent,
         headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          'Accept': 'image/*,*/*'
         }
       });
 
-      res.setHeader('Content-Type', String(response.headers['content-type'] || 'image/jpeg'));
+      const contentType = String(response.headers['content-type'] || 'image/jpeg');
+      if (!contentType.startsWith('image/') && !contentType.startsWith('application/octet-stream')) {
+        return res.status(400).send('Endast bildresurser kan hämtas via denna bildproxy.');
+      }
+
+      res.setHeader('Content-Type', contentType);
       res.setHeader('Access-Control-Allow-Origin', '*');
       res.setHeader('Cache-Control', 'public, max-age=86400');
       
@@ -4191,7 +4769,7 @@ async function startServer() {
     }
   });
 
-  // Calendar proxy endpoint to fetch webcal ICS files
+  // Calendar proxy endpoint to fetch webcal ICS files (Protected against SSRF)
   app.get('/api/fetch-calendar', async (req, res) => {
     const { url } = req.query;
     if (!url || typeof url !== 'string') {
@@ -4205,8 +4783,13 @@ async function startServer() {
       fetchUrl = 'https://' + fetchUrl;
     }
 
+    const validation = await validateSafeExternalUrl(fetchUrl);
+    if (!validation.valid || !validation.urlObj) {
+      console.warn(`[Calendar Proxy SSRF Blocked] URL: ${fetchUrl} - Reason: ${validation.error}`);
+      return res.status(403).json({ error: `Åtkomst nekad: ${validation.error}` });
+    }
+
     const doFetch = async (targetUrl: string) => {
-      // Append random query param to bypass remote proxy/CDN caches
       const parsedUrl = new URL(targetUrl);
       parsedUrl.searchParams.set('_nocache', Date.now().toString());
 
@@ -4214,9 +4797,11 @@ async function startServer() {
         method: 'get',
         url: parsedUrl.toString(),
         timeout: 15000,
+        maxContentLength: 5 * 1024 * 1024,
         responseType: 'text',
-        maxRedirects: 10,
-        httpsAgent: new https.Agent({ rejectUnauthorized: false }),
+        maxRedirects: 5,
+        httpAgent: safeHttpAgent,
+        httpsAgent: safeHttpsAgent,
         headers: {
           'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
           'Accept': 'text/calendar, text/plain, */*',
@@ -4227,15 +4812,20 @@ async function startServer() {
     };
 
     try {
-      console.log(`[Calendar Proxy] Fetching fresh calendar from: ${fetchUrl}`);
+      console.log(`[Calendar Proxy] Fetching verified calendar from: ${fetchUrl}`);
       let response;
       try {
         response = await doFetch(fetchUrl);
       } catch (firstErr: any) {
         if (url.trim().startsWith('webcal://') && fetchUrl.startsWith('https://')) {
           const httpUrl = 'http://' + fetchUrl.slice(8);
-          console.log(`[Calendar Proxy] HTTPS failed, trying HTTP fallback: ${httpUrl}`);
-          response = await doFetch(httpUrl);
+          const httpVal = await validateSafeExternalUrl(httpUrl);
+          if (httpVal.valid) {
+            console.log(`[Calendar Proxy] HTTPS failed, trying HTTP fallback: ${httpUrl}`);
+            response = await doFetch(httpUrl);
+          } else {
+            throw firstErr;
+          }
         } else {
           throw firstErr;
         }
@@ -4448,8 +5038,8 @@ async function startServer() {
   app.get('/api/calendar/:clubId/:teamId/events.ics', handleIcsFeed);
   app.get('/api/calendar/:clubId/events.ics', handleIcsFeed);
 
-  // Direct download route for the pre-built production zip bundle
-  app.get('/api/download-production-bundle', (_req, res) => {
+  // Direct download route for the pre-built production zip bundle (Requires Root Admin)
+  app.get('/api/download-production-bundle', requireRootAdmin, (_req, res) => {
     const zipPath = path.resolve(process.cwd(), 'coachassist-production-bundle.zip');
     if (fs.existsSync(zipPath)) {
       res.setHeader('Content-Type', 'application/zip');
@@ -4459,8 +5049,8 @@ async function startServer() {
     return res.status(404).send('Bundle not found');
   });
 
-  // Direct download route for compiled server.cjs
-  app.get('/api/download-server-cjs', (_req, res) => {
+  // Direct download route for compiled server.cjs (Requires Root Admin)
+  app.get('/api/download-server-cjs', requireRootAdmin, (_req, res) => {
     const serverPath = path.resolve(process.cwd(), 'dist', 'server.cjs');
     if (fs.existsSync(serverPath)) {
       res.setHeader('Content-Type', 'application/javascript');
@@ -4494,8 +5084,8 @@ async function startServer() {
     }
   }
 
-  // SSH Direct Deploy Endpoints for 1-Click Deployment from AI Studio
-  app.get('/api/deploy-ssh-config', (_req, res) => {
+  // SSH Direct Deploy Endpoints for 1-Click Deployment from AI Studio (Requires Root Admin)
+  app.get('/api/deploy-ssh-config', requireRootAdmin, (_req, res) => {
     try {
       const row = dbGetSystemDoc('system/ssh_deploy_config');
       if (row && row.data) {
@@ -4525,7 +5115,7 @@ async function startServer() {
     }
   });
 
-  app.post('/api/deploy-to-ssh', async (req, res) => {
+  app.post('/api/deploy-to-ssh', requireRootAdmin, async (req, res) => {
     const {
       host = 'coachassist.setterholm.se',
       port = 22,

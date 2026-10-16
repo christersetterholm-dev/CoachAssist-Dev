@@ -30,15 +30,28 @@
   /* Redefining zinc scale to map perfectly to CoachAssist light and dark themes */
   --color-zinc-50: #F5F6F8;     /* Ljust tema bakgrund */
   --color-zinc-100: #E4E7EC;    /* Ljust tema dividers/borders */
+  --color-zinc-150: #E2E8F0;
   --color-zinc-200: #CBD5E1;
+  --color-zinc-250: #CBD5E1;
+  --color-zinc-300: #CBD5E1;
   --color-zinc-350: #9CA3AF;
   --color-zinc-400: #9CA3AF;    /* Inaktiv navigation */
   --color-zinc-500: #6B7280;    /* Ljust tema sekundär text */
+  --color-zinc-550: #64748B;
+  --color-zinc-600: #4B5563;
   --color-zinc-650: #475569;
   --color-zinc-700: #334155;
+  --color-zinc-750: #293548;
   --color-zinc-800: #1F2937;    /* Dark mode dividers / borders / highlights */
+  --color-zinc-805: #1F2937;
+  --color-zinc-850: #151922;
   --color-zinc-900: #181C23;    /* Mörkt tema kort background */
   --color-zinc-950: #0F1115;    /* Mörkt tema bakgrund */
+
+  --color-indigo-650: #003869;
+  --color-indigo-750: #002D54;
+  --color-emerald-750: #047857;
+  --color-emerald-950: #022c22;
 }
 
 @custom-variant dark (&:where(.dark, .dark *));

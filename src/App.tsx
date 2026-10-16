@@ -2,9 +2,10 @@ import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { RotateCcw, Trophy, ArrowLeft, Check, Sun, Moon, Timer as TimerIcon, Edit2, Zap, Rocket, Users, LayoutDashboard, Unlock, LogIn, LogOut, User as UserIcon, ShieldCheck, Cloud, Globe, AlertTriangle, Calendar, Settings, RefreshCw, Bell, Building2, Shirt, VibrateOff } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { SquadPlayer, Exercise, Team, PointsConfig, Period, PeriodStandings, Lineup, TrainingSession, TrainingSettings, CoachData, BankExercise, SessionMoment, UserProfile, ClubMember, ClubTeam, Club } from './types';
-import { auth, signInWithGoogle, db, handleFirestoreError, OperationType, getApiUrl, doc, onSnapshot, setDoc, getDoc, collection, getDocs, onAuthStateChanged, signOut, User } from './lib/firebase';
+import { auth, signInWithGoogle, db, handleFirestoreError, OperationType, getApiUrl, doc, onSnapshot, setDoc, getDoc, collection, getDocs, onAuthStateChanged, signOut, User, deleteObject } from './lib/firebase';
 import { calculateLeaderboard } from './lib/leaderboardUtils';
 import { syncSquadToClubMembers, getMergedSquadAndClubMembers, deduplicateSquad } from './lib/clubUtils';
+import { deduplicateSessionsList } from './utils/calendarSync';
 
 import GameSetup from './components/GameSetup';
 import PlayerCard from './components/PlayerCard';
@@ -135,7 +136,7 @@ const normalizeExerciseBank = (arr: any[] | undefined | null): BankExercise[] =>
 
 const normalizeSessionMoments = (sessions: any[] | undefined | null, bank: BankExercise[] = []): TrainingSession[] => {
   if (!sessions || !Array.isArray(sessions)) return [];
-  return sessions.map(sess => {
+  const normalized: TrainingSession[] = sessions.map(sess => {
     if (!sess || !Array.isArray(sess.moments)) return sess;
     const updatedMoments = sess.moments.map((m: any) => {
       if (!m) return m;
@@ -183,6 +184,8 @@ const normalizeSessionMoments = (sessions: any[] | undefined | null, bank: BankE
       moments: updatedMoments
     };
   });
+  const { deduplicated } = deduplicateSessionsList(normalized);
+  return deduplicated;
 };
 
 const mergeLineups = (remoteLineups: Lineup[] = [], localLineups: Lineup[] = []): Lineup[] => {
@@ -267,7 +270,9 @@ const mergeSessions = (remoteSessions: TrainingSession[] = [], localSessions: Tr
       }
     }
   }
-  return Array.from(map.values());
+  const mergedList = Array.from(map.values());
+  const { deduplicated } = deduplicateSessionsList(mergedList);
+  return deduplicated;
 };
 
 const mergeExerciseBank = (remoteBank: BankExercise[] = [], localBank: BankExercise[] = []): BankExercise[] => {
@@ -289,6 +294,138 @@ const mergeExerciseBank = (remoteBank: BankExercise[] = [], localBank: BankExerc
     }
   }
   return Array.from(map.values());
+};
+
+const mergePeriods = (remotePeriods: Period[] = [], localPeriods: Period[] = []): Period[] => {
+  const map = new Map<string, Period>();
+  for (const p of localPeriods) {
+    if (p && p.id) map.set(p.id, { ...p });
+  }
+  for (const r of remotePeriods) {
+    if (!r || !r.id) continue;
+    const existing = map.get(r.id);
+    if (!existing) {
+      map.set(r.id, { ...r });
+    } else {
+      // Keep closed state (endDate) if either was closed
+      const isClosed = !!(r.endDate || existing.endDate);
+      const endDate = r.endDate || existing.endDate;
+      const standings = (r.standings && r.standings.length > 0) ? r.standings : (existing.standings || []);
+      const bonusPoints = (r.bonusPoints && r.bonusPoints.length > 0) ? r.bonusPoints : (existing.bonusPoints || []);
+      const shareId = r.shareId || existing.shareId;
+      const isActive = isClosed ? false : (r.isActive !== undefined ? r.isActive : existing.isActive);
+      map.set(r.id, {
+        ...existing,
+        ...r,
+        endDate: isClosed ? endDate : undefined,
+        standings,
+        bonusPoints,
+        shareId,
+        isActive
+      });
+    }
+  }
+  return Array.from(map.values());
+};
+
+const getAllCachedPeriods = (currentUser: any): Period[] => {
+  const found: Period[] = [];
+  const visitedIds = new Set<string>();
+
+  const checkItem = (raw: string | null) => {
+    if (!raw) return;
+    try {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        parsed.forEach(p => {
+          if (p && p.id && !visitedIds.has(p.id)) {
+            visitedIds.add(p.id);
+            found.push(p);
+          }
+        });
+      } else if (parsed && typeof parsed === 'object' && parsed.id && (parsed.name || parsed.standings)) {
+        if (!visitedIds.has(parsed.id)) {
+          visitedIds.add(parsed.id);
+          found.push(parsed as Period);
+        }
+      }
+    } catch (_) {}
+  };
+
+  const prefix = currentUser ? currentUser.uid : 'guest';
+  checkItem(localStorage.getItem(`${prefix}:football_periods`));
+  checkItem(localStorage.getItem(`${prefix}:football_periods_backup`));
+  checkItem(localStorage.getItem('football_periods'));
+  checkItem(localStorage.getItem('guest:football_periods'));
+
+  if (typeof window !== 'undefined' && window.localStorage) {
+    try {
+      for (let i = 0; i < window.localStorage.length; i++) {
+        const k = window.localStorage.key(i);
+        if (k && (k.includes('period') || k.includes('leaderboard'))) {
+          checkItem(window.localStorage.getItem(k));
+        }
+      }
+    } catch (_) {}
+  }
+
+  return found;
+};
+
+const recoverPeriodsFromExercises = (existingPeriods: Period[], exercisesList: Exercise[], squadList: SquadPlayer[] = []): Period[] => {
+  const result = [...existingPeriods];
+  const knownIds = new Set(result.map(p => p.id));
+
+  const missingPeriodIds = new Set<string>();
+  exercisesList.forEach(e => {
+    if (e.periodId && !knownIds.has(e.periodId)) {
+      missingPeriodIds.add(e.periodId);
+    }
+  });
+
+  if (missingPeriodIds.size === 0) return result;
+
+  missingPeriodIds.forEach(mId => {
+    const periodExercises = exercisesList.filter(e => e.periodId === mId);
+    if (periodExercises.length === 0) return;
+
+    let minDate = Infinity;
+    let maxDate = 0;
+    periodExercises.forEach(e => {
+      const d = e.finishedAt || e.date || 0;
+      if (d > 0) {
+        if (d < minDate) minDate = d;
+        if (d > maxDate) maxDate = d;
+      }
+    });
+
+    if (minDate === Infinity) minDate = Date.now() - 30 * 24 * 3600 * 1000;
+    if (maxDate === 0) maxDate = minDate;
+
+    const formattedDate = new Date(minDate).toLocaleDateString('sv-SE', { month: 'short', year: 'numeric' });
+    const recoveredStandings = calculateLeaderboard(squadList, exercisesList, mId, [], []);
+
+    const recoveredPeriod: Period = {
+      id: mId,
+      name: `Avslutad poängliga (${formattedDate})`,
+      startDate: minDate,
+      endDate: maxDate,
+      isActive: false,
+      standings: recoveredStandings.filter(s => s.totalPoints > 0).map(s => ({
+        playerId: s.id,
+        playerName: s.name,
+        points: s.totalPoints,
+        photoUrl: s.photoUrl || null,
+        history: s.history || []
+      }))
+    };
+
+    result.push(recoveredPeriod);
+    knownIds.add(mId);
+    console.log(`[App] Recovered missing closed period from exercises: ${recoveredPeriod.name} (id: ${mId})`);
+  });
+
+  return result;
 };
 
 const getPrefixedItem = (key: string, currentUser: any) => {
@@ -527,6 +664,8 @@ export default function App() {
       const savedSessions = localStorage.getItem(`${lastUser}:football_sessions`);
       const savedPeriods = localStorage.getItem(`${lastUser}:football_periods`);
       const savedLineups = localStorage.getItem(`${lastUser}:football_lineups`);
+      const savedExerciseBank = localStorage.getItem(`${lastUser}:football_exercise_bank`);
+      const savedExerciseBankCategories = localStorage.getItem(`${lastUser}:football_exercise_bank_categories`);
       
       const urlParams = new URLSearchParams(window.location.search);
       const urlEx = urlParams.get('ex');
@@ -534,7 +673,7 @@ export default function App() {
       const savedActiveExerciseId = localStorage.getItem(`${lastUser}:active_exercise_id`);
       const targetExId = urlEx || sessionEx || savedActiveExerciseId || null;
 
-      if (savedExercises || savedSquad || savedSessions) {
+      if (savedExercises || savedSquad || savedSessions || savedExerciseBank) {
         return {
           ...INITIAL_DATA,
           squad: savedSquad ? JSON.parse(savedSquad) : [],
@@ -542,6 +681,8 @@ export default function App() {
           sessions: savedSessions ? JSON.parse(savedSessions) : [],
           periods: savedPeriods ? JSON.parse(savedPeriods) : [],
           lineups: savedLineups ? JSON.parse(savedLineups) : [],
+          exerciseBank: savedExerciseBank ? JSON.parse(savedExerciseBank) : [],
+          exerciseBankCategories: savedExerciseBankCategories ? JSON.parse(savedExerciseBankCategories) : [],
           activeExerciseId: targetExId,
         };
       }
@@ -1647,7 +1788,8 @@ export default function App() {
       const localExerciseBank = exerciseBank.length > 0 ? exerciseBank : (savedExerciseBank ? JSON.parse(savedExerciseBank) : []);
       const localExerciseBankCategories = exerciseBankCategories.length > 0 ? exerciseBankCategories : (savedExerciseBankCategories ? JSON.parse(savedExerciseBankCategories) : []);
       const localLineups = lineups.length > 0 ? lineups : (savedLineups ? JSON.parse(savedLineups) : []);
-      const localPeriods = periods.length > 0 ? periods : (savedPeriods ? JSON.parse(savedPeriods) : []);
+      const cachedPeriods = getAllCachedPeriods(user);
+      const localPeriods = periods.length > 0 ? periods : (savedPeriods ? deduplicateById([...JSON.parse(savedPeriods), ...cachedPeriods]) : cachedPeriods);
 
       const remoteLineups = lineupsSnap.exists() ? (lineupsSnap.data().lineups || []) : [];
       const mergedLineups = deduplicateById(mergeLineups(remoteLineups, localLineups));
@@ -1661,6 +1803,14 @@ export default function App() {
 
       const remoteBank = exercisesSnap.exists() ? (exercisesSnap.data().exerciseBank || []) : [];
       const mergedBank = normalizeExerciseBank(deduplicateById(mergeExerciseBank(remoteBank, localExerciseBank)));
+
+      const remotePeriods = periodsSnap.exists() ? (periodsSnap.data().periods || []) : [];
+      const mergedCandidatePeriods = deduplicateById(mergePeriods(remotePeriods, localPeriods));
+      const finalMergedPeriods = recoverPeriodsFromExercises(
+        mergedCandidatePeriods,
+        mergedExercises,
+        squadSnap.exists() ? (squadSnap.data().squad || []) : localSquad
+      );
 
       const targetActiveExerciseId = activeExerciseId 
         || (typeof window !== 'undefined' ? sessionStorage.getItem('coach_active_exercise_id') : null)
@@ -1676,8 +1826,8 @@ export default function App() {
         exerciseBankCategories: exercisesSnap.exists() ? (exercisesSnap.data().exerciseBankCategories || []) : localExerciseBankCategories,
         lineups: mergedLineups,
         activeLineupId: targetActiveLineupId,
-        periods: periodsSnap.exists() ? deduplicateById(periodsSnap.data().periods || []) : deduplicateById(localPeriods),
-        currentPeriodId: periodsSnap.exists() ? (periodsSnap.data().currentPeriodId || null) : currentPeriodId,
+        periods: finalMergedPeriods,
+        currentPeriodId: periodsSnap.exists() ? (periodsSnap.data().currentPeriodId || null) : (currentPeriodId || finalMergedPeriods.find(p => p.isActive)?.id || null),
         teamUrl: settingsSnap.exists() ? (settingsSnap.data().teamUrl || '') : teamUrl,
         adminUrl: settingsSnap.exists() ? (settingsSnap.data().adminUrl || '') : adminUrl,
         seriesUrl: settingsSnap.exists() ? (settingsSnap.data().seriesUrl || '') : seriesUrl,
@@ -1709,6 +1859,10 @@ export default function App() {
         setPrefixedItem('football_exercises', JSON.stringify(mergedExercises), user);
         setPrefixedItem('football_sessions', JSON.stringify(mergedSessions), user);
         setPrefixedItem('football_lineups', JSON.stringify(mergedLineups), user);
+        setPrefixedItem('football_exercise_bank', JSON.stringify(mergedBank), user);
+        setPrefixedItem('football_exercise_bank_categories', JSON.stringify(updatedState.exerciseBankCategories || []), user);
+        setPrefixedItem('football_periods', JSON.stringify(finalMergedPeriods), user);
+        setPrefixedItem('football_periods_backup', JSON.stringify(finalMergedPeriods), user);
         if (targetActiveExerciseId) {
           setPrefixedItem('active_exercise_id', targetActiveExerciseId, user);
           sessionStorage.setItem('coach_active_exercise_id', targetActiveExerciseId);
@@ -1717,8 +1871,9 @@ export default function App() {
 
       const hasUnsyncedLocalExercises = mergedExercises.some(me => !remoteExercises.some(re => re.id === me.id));
       const hasUnsyncedLocalSessions = mergedSessions.some(ms => !remoteSessions.some(rs => rs.id === ms.id));
-      if (hasUnsyncedLocalExercises || hasUnsyncedLocalSessions) {
-        console.log("App: Preserved local unsynced exercises/sessions during pull. Triggering follow-up push.");
+      const hasUnsyncedLocalPeriods = finalMergedPeriods.some(fp => !remotePeriods.some(rp => rp.id === fp.id));
+      if (hasUnsyncedLocalExercises || hasUnsyncedLocalSessions || hasUnsyncedLocalPeriods) {
+        console.log("App: Preserved local unsynced data during pull. Triggering follow-up push.");
         setTimeout(() => {
           pushDirtySegments(true).catch(e => console.warn("App: Follow-up push after pull failed:", e));
         }, 150);
@@ -1794,14 +1949,16 @@ export default function App() {
         const { docSquadRef, docSessionsRef, docExercisesRef, docLineupsRef, docPeriodsRef, docSettingsRef } = getDocRefs(user, userProfile);
         const docOldStateRef = doc(db, 'users', user.uid, 'config', 'state');
 
+        const isClubMode = !!(userProfile.activeClubId && userProfile.activeTeamId);
         // Step 1: Check if any segmented documents exist
-        const [squadSnap, sessionsSnap, exercisesSnap, lineupsSnap, periodsSnap, settingsSnap] = await Promise.all([
+        const [squadSnap, sessionsSnap, exercisesSnap, lineupsSnap, periodsSnap, settingsSnap, userPrivatePeriodsSnap] = await Promise.all([
           getDoc(docSquadRef),
           getDoc(docSessionsRef),
           getDoc(docExercisesRef),
           getDoc(docLineupsRef),
           getDoc(docPeriodsRef),
           getDoc(docSettingsRef),
+          isClubMode ? getDoc(doc(db, 'users', user.uid, 'data', 'periods')).catch(() => null) : Promise.resolve(null),
         ]);
 
         const docsExist = squadSnap.exists() || sessionsSnap.exists() || exercisesSnap.exists() || lineupsSnap.exists() || periodsSnap.exists() || settingsSnap.exists();
@@ -1812,6 +1969,12 @@ export default function App() {
           // STRICT CLUB & TEAM ISOLATION
           if (!docsExist) {
             console.log(`App: Clean initial state for new club team [club: ${userProfile.activeClubId}, team: ${userProfile.activeTeamId}]`);
+            const cachedClubPeriods = getAllCachedPeriods(user);
+            const userPrivatePeriods = (userPrivatePeriodsSnap && userPrivatePeriodsSnap.exists())
+              ? (userPrivatePeriodsSnap.data().periods || [])
+              : [];
+            const recoveredPeriods = deduplicateById(mergePeriods(userPrivatePeriods, cachedClubPeriods));
+
             loadedState = {
               ...INITIAL_DATA,
               squad: [],
@@ -1820,8 +1983,8 @@ export default function App() {
               exercises: [],
               lineups: [],
               activeLineupId: null,
-              periods: [],
-              currentPeriodId: null,
+              periods: recoveredPeriods,
+              currentPeriodId: recoveredPeriods.find(p => p.isActive)?.id || null,
               activeExerciseId: new URLSearchParams(window.location.search).get('ex') || sessionStorage.getItem('coach_active_exercise_id') || getPrefixedItem('active_exercise_id', user) || null,
               teamUrl: '',
               adminUrl: '',
@@ -1854,6 +2017,18 @@ export default function App() {
             const remoteClubBank = exercisesSnap.exists() ? (exercisesSnap.data().exerciseBank || []) : [];
             const mergedClubBank = normalizeExerciseBank(deduplicateById(mergeExerciseBank(remoteClubBank, cachedClubBank)));
 
+            const cachedClubPeriods = getAllCachedPeriods(user);
+            const remoteClubPeriods = periodsSnap.exists() ? (periodsSnap.data().periods || []) : [];
+            const userPrivatePeriods = (userPrivatePeriodsSnap && userPrivatePeriodsSnap.exists())
+              ? (userPrivatePeriodsSnap.data().periods || [])
+              : [];
+            const mergedClubPeriods = deduplicateById(mergePeriods(remoteClubPeriods, mergePeriods(userPrivatePeriods, cachedClubPeriods)));
+            const finalClubPeriods = recoverPeriodsFromExercises(
+              mergedClubPeriods,
+              mergedClubExercises,
+              squadSnap.exists() ? (squadSnap.data().squad || []) : []
+            );
+
             const clubActiveExerciseId = new URLSearchParams(window.location.search).get('ex') 
               || sessionStorage.getItem('coach_active_exercise_id') 
               || getPrefixedItem('active_exercise_id', user) 
@@ -1868,8 +2043,8 @@ export default function App() {
               exerciseBankCategories: exercisesSnap.exists() ? (exercisesSnap.data().exerciseBankCategories || []) : [],
               lineups: mergedClubLineups,
               activeLineupId: clubActiveId,
-              periods: periodsSnap.exists() ? deduplicateById(periodsSnap.data().periods || []) : [],
-              currentPeriodId: periodsSnap.exists() ? (periodsSnap.data().currentPeriodId || null) : null,
+              periods: finalClubPeriods,
+              currentPeriodId: periodsSnap.exists() ? (periodsSnap.data().currentPeriodId || null) : (finalClubPeriods.find(p => p.isActive)?.id || null),
               teamUrl: settingsSnap.exists() ? (settingsSnap.data().teamUrl || '') : '',
               adminUrl: settingsSnap.exists() ? (settingsSnap.data().adminUrl || '') : '',
               seriesUrl: settingsSnap.exists() ? (settingsSnap.data().seriesUrl || '') : '',
@@ -1913,7 +2088,7 @@ export default function App() {
           const cachedExerciseBank = savedExerciseBank ? deduplicateById<BankExercise>(JSON.parse(savedExerciseBank)) : [];
           const cachedExerciseBankCategories = savedExerciseBankCategories ? JSON.parse(savedExerciseBankCategories) : [];
           const cachedLineups = savedLineups ? deduplicateById<Lineup>(JSON.parse(savedLineups)) : [];
-          const cachedPeriods = savedPeriods ? deduplicateById<Period>(JSON.parse(savedPeriods)) : [];
+          const cachedPeriods = savedPeriods ? deduplicateById<Period>([...JSON.parse(savedPeriods), ...getAllCachedPeriods(user)]) : getAllCachedPeriods(user);
           const cachedCustomFormations = getPrefixedItem('custom_formations', user) ? deduplicateById<any>(JSON.parse(getPrefixedItem('custom_formations', user)!)) : [];
           const cachedPinnedFormations = getPrefixedItem('pinned_formations', user) ? JSON.parse(getPrefixedItem('pinned_formations', user)!) : ['4-2-3-1', '4-4-2', '4-3-3'];
           const cachedSettings = savedSettings ? JSON.parse(savedSettings) : INITIAL_DATA.trainingSettings;
@@ -2013,6 +2188,14 @@ export default function App() {
             const remoteBank = exercisesSnap.exists() ? (exercisesSnap.data().exerciseBank || []) : [];
             const mergedBank = normalizeExerciseBank(deduplicateById(mergeExerciseBank(remoteBank, cachedExerciseBank)));
 
+            const remotePeriods = periodsSnap.exists() ? (periodsSnap.data().periods || []) : [];
+            const mergedPeriods = deduplicateById(mergePeriods(remotePeriods, cachedPeriods));
+            const finalPeriods = recoverPeriodsFromExercises(
+              mergedPeriods,
+              mergedExercises,
+              squadSnap.exists() ? (squadSnap.data().squad || []) : cachedSquad
+            );
+
             const targetActiveExerciseId = new URLSearchParams(window.location.search).get('ex') 
               || sessionStorage.getItem('coach_active_exercise_id') 
               || savedActiveExerciseId 
@@ -2027,8 +2210,8 @@ export default function App() {
               exerciseBankCategories: exercisesSnap.exists() ? (exercisesSnap.data().exerciseBankCategories || []) : cachedExerciseBankCategories,
               lineups: mergedLineups,
               activeLineupId: targetActiveLineupId,
-              periods: periodsSnap.exists() ? deduplicateById(periodsSnap.data().periods || []) : cachedPeriods,
-              currentPeriodId: periodsSnap.exists() ? (periodsSnap.data().currentPeriodId || null) : (savedCurrentPeriodId || null),
+              periods: finalPeriods,
+              currentPeriodId: periodsSnap.exists() ? (periodsSnap.data().currentPeriodId || null) : (savedCurrentPeriodId || finalPeriods.find(p => p.isActive)?.id || null),
               teamUrl: settingsSnap.exists() ? (settingsSnap.data().teamUrl || '') : (savedTeamUrl || ''),
               adminUrl: settingsSnap.exists() ? (settingsSnap.data().adminUrl || '') : (savedAdminUrl || ''),
               seriesUrl: settingsSnap.exists() ? (settingsSnap.data().seriesUrl || '') : (savedSeriesUrl || ''),
@@ -2066,6 +2249,10 @@ export default function App() {
             setPrefixedItem('football_exercises', JSON.stringify(loadedState.exercises), user);
             setPrefixedItem('football_sessions', JSON.stringify(loadedState.sessions), user);
             setPrefixedItem('football_lineups', JSON.stringify(loadedState.lineups), user);
+            setPrefixedItem('football_exercise_bank', JSON.stringify(loadedState.exerciseBank || []), user);
+            setPrefixedItem('football_exercise_bank_categories', JSON.stringify(loadedState.exerciseBankCategories || []), user);
+            setPrefixedItem('football_periods', JSON.stringify(loadedState.periods), user);
+            setPrefixedItem('football_periods_backup', JSON.stringify(loadedState.periods), user);
             if (loadedState.activeExerciseId) {
               setPrefixedItem('active_exercise_id', loadedState.activeExerciseId, user);
               sessionStorage.setItem('coach_active_exercise_id', loadedState.activeExerciseId);
@@ -2074,10 +2261,12 @@ export default function App() {
 
           const remoteExercises = exercisesSnap.exists() ? (exercisesSnap.data().exercises || []) : [];
           const remoteSessions = sessionsSnap.exists() ? (sessionsSnap.data().sessions || []) : [];
+          const remotePeriods = periodsSnap.exists() ? (periodsSnap.data().periods || []) : [];
           const hasUnsyncedExercises = loadedState.exercises.some(le => !remoteExercises.some(re => re.id === le.id));
           const hasUnsyncedSessions = loadedState.sessions.some(ls => !remoteSessions.some(rs => rs.id === ls.id));
-          if (hasUnsyncedExercises || hasUnsyncedSessions) {
-            console.log("App: Preserved local exercises/sessions on initial load that are not in cloud yet. Syncing to cloud...");
+          const hasUnsyncedPeriods = loadedState.periods.some(lp => !remotePeriods.some(rp => rp.id === lp.id));
+          if (hasUnsyncedExercises || hasUnsyncedSessions || hasUnsyncedPeriods) {
+            console.log("App: Preserved local data on initial load that is not in cloud yet. Syncing to cloud...");
             setTimeout(() => {
               pushDirtySegments(true).catch(e => console.warn("App: Initial sync push failed:", e));
             }, 300);
@@ -2757,6 +2946,28 @@ export default function App() {
     pushDirtySegments(true, { sessions: updatedSessionsList }).catch(err => console.warn('App: Instant push on batch sessions:', err));
   };
 
+  const onReplaceAllSessions = (newSessionsList: TrainingSession[], instantPush = true) => {
+    const { deduplicated: cleanList } = deduplicateSessionsList(newSessionsList);
+    let finalSessionsList: TrainingSession[] = cleanList;
+    setData(prev => {
+      finalSessionsList = cleanList;
+      const updated = {
+        ...prev,
+        sessions: cleanList
+      };
+      latestDataRef.current = updated;
+      try {
+        setPrefixedItem('football_sessions', JSON.stringify(cleanList), user);
+        setPrefixedItem('data', JSON.stringify(updated), user);
+      } catch (e) {}
+      return updated;
+    });
+    setSessionActionCount(prev => prev + 1);
+    if (instantPush) {
+      pushDirtySegments(true, { sessions: finalSessionsList }).catch(err => console.warn('App: Instant push on replace all sessions:', err));
+    }
+  };
+
   const onUpdateSession = (updatedSession: TrainingSession, instantPush = false) => {
     let updatedSessionsList: TrainingSession[] = [];
     setData(prev => {
@@ -2785,49 +2996,127 @@ export default function App() {
       id: 'bank_' + Math.random().toString(36).substring(7),
       createdAt: Date.now()
     };
-    setData(prev => ({
-      ...prev,
-      exerciseBank: [newEx, ...(prev.exerciseBank || [])]
-    }));
+    let updatedBank: BankExercise[] = [];
+    setData(prev => {
+      updatedBank = [newEx, ...(prev.exerciseBank || [])];
+      const updated = {
+        ...prev,
+        exerciseBank: updatedBank
+      };
+      latestDataRef.current = updated;
+      try {
+        setPrefixedItem('football_exercise_bank', JSON.stringify(updatedBank), user);
+        setPrefixedItem('data', JSON.stringify(updated), user);
+      } catch (e) {}
+      return updated;
+    });
     setSessionActionCount(prev => prev + 1);
+    pushDirtySegments(true, { exerciseBank: updatedBank }).catch(err => console.warn('App: Instant push on add bank exercise:', err));
   };
 
   const updateBankExercise = (id: string, updates: Partial<BankExercise>) => {
-    setData(prev => ({
-      ...prev,
-      exerciseBank: (prev.exerciseBank || []).map(ex => ex.id === id ? { ...ex, ...updates } : ex)
-    }));
+    let updatedBank: BankExercise[] = [];
+    setData(prev => {
+      const existingEx = (prev.exerciseBank || []).find(ex => ex.id === id);
+      if (existingEx && (updates.imageUrls !== undefined || updates.imageUrl !== undefined)) {
+        const oldImgs = [
+          ...(existingEx.imageUrls || []),
+          ...(existingEx.imageUrl ? [existingEx.imageUrl] : [])
+        ];
+        const newImgs = [
+          ...(updates.imageUrls !== undefined ? updates.imageUrls : (existingEx.imageUrls || [])),
+          ...(updates.imageUrl !== undefined ? (updates.imageUrl ? [updates.imageUrl] : []) : (existingEx.imageUrl ? [existingEx.imageUrl] : []))
+        ];
+        for (const oldUrl of oldImgs) {
+          if (oldUrl && !newImgs.includes(oldUrl) && (oldUrl.includes('/uploads/') || oldUrl.includes('photo_'))) {
+            deleteObject(oldUrl).catch(e => console.warn('Could not delete old image on update bank exercise:', e));
+          }
+        }
+      }
+      updatedBank = (prev.exerciseBank || []).map(ex => ex.id === id ? { ...ex, ...updates } : ex);
+      const updated = {
+        ...prev,
+        exerciseBank: updatedBank
+      };
+      latestDataRef.current = updated;
+      try {
+        setPrefixedItem('football_exercise_bank', JSON.stringify(updatedBank), user);
+        setPrefixedItem('data', JSON.stringify(updated), user);
+      } catch (e) {}
+      return updated;
+    });
     setSessionActionCount(prev => prev + 1);
+    pushDirtySegments(true, { exerciseBank: updatedBank }).catch(err => console.warn('App: Instant push on update bank exercise:', err));
   };
 
   const removeBankExercise = (id: string) => {
-    setData(prev => ({
-      ...prev,
-      exerciseBank: (prev.exerciseBank || []).filter(ex => ex.id !== id)
-    }));
+    let updatedBank: BankExercise[] = [];
+    setData(prev => {
+      const removedEx = (prev.exerciseBank || []).find(ex => ex.id === id);
+      if (removedEx) {
+        const imgs = (removedEx.imageUrls || []).concat(removedEx.imageUrl ? [removedEx.imageUrl] : []);
+        for (const imgUrl of imgs) {
+          if (imgUrl && (imgUrl.includes('/uploads/') || imgUrl.includes('photo_'))) {
+            deleteObject(imgUrl).catch(() => {});
+          }
+        }
+      }
+      updatedBank = (prev.exerciseBank || []).filter(ex => ex.id !== id);
+      const updated = {
+        ...prev,
+        exerciseBank: updatedBank
+      };
+      latestDataRef.current = updated;
+      try {
+        setPrefixedItem('football_exercise_bank', JSON.stringify(updatedBank), user);
+        setPrefixedItem('data', JSON.stringify(updated), user);
+      } catch (e) {}
+      return updated;
+    });
     setSessionActionCount(prev => prev + 1);
+    pushDirtySegments(true, { exerciseBank: updatedBank }).catch(err => console.warn('App: Instant push on remove bank exercise:', err));
   };
 
   const addBankCategory = (category: string) => {
     const trimmed = category.trim();
     if (!trimmed) return;
+    let updatedCats: string[] = [];
     setData(prev => {
       const existing = prev.exerciseBankCategories || [];
       if (existing.some(c => c.toLowerCase() === trimmed.toLowerCase())) return prev;
-      return {
+      updatedCats = [...existing, trimmed];
+      const updated = {
         ...prev,
-        exerciseBankCategories: [...existing, trimmed]
+        exerciseBankCategories: updatedCats
       };
+      latestDataRef.current = updated;
+      try {
+        setPrefixedItem('football_exercise_bank_categories', JSON.stringify(updatedCats), user);
+        setPrefixedItem('data', JSON.stringify(updated), user);
+      } catch (e) {}
+      return updated;
     });
     setSessionActionCount(prev => prev + 1);
+    pushDirtySegments(true, { exerciseBankCategories: updatedCats }).catch(err => console.warn('App: Instant push on add bank category:', err));
   };
 
   const removeBankCategory = (category: string) => {
-    setData(prev => ({
-      ...prev,
-      exerciseBankCategories: (prev.exerciseBankCategories || []).filter(c => c !== category)
-    }));
+    let updatedCats: string[] = [];
+    setData(prev => {
+      updatedCats = (prev.exerciseBankCategories || []).filter(c => c !== category);
+      const updated = {
+        ...prev,
+        exerciseBankCategories: updatedCats
+      };
+      latestDataRef.current = updated;
+      try {
+        setPrefixedItem('football_exercise_bank_categories', JSON.stringify(updatedCats), user);
+        setPrefixedItem('data', JSON.stringify(updated), user);
+      } catch (e) {}
+      return updated;
+    });
     setSessionActionCount(prev => prev + 1);
+    pushDirtySegments(true, { exerciseBankCategories: updatedCats }).catch(err => console.warn('App: Instant push on remove bank category:', err));
   };
 
   const saveMomentToBank = (moment: SessionMoment) => {
@@ -2864,11 +3153,22 @@ export default function App() {
       createdAt: Date.now(),
       tacticalBoards: moment.tacticalBoards ? JSON.parse(JSON.stringify(moment.tacticalBoards)) : undefined
     };
-    setData(prev => ({
-      ...prev,
-      exerciseBank: [newEx, ...(prev.exerciseBank || [])]
-    }));
+    let updatedBank: BankExercise[] = [];
+    setData(prev => {
+      updatedBank = [newEx, ...(prev.exerciseBank || [])];
+      const updated = {
+        ...prev,
+        exerciseBank: updatedBank
+      };
+      latestDataRef.current = updated;
+      try {
+        setPrefixedItem('football_exercise_bank', JSON.stringify(updatedBank), user);
+        setPrefixedItem('data', JSON.stringify(updated), user);
+      } catch (e) {}
+      return updated;
+    });
     setSessionActionCount(prev => prev + 1);
+    pushDirtySegments(true, { exerciseBank: updatedBank }).catch(err => console.warn('App: Instant push on save moment to bank:', err));
     return bankId;
   };
 
@@ -3117,24 +3417,47 @@ export default function App() {
     setSessionActionCount(prev => prev + 1);
   };
 
-  const handleClosePeriod = (name: string, standings: PeriodStandings[]) => {
-    const now = Date.now();
+  const handleClosePeriod = (name: string, standings: PeriodStandings[], targetPeriodId?: string, endDate?: number) => {
+    const closeTimestamp = endDate || Date.now();
+    const targetId = targetPeriodId || currentPeriodId;
     
     setData(prev => ({
       ...prev,
       periods: prev.periods.map(p => {
-        if (p.id === currentPeriodId) {
+        if (p.id === targetId) {
           return {
             ...p,
             name: name || p.name,
-            endDate: now,
+            endDate: closeTimestamp,
             isActive: false,
             standings
           };
         }
         return p;
       }),
-      currentPeriodId: null
+      currentPeriodId: prev.currentPeriodId === targetId ? null : prev.currentPeriodId
+    }));
+    setSessionActionCount(prev => prev + 1);
+  };
+
+  const handleReactivatePeriod = (id: string) => {
+    setData(prev => ({
+      ...prev,
+      periods: prev.periods.map(p => {
+        if (p.id === id) {
+          const { endDate: _removed, ...rest } = p;
+          return {
+            ...rest,
+            isActive: true,
+            endDate: undefined
+          };
+        }
+        return {
+          ...p,
+          isActive: false
+        };
+      }),
+      currentPeriodId: id
     }));
     setSessionActionCount(prev => prev + 1);
   };
@@ -3186,10 +3509,31 @@ export default function App() {
   };
 
   const updatePeriod = (id: string, updates: Partial<Period>) => {
-    setData(prev => ({
-      ...prev,
-      periods: prev.periods.map(p => p.id === id ? { ...p, ...updates } : p)
-    }));
+    setData(prev => {
+      const exists = prev.periods.some(p => p.id === id);
+      if (exists) {
+        return {
+          ...prev,
+          periods: prev.periods.map(p => p.id === id ? { ...p, ...updates } : p)
+        };
+      } else {
+        const fullPeriod: Period = {
+          id,
+          name: updates.name || 'Avslutad poängliga',
+          startDate: updates.startDate || Date.now() - 30 * 24 * 3600 * 1000,
+          endDate: updates.endDate || Date.now(),
+          isActive: updates.isActive || false,
+          standings: updates.standings || [],
+          bonusPoints: updates.bonusPoints || [],
+          shareId: updates.shareId,
+          ...(updates as any)
+        };
+        return {
+          ...prev,
+          periods: deduplicateById([fullPeriod, ...prev.periods])
+        };
+      }
+    });
     setSessionActionCount(prev => prev + 1);
   };
 
@@ -3853,8 +4197,7 @@ export default function App() {
                   onMovePlayer={movePlayer}
                   onCopyTeams={copyTeams}
                   onReorderSessions={(reordered) => {
-                    setData(prev => ({ ...prev, sessions: reordered }));
-                    setSessionActionCount(prev => prev + 1);
+                    onReplaceAllSessions(reordered, true);
                   }}
                 />
               </>
@@ -4150,8 +4493,7 @@ export default function App() {
                 onUpdateSettings={onUpdateSettings}
                 sessions={sessions}
                 onUpdateSessions={(newSessions) => {
-                  setData(prev => ({ ...prev, sessions: newSessions }));
-                  setSessionActionCount(prev => prev + 1);
+                  onReplaceAllSessions(newSessions, true);
                 }}
               />
             </motion.div>
@@ -4162,6 +4504,7 @@ export default function App() {
               key="leaderboard" 
               squad={squad} 
               exercises={exercises} 
+              sessions={sessions}
               periods={periods}
               currentPeriodId={currentPeriodId}
               onClosePeriod={handleClosePeriod}
@@ -4169,6 +4512,7 @@ export default function App() {
               onDeletePeriod={handleDeletePeriod}
               onCreatePeriod={createNewPeriod}
               onSwitchPeriod={switchActivePeriod}
+              onReactivatePeriod={handleReactivatePeriod}
               onRenamePeriod={renamePeriod}
               onUpdatePeriod={updatePeriod}
               sharedId={sharedLeaderboardId}
@@ -4182,7 +4526,7 @@ export default function App() {
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              className="flex-1 flex flex-col min-h-0 w-full"
+              className="flex-1 flex flex-col min-h-0 w-full bg-white dark:bg-zinc-900 pb-[calc(34px+env(safe-area-inset-bottom,0px))] sm:pb-[34px]"
             >
               <TeamPage 
                 initialUrl={teamUrl}
@@ -4192,8 +4536,6 @@ export default function App() {
                 initialSeriesUrl={seriesUrl}
                 onUpdateSeriesUrl={handleUpdateSeriesUrl}
               />
-              {/* Spacer for bottom nav when not in standalone full-height mode */}
-              <div className="h-20 shrink-0" />
             </motion.div>
           )}
 
@@ -4515,7 +4857,7 @@ export default function App() {
           )}
         </AnimatePresence>
 
-        {view !== 'exercise' && !(view === 'lineup' && isLineupMaximized) && (
+        {view !== 'exercise' && view !== 'teampage' && !(view === 'lineup' && isLineupMaximized) && (
           <div className="mt-8 mb-2 flex flex-col items-center justify-center gap-2">
             {activeClubInfo && (
               isCoachOrAdmin ? (
@@ -4546,68 +4888,116 @@ export default function App() {
         )}
       </main>
 
-      {/* Bottom Navigation with Apple Liquid Glass aesthetic */}
+      {/* Bottom Navigation */}
       {view !== 'exercise' && !(view === 'lineup' && isLineupMaximized) && (
-        <nav className="fixed bottom-0 left-0 right-0 liquid-glass border-t border-zinc-200/60 dark:border-zinc-800/60 px-2 sm:px-6 pt-1.5 pb-1.5 z-40">
-          <div className="max-w-xl mx-auto flex items-center justify-between gap-1">
-            <button
-              onClick={() => setView('training')}
-              className={`flex-1 flex flex-col items-center justify-center py-1 px-1 rounded-xl transition-all duration-200 relative ${
-                view === 'training'
-                  ? 'text-indigo-600 dark:text-indigo-400 liquid-glass-pill font-bold shadow-xs'
-                  : 'text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200'
-              }`}
-            >
-              <Calendar size={22} className="transition-transform active:scale-90" />
-              <span className="text-[10px] font-bold uppercase tracking-wider mt-0.5 leading-none">Kalender</span>
-            </button>
-            <button
-              onClick={() => setView('leaderboard')}
-              className={`flex-1 flex flex-col items-center justify-center py-1 px-1 rounded-xl transition-all duration-200 relative ${
-                view === 'leaderboard'
-                  ? 'text-indigo-600 dark:text-indigo-400 liquid-glass-pill font-bold shadow-xs'
-                  : 'text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200'
-              }`}
-            >
-              <LayoutDashboard size={22} className="transition-transform active:scale-90" />
-              <span className="text-[10px] font-bold uppercase tracking-wider mt-0.5 leading-none text-center">Poängliga</span>
-            </button>
-            <button
-              onClick={() => setView('squad')}
-              className={`flex-1 flex flex-col items-center justify-center py-1 px-1 rounded-xl transition-all duration-200 relative ${
-                view === 'squad'
-                  ? 'text-indigo-600 dark:text-indigo-400 liquid-glass-pill font-bold shadow-xs'
-                  : 'text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200'
-              }`}
-            >
-              <Users size={22} className="transition-transform active:scale-90" />
-              <span className="text-[10px] font-bold uppercase tracking-wider mt-0.5 leading-none text-center">Truppen</span>
-            </button>
-            {canViewLineup && (
+        <nav className={`fixed bottom-0 left-0 right-0 z-40 transition-all duration-200 ${
+          view === 'teampage'
+            ? 'bg-white dark:bg-zinc-900 border-t border-zinc-200 dark:border-zinc-800 px-2 sm:px-4 py-1 pb-[env(safe-area-inset-bottom,0px)] shadow-xs'
+            : 'liquid-glass border-t border-zinc-200/60 dark:border-zinc-800/60 px-2 sm:px-6 pt-1.5 pb-1.5 pb-safe'
+        }`}>
+          {view === 'teampage' ? (
+            /* Minimal bottom list for Lagsida to eliminate tall black border and maximize embedded webpage view */
+            <div className="max-w-md mx-auto flex items-center justify-between gap-1">
               <button
-                onClick={() => setView('lineup')}
+                onClick={() => setView('training')}
+                className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-zinc-500 hover:text-zinc-900 dark:hover:text-white transition-all text-xs font-bold active:scale-95 cursor-pointer"
+                title="Kalender"
+              >
+                <Calendar size={15} />
+                <span className="text-[11px] font-bold">Kalender</span>
+              </button>
+              <button
+                onClick={() => setView('leaderboard')}
+                className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-zinc-500 hover:text-zinc-900 dark:hover:text-white transition-all text-xs font-bold active:scale-95 cursor-pointer"
+                title="Poängliga"
+              >
+                <LayoutDashboard size={15} />
+                <span className="text-[11px] font-bold">Poängliga</span>
+              </button>
+              <button
+                onClick={() => setView('squad')}
+                className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-zinc-500 hover:text-zinc-900 dark:hover:text-white transition-all text-xs font-bold active:scale-95 cursor-pointer"
+                title="Truppen"
+              >
+                <Users size={15} />
+                <span className="text-[11px] font-bold">Truppen</span>
+              </button>
+              {canViewLineup && (
+                <button
+                  onClick={() => setView('lineup')}
+                  className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-zinc-500 hover:text-zinc-900 dark:hover:text-white transition-all text-xs font-bold active:scale-95 cursor-pointer"
+                  title="Laguppställning"
+                >
+                  <Shirt size={15} />
+                  <span className="text-[11px] font-bold">Laguppst.</span>
+                </button>
+              )}
+              <button
+                onClick={() => setView('teampage')}
+                className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-indigo-600 dark:text-indigo-400 liquid-glass-pill font-extrabold shadow-2xs text-xs active:scale-95 cursor-pointer"
+                title="Lagsida"
+              >
+                <Globe size={15} />
+                <span className="text-[11px] font-extrabold">Lagsida</span>
+              </button>
+            </div>
+          ) : (
+            <div className="max-w-xl mx-auto flex items-center justify-between gap-1">
+              <button
+                onClick={() => setView('training')}
                 className={`flex-1 flex flex-col items-center justify-center py-1 px-1 rounded-xl transition-all duration-200 relative ${
-                  view === 'lineup'
+                  view === 'training'
                     ? 'text-indigo-600 dark:text-indigo-400 liquid-glass-pill font-bold shadow-xs'
                     : 'text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200'
                 }`}
               >
-                <Shirt size={22} className="transition-transform active:scale-90" />
-                <span className="text-[10px] font-bold uppercase tracking-wider mt-0.5 leading-none text-center">Laguppst.</span>
+                <Calendar size={22} className="transition-transform active:scale-90" />
+                <span className="text-[10px] font-bold uppercase tracking-wider mt-0.5 leading-none">Kalender</span>
               </button>
-            )}
-            <button
-              onClick={() => setView('teampage')}
-              className={`flex-1 flex flex-col items-center justify-center py-1 px-1 rounded-xl transition-all duration-200 relative ${
-                view === 'teampage'
-                  ? 'text-indigo-600 dark:text-indigo-400 liquid-glass-pill font-bold shadow-xs'
-                  : 'text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200'
-              }`}
-            >
-              <Globe size={22} className="transition-transform active:scale-90" />
-              <span className="text-[10px] font-bold uppercase tracking-wider mt-0.5 leading-none text-center">Lagsida</span>
-            </button>
-          </div>
+              <button
+                onClick={() => setView('leaderboard')}
+                className={`flex-1 flex flex-col items-center justify-center py-1 px-1 rounded-xl transition-all duration-200 relative ${
+                  view === 'leaderboard'
+                    ? 'text-indigo-600 dark:text-indigo-400 liquid-glass-pill font-bold shadow-xs'
+                    : 'text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200'
+                }`}
+              >
+                <LayoutDashboard size={22} className="transition-transform active:scale-90" />
+                <span className="text-[10px] font-bold uppercase tracking-wider mt-0.5 leading-none text-center">Poängliga</span>
+              </button>
+              <button
+                onClick={() => setView('squad')}
+                className={`flex-1 flex flex-col items-center justify-center py-1 px-1 rounded-xl transition-all duration-200 relative ${
+                  view === 'squad'
+                    ? 'text-indigo-600 dark:text-indigo-400 liquid-glass-pill font-bold shadow-xs'
+                    : 'text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200'
+                }`}
+              >
+                <Users size={22} className="transition-transform active:scale-90" />
+                <span className="text-[10px] font-bold uppercase tracking-wider mt-0.5 leading-none text-center">Truppen</span>
+              </button>
+              {canViewLineup && (
+                <button
+                  onClick={() => setView('lineup')}
+                  className={`flex-1 flex flex-col items-center justify-center py-1 px-1 rounded-xl transition-all duration-200 relative ${
+                    view === 'lineup'
+                      ? 'text-indigo-600 dark:text-indigo-400 liquid-glass-pill font-bold shadow-xs'
+                      : 'text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200'
+                  }`}
+                >
+                  <Shirt size={22} className="transition-transform active:scale-90" />
+                  <span className="text-[10px] font-bold uppercase tracking-wider mt-0.5 leading-none text-center">Laguppst.</span>
+                </button>
+              )}
+              <button
+                onClick={() => setView('teampage')}
+                className="flex-1 flex flex-col items-center justify-center py-1 px-1 rounded-xl transition-all duration-200 relative text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200"
+              >
+                <Globe size={22} className="transition-transform active:scale-90" />
+                <span className="text-[10px] font-bold uppercase tracking-wider mt-0.5 leading-none text-center">Lagsida</span>
+              </button>
+            </div>
+          )}
         </nav>
       )}
 

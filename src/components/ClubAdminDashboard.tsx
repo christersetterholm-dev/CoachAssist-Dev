@@ -246,6 +246,7 @@ export default function ClubAdminDashboard({
   const [importFile, setImportFile] = useState<File | null>(null);
   const [importWipeBeforeRestore, setImportWipeBeforeRestore] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
+  const [isSyncingNow, setIsSyncingNow] = useState(false);
 
   // SSH Direct Deployment States
   const [sshHost, setSshHost] = useState('coachassist.setterholm.se');
@@ -800,10 +801,14 @@ export default function ClubAdminDashboard({
   const fetchDbConfig = async () => {
     setDbConfigLoading(true);
     try {
-      const res = await fetch(getApiUrl('/api/system/db-config'));
+      const res = await fetch(getApiUrl('/api/system/db-config'), {
+        headers: getAuthHeaders()
+      });
       if (res.ok) {
         const data = await res.json();
-        setDbConfig(data);
+        if (data && typeof data === 'object' && data.mode) {
+          setDbConfig(prev => ({ ...prev, ...data }));
+        }
       }
     } catch (e) {
       console.error('Error fetching db config:', e);
@@ -814,7 +819,9 @@ export default function ClubAdminDashboard({
 
   const fetchSshConfig = async () => {
     try {
-      const res = await fetch(getApiUrl('/api/deploy-ssh-config'));
+      const res = await fetch(getApiUrl('/api/deploy-ssh-config'), {
+        headers: getAuthHeaders()
+      });
       if (res.ok) {
         const data = await res.json();
         if (data.host) setSshHost(data.host);
@@ -854,7 +861,7 @@ export default function ClubAdminDashboard({
     try {
       const res = await fetch(getApiUrl('/api/deploy-to-ssh'), {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders(),
         body: JSON.stringify({
           host: sshHost,
           port: Number(sshPort),
@@ -898,7 +905,7 @@ export default function ClubAdminDashboard({
     try {
       const res = await fetch(getApiUrl('/api/system/db-config'), {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders(),
         body: JSON.stringify({
           mode: newMode,
           customFirestoreProjectId: dbConfig.customFirestoreProjectId || '',
@@ -928,7 +935,10 @@ export default function ClubAdminDashboard({
     setIsSyncingNow(true);
     setDbConfigMessage(null);
     try {
-      const res = await fetch(getApiUrl('/api/system/db-sync-now'), { method: 'POST' });
+      const res = await fetch(getApiUrl('/api/system/db-sync-now'), {
+        method: 'POST',
+        headers: getAuthHeaders()
+      });
       const data = await res.json();
       if (res.ok) {
         setDbConfigMessage({ type: 'success', text: data.message || 'Synkronisering slutförd!' });
@@ -942,8 +952,28 @@ export default function ClubAdminDashboard({
     }
   };
 
-  const handleExportBackup = () => {
-    window.open(getApiUrl('/api/system/db-export'), '_blank');
+  const handleExportBackup = async () => {
+    try {
+      const res = await fetch(getApiUrl('/api/system/db-export'), {
+        headers: getAuthHeaders()
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        alert(err.error || 'Kunde inte exportera databasen.');
+        return;
+      }
+      const blob = await res.blob();
+      const downloadUrl = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = downloadUrl;
+      a.download = `coachassist_backup_${new Date().toISOString().slice(0, 10)}.json`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(downloadUrl);
+    } catch (err: any) {
+      alert('Nätverksfel vid export av databas: ' + (err?.message || err));
+    }
   };
 
   const handleImportBackup = async (e: React.FormEvent) => {
@@ -954,9 +984,9 @@ export default function ClubAdminDashboard({
     try {
       const text = await importFile.text();
       const dump = JSON.parse(text);
-      const res = await fetch(getApiUrl('/api/system/db-import'), {
+      const res = await fetch(getApiUrl('/api/system/db-import' + (importWipeBeforeRestore ? '?wipe=true' : '')), {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders(),
         body: JSON.stringify({ ...dump, wipe: importWipeBeforeRestore })
       });
       const data = await res.json();
@@ -2022,7 +2052,7 @@ export default function ClubAdminDashboard({
             </div>
             <div className="min-w-0 flex-1">
               <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
-                <h1 className="text-lg sm:text-2xl font-black text-zinc-900 dark:text-white tracking-tight break-words">Klubb- & Lagadministration</h1>
+                <h1 className="text-lg sm:text-2xl font-black text-zinc-900 dark:text-white tracking-tight break-words">Klubb- och lagadministration</h1>
                 {isRootAdmin && (
                   <span className="text-[10px] font-black uppercase tracking-wider bg-red-50 dark:bg-red-950/40 text-red-600 dark:text-red-400 px-2 py-0.5 rounded-md border border-red-100/40 dark:border-red-900/40 animate-pulse">
                     Root Admin
@@ -2072,107 +2102,107 @@ export default function ClubAdminDashboard({
         </div>
 
         {/* Tab Selection */}
-        <div className="flex items-center gap-1.5 sm:gap-2 mt-3.5 sm:mt-5 overflow-x-auto pb-2 no-scrollbar w-full min-w-0 snap-x">
+        <div className="flex flex-wrap items-center gap-2 mt-3.5 sm:mt-5 w-full min-w-0">
           {isRootAdmin && (
             <button
               onClick={() => setActiveTab('clubs')}
-              className={`flex items-center gap-2 px-4 sm:px-5 py-2.5 sm:py-3 rounded-xl font-extrabold text-xs sm:text-sm transition-all cursor-pointer shrink-0 ${
+              className={`flex items-center gap-2 px-3.5 sm:px-4 py-2 sm:py-2.5 rounded-xl font-extrabold text-xs sm:text-sm transition-all cursor-pointer ${
                 activeTab === 'clubs'
                   ? 'bg-indigo-600 text-white shadow-md shadow-indigo-100 dark:shadow-none'
-                  : 'bg-zinc-50 hover:bg-zinc-100 dark:bg-zinc-950 dark:hover:bg-zinc-800 text-zinc-600 dark:text-zinc-400'
+                  : 'bg-zinc-50 hover:bg-zinc-100 dark:bg-zinc-950 dark:hover:bg-zinc-800 text-zinc-600 dark:text-zinc-400 border border-zinc-200/60 dark:border-zinc-800/80'
               }`}
             >
               <Landmark size={16} />
-              <span>Skapa Förening</span>
+              <span>Skapa förening</span>
             </button>
           )}
           
           <button
             disabled={!selectedClub}
             onClick={() => setActiveTab('teams')}
-            className={`flex items-center gap-2 px-4 sm:px-5 py-2.5 sm:py-3 rounded-xl font-extrabold text-xs sm:text-sm transition-all disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer shrink-0 ${
+            className={`flex items-center gap-2 px-3.5 sm:px-4 py-2 sm:py-2.5 rounded-xl font-extrabold text-xs sm:text-sm transition-all disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer ${
               activeTab === 'teams'
                 ? 'bg-indigo-600 text-white shadow-md shadow-indigo-100 dark:shadow-none'
-                : 'bg-zinc-50 hover:bg-zinc-100 dark:bg-zinc-950 dark:hover:bg-zinc-800 text-zinc-600 dark:text-zinc-400'
+                : 'bg-zinc-50 hover:bg-zinc-100 dark:bg-zinc-950 dark:hover:bg-zinc-800 text-zinc-600 dark:text-zinc-400 border border-zinc-200/60 dark:border-zinc-800/80'
             }`}
           >
             <Settings size={16} />
-            <span>Hantera Lag ({clubMetadata?.teams?.length || 0})</span>
+            <span>Hantera lag ({clubMetadata?.teams?.length || 0})</span>
           </button>
 
           <button
             disabled={!selectedClub}
             onClick={() => setActiveTab('members')}
-            className={`flex items-center gap-2 px-4 sm:px-5 py-2.5 sm:py-3 rounded-xl font-extrabold text-xs sm:text-sm transition-all disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer shrink-0 ${
+            className={`flex items-center gap-2 px-3.5 sm:px-4 py-2 sm:py-2.5 rounded-xl font-extrabold text-xs sm:text-sm transition-all disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer ${
               activeTab === 'members'
                 ? 'bg-indigo-600 text-white shadow-md shadow-indigo-100 dark:shadow-none'
-                : 'bg-zinc-50 hover:bg-zinc-100 dark:bg-zinc-950 dark:hover:bg-zinc-800 text-zinc-600 dark:text-zinc-400'
+                : 'bg-zinc-50 hover:bg-zinc-100 dark:bg-zinc-950 dark:hover:bg-zinc-800 text-zinc-600 dark:text-zinc-400 border border-zinc-200/60 dark:border-zinc-800/80'
             }`}
           >
             <Users size={16} />
-            <span>Medlemmar & Roller ({members.length})</span>
+            <span>Medlemmar och roller ({members.length})</span>
           </button>
 
           <button
             disabled={!selectedClub}
             onClick={() => setActiveTab('user_accounts')}
-            className={`flex items-center gap-2 px-4 sm:px-5 py-2.5 sm:py-3 rounded-xl font-extrabold text-xs sm:text-sm transition-all disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer shrink-0 ${
+            className={`flex items-center gap-2 px-3.5 sm:px-4 py-2 sm:py-2.5 rounded-xl font-extrabold text-xs sm:text-sm transition-all disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer ${
               activeTab === 'user_accounts'
                 ? 'bg-indigo-600 text-white shadow-md shadow-indigo-100 dark:shadow-none'
-                : 'bg-zinc-50 hover:bg-zinc-100 dark:bg-zinc-950 dark:hover:bg-zinc-800 text-zinc-600 dark:text-zinc-400'
+                : 'bg-zinc-50 hover:bg-zinc-100 dark:bg-zinc-950 dark:hover:bg-zinc-800 text-zinc-600 dark:text-zinc-400 border border-zinc-200/60 dark:border-zinc-800/80'
             }`}
           >
             <Key size={16} />
-            <span>Konto & Lösenord ({allMemberAccounts.length})</span>
+            <span>Konto och lösenord ({allMemberAccounts.length})</span>
           </button>
 
           <button
             onClick={() => setActiveTab('calendar_sync')}
-            className={`flex items-center gap-2 px-4 sm:px-5 py-2.5 sm:py-3 rounded-xl font-extrabold text-xs sm:text-sm transition-all cursor-pointer shrink-0 ${
+            className={`flex items-center gap-2 px-3.5 sm:px-4 py-2 sm:py-2.5 rounded-xl font-extrabold text-xs sm:text-sm transition-all cursor-pointer ${
               activeTab === 'calendar_sync'
                 ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-100 dark:shadow-none'
-                : 'bg-zinc-50 hover:bg-zinc-100 dark:bg-zinc-950 dark:hover:bg-zinc-800 text-zinc-600 dark:text-zinc-400'
+                : 'bg-zinc-50 hover:bg-zinc-100 dark:bg-zinc-950 dark:hover:bg-zinc-800 text-zinc-600 dark:text-zinc-400 border border-zinc-200/60 dark:border-zinc-800/80'
             }`}
           >
             <Calendar size={16} />
-            <span>Kalender & Webb</span>
+            <span>Kalender och webb</span>
           </button>
 
           <button
             onClick={() => setActiveTab('pwa_icons')}
-            className={`flex items-center gap-2 px-4 sm:px-5 py-2.5 sm:py-3 rounded-xl font-extrabold text-xs sm:text-sm transition-all cursor-pointer shrink-0 ${
+            className={`flex items-center gap-2 px-3.5 sm:px-4 py-2 sm:py-2.5 rounded-xl font-extrabold text-xs sm:text-sm transition-all cursor-pointer ${
               activeTab === 'pwa_icons'
                 ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-100 dark:shadow-none'
-                : 'bg-zinc-50 hover:bg-zinc-100 dark:bg-zinc-950 dark:hover:bg-zinc-800 text-zinc-600 dark:text-zinc-400'
+                : 'bg-zinc-50 hover:bg-zinc-100 dark:bg-zinc-950 dark:hover:bg-zinc-800 text-zinc-600 dark:text-zinc-400 border border-zinc-200/60 dark:border-zinc-800/80'
             }`}
           >
             <Smartphone size={16} />
-            <span>PWA-Ikonpaket</span>
+            <span>PWA-ikonpaket</span>
           </button>
 
           <button
             onClick={() => setActiveTab('database_env')}
-            className={`flex items-center gap-2 px-4 sm:px-5 py-2.5 sm:py-3 rounded-xl font-extrabold text-xs sm:text-sm transition-all cursor-pointer shrink-0 ${
+            className={`flex items-center gap-2 px-3.5 sm:px-4 py-2 sm:py-2.5 rounded-xl font-extrabold text-xs sm:text-sm transition-all cursor-pointer ${
               activeTab === 'database_env'
                 ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-100 dark:shadow-none'
-                : 'bg-zinc-50 hover:bg-zinc-100 dark:bg-zinc-950 dark:hover:bg-zinc-800 text-zinc-600 dark:text-zinc-400 border border-zinc-100 dark:border-zinc-850'
+                : 'bg-zinc-50 hover:bg-zinc-100 dark:bg-zinc-950 dark:hover:bg-zinc-800 text-zinc-600 dark:text-zinc-400 border border-zinc-200/60 dark:border-zinc-800/80'
             }`}
           >
             <Database size={16} />
-            <span>Databas & Molnsynk</span>
+            <span>Databas och molnsynk</span>
           </button>
 
           {isRootAdmin && (
             <button
               onClick={() => setActiveTab('root_admins')}
-              className={`flex items-center gap-2 px-4 sm:px-5 py-2.5 sm:py-3 rounded-xl font-extrabold text-xs sm:text-sm transition-all cursor-pointer shrink-0 ${
+              className={`flex items-center gap-2 px-3.5 sm:px-4 py-2 sm:py-2.5 rounded-xl font-extrabold text-xs sm:text-sm transition-all cursor-pointer ${
                 activeTab === 'root_admins'
                   ? 'bg-red-600 text-white shadow-lg shadow-red-100 dark:shadow-none'
-                  : 'bg-zinc-50 hover:bg-zinc-100 dark:bg-zinc-950 dark:hover:bg-zinc-800 text-zinc-600 dark:text-zinc-400 border border-zinc-100 dark:border-zinc-850'
+                  : 'bg-zinc-50 hover:bg-zinc-100 dark:bg-zinc-950 dark:hover:bg-zinc-800 text-zinc-600 dark:text-zinc-400 border border-zinc-200/60 dark:border-zinc-800/80'
               }`}
             >
               <Shield size={16} />
-              <span>System-Admins ({rootAdminsList.length || 2})</span>
+              <span>System-admins ({rootAdminsList.length || 2})</span>
             </button>
           )}
         </div>
@@ -4238,14 +4268,17 @@ export default function ClubAdminDashboard({
                 </p>
               </div>
 
-              <a
-                href="/api/download-production-bundle"
-                download="coachassist-production-bundle.zip"
+              <button
+                type="button"
+                onClick={() => {
+                  const token = localStorage.getItem('token') || localStorage.getItem('coachassist_jwt_token') || localStorage.getItem('jwt_token') || '';
+                  window.location.href = getApiUrl(`/api/download-production-bundle?token=${encodeURIComponent(token)}`);
+                }}
                 className="inline-flex items-center justify-center gap-2.5 bg-emerald-500 hover:bg-emerald-400 text-zinc-950 font-black px-6 py-3.5 rounded-2xl text-xs sm:text-sm transition-all shadow-lg shadow-emerald-500/30 active:scale-95 shrink-0 cursor-pointer"
               >
                 <Download size={18} />
                 <span>Ladda ner ZIP-paket (~20 MB)</span>
-              </a>
+              </button>
             </div>
           </div>
 

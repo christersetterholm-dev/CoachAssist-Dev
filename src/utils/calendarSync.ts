@@ -13,6 +13,181 @@ export interface SyncResult {
   lastSyncedAt: number;
 }
 
+export function getSessionContentWeight(session: Partial<TrainingSession>): number {
+  let score = 0;
+  if (session.moments && session.moments.length > 0) score += session.moments.length * 100;
+  if (session.attendance && session.attendance.length > 0) score += session.attendance.length * 10;
+  if (session.rsvps && Object.keys(session.rsvps).length > 0) score += Object.keys(session.rsvps).length * 10;
+  if (session.guestPlayers && session.guestPlayers.length > 0) score += session.guestPlayers.length * 10;
+  if (session.notes && session.notes.trim().length > 0) score += 50;
+  if (session.isLocallyEdited) score += 30;
+  if (session.isCompleted) score += 20;
+  if (session.isIgnored) score += 10;
+  return score;
+}
+
+export function cleanTitleForMatch(title?: string): string {
+  if (!title) return '';
+  return title
+    .replace(/^\[INSTÄLLT\]\s*/i, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9åäö]/gi, '')
+    .trim();
+}
+
+export const formatToYYYYMMDD = (timestamp: number) => {
+  const d = new Date(timestamp);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const r = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${r}`;
+};
+
+/**
+ * Deduplicates and consolidates an array of sessions:
+ * Merges any duplicate sessions occurring on the same date/time or with matching externalId,
+ * strictly preserving any user-planned content (moments, attendance, notes, guest players)
+ * and dropping redundant empty copies.
+ */
+export function deduplicateSessionsList(sessions: TrainingSession[]): { deduplicated: TrainingSession[]; removedCount: number } {
+  if (!sessions || sessions.length <= 1) return { deduplicated: sessions || [], removedCount: 0 };
+
+  const byDate = new Map<string, TrainingSession[]>();
+  for (const s of sessions) {
+    if (!s || !s.id) continue;
+    const dateKey = formatToYYYYMMDD(s.date);
+    if (!byDate.has(dateKey)) {
+      byDate.set(dateKey, []);
+    }
+    byDate.get(dateKey)!.push({ ...s });
+  }
+
+  const result: TrainingSession[] = [];
+  let removedCount = 0;
+
+  for (const [_, daySessions] of byDate.entries()) {
+    if (daySessions.length === 1) {
+      result.push(daySessions[0]);
+      continue;
+    }
+
+    const mergedDaySessions: TrainingSession[] = [];
+    const handledIndices = new Set<number>();
+
+    // Sort by content score descending so planned sessions take priority as primary
+    daySessions.sort((a, b) => getSessionContentWeight(b) - getSessionContentWeight(a));
+
+    for (let i = 0; i < daySessions.length; i++) {
+      if (handledIndices.has(i)) continue;
+
+      const primary = { ...daySessions[i] };
+      handledIndices.add(i);
+
+      for (let j = i + 1; j < daySessions.length; j++) {
+        if (handledIndices.has(j)) continue;
+
+        const candidate = daySessions[j];
+        
+        // Check if candidate is a duplicate of primary:
+        const sameExternalId = Boolean(primary.externalId && candidate.externalId && primary.externalId === candidate.externalId);
+        
+        const sameStartTime = Boolean(primary.startTime && candidate.startTime && primary.startTime.trim() === candidate.startTime.trim());
+        const primaryCleanTitle = cleanTitleForMatch(primary.title);
+        const candidateCleanTitle = cleanTitleForMatch(candidate.title);
+        const sameTitle = Boolean(primaryCleanTitle && candidateCleanTitle && primaryCleanTitle === candidateCleanTitle);
+        const titleOverlap = Boolean(
+          primaryCleanTitle && candidateCleanTitle &&
+          (primaryCleanTitle.includes(candidateCleanTitle) || candidateCleanTitle.includes(primaryCleanTitle))
+        );
+        const candidateHasNoContent = getSessionContentWeight(candidate) === 0;
+        const primaryHasContent = getSessionContentWeight(primary) > 0;
+
+        const [pH, pM] = (primary.startTime || '18:00').split(':').map(Number);
+        const [cH, cM] = (candidate.startTime || '18:00').split(':').map(Number);
+        const timeDiffMinutes = Math.abs((pH * 60 + (pM || 0)) - (cH * 60 + (cM || 0)));
+        const closeTime = timeDiffMinutes <= 60;
+        const reasonableTimeWindow = timeDiffMinutes <= 150; // Within 2.5 hours on the same day
+
+        // Check categories:
+        const pCat = primary.category || primary.type || 'training';
+        const cCat = candidate.category || candidate.type || 'training';
+        const sameCategory = pCat === cCat;
+
+        const isDuplicate = 
+          sameExternalId || 
+          (sameStartTime && (sameTitle || candidateHasNoContent || titleOverlap)) ||
+          (closeTime && (sameTitle || titleOverlap)) ||
+          // If candidate has no planning content and primary has coach's planning:
+          // merge if within reasonable time window (2.5 hours) or same category on same day!
+          (candidateHasNoContent && primaryHasContent && (reasonableTimeWindow || sameCategory || titleOverlap)) ||
+          // If candidate is empty and within reasonable time window:
+          (candidateHasNoContent && (sameStartTime || (closeTime && titleOverlap)));
+
+        if (isDuplicate) {
+          // Merge candidate into primary
+          handledIndices.add(j);
+          removedCount++;
+
+          // Copy missing calendar metadata from candidate if primary was missing it, or adopt calendar details
+          if (candidate.externalId) primary.externalId = candidate.externalId;
+          if (candidate.location && (!primary.location || primary.location.trim().length === 0)) primary.location = candidate.location;
+          if (candidate.description && (!primary.description || primary.description.trim().length === 0)) primary.description = candidate.description;
+          if (candidate.category) primary.category = candidate.category;
+          if (candidate.type) primary.type = candidate.type;
+          if (candidate.endTime && !primary.endTime) primary.endTime = candidate.endTime;
+          // If primary has a generic title while candidate has a specific calendar title, use candidate title
+          if (candidate.title && (!primary.title || primary.title === 'Träningspass' || primary.title === 'Träning')) {
+            primary.title = candidate.title;
+          }
+
+          // Merge any moments from candidate if candidate had them
+          if (candidate.moments && candidate.moments.length > 0) {
+            const existingMomentIds = new Set((primary.moments || []).map(m => m.id));
+            const newMoments = (candidate.moments || []).filter(m => m && !existingMomentIds.has(m.id));
+            if (newMoments.length > 0) {
+              primary.moments = [...(primary.moments || []), ...newMoments];
+            }
+          }
+
+          // Merge attendance
+          if (candidate.attendance && candidate.attendance.length > 0) {
+            const existingAtt = new Set(primary.attendance || []);
+            const newAtt = candidate.attendance.filter(pId => pId && !existingAtt.has(pId));
+            if (newAtt.length > 0) {
+              primary.attendance = [...(primary.attendance || []), ...newAtt];
+            }
+          }
+
+          // Merge RSVPs
+          if (candidate.rsvps && Object.keys(candidate.rsvps).length > 0) {
+            primary.rsvps = { ...(candidate.rsvps || {}), ...(primary.rsvps || {}) };
+          }
+
+          // Merge guest players
+          if (candidate.guestPlayers && candidate.guestPlayers.length > 0) {
+            const existingG = new Set((primary.guestPlayers || []).map(g => g.id));
+            const newG = (candidate.guestPlayers || []).filter(g => g && !existingG.has(g.id));
+            if (newG.length > 0) {
+              primary.guestPlayers = [...(primary.guestPlayers || []), ...newG];
+            }
+          }
+        }
+      }
+
+      mergedDaySessions.push(primary);
+    }
+
+    result.push(...mergedDaySessions);
+  }
+
+  result.sort((a, b) => {
+    if (a.date !== b.date) return a.date - b.date;
+    return (a.startTime || '').localeCompare(b.startTime || '');
+  });
+
+  return { deduplicated: result, removedCount };
+}
+
 export async function syncTeamCalendar(
   icsUrl: string,
   existingSessions: TrainingSession[],
@@ -141,21 +316,15 @@ export async function syncTeamCalendar(
       };
     }
 
-    const formatToYYYYMMDD = (timestamp: number) => {
-      const d = new Date(timestamp);
-      const y = d.getFullYear();
-      const m = String(d.getMonth() + 1).padStart(2, '0');
-      const r = String(d.getDate()).padStart(2, '0');
-      return `${y}-${m}-${r}`;
-    };
-
     const currentSessionsList = [...existingSessions];
     const newSessionsToAdd: TrainingSession[] = [];
     const matchedExistingIds = new Set<string>();
+    const duplicateSessionIdsToRemove = new Set<string>();
 
     let skippedCount = 0;
     let updatedCount = 0;
     let removedCount = 0;
+    let mergedDuplicatesCount = 0;
 
     // Calculate time horizon of external events
     let minIcsDate = Infinity;
@@ -170,41 +339,101 @@ export async function syncTeamCalendar(
     const horizonEnd = maxIcsDate + 24 * 60 * 60 * 1000;
 
     for (const ev of events) {
-      // 1. Match by externalId if present
-      const matchByExternalId = ev.externalId ? currentSessionsList.find(s => s.externalId === ev.externalId) : undefined;
-      
-      let matchByProximity = undefined;
-      if (!matchByExternalId) {
-        // 2. Proximity matching ONLY applies to sessions without an externalId (manually created local sessions)
-        matchByProximity = currentSessionsList.find(s => {
-          if (matchedExistingIds.has(s.id) || s.externalId) return false;
-          // Match same date and start time
-          return formatToYYYYMMDD(s.date) === formatToYYYYMMDD(ev.date) && s.startTime === ev.startTime;
-        });
+      const evDateYMD = formatToYYYYMMDD(ev.date);
+      const evCleanTitle = cleanTitleForMatch(ev.title);
+      const [evH, evM] = (ev.startTime || '18:00').split(':').map(Number);
+      const evTotalMinutes = evH * 60 + (evM || 0);
 
-        if (!matchByProximity && ev.title) {
-          const cleanEvTitle = ev.title.replace(/^\[INSTÄLLT\]\s*/i, '').trim().toLowerCase();
-          matchByProximity = currentSessionsList.find(s => {
-            if (matchedExistingIds.has(s.id) || s.externalId) return false;
-            // Match same date and identical title (excluding [INSTÄLLT])
-            const cleanSTitle = s.title.replace(/^\[INSTÄLLT\]\s*/i, '').trim().toLowerCase();
-            return formatToYYYYMMDD(s.date) === formatToYYYYMMDD(ev.date) && cleanSTitle === cleanEvTitle;
-          });
+      // Find all candidates in currentSessionsList that could represent this event
+      const candidates = currentSessionsList.filter(s => {
+        if (matchedExistingIds.has(s.id) || duplicateSessionIdsToRemove.has(s.id)) return false;
+
+        // 1. Exact externalId match
+        if (ev.externalId && s.externalId && s.externalId === ev.externalId) {
+          return true;
         }
-      }
 
-      const matchedSession = matchByExternalId || matchByProximity;
+        const sDateYMD = formatToYYYYMMDD(s.date);
+        if (sDateYMD !== evDateYMD) return false;
 
-      if (matchedSession) {
-        matchedExistingIds.add(matchedSession.id);
+        // 2. Same date and exact start time
+        if (s.startTime && s.startTime.trim() === ev.startTime.trim()) {
+          return true;
+        }
 
-        if ((matchedSession.isCompleted || matchedSession.isIgnored) && !forceOverwrite) {
+        // 3. Same date and matching cleaned title or title overlap
+        const sCleanTitle = cleanTitleForMatch(s.title);
+        if (sCleanTitle && evCleanTitle && (sCleanTitle === evCleanTitle || sCleanTitle.includes(evCleanTitle) || evCleanTitle.includes(sCleanTitle))) {
+          return true;
+        }
+
+        // 4. Same date and start time within 120 min (2 hours) and similar title / category
+        const [sH, sMin] = (s.startTime || '18:00').split(':').map(Number);
+        const sTotalMinutes = sH * 60 + (sMin || 0);
+        const diffMinutes = Math.abs(sTotalMinutes - evTotalMinutes);
+        if (diffMinutes <= 120) {
+          if (
+            (sCleanTitle && evCleanTitle && (sCleanTitle.includes(evCleanTitle) || evCleanTitle.includes(sCleanTitle))) ||
+            (s.category && ev.category && s.category === ev.category) ||
+            (!s.category && ev.category === 'training')
+          ) {
+            return true;
+          }
+        }
+
+        // 5. If this session on the same date has coach planning content (moments, exercises, attendance, notes)
+        // and is within 150 min (2.5 hours), treat as the planned session to update instead of creating a duplicate!
+        if (getSessionContentWeight(s) > 0 && diffMinutes <= 150) {
+          return true;
+        }
+
+        return false;
+      });
+
+      if (candidates.length > 0) {
+        // Sort candidates by content weight descending:
+        // The one with the coach's plan (moments, exercises, notes) is chosen as primary!
+        candidates.sort((a, b) => getSessionContentWeight(b) - getSessionContentWeight(a));
+        const primarySession = candidates[0];
+
+        // If there are other candidates, they are duplicate sessions in the database (e.g. empty synced copies)
+        for (let i = 1; i < candidates.length; i++) {
+          const duplicate = candidates[i];
+          duplicateSessionIdsToRemove.add(duplicate.id);
+          matchedExistingIds.add(duplicate.id);
+          mergedDuplicatesCount++;
+
+          // Merge any moments from duplicate if present
+          if (duplicate.moments && duplicate.moments.length > 0) {
+            const existingMIds = new Set((primarySession.moments || []).map(m => m.id));
+            const newM = (duplicate.moments || []).filter(m => m && !existingMIds.has(m.id));
+            if (newM.length > 0) {
+              primarySession.moments = [...(primarySession.moments || []), ...newM];
+            }
+          }
+          // Merge attendance
+          if (duplicate.attendance && duplicate.attendance.length > 0) {
+            const existingAtt = new Set(primarySession.attendance || []);
+            const newAtt = duplicate.attendance.filter(pId => pId && !existingAtt.has(pId));
+            if (newAtt.length > 0) {
+              primarySession.attendance = [...(primarySession.attendance || []), ...newAtt];
+            }
+          }
+          // Merge RSVPs
+          if (duplicate.rsvps && Object.keys(duplicate.rsvps).length > 0) {
+            primarySession.rsvps = { ...(duplicate.rsvps || {}), ...(primarySession.rsvps || {}) };
+          }
+        }
+
+        matchedExistingIds.add(primarySession.id);
+
+        if ((primarySession.isCompleted || primarySession.isIgnored) && !forceOverwrite) {
           skippedCount++;
           continue;
         }
 
         let changed = false;
-        const sessionIndex = currentSessionsList.findIndex(s => s.id === matchedSession.id);
+        const sessionIndex = currentSessionsList.findIndex(s => s.id === primarySession.id);
         if (sessionIndex === -1) continue;
 
         const updated = { ...currentSessionsList[sessionIndex] };
@@ -213,7 +442,7 @@ export async function syncTeamCalendar(
           updated.title = ev.title;
           changed = true;
         }
-        if (formatToYYYYMMDD(updated.date) !== formatToYYYYMMDD(ev.date)) {
+        if (formatToYYYYMMDD(updated.date) !== evDateYMD) {
           updated.date = ev.date;
           changed = true;
         }
@@ -233,7 +462,7 @@ export async function syncTeamCalendar(
           updated.description = ev.description;
           changed = true;
         }
-        if (!updated.externalId && ev.externalId) {
+        if (ev.externalId && updated.externalId !== ev.externalId) {
           updated.externalId = ev.externalId;
           changed = true;
         }
@@ -243,7 +472,7 @@ export async function syncTeamCalendar(
           changed = true;
         }
 
-        if (changed) {
+        if (changed || candidates.length > 1) {
           updated.updatedAt = Date.now();
           currentSessionsList[sessionIndex] = updated;
           updatedCount++;
@@ -282,9 +511,14 @@ export async function syncTeamCalendar(
       }
     }
 
-    // Filter out auto-synced sessions that were removed from external ICS feed and have no local edits/planning
+    // Filter out duplicate sessions and removed auto-synced sessions
     const finalSessionsList: TrainingSession[] = [];
     for (const session of currentSessionsList) {
+      if (duplicateSessionIdsToRemove.has(session.id)) {
+        // Explicitly removed duplicate session (its content was merged into primary)
+        continue;
+      }
+
       if (matchedExistingIds.has(session.id)) {
         finalSessionsList.push(session);
         continue;
@@ -310,6 +544,7 @@ export async function syncTeamCalendar(
         (session.moments && session.moments.length > 0) || 
         (session.attendance && session.attendance.length > 0) || 
         (session.rsvps && Object.keys(session.rsvps).length > 0) || 
+        (session.guestPlayers && session.guestPlayers.length > 0) || 
         (session.notes && session.notes.trim().length > 0);
 
       if (hasLocalEdits) {
@@ -321,31 +556,31 @@ export async function syncTeamCalendar(
       }
     }
 
-    const combinedSessions = [...newSessionsToAdd, ...finalSessionsList];
-    combinedSessions.sort((a, b) => {
-      if (a.date !== b.date) return a.date - b.date;
-      return (a.startTime || '').localeCompare(b.startTime || '');
-    });
+    // Final deduplication guarantee pass:
+    // Merges any duplicate sessions by date, time, and externalId
+    const rawCombined = [...newSessionsToAdd, ...finalSessionsList];
+    const { deduplicated: cleanSessions, removedCount: postDedupRemoved } = deduplicateSessionsList(rawCombined);
+    const totalRemoved = removedCount + mergedDuplicatesCount + postDedupRemoved;
 
     const addedCount = newSessionsToAdd.length;
     let message = '';
-    if (addedCount === 0 && updatedCount === 0 && removedCount === 0) {
+    if (addedCount === 0 && updatedCount === 0 && totalRemoved === 0) {
       message = `Kalendern är redan helt uppdaterad. Alla ${events.length} händelser från kalendern finns inlagda.`;
     } else {
       const parts: string[] = [];
       if (addedCount > 0) parts.push(`${addedCount} nya pass`);
       if (updatedCount > 0) parts.push(`${updatedCount} uppdaterade pass`);
-      if (removedCount > 0) parts.push(`${removedCount} borttagna pass`);
+      if (totalRemoved > 0) parts.push(`${totalRemoved} borttagna/rensade dubblettpass`);
       message = `Synkning klar! ${parts.join(', ')} (${events.length} händelser i kalendern).`;
     }
 
     return {
       success: true,
       message,
-      updatedSessions: combinedSessions,
+      updatedSessions: cleanSessions,
       addedCount,
       updatedCount,
-      removedCount,
+      removedCount: totalRemoved,
       skippedCount,
       lastSyncedAt: Date.now()
     };

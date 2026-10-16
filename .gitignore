@@ -6,4 +6,6 @@ coverage/
 .env*
 !.env.example
 *.db*
+coachassist_db.json*
+*.tmp*
 uploads/

@@ -1,13 +1,14 @@
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { ArrowLeft, Trash2, GripVertical, Clock, Calendar, Check, ListTodo, Save, ChevronDown, ChevronUp, Play, PlusCircle, Users, X, Edit2, Image as ImageIcon, Link as LinkIcon, Youtube, ExternalLink, Maximize2, Upload, Loader2, FileText, Copy, Library, Download, ChevronRight, Layout, Bell, Eye, EyeOff, UserCheck, Trophy, Dumbbell } from 'lucide-react';
 import { motion, AnimatePresence, Reorder, useDragControls } from 'motion/react';
-import { storage, ref, uploadBytesResumable, getDownloadURL } from '../lib/firebase';
+import { storage, ref, uploadBytesResumable, getDownloadURL, deleteObject } from '../lib/firebase';
 import { TrainingSession, SessionMoment, Exercise, SquadPlayer, UserProfile, getExerciseImages } from '../types';
 import TeamOverviewModal from './TeamOverviewModal';
 import MomentCopyModal from './MomentCopyModal';
 import TacticalBoardModal from './TacticalBoardModal';
 import { SessionRsvpView } from './SessionRsvpView';
 import { isMatchSession } from '../utils/sessionCategory';
+import { optimizeImageForUpload } from '../utils/imageOptimizer';
 
 interface SessionEditorProps {
   session: TrainingSession;
@@ -200,38 +201,38 @@ function MomentItem({
     if (!files || files.length === 0) return;
 
     const filesArray = Array.from(files) as File[];
-    setUploadProgress(10);
+    setUploadProgress(5);
     
     try {
-      // Process uploads in parallel for better performance and to reduce stale state window
-      const uploadPromises = filesArray.map(async (file) => {
-        // Check size (limit to 5MB for safety)
-        if (file.size > 5 * 1024 * 1024) {
-          console.warn(`Filen ${file.name} är för stor (max 5MB)`);
+      // Process uploads in parallel with HEIC conversion and JPEG compression
+      const uploadPromises = filesArray.map(async (rawFile, idx) => {
+        try {
+          const optimizedFile = await optimizeImageForUpload(rawFile);
+          const cleanName = optimizedFile.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+          const fileName = `${Date.now()}_${idx}_${cleanName}`;
+          const storageRef = ref(storage, `moments/${momentRef.current.id}/${fileName}`);
+          const uploadTask = uploadBytesResumable(storageRef, optimizedFile);
+
+          return new Promise<string | null>((resolve, reject) => {
+            uploadTask.on('state_changed', 
+              (snapshot) => {
+                const progress = (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
+                setUploadProgress(progress);
+              }, 
+              (error) => {
+                console.error("Upload error", error);
+                reject(error);
+              }, 
+              async () => {
+                const downloadURL = await getDownloadURL(uploadTask.snapshot.ref);
+                resolve(downloadURL);
+              }
+            );
+          });
+        } catch (fileErr) {
+          console.error(`Error processing file ${rawFile.name}:`, fileErr);
           return null;
         }
-
-        const fileName = `${Date.now()}_${file.name}`;
-        const storageRef = ref(storage, `moments/${momentRef.current.id}/${fileName}`);
-        const uploadTask = uploadBytesResumable(storageRef, file);
-
-        return new Promise<string | null>((resolve, reject) => {
-          uploadTask.on('state_changed', 
-            (snapshot) => {
-              const progress = (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
-              // Simple progress calculation (we'll just show the last one's progress or average)
-              setUploadProgress(progress);
-            }, 
-            (error) => {
-              console.error("Upload error", error);
-              reject(error);
-            }, 
-            async () => {
-              const downloadURL = await getDownloadURL(uploadTask.snapshot.ref);
-              resolve(downloadURL);
-            }
-          );
-        });
       });
 
       const results = await Promise.all(uploadPromises);
@@ -397,11 +398,15 @@ function MomentItem({
                                 <button
                                   type="button"
                                   onClick={() => {
+                                    const targetUrl = allMomentImages[idx];
                                     const newUrls = allMomentImages.filter((_, i) => i !== idx);
                                     updateMoment(moment.id, {
                                       imageUrls: newUrls.length > 0 ? newUrls : undefined,
                                       imageUrl: newUrls[0] || undefined
                                     });
+                                    if (targetUrl && (targetUrl.includes('/uploads/') || targetUrl.includes('photo_'))) {
+                                      deleteObject(targetUrl).catch(e => console.warn('Could not delete image on moment image removal:', e));
+                                    }
                                   }}
                                   className="absolute top-1 right-1 p-1 bg-black/60 hover:bg-black/80 text-white rounded-full transition-colors opacity-90 group-hover:opacity-100"
                                   title="Ta bort bild"
@@ -468,7 +473,7 @@ function MomentItem({
                               type="file"
                               ref={fileInputRef}
                               onChange={handleFileUpload}
-                              accept="image/*"
+                              accept="image/*, .heic, .HEIC, .heif, .HEIF, .png, .jpg, .jpeg, .webp"
                               multiple
                               className="hidden"
                             />
@@ -1409,8 +1414,19 @@ export default function SessionEditor({
                   <label className="block text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-2">Datum</label>
                   <input
                     type="date"
-                    value={new Date(session.date).toISOString().split('T')[0]}
-                    onChange={(e) => onUpdate({ ...session, date: new Date(e.target.value).getTime() })}
+                    value={(() => {
+                      const d = new Date(session.date);
+                      const y = d.getFullYear();
+                      const m = String(d.getMonth() + 1).padStart(2, '0');
+                      const day = String(d.getDate()).padStart(2, '0');
+                      return `${y}-${m}-${day}`;
+                    })()}
+                    onChange={(e) => {
+                      if (!e.target.value) return;
+                      const [y, m, d] = e.target.value.split('-').map(Number);
+                      const midday = new Date(y, m - 1, d, 12, 0, 0).getTime();
+                      onUpdate({ ...session, date: midday });
+                    }}
                     className="w-full bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-xl px-4 py-3 text-base font-bold text-zinc-900 dark:text-white focus:ring-2 focus:ring-indigo-500 outline-none"
                   />
                 </div>

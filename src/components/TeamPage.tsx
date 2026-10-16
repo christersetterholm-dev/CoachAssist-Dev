@@ -140,7 +140,7 @@ export default function TeamPage({
   }
 
   return (
-    <div className="flex-1 flex flex-col min-h-0 bg-zinc-100 dark:bg-zinc-900">
+    <div className="flex-1 flex flex-col min-h-0 bg-white dark:bg-zinc-900">
       {/* Browser-like Toolbar */}
       <div className="bg-white dark:bg-zinc-900 border-b border-zinc-200 dark:border-zinc-800 shrink-0 shadow-sm z-10 w-full">
         <div className="flex items-center justify-between px-4 py-2 max-w-4xl mx-auto w-full">
