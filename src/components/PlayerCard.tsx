@@ -1,7 +1,9 @@
 import { useState, useRef, useLayoutEffect } from 'react';
-import { Minus, Plus, Palette, X } from 'lucide-react';
-import { motion, AnimatePresence } from 'motion/react';
+import { createPortal } from 'react-dom';
+import { Minus, Plus, Palette, Check } from 'lucide-react';
+import { motion } from 'motion/react';
 import { Team, SquadPlayer, VEST_COLORS, PRESET_COLORS } from '../types';
+import { Sheet } from './ui';
 
 interface PlayerCardProps {
   team: Team;
@@ -35,6 +37,7 @@ export default function PlayerCard({
   onDragEnd
 }: PlayerCardProps) {
   const [fontSize, setFontSize] = useState<number>(120);
+  const [scoreAreaHeight, setScoreAreaHeight] = useState<number>(200);
   const containerRef = useRef<HTMLDivElement>(null);
   const [isOver, setIsOver] = useState(false);
   const [showColorPicker, setShowColorPicker] = useState(false);
@@ -44,6 +47,13 @@ export default function PlayerCard({
       squad.filter(p => team.playerIds.includes(p.id)).map(p => [p.id, p])
     ).values()
   );
+  // Korta kort (många lag): placering och färgknapp bredvid varandra, eller dolda om det inte får plats
+  const compact = scoreAreaHeight < 92;
+  const tooShort = scoreAreaHeight < 42;
+  const pickColor = (c: string) => {
+    onUpdateColor?.(team.id, c);
+    setShowColorPicker(false);
+  };
   const isThisPlayerDragging = draggedPlayerId && team.playerIds.includes(draggedPlayerId);
 
   useLayoutEffect(() => {
@@ -60,6 +70,7 @@ export default function PlayerCard({
       const maxWidthSize = (width * 0.9) / (scoreLength * charWidthRatio);
       
       setFontSize(Math.min(size, maxWidthSize));
+      setScoreAreaHeight(height);
     };
 
     const observer = new ResizeObserver(() => {
@@ -102,7 +113,7 @@ export default function PlayerCard({
         boxShadow: isOver ? `0 0 20px ${team.color}40` : '0 10px 15px -3px rgba(0, 0, 0, 0.1)',
         backgroundColor: isAnyPlayerDragging ? `${team.color}EE` : team.color,
         borderColor: isOver ? 'rgba(255,255,255,0.5)' : (isAnyPlayerDragging ? 'rgba(255,255,255,0.2)' : 'rgba(0,0,0,0.05)'),
-        zIndex: showColorPicker ? 110 : (isThisPlayerDragging ? 100 : (isAnyPlayerDragging ? 10 : 1))
+        zIndex: isThisPlayerDragging ? 100 : (isAnyPlayerDragging ? 10 : 1)
       }}
       data-team-id={team.id}
       onMouseEnter={() => isAnyPlayerDragging && setIsOver(true)}
@@ -112,6 +123,8 @@ export default function PlayerCard({
       {/* Minus Button */}
       {!disabled && (
         <button
+          type="button"
+          aria-label={`Ta bort ett poäng från ${team.name}`}
           onClick={() => onUpdateScore(team.id, -1)}
           className="w-16 sm:w-24 bg-black/10 text-white flex items-center justify-center hover:bg-black/20 active:bg-black/30 transition-all border-r border-white/10 shrink-0"
         >
@@ -122,7 +135,7 @@ export default function PlayerCard({
       {/* Central Column */}
       <div className="flex-1 flex flex-col min-h-0">
         <div className="p-1 sm:p-2 border-b border-white/10 flex flex-col items-center justify-center shrink-0">
-          <div className="flex flex-wrap justify-center gap-1 px-2">
+          <div className="flex flex-wrap justify-center gap-0.5 sm:gap-1 px-2">
             {teamPlayers.length > 0 ? (
               teamPlayers.map((p, pIdx) => (
                 <motion.span 
@@ -140,97 +153,48 @@ export default function PlayerCard({
                     scale: 1.1,
                     pointerEvents: 'none'
                   }}
-                  className={`text-[8px] sm:text-[10px] font-bold text-white/80 bg-white/10 px-1.5 py-0.5 rounded-full cursor-grab active:cursor-grabbing touch-none z-50 select-none`}
+                  className={`text-[10px] sm:text-xs leading-tight font-semibold text-white bg-black/15 px-1.5 sm:px-2 py-px sm:py-0.5 rounded-full cursor-grab active:cursor-grabbing touch-none z-50 select-none`}
                 >
                   {p.name}
                 </motion.span>
               ))
             ) : (
-              <span className="text-[8px] sm:text-[10px] font-bold text-white/40 italic">Inga spelare</span>
+              <span className="text-[10px] sm:text-xs font-semibold text-white/60">Inga spelare</span>
             )}
           </div>
         </div>
 
         {/* Score Display */}
-        <div ref={containerRef} className="flex-1 flex items-center justify-center p-0.5 relative">
+        <div ref={containerRef} className="flex-1 min-h-0 overflow-hidden flex items-center justify-center p-0.5 relative">
+          {!tooShort && (
           <button 
+            type="button"
+            aria-label={`Placering ${rank}`}
             onClick={(e) => {
               e.stopPropagation();
               onRankClick?.();
             }}
-            className="absolute top-1 left-1 sm:top-2 sm:left-2 flex items-center justify-center w-8 h-8 sm:w-10 sm:h-10 bg-white/20 hover:bg-white/30 active:bg-white/40 rounded-full border border-white/30 shadow-inner z-10 transition-colors cursor-pointer"
+            className="absolute top-1 left-1 sm:top-2 sm:left-2 flex items-center justify-center w-10 h-10 bg-white/20 hover:bg-white/30 active:bg-white/40 rounded-full border border-white/30 shadow-inner z-10 transition-colors cursor-pointer"
           >
-            <span className="text-sm sm:text-lg font-black text-white">{rank}</span>
+            <span className="text-base sm:text-lg font-bold text-white">{rank}</span>
           </button>
-
-          {!disabled && onUpdateColor && (
-            <div className="absolute bottom-1 left-1 sm:bottom-2 sm:left-2 z-[60]">
-              <button 
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setShowColorPicker(!showColorPicker);
-                }}
-                className={`flex items-center justify-center w-8 h-8 sm:w-10 sm:h-10 rounded-full border border-white/30 shadow-inner transition-all cursor-pointer ${showColorPicker ? 'bg-white text-indigo-600 scale-110' : 'bg-white/20 text-white hover:bg-white/30'}`}
-              >
-                <Palette size={16} className="sm:size-5" />
-              </button>
-
-              <AnimatePresence>
-                {showColorPicker && (
-                   <motion.div
-                    initial={{ opacity: 0, scale: 0.9, y: 10 }}
-                    animate={{ opacity: 1, scale: 1, y: 0 }}
-                    exit={{ opacity: 0, scale: 0.9, y: 10 }}
-                    className="absolute bottom-full left-0 mb-2 p-3 bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-200 dark:border-zinc-800 shadow-2xl z-[100] w-[200px] sm:w-[240px]"
-                   >
-                     <div className="flex items-center justify-between mb-3 px-1">
-                       <span className="text-[10px] font-black uppercase tracking-widest text-zinc-400">Välj färg</span>
-                       <button onClick={() => setShowColorPicker(false)} className="text-zinc-400 hover:text-zinc-600">
-                         <X size={14} />
-                       </button>
-                     </div>
-                     
-                     <div className="space-y-4">
-                       {/* Common Vest Colors */}
-                       <div className="grid grid-cols-5 gap-2">
-                         {VEST_COLORS.map(c => (
-                           <button
-                             key={c}
-                             onClick={(e) => {
-                               e.stopPropagation();
-                               onUpdateColor(team.id, c);
-                               setShowColorPicker(false);
-                             }}
-                             className={`w-full aspect-square rounded-full border-2 transition-transform hover:scale-110 active:scale-95 ${team.color.toLowerCase() === c.toLowerCase() ? 'border-zinc-900 dark:border-white shadow-lg' : 'border-transparent'}`}
-                             style={{ backgroundColor: c }}
-                           />
-                         ))}
-                       </div>
-
-                       {/* More Colors */}
-                       <div className="pt-3 border-t border-zinc-100 dark:border-zinc-800">
-                         <div className="grid grid-cols-6 gap-1.5 px-0.5">
-                           {PRESET_COLORS.filter(c => !VEST_COLORS.includes(c)).slice(0, 12).map(c => (
-                             <button
-                               key={c}
-                               onClick={(e) => {
-                                 e.stopPropagation();
-                                 onUpdateColor(team.id, c);
-                                 setShowColorPicker(false);
-                               }}
-                               className={`w-full aspect-square rounded-full border transition-transform hover:scale-110 active:scale-95 ${team.color.toLowerCase() === c.toLowerCase() ? 'border-zinc-900 dark:border-white' : 'border-transparent'}`}
-                               style={{ backgroundColor: c }}
-                             />
-                           ))}
-                         </div>
-                       </div>
-                     </div>
-                   </motion.div>
-                )}
-              </AnimatePresence>
-            </div>
           )}
-          
+
+          {!disabled && onUpdateColor && !tooShort && (
+            <button
+              type="button"
+              aria-label={`Byt färg på ${team.name}`}
+              title="Byt färg"
+              onClick={(e) => {
+                e.stopPropagation();
+                setShowColorPicker(true);
+              }}
+              className={`absolute z-10 flex ${compact ? 'top-1 left-12 sm:top-2 sm:left-14' : 'bottom-1 left-1 sm:bottom-2 sm:left-2'} items-center justify-center w-10 h-10 rounded-full bg-white/20 text-white border border-white/30 shadow-inner hover:bg-white/30 active:bg-white/40 transition-colors cursor-pointer`}
+            >
+              <Palette size={18} />
+            </button>
+          )}
+
           <span 
             className="font-black text-white tabular-nums drop-shadow-md leading-none select-none transition-all duration-300"
             style={{ fontSize: `${fontSize}px` }}
@@ -245,12 +209,16 @@ export default function PlayerCard({
         <div className="flex shrink-0">
           <div className="w-12 sm:w-16 flex flex-col border-l border-white/10">
             <button
+              type="button"
+              aria-label={`Två poäng till ${team.name}`}
               onClick={() => onUpdateScore(team.id, 2)}
               className="flex-1 bg-white/5 text-white text-sm sm:text-xl font-black hover:bg-white/15 active:bg-white/25 transition-all flex items-center justify-center"
             >
               +2
             </button>
             <button
+              type="button"
+              aria-label={`Tre poäng till ${team.name}`}
               onClick={() => onUpdateScore(team.id, 3)}
               className="flex-1 bg-white/5 text-white text-sm sm:text-xl font-black hover:bg-white/15 active:bg-white/25 transition-all border-t border-white/10 flex items-center justify-center"
             >
@@ -259,6 +227,8 @@ export default function PlayerCard({
           </div>
 
           <button
+            type="button"
+            aria-label={`Ett poäng till ${team.name}`}
             onClick={() => onUpdateScore(team.id, 1)}
             className="w-20 sm:w-28 bg-white/20 text-white flex items-center justify-center hover:bg-white/30 active:bg-white/40 transition-all border-l border-white/10"
           >
@@ -266,6 +236,44 @@ export default function PlayerCard({
           </button>
         </div>
       )}
+
+      {/* Portal: kortet har transform, så ett fast placerat ark måste ligga utanför det */}
+      {onUpdateColor && createPortal(
+        <Sheet open={showColorPicker} onClose={() => setShowColorPicker(false)} title={`Färg för ${team.name}`}>
+          <div className="px-2 pb-2 space-y-5">
+            <div>
+              <p className="text-sm font-semibold text-zinc-500 dark:text-zinc-400 mb-2">Västfärger</p>
+              <div className="grid grid-cols-5 gap-3">
+                {VEST_COLORS.map(c => (
+                  <ColorSwatch key={c} color={c} selected={team.color.toLowerCase() === c.toLowerCase()} onPick={pickColor} />
+                ))}
+              </div>
+            </div>
+            <div>
+              <p className="text-sm font-semibold text-zinc-500 dark:text-zinc-400 mb-2">Fler färger</p>
+              <div className="grid grid-cols-6 gap-3">
+                {PRESET_COLORS.filter(c => !VEST_COLORS.includes(c)).slice(0, 12).map(c => (
+                  <ColorSwatch key={c} color={c} selected={team.color.toLowerCase() === c.toLowerCase()} onPick={pickColor} />
+                ))}
+              </div>
+            </div>
+          </div>
+        </Sheet>,
+        document.body
+      )}
     </motion.div>
   );
 }
+
+const ColorSwatch = ({ color, selected, onPick }: { color: string; selected: boolean; onPick: (c: string) => void }) => (
+  <button
+    type="button"
+    aria-label={`Välj färg ${color}`}
+    aria-pressed={selected}
+    onClick={() => onPick(color)}
+    className={`w-full aspect-square min-h-[40px] rounded-full flex items-center justify-center transition-transform active:scale-95 cursor-pointer ring-offset-2 ring-offset-white dark:ring-offset-zinc-900 ${selected ? 'ring-2 ring-indigo-600 dark:ring-indigo-400' : 'ring-1 ring-black/10'}`}
+    style={{ backgroundColor: color }}
+  >
+    {selected && <Check size={18} strokeWidth={3} className="text-white drop-shadow" />}
+  </button>
+);

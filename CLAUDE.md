@@ -119,9 +119,25 @@ npm run set-password -- e@post.se            # lokalt konto/lösenord
 - Storskärmsläge (`isPresenting` i App.tsx): knappen "Visa på storskärm" på Uppställning och
   Poängliga döljer menyer, försöker helskärm och skickar `presentationMode` till
   `LineupBuilder` (bara planen, skalad) och `Leaderboard` (två kolumner, inga knappar).
+  Knappen för att lämna läget ligger i nedre högra hörnet och tonas bort efter 3 s (Esc stänger).
+- Uppställning (`LineupBuilder.tsx`): är vyn minst 720 px bred (1080 px med liggande plan)
+  ligger planen till vänster och en sidopanel till höger med flikarna Sparade, Formation,
+  Utseende och Anteckningar. Bredden mäts på vyn själv (ResizeObserver), inte på fönstret. I
+  smalare vyer (mobil, iPad på höjden) finns verktygsraden under planen och flikarna öppnas
+  i ark (`Sheet`).
+- Bildläge ("Skärmbild att skicka till spelarna", `isSnapshotMode` i LineupBuilder): täcker
+  hela skärmen och visar bara lagkortet (`renderLineupContent(true)`) med plan och bänk i fast
+  storlek, skalat till skärmen. Ett tryck visar Klar i två sekunder, och Esc stänger. Den ersätter
+  den gamla förhandsgranskningen/skärmbildsmodalen.
 - Ny kod ska använda byggklossarna i `src/components/ui` i stället för egna knappklasser.
   Stil: meningsversaler (inte VERSALER), `font-semibold`/`font-bold`, tryckytor minst 40 px.
 - Spelare ser inte Övningsbanken eller tävlingsknapparna i poänglistan (`canManage`).
+- Passvyn (`SessionEditor` + `SessionRsvpView`): tränaren har flikarna Planera / Träna / Närvaro,
+  momenten visas som tidslinje och svaren grupperade per status (tryck på en person för att ändra
+  svar; bocken markerar närvaro). Spelaren landar på Kallelse (vad, när, var, svara Kommer/Delvis/
+  Kan inte med kommentar) och ser Upplägg i läsläge, eller inte alls om `hideContentForPlayers`.
+  Två kolumner från 768 px. "Skapa kallelse" sätter bara sista svarsdag och meddelande – inga
+  mejl eller notiser skickas.
 
 ## Konventioner
 
@@ -133,15 +149,21 @@ npm run set-password -- e@post.se            # lokalt konto/lösenord
 ## Kvar att göra / idéer
 
 - Föräldrar kopplade till barn (svara på kallelser åt dem).
-- Spelarvyn: dölj spara-/redigeringsknappar i träningsplaneringen för spelare.
 - `admins/root_admins_list` kan läsas av alla inloggade – begränsa.
 - Rate-limit litar på `X-Forwarded-For` (kan förfalskas).
 - Vite-HMR via websocket fungerar inte i middleware-läget (ofarligt, sidan laddas om manuellt).
 - Dela upp `server.ts`, `App.tsx`, `LineupBuilder.tsx` gradvis; appen laddas som ett stort JS-paket (3,4 MB).
-- Gränssnittet, kvar att göra i nya stilen: Uppställning/taktik (iPad: plan + sidopanel),
-  Truppen, Passplanering och kallelser (SessionEditor/SessionRsvpView), Tävlingsmoment-listan
-  och GameSetup. (Profil, Poängliga och Administrationens ram/flikar är klara; flikarnas
-  innehåll i Administration har bara fått lugnare typografi.)
+- Gränssnittet, kvar att göra i nya stilen:
+  taktiktavlan/rittavlan (`isMaximized` i LineupBuilder: flytande menyer och ritverktyg, egen
+  session) och LineupBuilders modaler (formationer, spelarväljare, nummer/position, rubrik) som
+  har kvar VERSALER. Klara: uppställningen (sidopanel och bildläge), Översikt, kalender, passplanering
+  och kallelser, Truppen, Tävlingsmoment och GameSetup, Profil, Poängliga, Administrationens
+  ram/flikar (flikarnas innehåll har bara fått lugnare typografi).
+- `hideContentForPlayers` döljs bara i appen; servern skickar ändå passets moment till spelare.
+- Tränarens app visade inte en spelares nya svar ens efter omladdning (servern hade svaret);
+  troligen används pass som sparats i webbläsaren i stället för serverns. Utred synkningen.
+- I poängräkningen (`view === 'exercise'` i App.tsx) är timerpanelen och jokerraden ovanför
+  poängkorten fortfarande i gammal stil (VERSALER).
 - E-post via SMTP (inbjudningar, glömt lösenord) om det behövs senare.
 - iOS-app och notiser (pausat, utrett okt 2026): steg 1 webbnotiser (Web Push/PWA, egen server,
   ingen Firebase); steg 2 Capacitor-skal runt befintliga appen för riktiga notiser via APNs och

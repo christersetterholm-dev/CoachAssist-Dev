@@ -960,6 +960,7 @@ export default function TrainingManager({
 
       {activeTab === 'exercises' ? (
         <GameList
+          canManage={isCoachOrAdmin}
           exercises={exercises}
           sessions={sessions}
           onSelectExercise={onSelectExercise}

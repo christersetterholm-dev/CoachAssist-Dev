@@ -1,6 +1,7 @@
 import React, { useState, useRef, useMemo } from 'react';
-import { UserPlus, UserCheck, Send, Trash2, Edit2, X, Users, Upload, FileSpreadsheet, FileText, ClipboardList, Camera, Loader2, ArrowUpDown, Check, Search, AlertTriangle, Activity } from 'lucide-react';
-import { motion, AnimatePresence } from 'motion/react';
+import { UserPlus, UserCheck, Send, Trash2, Edit2, X, Users, Upload, FileSpreadsheet, ClipboardList, Camera, Loader2, ArrowUpDown, Check, Search, AlertTriangle, Activity, MoreVertical } from 'lucide-react';
+import { AnimatePresence } from 'motion/react';
+import { Badge, Button, Card, EmptyState, IconButton, MenuItem, SectionHeader, SegmentedTabs, Sheet } from './ui';
 import { storage, db, ref, uploadBytes, getDownloadURL, getApiUrl, getAuthHeader, doc, getDoc, createInvite } from '../lib/firebase';
 import InviteShareModal from './InviteShareModal';
 import { SquadPlayer, ClubMember, ClubTeam, TrainingSession } from '../types';
@@ -112,6 +113,10 @@ export default function SquadManager({ squad, sessions = [], onUpdateSquad, acti
     }
   };
   const [isAdding, setIsAdding] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [menuPersonId, setMenuPersonId] = useState<string | null>(null);
+  const [showSortSheet, setShowSortSheet] = useState(false);
+  const [showSquadMenu, setShowSquadMenu] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
   const [newName, setNewName] = useState('');
   const [newPosition, setNewPosition] = useState('');
@@ -769,8 +774,195 @@ export default function SquadManager({ squad, sessions = [], onUpdateSquad, acti
     processImportedData(rows);
   };
 
+  const sortOptions: { value: SortOption; label: string }[] = [
+    { value: 'standard', label: 'Position och nummer' },
+    { value: 'number', label: 'Tröjnummer' },
+    { value: 'position', label: 'Position' },
+    { value: 'firstname', label: 'Förnamn' },
+    { value: 'lastname', label: 'Efternamn' },
+  ];
+
+  const matchesSearch = (p: SquadPlayer) => {
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return true;
+    return p.name.toLowerCase().includes(q) ||
+      (p.number || '').toLowerCase().includes(q) ||
+      (p.position || '').toLowerCase().includes(q);
+  };
+  const visiblePlayers = sortedPlayers.filter(matchesSearch);
+  const visibleLeaders = sortedLeaders.filter(matchesSearch);
+  const playerCount = squad.filter(p => p.role !== 'leader').length;
+  const leaderCount = squad.filter(p => p.role === 'leader').length;
+
+  const closeEdit = () => {
+    setIsEditingModalOpen(false);
+    setEditingPlayer(null);
+  };
+
+  const openAdd = () => {
+    setNewName('');
+    setNewPosition('');
+    setNewNumber('');
+    setNewPhotoUrl('');
+    setNewRole('player');
+    setIsAdding(true);
+  };
+
+  const menuPerson = menuPersonId ? squad.find(p => p.id === menuPersonId) : undefined;
+  const runFromMenu = (fn: (p: SquadPlayer) => void) => {
+    const p = menuPerson;
+    setMenuPersonId(null);
+    if (p) fn(p);
+  };
+
+  const fieldLabel = 'block text-sm font-semibold text-zinc-600 dark:text-zinc-300 mb-1.5';
+  const fieldInput = 'w-full h-12 px-4 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-700 rounded-xl text-base text-zinc-900 dark:text-white outline-none focus:ring-2 focus:ring-indigo-500';
+
+  // Formuläret används både för "lägg till" och "redigera"
+  const renderPersonForm = () => (
+    <div className="px-2 pb-2 space-y-4">
+      <div className="flex items-center gap-4">
+        <div className="relative shrink-0">
+          <div className="w-20 h-20 rounded-full overflow-hidden bg-zinc-100 dark:bg-zinc-800 flex items-center justify-center text-zinc-400">
+            {isUploading ? (
+              <Loader2 size={28} className="animate-spin text-indigo-600" />
+            ) : newPhotoUrl ? (
+              <CachedImage src={newPhotoUrl} alt="Förhandsvisning" className="w-full h-full object-cover" loading="lazy" decoding="async" />
+            ) : (
+              <Users size={28} />
+            )}
+          </div>
+          <label className="absolute -bottom-1 -right-1 w-10 h-10 bg-indigo-600 text-white rounded-full flex items-center justify-center shadow-lg cursor-pointer hover:bg-indigo-700 active:scale-95 transition-all ring-2 ring-white dark:ring-zinc-900" title="Välj bild">
+            <Camera size={18} />
+            <input type="file" className="hidden" accept="image/*" onChange={handlePhotoUpload} />
+          </label>
+        </div>
+        <div className="flex-1 min-w-0">
+          <SegmentedTabs<'player' | 'leader'>
+            value={newRole}
+            onChange={setNewRole}
+            tabs={[
+              { id: 'player', label: 'Spelare' },
+              { id: 'leader', label: 'Ledare' },
+            ]}
+          />
+          <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-2">Tryck på kameran för att välja en bild.</p>
+        </div>
+      </div>
+
+      <div>
+        <label htmlFor="person-name" className={fieldLabel}>Namn</label>
+        <input
+          id="person-name"
+          type="text"
+          value={newName}
+          onChange={(e) => setNewName(e.target.value)}
+          placeholder="För- och efternamn"
+          className={fieldInput}
+          required
+        />
+      </div>
+      <div className="grid grid-cols-[1fr_7rem] gap-3">
+        <div>
+          <label htmlFor="person-position" className={fieldLabel}>{newRole === 'leader' ? 'Roll' : 'Position'}</label>
+          <input
+            id="person-position"
+            type="text"
+            value={newPosition}
+            onChange={(e) => setNewPosition(e.target.value)}
+            placeholder={newRole === 'leader' ? 'T.ex. huvudtränare' : 'T.ex. mittback'}
+            className={fieldInput}
+          />
+        </div>
+        <div>
+          <label htmlFor="person-number" className={fieldLabel}>Nummer</label>
+          <input
+            id="person-number"
+            type="text"
+            inputMode="numeric"
+            value={newNumber}
+            onChange={(e) => setNewNumber(e.target.value)}
+            placeholder="#"
+            className={fieldInput}
+          />
+        </div>
+      </div>
+    </div>
+  );
+
+  const renderPersonRow = (person: SquadPlayer) => {
+    const att = person.role !== 'leader' ? quickAttendanceMap.get(person.id) : undefined;
+    const subtitle = person.role === 'leader' ? (person.position || 'Ledare') : person.position;
+    return (
+      <div
+        key={person.id}
+        className="flex items-center gap-3 pl-4 pr-2 py-2.5 min-h-[64px]"
+      >
+        <span className="relative shrink-0">
+          <span className={`w-11 h-11 rounded-full overflow-hidden flex items-center justify-center font-bold text-sm ${
+            person.role === 'leader' ? 'bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300' : 'bg-indigo-100 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300'
+          }`}>
+            {person.photoUrl
+              ? <CachedImage src={person.photoUrl} alt={person.name} className="w-full h-full object-cover" loading="lazy" decoding="async" />
+              : person.name.charAt(0).toUpperCase()}
+          </span>
+          {person.number && person.role !== 'leader' && (
+            <span className="absolute -bottom-1 -right-1 min-w-[22px] h-[22px] px-1 rounded-full bg-zinc-900 dark:bg-white text-white dark:text-zinc-900 text-[11px] font-bold leading-[22px] text-center ring-2 ring-white dark:ring-zinc-900">
+              {person.number}
+            </span>
+          )}
+        </span>
+
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-1.5">
+            <span className="font-semibold text-zinc-900 dark:text-white truncate">{person.name}</span>
+            {person.isMe && <Badge tone="brand">Du</Badge>}
+            {isCoachOrAdmin && person.accountLinked && (
+              <span title="Har ett konto i appen" className="text-emerald-600 dark:text-emerald-400 shrink-0">
+                <UserCheck size={16} aria-label="Har konto" />
+              </span>
+            )}
+          </div>
+          {(subtitle || (att && att.total > 0)) && (
+            <div className="flex items-center gap-2 text-xs text-zinc-500 dark:text-zinc-400 mt-0.5 min-w-0">
+              {subtitle && <span className="truncate">{subtitle}</span>}
+              {att && att.total > 0 && (
+                <span className="inline-flex items-center gap-1 shrink-0" title={`Närvaro senaste 30 dagarna: ${att.attended} av ${att.total} pass`}>
+                  {subtitle && <span aria-hidden>·</span>}
+                  <span className={`w-1.5 h-1.5 rounded-full ${att.pct >= 80 ? 'bg-emerald-500' : att.pct >= 50 ? 'bg-amber-500' : 'bg-zinc-400'}`} />
+                  {att.pct}% närvaro
+                </span>
+              )}
+            </div>
+          )}
+        </div>
+
+        {isCoachOrAdmin && (
+          <IconButton label={`Val för ${person.name}`} onClick={() => setMenuPersonId(person.id)}>
+            <MoreVertical size={20} />
+          </IconButton>
+        )}
+      </div>
+    );
+  };
+
+  const renderSection = (title: string, total: number, people: SquadPlayer[], emptyText: string) => (
+    <section>
+      <SectionHeader title={`${title} (${total})`} />
+      {people.length === 0 ? (
+        <div className="rounded-2xl border border-dashed border-zinc-200 dark:border-zinc-800 px-4 py-6 text-center text-sm text-zinc-500 dark:text-zinc-400">
+          {searchQuery.trim() ? 'Ingen matchar sökningen.' : emptyText}
+        </div>
+      ) : (
+        <Card padded={false} className="divide-y divide-zinc-100 dark:divide-zinc-800 overflow-hidden">
+          {people.map(renderPersonRow)}
+        </Card>
+      )}
+    </section>
+  );
+
   return (
-    <div className="w-full max-w-4xl lg:max-w-5xl xl:max-w-6xl 2xl:max-w-7xl mx-auto p-4 sm:p-6 pb-16 min-w-0">
+    <div className="w-full max-w-4xl lg:max-w-5xl mx-auto px-4 sm:px-6 py-4 sm:py-6 pb-16 min-w-0 space-y-4">
       {invite && (
         <InviteShareModal
           name={invite.name}
@@ -781,1140 +973,392 @@ export default function SquadManager({ squad, sessions = [], onUpdateSquad, acti
           onClose={() => setInvite(null)}
         />
       )}
+
       {fetchStatusMessage && (
-        <div className={`p-4 mb-6 rounded-2xl border text-xs sm:text-sm font-extrabold flex items-center justify-between shadow-sm animate-in fade-in ${
-          fetchStatusMessage.type === 'success' 
-            ? 'bg-emerald-50 text-emerald-900 border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-200 dark:border-emerald-800'
-            : 'bg-zinc-100 text-zinc-900 border-zinc-200 dark:bg-zinc-900 dark:text-zinc-100 dark:border-zinc-800'
-        }`}>
-          <div className="flex items-center gap-2">
-            <Check size={18} className="text-emerald-600 dark:text-emerald-400 shrink-0" />
-            <span>{fetchStatusMessage.text}</span>
-          </div>
-          <button onClick={() => setFetchStatusMessage(null)} className="text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 p-1 cursor-pointer">
+        <div className="p-3 pl-4 rounded-2xl border text-sm font-semibold flex items-center gap-3 bg-emerald-50 text-emerald-900 border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-200 dark:border-emerald-800">
+          <Check size={18} className="text-emerald-600 dark:text-emerald-400 shrink-0" />
+          <span className="flex-1">{fetchStatusMessage.text}</span>
+          <IconButton label="Stäng" onClick={() => setFetchStatusMessage(null)}>
             <X size={16} />
-          </button>
+          </IconButton>
         </div>
       )}
 
-      {/* Top Tab Bar: Trupplista vs Närvaro & Statistik */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6 border-b border-zinc-200/80 dark:border-zinc-800 pb-4">
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={() => setActiveTab('roster')}
-            className={`flex items-center gap-2 px-4 py-2.5 rounded-2xl text-xs sm:text-sm font-extrabold transition-all cursor-pointer ${
-              activeTab === 'roster'
-                ? 'bg-indigo-600 text-white shadow-md shadow-indigo-100 dark:shadow-none'
-                : 'bg-zinc-100 dark:bg-zinc-800/80 text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white border border-transparent'
-            }`}
-          >
-            <Users size={16} />
-            <span>Trupplista ({squad.length})</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => setActiveTab('attendance')}
-            className={`flex items-center gap-2 px-4 py-2.5 rounded-2xl text-xs sm:text-sm font-extrabold transition-all cursor-pointer ${
-              activeTab === 'attendance'
-                ? 'bg-indigo-600 text-white shadow-md shadow-indigo-100 dark:shadow-none'
-                : 'bg-zinc-100 dark:bg-zinc-800/80 text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white border border-transparent'
-            }`}
-          >
-            <Activity size={16} />
-            <span>Närvaro & Statistik</span>
-          </button>
+      {/* Flikar och åtgärder (bara tränare) */}
+      {isCoachOrAdmin && (
+        <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+          <SegmentedTabs<'roster' | 'attendance'>
+            className="sm:w-auto"
+            value={activeTab}
+            onChange={setActiveTab}
+            tabs={[
+              { id: 'roster', label: 'Trupplista', icon: <Users size={16} />, count: squad.length },
+              { id: 'attendance', label: 'Närvaro', icon: <Activity size={16} /> },
+            ]}
+          />
+          {activeTab === 'roster' && (
+            <div className="flex items-center gap-2 sm:ml-auto">
+              <Button icon={<UserPlus size={18} />} onClick={openAdd} className="flex-1 sm:flex-none">Lägg till</Button>
+              <Button variant="secondary" icon={<Users size={18} />} onClick={handleOpenFetchMembersModal} className="flex-1 sm:flex-none">Hämta från laget</Button>
+              <IconButton label="Fler val" onClick={() => setShowSquadMenu(true)} className="border border-zinc-200 dark:border-zinc-700">
+                <MoreVertical size={20} />
+              </IconButton>
+            </div>
+          )}
         </div>
+      )}
 
-        {activeTab === 'roster' && isCoachOrAdmin && (
-          <div className="flex flex-wrap items-center gap-2">
-            <button
-              onClick={handleOpenFetchMembersModal}
-              className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white px-3.5 py-2.5 rounded-xl font-black text-xs transition-all shadow-md shadow-emerald-100 dark:shadow-none cursor-pointer"
-              title="Hämta personer från medlemsregistret/laget"
-            >
-              <Users size={16} />
-              <span className="hidden sm:inline">Hämta från laget</span>
-            </button>
-
-            <button
-              onClick={() => {
-                setNewName('');
-                setNewPosition('');
-                setNewNumber('');
-                setNewPhotoUrl('');
-                setIsAdding(true);
-              }}
-              className="p-2.5 bg-indigo-600 text-white rounded-xl font-bold hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-200 dark:shadow-none cursor-pointer"
-              title="Lägg till i truppen"
-            >
-              <UserPlus size={18} />
-            </button>
-            <button
-              onClick={() => setIsImporting(true)}
-              className="flex items-center gap-1.5 bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300 px-3.5 py-2.5 rounded-xl font-bold text-xs hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-all border border-zinc-200 dark:border-zinc-700 cursor-pointer"
-            >
-              <Upload size={16} />
-              <span>Importera fil</span>
-            </button>
-            {squad.length > 0 && (
-              <button
-                onClick={() => setShowClearConfirm(true)}
-                className="flex items-center gap-1.5 bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 px-3.5 py-2.5 rounded-xl font-bold text-xs hover:bg-red-100 dark:hover:bg-red-900/40 transition-all border border-red-100 dark:border-red-900/30 cursor-pointer"
-              >
-                <Trash2 size={16} />
-                <span>Rensa</span>
-              </button>
-            )}
-          </div>
-        )}
-      </div>
-
-      {activeTab === 'attendance' ? (
+      {activeTab === 'attendance' && isCoachOrAdmin ? (
         <SquadAttendanceOverview squad={squad} sessions={sessions} isCoachOrAdmin={isCoachOrAdmin} />
+      ) : squad.length === 0 ? (
+        <Card>
+          <EmptyState
+            icon={<Users size={26} />}
+            title="Truppen är tom"
+            text={isCoachOrAdmin
+              ? 'Hämta medlemmarna som finns i laget, lägg till personer en och en eller importera en lista.'
+              : 'Inga spelare eller ledare har lagts till i truppen än.'}
+            action={isCoachOrAdmin ? (
+              <div className="flex flex-col sm:flex-row gap-2">
+                <Button icon={<Users size={18} />} onClick={handleOpenFetchMembersModal}>Hämta från laget</Button>
+                <Button variant="secondary" icon={<UserPlus size={18} />} onClick={openAdd}>Lägg till</Button>
+                <Button variant="secondary" icon={<Upload size={18} />} onClick={() => setIsImporting(true)}>Importera</Button>
+              </div>
+            ) : undefined}
+          />
+        </Card>
       ) : (
         <>
+          {/* Sök och sortering */}
+          <div className="flex items-center gap-2">
+            <div className="relative flex-1">
+              <Search size={18} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-zinc-400 pointer-events-none" />
+              <input
+                type="search"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Sök i truppen"
+                aria-label="Sök på namn, nummer eller position"
+                className="w-full h-11 pl-10 pr-11 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl text-base sm:text-sm text-zinc-900 dark:text-white placeholder:text-zinc-400 outline-none focus:border-indigo-500"
+              />
+              {searchQuery && (
+                <IconButton label="Rensa sökningen" onClick={() => setSearchQuery('')} className="absolute right-0.5 top-1/2 -translate-y-1/2">
+                  <X size={16} />
+                </IconButton>
+              )}
+            </div>
+            <Button variant="secondary" icon={<ArrowUpDown size={18} />} onClick={() => setShowSortSheet(true)} aria-label="Sortera">
+              <span className="hidden sm:inline">{sortOptions.find(o => o.value === sortBy)?.label}</span>
+            </Button>
+          </div>
+
+          <div className="space-y-6">
+            {renderSection('Spelare', playerCount, visiblePlayers, 'Inga spelare i truppen än.')}
+            {(leaderCount > 0 || isCoachOrAdmin) && renderSection('Ledare', leaderCount, visibleLeaders, 'Inga ledare än. Lägg till en person och välj Ledare.')}
+          </div>
+        </>
+      )}
+
+      {/* Meny: sortering */}
+      <Sheet open={showSortSheet} onClose={() => setShowSortSheet(false)} title="Sortera efter">
+        <div className="flex flex-col gap-0.5">
+          {sortOptions.map(opt => (
+            <MenuItem
+              key={opt.value}
+              label={opt.label}
+              active={sortBy === opt.value}
+              trailing={sortBy === opt.value ? <Check size={18} className="text-indigo-600" /> : undefined}
+              onClick={() => { handleSortChange(opt.value); setShowSortSheet(false); }}
+            />
+          ))}
+        </div>
+      </Sheet>
+
+      {/* Meny: hela truppen */}
+      <Sheet open={showSquadMenu} onClose={() => setShowSquadMenu(false)} title="Truppen">
+        <div className="flex flex-col gap-0.5">
+          <MenuItem icon={<UserPlus size={18} />} label="Lägg till person" onClick={() => { setShowSquadMenu(false); openAdd(); }} />
+          <MenuItem icon={<Users size={18} />} label="Hämta från laget" description="Personer i föreningens medlemsregister" onClick={() => { setShowSquadMenu(false); handleOpenFetchMembersModal(); }} />
+          <MenuItem icon={<Upload size={18} />} label="Importera lista" description="Excel, CSV eller inklistrad text" onClick={() => { setShowSquadMenu(false); setIsImporting(true); }} />
           {squad.length > 0 && (
-            <div className="w-full min-w-0 flex flex-col md:flex-row md:items-center justify-between gap-4 bg-zinc-50 dark:bg-zinc-950/45 p-4 rounded-3xl border border-zinc-150/80 dark:border-zinc-800/80 mb-8 shadow-sm overflow-hidden">
-              <div className="flex items-center gap-2 text-zinc-550 dark:text-zinc-450">
-                <ArrowUpDown size={16} className="text-zinc-400 shrink-0" />
-                <span className="text-[11px] font-black uppercase tracking-widest shrink-0">Sortera efter</span>
-              </div>
-              <div className="flex items-center gap-1.5 overflow-x-auto whitespace-nowrap scrollbar-none pb-1 md:pb-0 -mx-4 px-4 md:mx-0 md:px-0">
-                {[
-                  { value: 'standard', label: 'Standard' },
-                  { value: 'number', label: 'Tröjnummer' },
-                  { value: 'position', label: 'Position' },
-                  { value: 'firstname', label: 'Förnamn' },
-                  { value: 'lastname', label: 'Efternamn' }
-                ].map((opt) => (
-                  <button
-                    key={opt.value}
-                    type="button"
-                    onClick={() => handleSortChange(opt.value as SortOption)}
-                    className={`px-3.5 py-2 rounded-xl text-xs font-black uppercase tracking-wider transition-all shrink-0 border ${
-                      sortBy === opt.value
-                        ? 'bg-indigo-600 border-indigo-500 text-white shadow-md shadow-indigo-100 dark:shadow-none'
-                        : 'bg-white dark:bg-zinc-900 text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white border-zinc-200 dark:border-zinc-800'
-                    }`}
-                  >
-                    {opt.label}
-                  </button>
-                ))}
-              </div>
-            </div>
+            <MenuItem icon={<Trash2 size={18} />} label="Rensa truppen" tone="danger" onClick={() => { setShowSquadMenu(false); setShowClearConfirm(true); }} />
           )}
+        </div>
+      </Sheet>
 
-      <AnimatePresence>
-        {isImporting && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4"
-            onClick={() => setIsImporting(false)}
-          >
-            <motion.div
-              initial={{ scale: 0.9, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.9, opacity: 0 }}
-              className="bg-white dark:bg-zinc-900 rounded-3xl p-8 max-w-lg w-full shadow-2xl border border-zinc-100 dark:border-zinc-800"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <div className="flex items-center justify-between mb-6">
-                <h3 className="text-xl font-bold text-zinc-900 dark:text-white">Importera truppen</h3>
-                <button onClick={() => setIsImporting(false)} className="text-zinc-400 hover:text-zinc-600">
-                  <X size={24} />
-                </button>
+      {/* Meny: en person */}
+      <Sheet open={!!menuPerson} onClose={() => setMenuPersonId(null)} title={menuPerson?.name}>
+        {menuPerson && (
+          <div className="flex flex-col gap-0.5">
+            <MenuItem icon={<Edit2 size={18} />} label="Redigera" description="Namn, nummer, position och bild" onClick={() => runFromMenu(startEdit)} />
+            {menuPerson.accountLinked ? (
+              <div className="flex items-center gap-3 px-3 py-3 text-sm text-emerald-700 dark:text-emerald-400">
+                <span className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0 bg-emerald-50 dark:bg-emerald-950/40">
+                  <UserCheck size={18} />
+                </span>
+                <span className="font-semibold">Har konto i appen</span>
               </div>
-
-              <div className="space-y-6">
-                <div className="grid grid-cols-2 gap-4">
-                  <button
-                    onClick={() => fileInputRef.current?.click()}
-                    className="flex flex-col items-center gap-3 p-6 rounded-2xl border-2 border-dashed border-zinc-200 dark:border-zinc-800 hover:border-indigo-500 hover:bg-indigo-50 dark:hover:bg-indigo-950/20 transition-all group"
-                  >
-                    <div className="w-12 h-12 bg-indigo-100 dark:bg-indigo-900/50 rounded-xl flex items-center justify-center text-indigo-600 dark:text-indigo-400 group-hover:scale-110 transition-transform">
-                      <FileSpreadsheet size={24} />
-                    </div>
-                    <span className="text-sm font-bold text-zinc-600 dark:text-zinc-400">Excel / CSV</span>
-                  </button>
-                  <input
-                    type="file"
-                    ref={fileInputRef}
-                    onChange={handleFileUpload}
-                    accept=".csv,.xlsx,.xls"
-                    className="hidden"
-                  />
-                  <div className="flex flex-col items-center gap-3 p-6 rounded-2xl border-2 border-dashed border-zinc-200 dark:border-zinc-800 opacity-50">
-                    <div className="w-12 h-12 bg-zinc-100 dark:bg-zinc-800 rounded-xl flex items-center justify-center text-zinc-400">
-                      <FileText size={24} />
-                    </div>
-                    <span className="text-sm font-bold text-zinc-400">Google Sheets</span>
-                    <p className="text-[10px] text-center text-zinc-400 -mt-2">Kopiera & klistra in nedan</p>
-                  </div>
-                </div>
-
-                <div className="relative">
-                  <div className="absolute inset-y-0 left-4 pt-3 text-zinc-400">
-                    <ClipboardList size={20} />
-                  </div>
-                  <textarea
-                    value={pasteData}
-                    onChange={(e) => setPasteData(e.target.value)}
-                    placeholder="Klistra in här... 
-Exempel:
-Elias Lindgren	Målvakt	1	https://image.url
-Kalle Karlsson	Mittback	4	https://image.url"
-                    className="w-full h-40 pl-12 pr-4 py-3 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-white outline-none focus:ring-2 focus:ring-indigo-500 text-sm resize-none"
-                  />
-                </div>
-
-                <button
-                  onClick={handlePasteImport}
-                  disabled={!pasteData.trim()}
-                  className="w-full py-4 bg-indigo-600 text-white rounded-2xl font-bold hover:bg-indigo-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-indigo-200 dark:shadow-none"
-                >
-                  Importera från text
-                </button>
-
-                <p className="text-xs text-center text-zinc-400">
-                  Tips: Du kan kopiera en kolumn med namn direkt från Excel eller Google Sheets och klistra in här.
-                </p>
-              </div>
-            </motion.div>
-          </motion.div>
+            ) : activeClubId ? (
+              <MenuItem icon={<Send size={18} />} label="Bjud in till appen" description="Skapa en länk att skicka med sms eller WhatsApp" onClick={() => runFromMenu(handleInvite)} />
+            ) : null}
+            {menuPerson.role !== 'leader' && (
+              <MenuItem icon={<Activity size={18} />} label="Visa närvaro" onClick={() => runFromMenu(() => setActiveTab('attendance'))} />
+            )}
+            <MenuItem icon={<Trash2 size={18} />} label="Ta bort ur truppen" tone="danger" onClick={() => runFromMenu(handleRemove)} />
+          </div>
         )}
+      </Sheet>
 
-        {showImportConflictModal && pendingImportPlayers && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4"
-            onClick={() => {
-              setShowImportConflictModal(false);
-              setPendingImportPlayers(null);
-            }}
+      {/* Lägg till person */}
+      <Sheet
+        open={isAdding}
+        onClose={() => setIsAdding(false)}
+        title={newRole === 'leader' ? 'Ny ledare' : 'Ny spelare'}
+        footer={
+          <form onSubmit={handleAdd}>
+            <Button type="submit" block disabled={isUploading || !newName.trim()}>
+              {newRole === 'leader' ? 'Lägg till ledare' : 'Lägg till spelare'}
+            </Button>
+          </form>
+        }
+      >
+        {renderPersonForm()}
+      </Sheet>
+
+      {/* Redigera person */}
+      <Sheet
+        open={isEditingModalOpen}
+        onClose={closeEdit}
+        title={newRole === 'leader' ? 'Redigera ledare' : 'Redigera spelare'}
+        footer={
+          <div className="flex flex-col-reverse sm:flex-row gap-2 sm:justify-end">
+            <Button variant="secondary" onClick={closeEdit}>Avbryt</Button>
+            <Button onClick={handleSaveEdit} disabled={isUploading || !newName.trim()}>Spara ändringar</Button>
+          </div>
+        }
+      >
+        {renderPersonForm()}
+      </Sheet>
+
+      {/* Ta bort person */}
+      <Sheet
+        open={!!playerToRemove}
+        onClose={() => setPlayerToRemove(null)}
+        title={playerToRemove?.role === 'leader' ? 'Ta bort ledare?' : 'Ta bort spelare?'}
+        footer={
+          <div className="flex flex-col-reverse sm:flex-row gap-2 sm:justify-end">
+            <Button variant="secondary" onClick={() => setPlayerToRemove(null)}>Avbryt</Button>
+            <Button variant="danger" icon={<Trash2 size={18} />} onClick={confirmRemove}>Ja, ta bort</Button>
+          </div>
+        }
+      >
+        <p className="px-2 pb-2 text-sm text-zinc-600 dark:text-zinc-300">
+          <span className="font-semibold text-zinc-900 dark:text-white">{playerToRemove?.name}</span> tas bort ur truppen.
+        </p>
+      </Sheet>
+
+      {/* Rensa truppen */}
+      <Sheet
+        open={showClearConfirm}
+        onClose={() => setShowClearConfirm(false)}
+        title="Rensa truppen?"
+        footer={
+          <div className="flex flex-col-reverse sm:flex-row gap-2 sm:justify-end">
+            <Button variant="secondary" onClick={() => setShowClearConfirm(false)}>Avbryt</Button>
+            <Button variant="danger" icon={<Trash2 size={18} />} onClick={handleClearSquad}>Ja, rensa allt</Button>
+          </div>
+        }
+      >
+        <p className="px-2 pb-2 text-sm text-zinc-600 dark:text-zinc-300">Alla spelare och ledare tas bort ur truppen. Det går inte att ångra.</p>
+      </Sheet>
+
+      {/* Importera */}
+      <Sheet open={isImporting} onClose={() => setIsImporting(false)} title="Importera truppen">
+        <div className="px-2 pb-2 space-y-4">
+          <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            className="w-full flex items-center gap-3 p-4 rounded-2xl border-2 border-dashed border-zinc-200 dark:border-zinc-700 hover:border-indigo-500 hover:bg-indigo-50 dark:hover:bg-indigo-950/20 transition-all text-left cursor-pointer"
           >
-            <motion.div
-              initial={{ scale: 0.95, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.95, opacity: 0 }}
-              className="bg-white dark:bg-zinc-900 rounded-3xl p-6 sm:p-8 max-w-xl w-full shadow-2xl border border-zinc-100 dark:border-zinc-800"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <div className="flex items-start gap-4 mb-6">
-                <div className="w-12 h-12 bg-amber-100 dark:bg-amber-950/60 rounded-2xl flex items-center justify-center text-amber-600 dark:text-amber-400 shrink-0">
-                  <AlertTriangle size={24} />
-                </div>
-                <div>
-                  <h3 className="text-lg font-black text-zinc-900 dark:text-white">
-                    Dubbletter eller befintliga medlemmar hittades
-                  </h3>
-                  <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1 leading-relaxed">
-                    Vi hittade {importConflicts.length} personer i importfilen som har samma namn och nummer/roll som personer som redan finns i truppen.
-                  </p>
-                </div>
-              </div>
+            <span className="w-11 h-11 bg-indigo-100 dark:bg-indigo-900/50 rounded-xl flex items-center justify-center text-indigo-600 dark:text-indigo-400 shrink-0">
+              <FileSpreadsheet size={22} />
+            </span>
+            <span>
+              <span className="block font-semibold">Välj fil</span>
+              <span className="block text-sm text-zinc-500 dark:text-zinc-400">Excel (.xlsx) eller CSV</span>
+            </span>
+          </button>
+          <input type="file" ref={fileInputRef} onChange={handleFileUpload} accept=".csv,.xlsx,.xls" className="hidden" />
 
-              {/* Conflict Preview List */}
-              <div className="mb-6 max-h-40 overflow-y-auto border border-zinc-200 dark:border-zinc-800 rounded-2xl p-3 bg-zinc-50 dark:bg-zinc-950 space-y-2">
-                {importConflicts.map((c, idx) => (
-                  <div key={idx} className="flex items-center justify-between text-xs p-2 bg-white dark:bg-zinc-900 rounded-xl border border-zinc-100 dark:border-zinc-800">
-                    <div className="font-extrabold text-zinc-900 dark:text-white">
-                      {c.imported.name} {c.imported.number ? `#${c.imported.number}` : ''}
-                    </div>
-                    <div className="text-[11px] font-bold text-amber-600 dark:text-amber-400">
-                      Befintlig: {c.existing.role === 'leader' ? 'Ledare' : 'Spelare'} {c.existing.number ? `#${c.existing.number}` : ''}
-                    </div>
-                  </div>
-                ))}
-              </div>
+          <div>
+            <label htmlFor="squad-paste" className={fieldLabel}>Eller klistra in en lista</label>
+            <textarea
+              id="squad-paste"
+              value={pasteData}
+              onChange={(e) => setPasteData(e.target.value)}
+              placeholder={'En person per rad: namn, position, nummer\nElias Lindgren\tMålvakt\t1\nKalle Karlsson\tMittback\t4'}
+              className="w-full h-36 px-4 py-3 rounded-xl border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-white outline-none focus:ring-2 focus:ring-indigo-500 text-base sm:text-sm resize-none"
+            />
+            <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1.5">Du kan kopiera kolumner direkt från Excel eller Google Kalkylark.</p>
+          </div>
+          <Button block icon={<ClipboardList size={18} />} onClick={handlePasteImport} disabled={!pasteData.trim()}>
+            Importera listan
+          </Button>
+        </div>
+      </Sheet>
 
-              {/* Options */}
-              <div className="space-y-3 mb-8">
-                <label className="block text-xs font-black uppercase text-zinc-400 tracking-wider">
-                  Hur vill du hantera dessa dubbletter?
-                </label>
-                {[
-                  {
-                    id: 'merge',
-                    title: 'Slå ihop & Uppdatera (Rekommenderat)',
-                    desc: 'Uppdatera befintliga personer i truppen med ny information och lägg till helt nya personer.'
-                  },
-                  {
-                    id: 'skip',
-                    title: 'Hoppa över dubbletter',
-                    desc: 'Importera endast nya personer och lämna alla befintliga helt orörda.'
-                  },
-                  {
-                    id: 'add_all',
-                    title: 'Skapa alla som nya',
-                    desc: 'Skapa nya poster för alla rader utan att slå ihop.'
-                  }
-                ].map(opt => (
-                  <button
-                    key={opt.id}
-                    type="button"
-                    onClick={() => setImportConflictOption(opt.id as any)}
-                    className={`w-full text-left p-4 rounded-2xl border-2 transition-all cursor-pointer ${
-                      importConflictOption === opt.id
-                        ? 'border-indigo-600 bg-indigo-50/50 dark:bg-indigo-950/30 text-indigo-900 dark:text-indigo-200'
-                        : 'border-zinc-200 dark:border-zinc-800 hover:border-zinc-300 dark:hover:border-zinc-700 bg-white dark:bg-zinc-900 text-zinc-700 dark:text-zinc-300'
-                    }`}
-                  >
-                    <div className="font-extrabold text-xs">{opt.title}</div>
-                    <div className="text-[11px] text-zinc-500 dark:text-zinc-400 mt-0.5">{opt.desc}</div>
-                  </button>
-                ))}
-              </div>
-
-              {/* Actions */}
-              <div className="flex items-center justify-end gap-3 pt-4 border-t border-zinc-100 dark:border-zinc-800">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setShowImportConflictModal(false);
-                    setPendingImportPlayers(null);
-                  }}
-                  className="px-5 py-3 rounded-xl border border-zinc-200 dark:border-zinc-800 text-zinc-600 dark:text-zinc-400 font-bold text-xs hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-all cursor-pointer"
-                >
-                  Avbryt
-                </button>
-                <button
-                  type="button"
-                  onClick={() => executeImportDirect(pendingImportPlayers, importConflictOption)}
-                  className="bg-indigo-600 hover:bg-indigo-700 text-white font-black px-6 py-3 rounded-xl text-xs flex items-center gap-2 active:scale-95 transition-all cursor-pointer shadow-md shadow-indigo-100 dark:shadow-none"
-                >
-                  <Check size={16} />
-                  <span>Verkställ import</span>
-                </button>
-              </div>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      <AnimatePresence>
-        {isAdding && (
-          <motion.form
-            initial={{ opacity: 0, y: -20 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -20 }}
-            onSubmit={handleAdd}
-            className="w-full bg-white dark:bg-zinc-900 p-5 sm:p-8 rounded-[24px] sm:rounded-[32px] border border-zinc-100 dark:border-zinc-800 shadow-2xl mb-12"
-          >
-            <div className="flex items-center justify-between mb-8">
-              <h3 className="text-xl font-black text-zinc-900 dark:text-white tracking-tight">
-                {newRole === 'leader' ? 'Ny ledare' : 'Ny spelare'}
-              </h3>
-              <button 
-                type="button"
-                onClick={() => setIsAdding(false)}
-                className="text-zinc-400 hover:text-zinc-600 transition-colors"
-              >
-                <X size={24} />
-              </button>
-            </div>
-
-            <div className="flex flex-col md:flex-row gap-8">
-              {/* Photo Upload for New Member */}
-              <div className="flex flex-col items-center gap-4">
-                <div className="relative group">
-                  <div className="w-24 h-24 rounded-3xl overflow-hidden bg-zinc-100 dark:bg-zinc-800 border-4 border-white dark:border-zinc-800 shadow-xl flex items-center justify-center text-zinc-400">
-                    {isUploading ? (
-                      <Loader2 size={32} className="animate-spin text-indigo-600" />
-                    ) : newPhotoUrl ? (
-                      <CachedImage 
-                        src={newPhotoUrl} 
-                        alt="Preview" 
-                        className="w-full h-full object-cover" 
-                        loading="lazy"
-                        decoding="async"
-                      />
-                    ) : (
-                      <Users size={32} />
-                    )}
-                  </div>
-                  <label className="absolute -bottom-2 -right-2 w-10 h-10 bg-indigo-600 text-white rounded-2xl flex items-center justify-center shadow-lg cursor-pointer hover:bg-indigo-700 active:scale-95 transition-all">
-                    <Camera size={20} />
-                    <input type="file" className="hidden" accept="image/*" onChange={handlePhotoUpload} />
-                  </label>
-                </div>
-                <span className="text-[10px] font-black text-zinc-400 uppercase tracking-widest text-center">
-                  {newRole === 'leader' ? 'Ledarbild' : 'Spelarbild'}
+      {/* Dubbletter vid import */}
+      <Sheet
+        open={showImportConflictModal && !!pendingImportPlayers}
+        onClose={() => { setShowImportConflictModal(false); setPendingImportPlayers(null); }}
+        title="Några finns redan i truppen"
+        footer={
+          <div className="flex flex-col-reverse sm:flex-row gap-2 sm:justify-end">
+            <Button variant="secondary" onClick={() => { setShowImportConflictModal(false); setPendingImportPlayers(null); }}>Avbryt</Button>
+            <Button icon={<Check size={18} />} onClick={() => pendingImportPlayers && executeImportDirect(pendingImportPlayers, importConflictOption)}>Importera</Button>
+          </div>
+        }
+      >
+        <div className="px-2 pb-2 space-y-4">
+          <div className="flex items-start gap-3 text-sm text-zinc-600 dark:text-zinc-300">
+            <AlertTriangle size={20} className="text-amber-500 shrink-0 mt-0.5" />
+            <p>{importConflicts.length} personer i listan har samma namn (och nummer) som någon som redan finns i truppen.</p>
+          </div>
+          <div className="max-h-40 overflow-y-auto rounded-xl border border-zinc-200 dark:border-zinc-800 divide-y divide-zinc-100 dark:divide-zinc-800">
+            {importConflicts.map((c, idx) => (
+              <div key={idx} className="flex items-center justify-between gap-2 px-3 py-2 text-sm">
+                <span className="font-semibold truncate">{c.imported.name} {c.imported.number ? `#${c.imported.number}` : ''}</span>
+                <span className="text-xs text-amber-700 dark:text-amber-400 shrink-0">
+                  Finns som {c.existing.role === 'leader' ? 'ledare' : 'spelare'} {c.existing.number ? `#${c.existing.number}` : ''}
                 </span>
               </div>
-
-              <div className="flex-1 space-y-4">
-                <div>
-                  <label className="block text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-1.5 ml-1">Typ av medlem</label>
-                  <div className="grid grid-cols-2 gap-1.5 bg-zinc-50 dark:bg-zinc-950 p-1 border-2 border-zinc-100 dark:border-zinc-800 rounded-2xl h-[58px]">
-                    <button
-                      type="button"
-                      onClick={() => setNewRole('player')}
-                      className={`rounded-xl text-[11px] font-black uppercase tracking-wider transition-all ${
-                        newRole === 'player'
-                          ? 'bg-indigo-600 text-white shadow-sm'
-                          : 'text-zinc-400 hover:text-indigo-600 dark:hover:text-indigo-400'
-                      }`}
-                    >
-                      Spelare
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setNewRole('leader')}
-                      className={`rounded-xl text-[11px] font-black uppercase tracking-wider transition-all ${
-                        newRole === 'leader'
-                          ? 'bg-indigo-600 text-white shadow-sm'
-                          : 'text-zinc-400 hover:text-indigo-600 dark:hover:text-indigo-400'
-                      }`}
-                    >
-                      Ledare
-                    </button>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-1.5 ml-1">Namn</label>
-                    <input
-                      type="text"
-                      value={newName}
-                      onChange={(e) => setNewName(e.target.value)}
-                      placeholder={newRole === 'leader' ? 'Ledarens fullständiga namn...' : 'Spelarens fullständiga namn...'}
-                      className="w-full px-5 py-4 bg-zinc-50 dark:bg-zinc-950 border-2 border-zinc-100 dark:border-zinc-800 rounded-2xl text-base font-bold outline-none focus:border-indigo-600 transition-colors"
-                      required
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-1.5 ml-1">
-                      {newRole === 'leader' ? 'Roll / Titel' : 'Position'}
-                    </label>
-                    <input
-                      type="text"
-                      value={newPosition}
-                      onChange={(e) => setNewPosition(e.target.value)}
-                      placeholder={newRole === 'leader' ? 'Huvudtränare, Lagledare, Fysioterapeut...' : 'Målvakt, Back...'}
-                      className="w-full px-5 py-4 bg-zinc-50 dark:bg-zinc-950 border-2 border-zinc-100 dark:border-zinc-800 rounded-2xl text-base font-bold outline-none focus:border-indigo-600 transition-colors"
-                    />
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-1.5 ml-1">
-                      {newRole === 'leader' ? 'Nummer (valfritt)' : 'Tröjnummer'}
-                    </label>
-                    <input
-                      type="text"
-                      value={newNumber}
-                      onChange={(e) => setNewNumber(e.target.value)}
-                      placeholder={newRole === 'leader' ? '-' : '#'}
-                      className="w-full px-5 py-4 bg-zinc-50 dark:bg-zinc-950 border-2 border-zinc-100 dark:border-zinc-800 rounded-2xl text-base font-bold outline-none focus:border-indigo-600 transition-colors"
-                    />
-                  </div>
-                  <div className="flex items-end">
-                    <button
-                      type="submit"
-                      disabled={isUploading || !newName.trim()}
-                      className="w-full h-[58px] bg-indigo-600 text-white font-black rounded-2xl active:scale-95 shadow-lg shadow-indigo-100 dark:shadow-none transition-all disabled:opacity-50 text-xs uppercase tracking-widest"
-                    >
-                      {newRole === 'leader' ? 'Skapa ledare' : 'Skapa spelare'}
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </motion.form>
-        )}
-      </AnimatePresence>
-
-      {/* Player & Leader Lists */}
-      <div className="space-y-12">
-        {/* Players Section */}
-        <div>
-          <h3 className="text-xs font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-4 flex items-center gap-2">
-            <span>Spelare</span>
-            <span className="bg-indigo-100 dark:bg-indigo-950/50 text-indigo-650 dark:text-indigo-400 font-extrabold text-[10px] px-2 py-0.5 rounded-full">
-              {squad.filter(p => p.role !== 'leader').length}
-            </span>
-          </h3>
-
-          {squad.filter(p => p.role !== 'leader').length === 0 ? (
-            <div className="text-center py-10 bg-zinc-50 dark:bg-zinc-950 rounded-2xl border border-dashed border-zinc-200 dark:border-zinc-805 text-zinc-450 text-sm">
-              Inga spelare inlagda i truppen än.
-            </div>
-          ) : (
-            <div className="grid w-full grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-              <AnimatePresence mode="popLayout">
-                {sortedPlayers.map((player) => (
-                  <motion.div
-                    layout
-                    key={player.id}
-                    initial={{ opacity: 0, scale: 0.9 }}
-                    animate={{ opacity: 1, scale: 1 }}
-                    exit={{ opacity: 0, scale: 0.9 }}
-                    className="w-full bg-white dark:bg-zinc-900 p-4 rounded-3xl border border-zinc-150 dark:border-zinc-805 shadow-sm flex items-center justify-between group hover:shadow-md transition-all min-w-0"
-                  >
-                    <div className="flex items-center gap-3 min-w-0 flex-1 mr-2">
-                      <div className="relative shrink-0">
-                        <div className="w-12 h-12 rounded-2xl overflow-hidden bg-indigo-50 dark:bg-indigo-950/30 flex items-center justify-center text-indigo-600 dark:text-indigo-400 font-black border border-zinc-100 dark:border-zinc-800 shadow-inner">
-                          {player.photoUrl ? (
-                            <CachedImage 
-                              src={player.photoUrl} 
-                              alt={player.name} 
-                              className="w-full h-full object-cover" 
-                              loading="lazy"
-                              decoding="async"
-                            />
-                          ) : (
-                            <span className="text-sm uppercase">{player.name.charAt(0)}</span>
-                          )}
-                        </div>
-                        {player.number && (
-                          <div className="absolute -top-1.5 -right-1.5 w-6 h-6 bg-indigo-600 text-white rounded-full flex items-center justify-center text-[10px] font-black border-2 border-white dark:border-zinc-900 shadow-sm">
-                            {player.number}
-                          </div>
-                        )}
-                      </div>
-                      <div className="flex flex-col min-w-0">
-                        <h4 className="font-bold text-zinc-900 dark:text-white mb-0.5 line-clamp-1 truncate">{player.name}</h4>
-                        {player.position && (
-                          <span className="text-[9px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest truncate">
-                            {player.position}
-                          </span>
-                        )}
-                        {quickAttendanceMap.has(player.id) && quickAttendanceMap.get(player.id)!.total > 0 && (
-                          <button
-                            type="button"
-                            onClick={() => setActiveTab('attendance')}
-                            className="mt-1 flex items-center gap-1.5 text-[10px] font-bold text-zinc-500 dark:text-zinc-400 hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors text-left"
-                            title="Klicka för att se full närvarostatistik"
-                          >
-                            <span className={`inline-block w-1.5 h-1.5 rounded-full shrink-0 ${
-                              quickAttendanceMap.get(player.id)!.pct >= 80 ? 'bg-emerald-500' :
-                              quickAttendanceMap.get(player.id)!.pct >= 50 ? 'bg-amber-500' : 'bg-zinc-400'
-                            }`} />
-                            <span className="truncate">Närvaro 30d: {quickAttendanceMap.get(player.id)!.pct}%</span>
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                    {isCoachOrAdmin && (
-                      <div className="flex items-center gap-1.5 shrink-0">
-                        {player.accountLinked ? (
-                          <span
-                            className="p-2 text-emerald-600 dark:text-emerald-400"
-                            title="Har ett konto i appen"
-                          >
-                            <UserCheck size={18} />
-                          </span>
-                        ) : activeClubId ? (
-                          <button
-                            onClick={() => handleInvite(player)}
-                            className="p-2 bg-zinc-100 dark:bg-zinc-800 text-emerald-600 dark:text-emerald-400 rounded-xl hover:bg-emerald-100 dark:hover:bg-emerald-950/50 transition-all active:scale-95 shadow-sm"
-                            title="Bjud in till appen"
-                          >
-                            <Send size={18} />
-                          </button>
-                        ) : null}
-                        <button
-                          onClick={() => startEdit(player)}
-                          className="p-2 bg-zinc-100 dark:bg-zinc-800 text-indigo-600 dark:text-indigo-400 rounded-xl hover:bg-indigo-100 dark:hover:bg-indigo-950/50 transition-all active:scale-95 shadow-sm"
-                          title="Redigera"
-                        >
-                          <Edit2 size={18} />
-                        </button>
-                        <button
-                          onClick={() => handleRemove(player)}
-                          className="p-2 bg-zinc-100 dark:bg-zinc-800 text-red-600 dark:text-red-400 rounded-xl hover:bg-red-100 dark:hover:bg-red-950/50 transition-all active:scale-95 shadow-sm"
-                          title="Ta bort"
-                        >
-                          <Trash2 size={18} />
-                        </button>
-                      </div>
-                    )}
-                  </motion.div>
-                ))}
-              </AnimatePresence>
-            </div>
-          )}
-        </div>
-
-        {/* Leaders Section */}
-        <div>
-          <h3 className="text-xs font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-4 flex items-center gap-2">
-            <span>Ledare</span>
-            <span className="bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400 font-extrabold text-[10px] px-2 py-0.5 rounded-full">
-              {squad.filter(p => p.role === 'leader').length}
-            </span>
-          </h3>
-
-          {squad.filter(p => p.role === 'leader').length === 0 ? (
-            <div className="text-center py-8 bg-zinc-50 dark:bg-zinc-950 rounded-2xl border border-dashed border-zinc-200 dark:border-zinc-800 text-zinc-450 text-xs">
-              Inga ledare inlagda än. Skapa en medlem och välj "Ledare" som roll.
-            </div>
-          ) : (
-            <div className="grid w-full grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-              <AnimatePresence mode="popLayout">
-                {sortedLeaders.map((player) => (
-                  <motion.div
-                    layout
-                    key={player.id}
-                    initial={{ opacity: 0, scale: 0.9 }}
-                    animate={{ opacity: 1, scale: 1 }}
-                    exit={{ opacity: 0, scale: 0.9 }}
-                    className="w-full bg-white dark:bg-zinc-900 p-4 rounded-3xl border border-zinc-150 dark:border-zinc-805 shadow-sm flex items-center justify-between group hover:shadow-md transition-all min-w-0"
-                  >
-                    <div className="flex items-center gap-3 min-w-0 flex-1 mr-2">
-                      <div className="relative shrink-0">
-                        <div className="w-12 h-12 rounded-2xl overflow-hidden bg-zinc-50 dark:bg-zinc-950/50 flex items-center justify-center text-zinc-500 dark:text-zinc-400 font-black border border-zinc-100 dark:border-zinc-800 shadow-inner">
-                          {player.photoUrl ? (
-                            <CachedImage 
-                              src={player.photoUrl} 
-                              alt={player.name} 
-                              className="w-full h-full object-cover" 
-                              loading="lazy"
-                              decoding="async"
-                            />
-                          ) : (
-                            <span className="text-sm uppercase">{player.name.charAt(0)}</span>
-                          )}
-                        </div>
-                      </div>
-                      <div className="flex flex-col min-w-0">
-                        <h4 className="font-bold text-zinc-900 dark:text-white mb-0.5 line-clamp-1 truncate">{player.name}</h4>
-                        <span className="text-[9px] font-black text-indigo-600 dark:text-indigo-400 uppercase tracking-widest truncate">
-                          {player.position || 'Ledare/Tränare'}
-                        </span>
-                      </div>
-                    </div>
-                    {isCoachOrAdmin && (
-                      <div className="flex items-center gap-1.5 shrink-0">
-                        {player.accountLinked ? (
-                          <span
-                            className="p-2 text-emerald-600 dark:text-emerald-400"
-                            title="Har ett konto i appen"
-                          >
-                            <UserCheck size={18} />
-                          </span>
-                        ) : activeClubId ? (
-                          <button
-                            onClick={() => handleInvite(player)}
-                            className="p-2 bg-zinc-100 dark:bg-zinc-800 text-emerald-600 dark:text-emerald-400 rounded-xl hover:bg-emerald-100 dark:hover:bg-emerald-950/50 transition-all active:scale-95 shadow-sm"
-                            title="Bjud in till appen"
-                          >
-                            <Send size={18} />
-                          </button>
-                        ) : null}
-                        <button
-                          onClick={() => startEdit(player)}
-                          className="p-2 bg-zinc-100 dark:bg-zinc-800 text-indigo-600 dark:text-indigo-400 rounded-xl hover:bg-indigo-100 dark:hover:bg-indigo-950/50 transition-all active:scale-95 shadow-sm"
-                          title="Redigera"
-                        >
-                          <Edit2 size={18} />
-                        </button>
-                        <button
-                          onClick={() => handleRemove(player)}
-                          className="p-2 bg-zinc-100 dark:bg-zinc-800 text-red-600 dark:text-red-400 rounded-xl hover:bg-red-100 dark:hover:bg-red-950/50 transition-all active:scale-95 shadow-sm"
-                          title="Ta bort"
-                        >
-                          <Trash2 size={18} />
-                        </button>
-                      </div>
-                    )}
-                  </motion.div>
-                ))}
-              </AnimatePresence>
-            </div>
-          )}
-        </div>
-      </div>
-      </>
-      )}
-
-      <AnimatePresence>
-        {isEditingModalOpen && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-black/60 backdrop-blur-md z-[100] flex items-center justify-center p-4"
-            onClick={() => {
-              setIsEditingModalOpen(false);
-              setEditingPlayer(null);
-            }}
-          >
-            <motion.div
-              initial={{ scale: 0.9, y: 20 }}
-              animate={{ scale: 1, y: 0 }}
-              exit={{ scale: 0.9, y: 20 }}
-              className="bg-white dark:bg-zinc-900 rounded-[24px] sm:rounded-[32px] p-5 sm:p-8 max-w-sm w-full shadow-2xl border border-zinc-100 dark:border-zinc-800"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <div className="flex items-center justify-between mb-8">
-                <h3 className="text-xl font-black text-zinc-900 dark:text-white tracking-tight">
-                  {newRole === 'leader' ? 'Redigera ledare' : 'Redigera spelare'}
-                </h3>
-                <button 
-                  onClick={() => {
-                    setIsEditingModalOpen(false);
-                    setEditingPlayer(null);
-                  }}
-                  className="text-zinc-400 hover:text-zinc-600 transition-colors"
-                >
-                  <X size={24} />
-                </button>
-              </div>
-
-              <div className="space-y-6">
-                {/* Photo Upload Section */}
-                <div className="flex flex-col items-center gap-4">
-                  <div className="relative group">
-                    <div className="w-24 h-24 rounded-3xl overflow-hidden bg-zinc-100 dark:bg-zinc-800 border-4 border-white dark:border-zinc-800 shadow-xl flex items-center justify-center text-zinc-400">
-                      {isUploading ? (
-                        <Loader2 size={32} className="animate-spin text-indigo-600" />
-                      ) : newPhotoUrl ? (
-                        <CachedImage 
-                          src={newPhotoUrl} 
-                          alt="Preview" 
-                          className="w-full h-full object-cover" 
-                          loading="lazy"
-                          decoding="async"
-                        />
-                      ) : (
-                        <Users size={32} />
-                      )}
-                    </div>
-                    <label className="absolute -bottom-2 -right-2 w-10 h-10 bg-indigo-600 text-white rounded-2xl flex items-center justify-center shadow-lg cursor-pointer hover:bg-indigo-700 active:scale-95 transition-all">
-                      <Camera size={20} />
-                      <input type="file" className="hidden" accept="image/*" onChange={handlePhotoUpload} />
-                    </label>
-                  </div>
-                  <span className="text-[10px] font-black text-zinc-400 uppercase tracking-widest">
-                    {newRole === 'leader' ? 'Ladda upp ledarbild' : 'Ladda upp spelarbild'}
-                  </span>
-                </div>
-                <div className="space-y-4">
-                  <div>
-                    <label className="block text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-1.5 ml-1">Typ av medlem</label>
-                    <div className="grid grid-cols-2 gap-1.5 bg-zinc-50 dark:bg-zinc-950 p-1 border-2 border-zinc-100 dark:border-zinc-800 rounded-2xl h-[58px]">
-                      <button
-                        type="button"
-                        onClick={() => setNewRole('player')}
-                        className={`rounded-xl text-[11px] font-black uppercase tracking-wider transition-all ${
-                          newRole === 'player'
-                            ? 'bg-indigo-600 text-white shadow-sm'
-                            : 'text-zinc-450 dark:text-zinc-500 hover:text-indigo-600 dark:hover:text-indigo-400'
-                        }`}
-                      >
-                        Spelare
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setNewRole('leader')}
-                        className={`rounded-xl text-[11px] font-black uppercase tracking-wider transition-all ${
-                          newRole === 'leader'
-                            ? 'bg-indigo-600 text-white shadow-sm'
-                            : 'text-zinc-450 dark:text-zinc-500 hover:text-indigo-600 dark:hover:text-indigo-400'
-                        }`}
-                      >
-                        Ledare
-                      </button>
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="block text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-1.5 ml-1">Namn</label>
-                    <input
-                      type="text"
-                      value={newName}
-                      onChange={(e) => setNewName(e.target.value)}
-                      placeholder={newRole === 'leader' ? 'Ledarens namn...' : 'Spelarens namn...'}
-                      className="w-full px-5 py-4 bg-zinc-50 dark:bg-zinc-950 border-2 border-zinc-100 dark:border-zinc-800 rounded-2xl text-lg font-bold outline-none focus:border-indigo-600 transition-colors"
-                    />
-                  </div>
-                  
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-1.5 ml-1">
-                        {newRole === 'leader' ? 'Roll / Titel' : 'Position'}
-                      </label>
-                      <input
-                        type="text"
-                        value={newPosition}
-                        onChange={(e) => setNewPosition(e.target.value)}
-                        placeholder={newRole === 'leader' ? 'Huvudtränare, Lagledare, Fysioterapeut...' : 'Position...'}
-                        className="w-full px-5 py-4 bg-zinc-50 dark:bg-zinc-950 border-2 border-zinc-100 dark:border-zinc-800 rounded-2xl text-base font-bold outline-none focus:border-indigo-600 transition-colors"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-1.5 ml-1">
-                        {newRole === 'leader' ? 'Nummer' : 'Tröjnummer'}
-                      </label>
-                      <input
-                        type="text"
-                        value={newNumber}
-                        onChange={(e) => setNewNumber(e.target.value)}
-                        placeholder={newRole === 'leader' ? '-' : '#'}
-                        className="w-full px-5 py-4 bg-zinc-50 dark:bg-zinc-950 border-2 border-zinc-100 dark:border-zinc-800 rounded-2xl text-base font-bold outline-none focus:border-indigo-600 transition-colors"
-                      />
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-                <div className="pt-4 space-y-3">
-                  <button
-                    onClick={handleSaveEdit}
-                    disabled={isUploading || !newName.trim()}
-                    className="w-full py-4 bg-indigo-600 text-white font-black rounded-2xl active:scale-95 shadow-lg shadow-indigo-100 dark:shadow-none transition-all disabled:opacity-50"
-                  >
-                    Spara ändringar
-                  </button>
-                  <button
-                    onClick={() => {
-                      setIsEditingModalOpen(false);
-                      setEditingPlayer(null);
-                    }}
-                    className="w-full py-4 bg-zinc-100 dark:bg-zinc-800 text-zinc-500 font-bold rounded-2xl active:scale-95 transition-all underline decoration-1 underline-offset-4"
-                  >
-                    Avbryt
-                  </button>
-                </div>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      <AnimatePresence>
-        {playerToRemove && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4"
-            onClick={() => setPlayerToRemove(null)}
-          >
-            <motion.div
-              initial={{ scale: 0.9, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.9, opacity: 0 }}
-              className="bg-white dark:bg-zinc-900 rounded-3xl p-8 max-w-sm w-full shadow-2xl border border-zinc-100 dark:border-zinc-800"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <div className="w-16 h-16 bg-red-100 dark:bg-red-900/30 rounded-2xl flex items-center justify-center text-red-600 dark:text-red-400 mb-6 mx-auto">
-                <Trash2 size={32} />
-              </div>
-              <h3 className="text-xl font-bold text-zinc-900 dark:text-white mb-2 text-center">
-                {playerToRemove.role === 'leader' ? 'Ta bort ledare?' : 'Ta bort spelare?'}
-              </h3>
-              <p className="text-zinc-500 dark:text-zinc-400 mb-6 text-center">
-                Är du säker på att du vill ta bort <span className="font-bold text-zinc-900 dark:text-white">{playerToRemove.name}</span> från truppen?
-              </p>
-              <div className="flex flex-col gap-3">
-                <button
-                  onClick={confirmRemove}
-                  className="w-full py-4 bg-red-600 text-white rounded-2xl font-bold hover:bg-red-700 transition-all shadow-lg shadow-red-100 dark:shadow-none"
-                >
-                  Ja, ta bort
-                </button>
-                <button
-                  onClick={() => setPlayerToRemove(null)}
-                  className="w-full py-4 bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300 rounded-2xl font-bold hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-all"
-                >
-                  Avbryt
-                </button>
-              </div>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      <AnimatePresence>
-        {showClearConfirm && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4"
-            onClick={() => setShowClearConfirm(false)}
-          >
-            <motion.div
-              initial={{ scale: 0.9, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.9, opacity: 0 }}
-              className="bg-white dark:bg-zinc-900 rounded-3xl p-8 max-w-sm w-full shadow-2xl border border-zinc-100 dark:border-zinc-800"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <div className="w-16 h-16 bg-red-100 dark:bg-red-900/30 rounded-2xl flex items-center justify-center text-red-600 dark:text-red-400 mb-6 mx-auto">
-                <Trash2 size={32} />
-              </div>
-              <h3 className="text-xl font-bold text-zinc-900 dark:text-white mb-2 text-center">Rensa truppen?</h3>
-              <p className="text-zinc-500 dark:text-zinc-400 mb-6 text-center">
-                Är du säker på att du vill rensa hela truppen? Detta går inte att ångra.
-              </p>
-              <div className="flex flex-col gap-3">
-                <button
-                  onClick={handleClearSquad}
-                  className="w-full py-4 bg-red-600 text-white rounded-2xl font-bold hover:bg-red-700 transition-all shadow-lg shadow-red-100 dark:shadow-none"
-                >
-                  Ja, rensa allt
-                </button>
-                <button
-                  onClick={() => setShowClearConfirm(false)}
-                  className="w-full py-4 bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300 rounded-2xl font-bold hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-all"
-                >
-                  Avbryt
-                </button>
-              </div>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      {squad.length === 0 && !isAdding && !isImporting && (
-        <div className="text-center py-20">
-          <div className="w-20 h-20 bg-zinc-100 dark:bg-zinc-800 rounded-3xl flex items-center justify-center text-zinc-400 mx-auto mb-6">
-            <Users size={40} />
+            ))}
           </div>
-          <h3 className="text-xl font-bold text-zinc-900 dark:text-white mb-2">Truppen är tom</h3>
-          <p className="text-zinc-500 dark:text-zinc-400 mb-8 max-w-md mx-auto">
-            {isCoachOrAdmin 
-              ? 'Börja med att hämta in registrerade medlemmar från laget, eller lägg till/importera medlemmar direkt.'
-              : 'Inga spelare eller ledare har lagts till i truppen ännu.'}
-          </p>
-          {isCoachOrAdmin && (
-            <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
+          <div className="space-y-2" role="radiogroup" aria-label="Hur ska dubbletterna hanteras?">
+            {([
+              { id: 'merge', title: 'Slå ihop och uppdatera (rekommenderas)', desc: 'Befintliga personer får den nya informationen, nya läggs till.' },
+              { id: 'skip', title: 'Hoppa över dubbletter', desc: 'Bara nya personer läggs till.' },
+              { id: 'add_all', title: 'Lägg till alla som nya', desc: 'Skapar nya rader för alla, utan att slå ihop.' },
+            ] as const).map(opt => (
               <button
-                onClick={handleOpenFetchMembersModal}
-                className="w-full sm:w-auto bg-emerald-600 hover:bg-emerald-700 text-white px-6 py-3 rounded-2xl font-bold transition-all shadow-md shadow-emerald-100 dark:shadow-none flex items-center justify-center gap-2 cursor-pointer"
+                key={opt.id}
+                type="button"
+                role="radio"
+                aria-checked={importConflictOption === opt.id}
+                onClick={() => setImportConflictOption(opt.id)}
+                className={`w-full text-left p-3 rounded-xl border-2 transition-all cursor-pointer ${
+                  importConflictOption === opt.id
+                    ? 'border-indigo-600 bg-indigo-50/60 dark:bg-indigo-950/30'
+                    : 'border-zinc-200 dark:border-zinc-800 hover:border-zinc-300 dark:hover:border-zinc-700'
+                }`}
               >
-                <Users size={18} />
-                <span>Hämta medlemmar från laget</span>
+                <div className="text-sm font-semibold">{opt.title}</div>
+                <div className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">{opt.desc}</div>
               </button>
-              <button
-                onClick={() => setIsAdding(true)}
-                className="w-full sm:w-auto bg-indigo-600 text-white px-6 py-3 rounded-2xl font-bold hover:bg-indigo-700 transition-all cursor-pointer"
-              >
-                Lägg till i truppen
-              </button>
-              <button
-                onClick={() => setIsImporting(true)}
-                className="w-full sm:w-auto bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300 px-6 py-3 rounded-2xl font-bold hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-all cursor-pointer"
-              >
-                Importera fil
-              </button>
-            </div>
-          )}
+            ))}
+          </div>
         </div>
-      )}
+      </Sheet>
 
-      {/* FETCH MEMBERS FROM TEAM MODAL */}
-      <AnimatePresence>
-        {showFetchMembersModal && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-black/50 backdrop-blur-sm z-[100] flex items-center justify-center p-3 sm:p-6 overflow-y-auto"
-            onClick={() => setShowFetchMembersModal(false)}
-          >
-            <motion.div
-              initial={{ scale: 0.95, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.95, opacity: 0 }}
-              className="bg-white dark:bg-zinc-900 rounded-3xl p-5 sm:p-8 max-w-2xl w-full shadow-2xl border border-zinc-100 dark:border-zinc-800 my-auto"
-              onClick={(e) => e.stopPropagation()}
-            >
-              {/* Header */}
-              <div className="flex items-center justify-between mb-5 border-b border-zinc-100 dark:border-zinc-800 pb-4">
-                <div>
-                  <h3 className="text-base sm:text-lg font-black text-zinc-900 dark:text-white flex items-center gap-2">
-                    <Users size={22} className="text-emerald-600 dark:text-emerald-400" />
-                    <span>Hämta medlemmar till truppen</span>
-                  </h3>
-                  <p className="text-xs text-zinc-500 font-medium mt-0.5">
-                    {activeTeamName ? `Kopplade medlemmar för ${activeTeamName}` : 'Välj medlemmar att hämta in till truppen'}
-                  </p>
-                </div>
-                <button
-                  onClick={() => setShowFetchMembersModal(false)}
-                  className="text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 p-2 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-xl transition-all cursor-pointer"
-                >
-                  <X size={20} />
-                </button>
-              </div>
-
-              {/* Body */}
-              {isFetchingMembers ? (
-                <div className="py-12 text-center space-y-3">
-                  <Loader2 size={36} className="animate-spin text-emerald-600 mx-auto" />
-                  <p className="text-sm font-bold text-zinc-600 dark:text-zinc-300">Hämtar medlemmar från laget...</p>
-                </div>
-              ) : fetchedMembers.length === 0 ? (
-                <div className="py-8 text-center space-y-4">
-                  <div className="w-16 h-16 bg-zinc-100 dark:bg-zinc-800 rounded-2xl flex items-center justify-center text-zinc-400 mx-auto">
-                    <Users size={32} />
-                  </div>
-                  <div>
-                    <h4 className="text-sm font-bold text-zinc-900 dark:text-white">Inga medlemmar hittades</h4>
-                    <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1 max-w-md mx-auto">
-                      {!activeClubId || !activeTeamId
-                        ? 'Inget aktivt lag är valt. Välj ett aktivt lag i Klubb & Lag-menyn för att hämta medlemmar kopplade till ditt lag.'
-                        : 'Inga medlemmar har lagts till i medlemsregistret för detta lag än. Du kan lägga till eller importera medlemmar under Klubb & Lag i menyn.'}
-                    </p>
-                  </div>
-                </div>
-              ) : (
-                <div className="space-y-4">
-                  {/* Filters & Search */}
-                  <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
-                    <div className="relative flex-1">
-                      <Search size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-zinc-400" />
-                      <input
-                        type="text"
-                        placeholder="Sök medlem..."
-                        value={fetchSearchQuery}
-                        onChange={(e) => setFetchSearchQuery(e.target.value)}
-                        className="w-full pl-9 pr-4 py-2 bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-white border border-zinc-200 dark:border-zinc-800 rounded-xl text-xs font-bold focus:outline-none focus:border-emerald-500"
-                      />
-                    </div>
-
-                    <div className="flex items-center gap-2 shrink-0">
-                      {activeTeamId && (
-                        <button
-                          type="button"
-                          onClick={() => setFetchFilterShowAll(!fetchFilterShowAll)}
-                          className={`px-3 py-2 rounded-xl text-xs font-bold transition-all border cursor-pointer ${
-                            fetchFilterShowAll
-                              ? 'bg-emerald-50 border-emerald-300 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300'
-                              : 'bg-zinc-50 border-zinc-200 text-zinc-600 dark:bg-zinc-950 dark:border-zinc-800 dark:text-zinc-400'
-                          }`}
-                        >
-                          {fetchFilterShowAll ? 'Visar alla i klubben' : 'Visar lagets medlemmar'}
-                        </button>
-                      )}
-
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const visibleIds = displayMembers.map(m => m.userId || m.fullName);
-                          if (selectedMemberUserIds.length === visibleIds.length) {
-                            setSelectedMemberUserIds([]);
-                          } else {
-                            setSelectedMemberUserIds(visibleIds);
-                          }
-                        }}
-                        className="text-xs font-bold text-indigo-600 dark:text-indigo-400 hover:underline px-2 py-1 cursor-pointer"
-                      >
-                        {selectedMemberUserIds.length === displayMembers.length ? 'Avmarkera alla' : 'Välj alla'}
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* List */}
-                  <div className="max-h-64 overflow-y-auto border border-zinc-200 dark:border-zinc-800 rounded-2xl divide-y divide-zinc-100 dark:divide-zinc-800">
-                    {displayMembers.length === 0 ? (
-                      <div className="p-6 text-center text-xs text-zinc-500">Inga medlemmar matchade sökningen.</div>
-                    ) : (
-                      displayMembers.map((member) => {
-                        const mId = member.userId || member.fullName;
-                        const isSelected = selectedMemberUserIds.includes(mId);
-
-                        const cleanEmail = (member.email || '').trim().toLowerCase();
-                        const cleanName = (member.fullName || '').trim().toLowerCase();
-                        const alreadyInSquad = squad.some(sp => 
-                          (member.userId && sp.id === member.userId) ||
-                          (cleanEmail && sp.email && sp.email.trim().toLowerCase() === cleanEmail) ||
-                          (sp.name.trim().toLowerCase() === cleanName)
-                        );
-
-                        const isCoach = member.roles?.some(r => r === 'coach' || r === 'admin');
-
-                        return (
-                          <div
-                            key={mId}
-                            onClick={() => {
-                              if (isSelected) {
-                                setSelectedMemberUserIds(selectedMemberUserIds.filter(id => id !== mId));
-                              } else {
-                                setSelectedMemberUserIds([...selectedMemberUserIds, mId]);
-                              }
-                            }}
-                            className={`p-3.5 flex items-center justify-between cursor-pointer transition-all hover:bg-zinc-50 dark:hover:bg-zinc-950/50 ${
-                              isSelected ? 'bg-emerald-50/50 dark:bg-emerald-950/20' : ''
-                            }`}
-                          >
-                            <div className="flex items-center gap-3">
-                              <input
-                                type="checkbox"
-                                checked={isSelected}
-                                onChange={() => {}}
-                                className="w-4 h-4 text-emerald-600 rounded border-zinc-300 focus:ring-emerald-500 cursor-pointer"
-                              />
-                              <div>
-                                <div className="flex items-center gap-2">
-                                  <span className="text-xs font-black text-zinc-900 dark:text-white">{member.fullName}</span>
-                                  <span className={`px-2 py-0.5 rounded text-[10px] font-black uppercase ${
-                                    isCoach
-                                      ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
-                                      : 'bg-sky-100 text-sky-800 dark:bg-sky-950 dark:text-sky-300'
-                                  }`}>
-                                    {isCoach ? 'Tränare / Ledare' : 'Spelare'}
-                                  </span>
-                                </div>
-                                <div className="text-[11px] text-zinc-500 dark:text-zinc-400 font-medium mt-0.5 flex items-center gap-3">
-                                  {member.email && <span>{member.email}</span>}
-                                  {member.phone && <span>{member.phone}</span>}
-                                </div>
-                              </div>
-                            </div>
-
-                            <div className="shrink-0">
-                              {alreadyInSquad ? (
-                                <span className="bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400 text-[10px] font-bold px-2.5 py-1 rounded-lg">
-                                  I truppen
-                                </span>
-                              ) : (
-                                <span className="bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 text-[10px] font-black px-2.5 py-1 rounded-lg">
-                                  Ny
-                                </span>
-                              )}
-                            </div>
-                          </div>
-                        );
-                      })
-                    )}
-                  </div>
-
-                  {/* Actions */}
-                  <div className="flex items-center justify-end gap-3 pt-4 border-t border-zinc-100 dark:border-zinc-800">
-                    <button
-                      type="button"
-                      onClick={() => setShowFetchMembersModal(false)}
-                      className="px-5 py-2.5 rounded-xl border border-zinc-200 dark:border-zinc-800 text-zinc-600 dark:text-zinc-400 font-bold text-xs hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-all cursor-pointer"
-                    >
-                      Avbryt
-                    </button>
-                    <button
-                      type="button"
-                      disabled={selectedMemberUserIds.length === 0}
-                      onClick={handleExecuteAddFetchedMembers}
-                      className="bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-black px-6 py-2.5 rounded-xl text-xs flex items-center gap-2 active:scale-95 transition-all cursor-pointer shadow-md shadow-emerald-100 dark:shadow-none"
-                    >
-                      <Check size={16} />
-                      <span>Hämta valda medlemmar ({selectedMemberUserIds.length})</span>
-                    </button>
-                  </div>
-                </div>
-              )}
-            </motion.div>
-          </motion.div>
+      {/* Hämta medlemmar från laget */}
+      <Sheet
+        open={showFetchMembersModal}
+        onClose={() => setShowFetchMembersModal(false)}
+        title="Hämta från laget"
+        footer={!isFetchingMembers && fetchedMembers.length > 0 ? (
+          <Button block icon={<Check size={18} />} disabled={selectedMemberUserIds.length === 0} onClick={handleExecuteAddFetchedMembers}>
+            Hämta {selectedMemberUserIds.length} {selectedMemberUserIds.length === 1 ? 'person' : 'personer'}
+          </Button>
+        ) : undefined}
+      >
+        {isFetchingMembers ? (
+          <div className="py-12 text-center space-y-3">
+            <Loader2 size={32} className="animate-spin text-indigo-600 mx-auto" />
+            <p className="text-sm text-zinc-500">Hämtar medlemmar…</p>
+          </div>
+        ) : fetchedMembers.length === 0 ? (
+          <EmptyState
+            icon={<Users size={26} />}
+            title="Inga medlemmar hittades"
+            text={!activeClubId || !activeTeamId
+              ? 'Inget lag är valt. Välj förening och lag i kontomenyn först.'
+              : 'Laget har inga medlemmar i medlemsregistret än. Lägg till dem under Administration.'}
+          />
+        ) : (
+          <div className="px-2 pb-2 space-y-3">
+            {activeTeamName && <p className="text-sm text-zinc-500 dark:text-zinc-400">Medlemmar i {activeTeamName}</p>}
+            <div className="relative">
+              <Search size={18} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-zinc-400 pointer-events-none" />
+              <input
+                type="search"
+                placeholder="Sök medlem"
+                value={fetchSearchQuery}
+                onChange={(e) => setFetchSearchQuery(e.target.value)}
+                className="w-full h-11 pl-10 pr-4 bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-white border border-zinc-200 dark:border-zinc-700 rounded-xl text-base sm:text-sm outline-none focus:border-indigo-500"
+              />
+            </div>
+            <div className="flex items-center justify-between gap-2">
+              {activeTeamId ? (
+                <SegmentedTabs<'team' | 'club'>
+                  size="sm"
+                  value={fetchFilterShowAll ? 'club' : 'team'}
+                  onChange={(v) => setFetchFilterShowAll(v === 'club')}
+                  tabs={[{ id: 'team', label: 'Laget' }, { id: 'club', label: 'Hela föreningen' }]}
+                />
+              ) : <span />}
+              <Button
+                variant="ghost"
+                size="sm"
+                className="!h-10"
+                onClick={() => {
+                  const visibleIds = displayMembers.map(m => m.userId || m.fullName);
+                  setSelectedMemberUserIds(selectedMemberUserIds.length === visibleIds.length ? [] : visibleIds);
+                }}
+              >
+                {selectedMemberUserIds.length === displayMembers.length ? 'Avmarkera alla' : 'Välj alla'}
+              </Button>
+            </div>
+            <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 divide-y divide-zinc-100 dark:divide-zinc-800">
+              {displayMembers.length === 0 ? (
+                <div className="p-6 text-center text-sm text-zinc-500">Ingen matchar sökningen.</div>
+              ) : displayMembers.map((member) => {
+                const mId = member.userId || member.fullName;
+                const isSelected = selectedMemberUserIds.includes(mId);
+                const cleanEmail = (member.email || '').trim().toLowerCase();
+                const cleanName = (member.fullName || '').trim().toLowerCase();
+                const alreadyInSquad = squad.some(sp =>
+                  (member.userId && sp.id === member.userId) ||
+                  (cleanEmail && sp.email && sp.email.trim().toLowerCase() === cleanEmail) ||
+                  (sp.name.trim().toLowerCase() === cleanName)
+                );
+                const isCoach = member.roles?.some(r => r === 'coach' || r === 'admin');
+                return (
+                  <label
+                    key={mId}
+                    className={`flex items-center gap-3 px-3 py-2.5 min-h-[56px] cursor-pointer transition-colors ${isSelected ? 'bg-indigo-50/60 dark:bg-indigo-950/20' : 'hover:bg-zinc-50 dark:hover:bg-zinc-800/50'}`}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={isSelected}
+                      onChange={() => setSelectedMemberUserIds(isSelected
+                        ? selectedMemberUserIds.filter(id => id !== mId)
+                        : [...selectedMemberUserIds, mId])}
+                      className="w-5 h-5 accent-indigo-600 cursor-pointer shrink-0"
+                    />
+                    <span className="flex-1 min-w-0">
+                      <span className="block text-sm font-semibold truncate">{member.fullName}</span>
+                      <span className="block text-xs text-zinc-500 dark:text-zinc-400 truncate">
+                        {isCoach ? 'Tränare/ledare' : 'Spelare'}{member.email ? ` · ${member.email}` : ''}
+                      </span>
+                    </span>
+                    {alreadyInSquad ? <Badge>I truppen</Badge> : <Badge tone="success">Ny</Badge>}
+                  </label>
+                );
+              })}
+            </div>
+          </div>
         )}
-      </AnimatePresence>
+      </Sheet>
 
       <AnimatePresence>
         {imageToCrop && (

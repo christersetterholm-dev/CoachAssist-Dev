@@ -12,6 +12,16 @@ import { isMatchSession } from '../utils/sessionCategory';
 import { Reorder } from 'motion/react';
 import ColorPicker from './ColorPicker';
 import ImageCropper from './ImageCropper';
+import { Button, IconButton, Card, SegmentedTabs, Badge, Sheet, type TabItem } from './ui';
+
+// Delarna i uppställningsvyns sidopanel (bred skärm) eller ark (mobil).
+type LineupPanel = 'lineups' | 'formation' | 'settings' | 'notes';
+const PANEL_TITLES: Record<LineupPanel, string> = {
+  lineups: 'Sparade uppställningar',
+  formation: 'Formation',
+  settings: 'Utseende och inställningar',
+  notes: 'Anteckningar',
+};
 
 import { storage, ref, uploadBytes, getDownloadURL, deleteObject } from '../lib/firebase';
 
@@ -245,7 +255,7 @@ function LineupReorderItem({
 }: LineupReorderItemProps) {
   const controls = useDragControls();
 
-  const titleText = l.matchTitle || l.teamName || 'Namnlös Match';
+  const titleText = l.matchTitle || l.teamName || 'Namnlös match';
   const linkedSession = l.sessionId && sessions ? sessions.find(s => s.id === l.sessionId) : null;
 
   return (
@@ -254,7 +264,7 @@ function LineupReorderItem({
       value={l}
       dragListener={false}
       dragControls={controls}
-      className={`group p-3.5 sm:p-4 rounded-2xl border transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-3 w-full min-w-0 ${
+      className={`group p-3.5 sm:p-4 rounded-2xl border transition-all flex flex-col justify-between gap-2 w-full min-w-0 ${
         activeLineupId === l.id 
           ? 'bg-indigo-50/90 dark:bg-indigo-900/20 border-indigo-200 dark:border-indigo-800 ring-1 ring-indigo-200 dark:ring-indigo-800' 
           : 'bg-white dark:bg-zinc-900 border-zinc-100 dark:border-zinc-800 hover:border-zinc-200 dark:hover:border-zinc-700'
@@ -263,7 +273,7 @@ function LineupReorderItem({
       <div className="flex items-start sm:items-center gap-2.5 sm:gap-3 flex-1 min-w-0">
         {isCoachOrAdmin && (
           <div 
-            className="cursor-grab active:cursor-grabbing text-zinc-300 dark:text-zinc-700 hover:text-zinc-500 transition-colors shrink-0 p-1.5 -m-1.5 touch-none mt-0.5 sm:mt-0 self-start sm:self-center"
+            className="cursor-grab active:cursor-grabbing text-zinc-300 dark:text-zinc-700 hover:text-zinc-500 transition-colors shrink-0 w-10 h-10 -m-2 flex items-center justify-center touch-none self-start"
             onPointerDown={(e) => controls.start(e)}
           >
             <GripVertical size={18} />
@@ -274,25 +284,25 @@ function LineupReorderItem({
           onClick={() => onSelectLineup(l.id)}
         >
           <div className="flex items-center gap-2 min-w-0 flex-wrap mb-1">
-            <h4 className="font-black text-zinc-900 dark:text-white tracking-tight leading-snug text-sm sm:text-base break-words min-w-0">
+            <h4 className="font-bold text-zinc-900 dark:text-white leading-snug text-sm break-words min-w-0">
               {titleText}
             </h4>
             {linkedSession ? (
-              <span className="inline-flex items-center gap-1 text-[9px] font-bold text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-950/40 border border-indigo-200 dark:border-indigo-800/60 px-1.5 py-0.5 rounded-md shrink-0" title={`Kopplad till match: ${linkedSession.title}`}>
+              <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-950/40 border border-indigo-200 dark:border-indigo-800/60 px-1.5 py-0.5 rounded-md shrink-0" title={`Kopplad till match: ${linkedSession.title}`}>
                 <UserCheck size={10} className="text-emerald-500" /> Kopplad match
               </span>
             ) : null}
             {l.isPublishedToPlayers ? (
-              <span className="inline-flex items-center gap-1 text-[9px] font-black uppercase tracking-wider text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800/60 px-1.5 py-0.5 rounded-md shrink-0">
+              <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800/60 px-1.5 py-0.5 rounded-md shrink-0">
                 <Eye size={10} /> Publicerad
               </span>
             ) : isCoachOrAdmin ? (
-              <span className="inline-flex items-center gap-1 text-[9px] font-bold uppercase tracking-wider text-zinc-500 dark:text-zinc-400 bg-zinc-100 dark:bg-zinc-800 px-1.5 py-0.5 rounded-md shrink-0">
+              <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-zinc-500 dark:text-zinc-400 bg-zinc-100 dark:bg-zinc-800 px-1.5 py-0.5 rounded-md shrink-0">
                 <EyeOff size={10} /> Utkast
               </span>
             ) : null}
           </div>
-          <div className="flex items-center gap-2 text-[9px] sm:text-[10px] font-bold text-zinc-400 uppercase tracking-widest flex-wrap">
+          <div className="flex items-center gap-2 text-xs font-medium text-zinc-500 dark:text-zinc-400 flex-wrap">
             <span>{new Date(l.date).toLocaleDateString('sv-SE', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</span>
             {l.formation && (
               <>
@@ -304,7 +314,7 @@ function LineupReorderItem({
         </div>
       </div>
 
-      <div className="flex items-center gap-1 shrink-0 justify-end pt-2 sm:pt-0 border-t sm:border-t-0 border-zinc-100 dark:border-zinc-800/60">
+      <div className="flex items-center gap-1 shrink-0 justify-end pt-2 border-t border-zinc-100 dark:border-zinc-800/60">
         {isCoachOrAdmin && onTogglePublish && (
           <button
             onClick={() => onTogglePublish(l.id)}
@@ -313,7 +323,7 @@ function LineupReorderItem({
                 ? 'text-emerald-600 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/40'
                 : 'text-zinc-400 hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-zinc-100 dark:hover:bg-zinc-800'
             }`}
-            title={l.isPublishedToPlayers ? "Publicerad för spelare (Klicka för att dölja)" : "Klicka för att publicera för spelare"}
+            title={l.isPublishedToPlayers ? "Publicerad för spelarna – tryck för att dölja" : "Tryck för att publicera för spelarna"}
           >
             {l.isPublishedToPlayers ? <Eye size={16} /> : <EyeOff size={16} />}
           </button>
@@ -322,28 +332,28 @@ function LineupReorderItem({
           <>
             <button
               onClick={() => onEditTitle(l.id, l.matchTitle || '', l.teamName || '', l.sessionId)}
-              className="p-2 text-zinc-400 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-zinc-50 dark:hover:bg-zinc-800 rounded-xl transition-all cursor-pointer"
-              title="Redigera rubriker & matchkoppling"
+              className="w-10 h-10 flex items-center justify-center text-zinc-400 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-zinc-50 dark:hover:bg-zinc-800 rounded-xl transition-all cursor-pointer"
+              title="Redigera rubrik och matchkoppling"
             >
               <Pencil size={16} />
             </button>
             <button
               onClick={(e) => toggleArchive(e, l.id)}
-              className="p-2 text-zinc-400 hover:text-amber-600 dark:hover:text-amber-400 hover:bg-zinc-50 dark:hover:bg-zinc-800 rounded-xl transition-all"
+              className="w-10 h-10 flex items-center justify-center text-zinc-400 hover:text-amber-600 dark:hover:text-amber-400 hover:bg-zinc-50 dark:hover:bg-zinc-800 rounded-xl transition-all"
               title="Arkivera"
             >
               <Archive size={16} />
             </button>
             <button
               onClick={() => onCopyLineup(l.id)}
-              className="p-2 text-zinc-400 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-zinc-50 dark:hover:bg-zinc-800 rounded-xl transition-all"
+              className="w-10 h-10 flex items-center justify-center text-zinc-400 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-zinc-50 dark:hover:bg-zinc-800 rounded-xl transition-all"
               title="Kopiera"
             >
               <Copy size={16} />
             </button>
             <button
               onClick={() => onDeleteLineup(l.id)}
-              className="p-2 text-zinc-400 hover:text-red-600 dark:hover:text-red-400 hover:bg-zinc-50 dark:hover:bg-zinc-800 rounded-xl transition-all"
+              className="w-10 h-10 flex items-center justify-center text-zinc-400 hover:text-red-600 dark:hover:text-red-400 hover:bg-zinc-50 dark:hover:bg-zinc-800 rounded-xl transition-all"
               title="Radera"
             >
               <Trash2 size={16} />
@@ -641,9 +651,6 @@ export default function LineupBuilder({
   const logoInputRef = useRef<HTMLInputElement>(null);
 
   const [previewZoom, setPreviewZoom] = useState(1);
-  const [isSettingsExpanded, setIsSettingsExpanded] = useState(false);
-  const [isFormationsExpanded, setIsFormationsExpanded] = useState(true);
-  const [isSavedLineupsExpanded, setIsSavedLineupsExpanded] = useState(true);
   const [hoveredPlayerId, setHoveredPlayerId] = useState<string | null>(null);
   const [isEditMode, setIsEditMode] = useState(false);
   const [teamNotes, setTeamNotes] = useState(lineup?.notes?.team?.text || '');
@@ -665,8 +672,27 @@ export default function LineupBuilder({
     textarea.style.height = `${textarea.scrollHeight}px`;
   };
 
+  // Sidopanel bredvid planen när vyn är bred nog, annars ark. Mäter vyns egen bredd
+  // (inte fönstrets) eftersom appens sidomeny tar plats på iPad och dator.
+  const rootRef = useRef<HTMLDivElement>(null);
+  const [rootWidth, setRootWidth] = useState(0);
   useEffect(() => {
-    if (showNotesModal) {
+    const el = rootRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(entries => setRootWidth(entries[0].contentRect.width));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  const [sidePanel, setSidePanel] = useState<LineupPanel>('lineups');
+  const [mobilePanel, setMobilePanelState] = useState<LineupPanel | null>(null);
+  const [lastMobilePanel, setLastMobilePanel] = useState<LineupPanel>('lineups');
+  const setMobilePanel = (panel: LineupPanel | null) => {
+    setMobilePanelState(panel);
+    if (panel) setLastMobilePanel(panel);
+  };
+
+  useEffect(() => {
+    if (showNotesModal || sidePanel === 'notes' || mobilePanel === 'notes') {
       // Give time for the modal animation/mounting before calculating height
       const timer = setTimeout(() => {
         adjustTextAreaHeight(teamTextareaRef.current);
@@ -674,7 +700,7 @@ export default function LineupBuilder({
       }, 100);
       return () => clearTimeout(timer);
     }
-  }, [showNotesModal, teamNotes, opponentNotes]);
+  }, [showNotesModal, sidePanel, mobilePanel, teamNotes, opponentNotes]);
 
   const [isUploadingMedia, setIsUploadingMedia] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
@@ -972,9 +998,63 @@ export default function LineupBuilder({
   const [tempTeamName, setTempTeamName] = useState('');
   const [tempSessionId, setTempSessionId] = useState<string | undefined>(lineup?.sessionId);
   const [editingLineupId, setEditingLineupId] = useState<string | null>(null);
-  const [showPreview, setShowPreview] = useState(false);
-  const [isScreenshotMode, setIsScreenshotMode] = useState(false);
-  const [showScreenshotTip, setShowScreenshotTip] = useState(false);
+  // Bildläge (skärmbild att skicka till spelarna): döljer allt utom lagkortet.
+  const [isSnapshotMode, setIsSnapshotMode] = useState(false);
+  const [showSnapshotDone, setShowSnapshotDone] = useState(false);
+  const [snapshotZoom, setSnapshotZoom] = useState(1);
+  const snapshotRef = useRef<HTMLDivElement>(null);
+  const snapshotDoneTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const flashSnapshotDone = useCallback(() => {
+    setShowSnapshotDone(true);
+    if (snapshotDoneTimer.current) clearTimeout(snapshotDoneTimer.current);
+    snapshotDoneTimer.current = setTimeout(() => setShowSnapshotDone(false), 2000);
+  }, []);
+  const enterSnapshotMode = () => {
+    (document.activeElement as HTMLElement | null)?.blur?.();
+    setSelectedDrawingId(null);
+    setIsSnapshotMode(true);
+    flashSnapshotDone();
+    try {
+      const el = document.documentElement as any;
+      const req = el.requestFullscreen || el.webkitRequestFullscreen;
+      if (req && !document.fullscreenElement) req.call(el).catch?.(() => {});
+    } catch (e) {}
+  };
+  const exitSnapshotMode = useCallback(() => {
+    setIsSnapshotMode(false);
+    setShowSnapshotDone(false);
+    try {
+      const d = document as any;
+      if (d.fullscreenElement || d.webkitFullscreenElement) (d.exitFullscreen || d.webkitExitFullscreen)?.call(d);
+    } catch (e) {}
+  }, []);
+  // Anpassa lagkortet till skärmen (både bredd och höjd) i bildläget.
+  React.useLayoutEffect(() => {
+    if (!isSnapshotMode) return;
+    const fit = () => {
+      const el = snapshotRef.current;
+      if (!el) return;
+      const prev = el.style.zoom;
+      el.style.zoom = '1';
+      const w = el.offsetWidth;
+      const h = el.offsetHeight;
+      el.style.zoom = prev;
+      if (!w || !h) return;
+      const z = Math.min((window.innerWidth - 8) / w, (window.innerHeight - 8) / h);
+      setSnapshotZoom(Math.max(0.2, Math.min(z, 3)));
+    };
+    fit();
+    const t = setTimeout(fit, 300);
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') exitSnapshotMode(); };
+    window.addEventListener('resize', fit);
+    window.addEventListener('keydown', onKey);
+    return () => {
+      clearTimeout(t);
+      window.removeEventListener('resize', fit);
+      window.removeEventListener('keydown', onKey);
+    };
+  }, [isSnapshotMode, orientation, exitSnapshotMode]);
+  useEffect(() => () => { if (snapshotDoneTimer.current) clearTimeout(snapshotDoneTimer.current); }, []);
   const [showFormationModal, setShowFormationModal] = useState(false);
   const [showOpponentFormationModal, setShowOpponentFormationModal] = useState(false);
   const [blueFormation, setBlueFormation] = useState<string>('4-4-2');
@@ -3569,14 +3649,16 @@ export default function LineupBuilder({
             style={{
               width: isFieldMaximized 
                 ? (orientation === 'landscape' ? `min(98vw, calc((100vh - 24px) * ${R}))` : `min(98vw, calc((100vh - 24px) * ${invR}))`)
-                : (orientation === 'landscape' 
-                    ? `min(96vw, 1024px, calc((100vh - 160px) * ${R}))` 
+                : isSimplified
+                  ? '100%' // bildläget: fast storlek som sedan skalas till skärmen
+                  : (orientation === 'landscape'
+                    ? `min(100%, 1024px, calc((100vh - 160px) * ${R}))`
                     : `min(100%, 680px, calc((100dvh - 200px) * ${invR}))`),
               height: isFieldMaximized
                 ? (orientation === 'landscape' ? `min(calc(98vw / ${R}), calc(100vh - 24px))` : `min(calc(98vw / ${invR}), calc(100vh - 24px))`)
                 : (orientation === 'landscape' 
-                    ? `min(calc(96vw / ${R}), 663px, calc(100vh - 160px))` 
-                    : `min(calc(680px * ${R}), calc(100dvh - 200px))`),
+                    ? 'auto' 
+                    : 'auto'),
               aspectRatio: orientation === 'landscape' ? '105/68' : '68/105',
               backgroundImage: (pitchType === 'classic' || pitchType === 'blue-stripes' || pitchType === 'blue') ? (
                 `repeating-linear-gradient(
@@ -4487,12 +4569,14 @@ export default function LineupBuilder({
           {/* New Dynamic Bench/Dugout Area (Outside Pitch) */}
           {!isFieldMaximized && (
             <div 
-              ref={benchRef}
+              ref={isSimplified ? undefined : benchRef}
               className="mt-0 px-1.5 py-1.5 sm:px-3 sm:py-2 rounded-none sm:rounded-2xl border-x-0 sm:border border-zinc-200/60 dark:border-zinc-600/80 bg-zinc-100/95 dark:bg-zinc-700/90 backdrop-blur-sm shadow-md transition-all mx-auto select-none overflow-x-auto scrollbar-none"
               style={{
-                width: orientation === 'landscape' 
-                  ? `min(96vw, 1024px, calc((100vh - 160px) * ${R}))` 
-                  : `min(100%, 680px, calc((100dvh - 200px) * ${invR}))`,
+                width: isSimplified
+                  ? '100%'
+                  : orientation === 'landscape'
+                    ? `min(100%, 1024px, calc((100vh - 160px) * ${R}))`
+                    : `min(100%, 680px, calc((100dvh - 200px) * ${invR}))`,
               }}
             >
               {(() => {
@@ -4626,8 +4710,995 @@ export default function LineupBuilder({
     );
   };
 
+
+  const isWide = rootWidth >= (orientation === 'landscape' ? 1080 : 720);
+  const sidePanelWidth = rootWidth >= 1100 ? 400 : rootWidth >= 860 ? 390 : 360;
+
+  // Sidopanelens/arkens innehåll. Visas i en sidopanel bredvid planen på breda skärmar
+  // och i ark (Sheet) på mobil och iPad på höjden.
+  // I arket på mobil stängs arket när man väljer, så att man ser planen direkt.
+  const applyFormationFromPanel = (formation: Parameters<typeof applyFormation>[0]) => {
+    applyFormation(formation);
+    setMobilePanel(null);
+  };
+
+  const renderFormationsPanel = () => (
+    <div className="flex flex-col gap-4">
+      <p className="text-sm text-zinc-500 dark:text-zinc-400">
+        {currentFormation ? <>Nuvarande formation: <span className="font-semibold text-zinc-900 dark:text-white">{currentFormation}</span></> : 'Välj en formation för att placera spelarna.'}
+      </p>
+      <div className="flex flex-wrap gap-2">
+        {/* Dynamic Quick Access based on pins - Ensure unique IDs */}
+        {Array.from(new Set(pinnedFormationIds)).map(id => {
+          // Check if it's a standard formation first
+          const temp = FORMATION_TEMPLATES.find(t => t.id === id);
+          if (temp) {
+            const variant = temp.variants[0];
+            const isSelected = currentFormation === variant.name;
+            return (
+              <button
+                key={id}
+                onClick={() => applyFormationFromPanel(variant)}
+                className={`px-4 min-h-10 py-2 rounded-xl text-xs font-semibold transition-all ${
+                  isSelected
+                    ? 'bg-indigo-600 text-white shadow-md'
+                    : 'bg-zinc-50 dark:bg-zinc-950 text-zinc-600 dark:text-zinc-400 border border-zinc-200 dark:border-zinc-800 hover:bg-zinc-100'
+                }`}
+              >
+                {temp.name}
+              </button>
+            );
+          }
+
+          // Check if it's a custom formation
+          const custom = customFormations.find(f => f.id === id);
+          if (custom) {
+            const isSelected = currentFormation === custom.name;
+            return (
+              <button
+                key={id}
+                onClick={() => applyFormationFromPanel(custom)}
+                className={`px-4 min-h-10 py-2 rounded-xl text-xs font-semibold transition-all ${
+                  isSelected
+                    ? 'bg-emerald-600 text-white shadow-md'
+                    : 'bg-zinc-50 dark:bg-zinc-950 text-zinc-600 dark:text-zinc-400 border border-zinc-200 dark:border-zinc-800 hover:bg-zinc-100'
+                }`}
+              >
+                {custom.name}
+              </button>
+            );
+          }
+
+          return null;
+        })}
+        
+        {/* Fill defaults if no pins (fallback UX) */}
+        {pinnedFormationIds.length === 0 && ['4-4-2', '4-3-3', '4-2-3-1'].map(id => {
+          const temp = FORMATION_TEMPLATES.find(t => t.id === id);
+          if (!temp) return null;
+          return (
+            <button
+              key={id}
+              onClick={() => applyFormationFromPanel(temp.variants[0])}
+              className="px-4 min-h-10 py-2 rounded-xl text-xs font-semibold bg-zinc-100 dark:bg-zinc-950 text-zinc-700 dark:text-zinc-300 border border-zinc-200 dark:border-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-800 transition-all font-mono"
+            >
+              {temp.name}
+            </button>
+          );
+        })}
+
+        <button
+          onClick={() => setShowFormationModal(true)}
+          className="px-4 min-h-10 py-2 rounded-xl text-xs font-semibold bg-zinc-900 dark:bg-white text-white dark:text-black hover:opacity-90 transition-all flex items-center gap-2"
+        >
+          <Plus size={14} />
+          <span>Fler formationer</span>
+        </button>
+        <button
+          onClick={() => setShowSaveFormation(true)}
+          className="px-4 min-h-10 py-2 rounded-xl text-xs font-semibold bg-emerald-600 text-white hover:bg-emerald-700 transition-all flex items-center gap-2 shadow-lg shadow-emerald-100 dark:shadow-none"
+        >
+          <Plus size={14} />
+          <span>Spara egen formation</span>
+        </button>
+      </div>
+    </div>
+  );
+
+  const renderSettingsPanel = () => (
+      <div className="flex flex-col gap-6">
+        {/* Part 1: Zoom och storlek (HÖGST UPP) */}
+        <div className="flex flex-col gap-3">
+          <span className="text-xs font-semibold text-zinc-600 dark:text-zinc-400 ml-1">Zoom och storlek</span>
+          
+          {/* Zoom interface rows */}
+          <div className="flex flex-col gap-3 bg-zinc-100 dark:bg-zinc-950 p-3 rounded-2xl border border-zinc-200 dark:border-zinc-800/80">
+            <div className="flex flex-col">
+              <span className="text-xs font-semibold text-zinc-800 dark:text-zinc-200 leading-none mb-1">Zoom</span>
+              <span className="text-xs font-bold text-zinc-600 dark:text-zinc-400">Storleken på planen i vyn</span>
+            </div>
+            <div className="flex items-center gap-1 shrink-0">
+              <button 
+                onClick={() => setPreviewZoom(Math.max(0.5, Math.round((previewZoom - 0.05) * 100) / 100))}
+                className="w-10 h-10 flex items-center justify-center bg-white dark:bg-zinc-900 hover:bg-zinc-200 dark:hover:bg-zinc-800 rounded-lg text-zinc-700 dark:text-zinc-300 hover:text-zinc-900 dark:hover:text-white transition-all border border-zinc-200 dark:border-zinc-800/80"
+                title="Minska zoom"
+              >
+                <Minus size={14} />
+              </button>
+              <div className="px-3 py-1.5 bg-zinc-200/80 dark:bg-zinc-800 rounded-lg shadow-inner min-w-[60px] text-center flex items-center justify-center">
+                <span className="text-xs font-mono font-semibold text-zinc-900 dark:text-zinc-100">
+                  {Math.round(previewZoom * 100)}%
+                </span>
+              </div>
+              <button 
+                onClick={() => setPreviewZoom(Math.min(1.5, Math.round((previewZoom + 0.05) * 100) / 100))}
+                className="w-10 h-10 flex items-center justify-center bg-white dark:bg-zinc-900 hover:bg-zinc-200 dark:hover:bg-zinc-800 rounded-lg text-zinc-700 dark:text-zinc-300 hover:text-zinc-900 dark:hover:text-white transition-all border border-zinc-200 dark:border-zinc-800/80"
+                title="Öka zoom"
+              >
+                <Plus size={14} />
+              </button>
+              {previewZoom !== 1 && (
+                <button 
+                  onClick={() => setPreviewZoom(1)}
+                  className="w-10 h-10 flex items-center justify-center bg-white dark:bg-zinc-900 hover:bg-zinc-200 dark:hover:bg-zinc-800 rounded-lg text-zinc-600 dark:text-zinc-400 hover:text-indigo-600 transition-all border border-zinc-200 dark:border-zinc-800/80"
+                  title="Återställ zoom (100%)"
+                >
+                  <RotateCcw size={12} />
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* Scale interface rows */}
+          <div className="flex flex-col gap-3 bg-zinc-100 dark:bg-zinc-950 p-3 rounded-2xl border border-zinc-200 dark:border-zinc-800/80">
+            <div className="flex flex-col">
+              <span className="text-xs font-semibold text-zinc-800 dark:text-zinc-200 leading-none mb-1">Spelarstorlek</span>
+              <span className="text-xs font-bold text-zinc-600 dark:text-zinc-400">Ändra cirklarnas storlek på spelplanen</span>
+            </div>
+            <div className="flex items-center gap-1 shrink-0">
+              <button 
+                onClick={() => {
+                  setPlayerScale(Math.max(0.5, Math.round((playerScale - 0.05) * 100) / 100));
+                  setHasUnsavedChanges(true);
+                }}
+                className="w-10 h-10 flex items-center justify-center bg-white dark:bg-zinc-900 hover:bg-zinc-200 dark:hover:bg-zinc-800 rounded-lg text-zinc-700 dark:text-zinc-300 hover:text-zinc-900 dark:hover:text-white transition-all border border-zinc-200 dark:border-zinc-800/80"
+                title="Minska spelarstorlek"
+              >
+                <Minus size={14} />
+              </button>
+              <div className="px-3 py-1.5 bg-zinc-200/80 dark:bg-zinc-800 rounded-lg shadow-inner min-w-[60px] text-center flex items-center justify-center">
+                <span className="text-xs font-mono font-semibold text-zinc-900 dark:text-zinc-100">
+                  {Math.round(playerScale * 100)}%
+                </span>
+              </div>
+              <button 
+                onClick={() => {
+                  setPlayerScale(Math.min(1.5, Math.round((playerScale + 0.05) * 100) / 100));
+                  setHasUnsavedChanges(true);
+                }}
+                className="w-10 h-10 flex items-center justify-center bg-white dark:bg-zinc-900 hover:bg-zinc-200 dark:hover:bg-zinc-800 rounded-lg text-zinc-700 dark:text-zinc-300 hover:text-zinc-900 dark:hover:text-white transition-all border border-zinc-200 dark:border-zinc-800/80"
+                title="Öka spelarstorlek"
+              >
+                <Plus size={14} />
+              </button>
+              {playerScale !== 1 && (
+                <button 
+                  onClick={() => {
+                    setPlayerScale(1);
+                    setHasUnsavedChanges(true);
+                  }}
+                  className="w-10 h-10 flex items-center justify-center bg-white dark:bg-zinc-900 hover:bg-zinc-200 dark:hover:bg-zinc-800 rounded-lg text-zinc-600 dark:text-zinc-400 hover:text-indigo-600 transition-all border border-zinc-200 dark:border-zinc-800/80"
+                  title="Återställ spelarstorlek"
+                >
+                  <RotateCcw size={12} />
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* Horizontal Line Divider */}
+        <div className="h-[1px] bg-zinc-150 dark:bg-zinc-800/80 w-full" />
+
+        {/* Part 2: Spelarutseende */}
+        <div className="flex flex-col gap-3">
+          <span className="text-xs font-semibold text-zinc-500 dark:text-zinc-400 ml-1">Spelarutseende</span>
+          
+          <div className="grid grid-cols-2 gap-4">
+            {/* Theme Style */}
+            <div className="flex flex-col gap-2">
+              <span className="text-xs font-semibold text-zinc-500 dark:text-zinc-400 ml-1">Namnfärg</span>
+              <div className="flex gap-1 p-1 bg-zinc-100 dark:bg-zinc-950 rounded-2xl border border-zinc-200 dark:border-zinc-800">
+                <button
+                  onClick={() => {
+                    setNameTagStyle('light');
+                    setHasUnsavedChanges(true);
+                  }}
+                  className={`flex-1 px-3 min-h-10 py-2 rounded-xl text-xs font-semibold transition-all ${
+                    nameTagStyle === 'light'
+                      ? 'bg-indigo-600 text-white shadow-lg'
+                      : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-200 hover:bg-zinc-200/60 dark:hover:bg-zinc-800'
+                  }`}
+                >
+                  Ljus
+                </button>
+                <button
+                  onClick={() => {
+                    setNameTagStyle('dark');
+                    setHasUnsavedChanges(true);
+                  }}
+                  className={`flex-1 px-3 min-h-10 py-2 rounded-xl text-xs font-semibold transition-all ${
+                    nameTagStyle === 'dark'
+                      ? 'bg-indigo-600 text-white shadow-lg'
+                      : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-200 hover:bg-zinc-200/60 dark:hover:bg-zinc-800'
+                  }`}
+                >
+                  Mörk
+                </button>
+              </div>
+            </div>
+
+            {/* Photo Toggle */}
+            <div className="flex flex-col gap-2">
+              <span className="text-xs font-semibold text-zinc-500 dark:text-zinc-400 ml-1">Spelarfoto</span>
+              <button
+                onClick={() => {
+                  setShowPhoto(!showPhoto);
+                  setHasUnsavedChanges(true);
+                }}
+                className={`flex items-center justify-between px-4 h-11 rounded-2xl border transition-all ${
+                  showPhoto
+                    ? 'bg-indigo-600 border-indigo-500 text-white shadow-lg'
+                    : 'bg-zinc-100 dark:bg-zinc-950 border-zinc-200 dark:border-zinc-800 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-200 dark:hover:bg-zinc-800'
+                }`}
+              >
+                <span className="text-xs font-semibold">{showPhoto ? 'Ja' : 'Nej'}</span>
+                <Camera size={14} className={showPhoto ? 'text-white' : 'text-zinc-400'} />
+              </button>
+            </div>
+
+            {/* Number Toggle */}
+            <div className="flex flex-col gap-2">
+              <span className="text-xs font-semibold text-zinc-500 dark:text-zinc-400 ml-1">Tröjnummer</span>
+              <button
+                onClick={() => {
+                  setShowNumber(!showNumber);
+                  setHasUnsavedChanges(true);
+                }}
+                className={`flex items-center justify-between px-4 h-11 rounded-2xl border transition-all ${
+                  showNumber
+                    ? 'bg-indigo-600 border-indigo-500 text-white shadow-lg'
+                    : 'bg-zinc-100 dark:bg-zinc-950 border-zinc-200 dark:border-zinc-800 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-200 dark:hover:bg-zinc-800'
+                }`}
+              >
+                <span className="text-xs font-semibold">{showNumber ? 'Ja' : 'Nej'}</span>
+                <div className={`w-3 h-3 rounded-md border-2 border-current flex items-center justify-center ${showNumber ? 'bg-white border-white' : 'border-zinc-400'}`}>
+                  {showNumber && <div className="w-1.5 h-1.5 bg-indigo-600 rounded-sm" />}
+                </div>
+              </button>
+            </div>
+
+            {/* Name Toggle */}
+            <div className="flex flex-col gap-2">
+              <span className="text-xs font-semibold text-zinc-500 dark:text-zinc-400 ml-1">Spelarnamn</span>
+              <button
+                onClick={() => {
+                  setShowName(!showName);
+                  setHasUnsavedChanges(true);
+                }}
+                className={`flex items-center justify-between px-4 h-11 rounded-2xl border transition-all ${
+                  showName
+                    ? 'bg-indigo-600 border-indigo-500 text-white shadow-lg'
+                    : 'bg-zinc-100 dark:bg-zinc-950 border-zinc-200 dark:border-zinc-800 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-200 dark:hover:bg-zinc-800'
+                }`}
+              >
+                <span className="text-xs font-semibold">{showName ? 'Ja' : 'Nej'}</span>
+                <User size={14} className={showName ? 'text-white' : 'text-zinc-400'} />
+              </button>
+            </div>
+
+            {/* Position Description Toggle */}
+            <div className="flex flex-col gap-2">
+              <span className="text-xs font-semibold text-zinc-500 dark:text-zinc-400 ml-1">Positionsbeskrivning</span>
+              <button
+                onClick={() => {
+                  setShowPositionDescriptions(!showPositionDescriptions);
+                  setHasUnsavedChanges(true);
+                }}
+                className={`flex items-center justify-between px-4 h-11 rounded-2xl border transition-all cursor-pointer ${
+                  showPositionDescriptions
+                    ? 'bg-indigo-600 border-indigo-500 text-white shadow-lg'
+                    : 'bg-zinc-100 dark:bg-zinc-950 border-zinc-200 dark:border-zinc-800 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-200 dark:hover:bg-zinc-800'
+                }`}
+              >
+                <span className="text-xs font-semibold">{showPositionDescriptions ? 'Ja' : 'Nej'}</span>
+                {showPositionDescriptions ? <Eye size={14} className="text-white" /> : <EyeOff size={14} className="text-zinc-400" />}
+              </button>
+            </div>
+
+            {/* Name Mode */}
+            <div className="flex flex-col gap-2 col-span-2">
+              <span className="text-xs font-semibold text-zinc-500 dark:text-zinc-400 ml-1">Namnformat</span>
+              <div className="grid grid-cols-3 gap-1 p-1 bg-zinc-100 dark:bg-zinc-950 rounded-2xl border border-zinc-200 dark:border-zinc-800">
+                <button onClick={() => {
+                  setNameDisplayMode('first');
+                  setHasUnsavedChanges(true);
+                }} className={`px-2 min-h-10 py-2 rounded-xl text-xs font-semibold transition-all ${nameDisplayMode === 'first' ? 'bg-indigo-600 text-white shadow-md' : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-200 hover:bg-zinc-200/60 dark:hover:bg-zinc-800'}`}>Förnamn</button>
+                <button onClick={() => {
+                  setNameDisplayMode('last');
+                  setHasUnsavedChanges(true);
+                }} className={`px-2 min-h-10 py-2 rounded-xl text-xs font-semibold transition-all ${nameDisplayMode === 'last' ? 'bg-indigo-600 text-white shadow-md' : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-200 hover:bg-zinc-200/60 dark:hover:bg-zinc-800'}`}>Efternamn</button>
+                <button onClick={() => {
+                  setNameDisplayMode('full');
+                  setHasUnsavedChanges(true);
+                }} className={`px-2 min-h-10 py-2 rounded-xl text-xs font-semibold transition-all ${nameDisplayMode === 'full' ? 'bg-indigo-600 text-white shadow-md' : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-200 hover:bg-zinc-200/60 dark:hover:bg-zinc-800'}`}>Hela namnet</button>
+                <button onClick={() => {
+                  setNameDisplayMode('initials');
+                  setHasUnsavedChanges(true);
+                }} className={`px-2 min-h-10 py-2 rounded-xl text-xs font-semibold transition-all ${nameDisplayMode === 'initials' ? 'bg-indigo-600 text-white shadow-md' : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-200 hover:bg-zinc-200/60 dark:hover:bg-zinc-800'}`}>Initialer</button>
+                <button onClick={() => {
+                  setNameDisplayMode('firstLastInitial');
+                  setHasUnsavedChanges(true);
+                }} className={`px-2 min-h-10 py-2 rounded-xl text-xs font-semibold transition-all ${nameDisplayMode === 'firstLastInitial' ? 'bg-indigo-600 text-white shadow-md' : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-200 hover:bg-zinc-200/60 dark:hover:bg-zinc-800'}`}>Namn + I.</button>
+                <button onClick={() => {
+                  setNameDisplayMode('initialLastName');
+                  setHasUnsavedChanges(true);
+                }} className={`px-2 min-h-10 py-2 rounded-xl text-xs font-semibold transition-all ${nameDisplayMode === 'initialLastName' ? 'bg-indigo-600 text-white shadow-md' : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-200 hover:bg-zinc-200/60 dark:hover:bg-zinc-800'}`}>I. + Efternamn</button>
+              </div>
+            </div>
+
+            {/* Background Type */}
+            <div className="flex flex-col gap-2 col-span-2">
+              <span className="text-xs font-semibold text-zinc-500 dark:text-zinc-400 ml-1">Skyltstil</span>
+              <div className="flex gap-1 p-1 bg-zinc-100 dark:bg-zinc-950 rounded-2xl border border-zinc-200 dark:border-zinc-800">
+                <button onClick={() => {
+                  setNameBackgroundType('badge');
+                  setShowNameBackground(true);
+                  setHasUnsavedChanges(true);
+                }} className={`flex-1 px-1 min-h-10 py-2 rounded-xl text-xs font-semibold transition-all ${nameBackgroundType === 'badge' && showNameBackground ? 'bg-indigo-600 text-white shadow-md' : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-200 hover:bg-zinc-200/60 dark:hover:bg-zinc-800'}`}>Badge</button>
+                <button onClick={() => {
+                  setNameBackgroundType('transparent');
+                  setShowNameBackground(true);
+                  setHasUnsavedChanges(true);
+                }} className={`flex-1 px-1 min-h-10 py-2 rounded-xl text-xs font-semibold transition-all ${nameBackgroundType === 'transparent' && showNameBackground ? 'bg-indigo-600 text-white shadow-md' : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-200 hover:bg-zinc-200/60 dark:hover:bg-zinc-800'}`}>Genomskinlig</button>
+                <button onClick={() => {
+                  setNameBackgroundType('solid');
+                  setShowNameBackground(true);
+                  setHasUnsavedChanges(true);
+                }} className={`flex-1 px-1 min-h-10 py-2 rounded-xl text-xs font-semibold transition-all ${nameBackgroundType === 'solid' && showNameBackground ? 'bg-indigo-600 text-white shadow-md' : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-200 hover:bg-zinc-200/60 dark:hover:bg-zinc-800'}`}>Bakgrund</button>
+                <button onClick={() => {
+                  setNameBackgroundType('none');
+                  setShowNameBackground(false);
+                  setHasUnsavedChanges(true);
+                }} className={`flex-1 px-1 min-h-10 py-2 rounded-xl text-xs font-semibold transition-all ${(!showNameBackground || nameBackgroundType === 'none') ? 'bg-indigo-600 text-white shadow-md' : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-200 hover:bg-zinc-200/60 dark:hover:bg-zinc-800'}`}>Ingen</button>
+              </div>
+            </div>
+
+            <div className="flex flex-col gap-2 col-span-2">
+              <span className="text-xs font-semibold text-zinc-500 dark:text-zinc-400 ml-1">Planstil</span>
+              <div className="grid grid-cols-2 gap-1 p-1 bg-zinc-100 dark:bg-zinc-950 rounded-2xl border border-zinc-200 dark:border-zinc-800">
+                <button onClick={() => {
+                  setPitchType('classic');
+                  setHasUnsavedChanges(true);
+                }} className={`px-1 min-h-10 py-2 rounded-xl text-xs font-semibold transition-all ${pitchType === 'classic' ? 'bg-indigo-600 text-white shadow-md' : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-200 hover:bg-zinc-200/60 dark:hover:bg-zinc-800'}`}>Gröna ränder</button>
+                <button onClick={() => {
+                  setPitchType('blue-stripes');
+                  setHasUnsavedChanges(true);
+                }} className={`px-1 min-h-10 py-2 rounded-xl text-xs font-semibold transition-all ${pitchType === 'blue-stripes' ? 'bg-indigo-600 text-white shadow-md' : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-200 hover:bg-zinc-200/60 dark:hover:bg-zinc-800'}`}>Blå ränder</button>
+                <button onClick={() => {
+                  setPitchType('grass');
+                  setHasUnsavedChanges(true);
+                }} className={`px-1 min-h-10 py-2 rounded-xl text-xs font-semibold transition-all ${pitchType === 'grass' ? 'bg-indigo-600 text-white shadow-md' : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-200 hover:bg-zinc-200/60 dark:hover:bg-zinc-800'}`}>Gräs</button>
+                <button onClick={() => {
+                  setPitchType('blue-grass');
+                  setHasUnsavedChanges(true);
+                }} className={`px-1 min-h-10 py-2 rounded-xl text-xs font-semibold transition-all ${pitchType === 'blue-grass' ? 'bg-indigo-600 text-white shadow-md' : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-200 hover:bg-zinc-200/60 dark:hover:bg-zinc-800'}`}>Blått gräs</button>
+                <button onClick={() => {
+                  setPitchType('blue');
+                  setHasUnsavedChanges(true);
+                }} className={`px-1 min-h-10 py-2 rounded-xl text-xs font-semibold transition-all ${pitchType === 'blue' ? 'bg-indigo-600 text-white shadow-md' : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-200 hover:bg-zinc-200/60 dark:hover:bg-zinc-800'}`}>Blå mix</button>
+                <button onClick={() => {
+                  setPitchType('solid-blue');
+                  setHasUnsavedChanges(true);
+                }} className={`px-1 min-h-10 py-2 rounded-xl text-xs font-semibold transition-all ${pitchType === 'solid-blue' ? 'bg-indigo-600 text-white shadow-md' : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-200 hover:bg-zinc-200/60 dark:hover:bg-zinc-800'}`}>Helblå</button>
+                <button onClick={() => {
+                  setPitchType('solid-white');
+                  setHasUnsavedChanges(true);
+                }} className={`px-1 min-h-10 py-2 rounded-xl text-xs font-semibold transition-all ${pitchType === 'solid-white' ? 'bg-indigo-600 text-white shadow-md' : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-200 hover:bg-zinc-200/60 dark:hover:bg-zinc-800'}`}>Helvit</button>
+                <button onClick={() => {
+                  setPitchType('solid-black');
+                  setHasUnsavedChanges(true);
+                }} className={`px-1 min-h-10 py-2 rounded-xl text-xs font-semibold transition-all ${pitchType === 'solid-black' ? 'bg-indigo-600 text-white shadow-md' : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-200 hover:bg-zinc-200/60 dark:hover:bg-zinc-800'}`}>Helsvart</button>
+              </div>
+            </div>
+
+            <div className="flex flex-col gap-2 col-span-2">
+              <span className="text-xs font-semibold text-zinc-500 dark:text-zinc-400 ml-1">Spelriktning</span>
+              <div className="flex gap-1 p-1 bg-zinc-100 dark:bg-zinc-950 rounded-2xl border border-zinc-200 dark:border-zinc-800">
+                {orientation === 'vertical' ? (
+                  <>
+                    <button onClick={() => {
+                      setAttackDirection('up');
+                    }} className={`flex-1 min-h-10 py-2 rounded-xl text-xs font-semibold transition-all ${attackDirection === 'up' ? 'bg-indigo-600 text-white shadow-md' : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-200 hover:bg-zinc-200/60 dark:hover:bg-zinc-800'}`}>Uppåt</button>
+                    <button onClick={() => {
+                      setAttackDirection('down');
+                    }} className={`flex-1 min-h-10 py-2 rounded-xl text-xs font-semibold transition-all ${attackDirection === 'down' ? 'bg-indigo-600 text-white shadow-md' : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-200 hover:bg-zinc-200/60 dark:hover:bg-zinc-800'}`}>Nedåt</button>
+                  </>
+                ) : (
+                  <>
+                    <button onClick={() => {
+                      setAttackDirection('left');
+                    }} className={`flex-1 min-h-10 py-2 rounded-xl text-xs font-semibold transition-all ${attackDirection === 'left' ? 'bg-indigo-600 text-white shadow-md' : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-200 hover:bg-zinc-200/60 dark:hover:bg-zinc-800'}`}>Vänster</button>
+                    <button onClick={() => {
+                      setAttackDirection('right');
+                    }} className={`flex-1 min-h-10 py-2 rounded-xl text-xs font-semibold transition-all ${attackDirection === 'right' ? 'bg-indigo-600 text-white shadow-md' : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-200 hover:bg-zinc-200/60 dark:hover:bg-zinc-800'}`}>Höger</button>
+                  </>
+                )}
+              </div>
+            </div>
+
+            {/* Automated Pass network setting */}
+            <div className="flex flex-col gap-2 col-span-2">
+              <span className="text-xs font-semibold text-zinc-500 dark:text-zinc-400 ml-1">Automatiskt passningsnätverk</span>
+              <div className="grid grid-cols-2 gap-1 p-1 bg-zinc-100 dark:bg-zinc-950 rounded-2xl border border-zinc-200 dark:border-zinc-800">
+                <button
+                  onClick={() => {
+                    setPassingNetworkMode('triangulation');
+                    setHasUnsavedChanges(true);
+                  }}
+                  className={`flex px-3 min-h-10 py-2 rounded-xl text-xs font-semibold transition-all flex-col items-center justify-center gap-1 text-center ${
+                    passingNetworkMode === 'triangulation'
+                      ? 'bg-indigo-600 text-white shadow-md'
+                      : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-200 hover:bg-zinc-200/60 dark:hover:bg-zinc-800'
+                  }`}
+                >
+                  <span>Triangulering</span>
+                  <span className="text-[11px] opacity-75 font-medium lowercase">enbart trianglar</span>
+                </button>
+                <button
+                  onClick={() => {
+                    setPassingNetworkMode('standard');
+                    setHasUnsavedChanges(true);
+                  }}
+                  className={`flex px-3 min-h-10 py-2 rounded-xl text-xs font-semibold transition-all flex-col items-center justify-center gap-1 text-center ${
+                    passingNetworkMode === 'standard'
+                      ? 'bg-indigo-600 text-white shadow-md'
+                      : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-200 hover:bg-zinc-200/60 dark:hover:bg-zinc-800'
+                  }`}
+                >
+                  <span>Standard (3)</span>
+                  <span className="text-[11px] opacity-75 font-medium lowercase">trianglar + 3 närmaste</span>
+                </button>
+                <button
+                  onClick={() => {
+                    setPassingNetworkMode('maximum');
+                    setHasUnsavedChanges(true);
+                  }}
+                  className={`flex px-3 min-h-10 py-2 rounded-xl text-xs font-semibold transition-all flex-col items-center justify-center gap-1 text-center ${
+                    passingNetworkMode === 'maximum'
+                      ? 'bg-indigo-600 text-white shadow-md'
+                      : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-200 hover:bg-zinc-200/60 dark:hover:bg-zinc-800'
+                  }`}
+                >
+                  <span>Maximalt (4)</span>
+                  <span className="text-[11px] opacity-75 font-medium lowercase">trianglar + 4 närmaste</span>
+                </button>
+                <button
+                  onClick={() => {
+                    setPassingNetworkMode('ultra');
+                    setHasUnsavedChanges(true);
+                  }}
+                  className={`flex px-3 min-h-10 py-2 rounded-xl text-xs font-semibold transition-all flex-col items-center justify-center gap-1 text-center ${
+                    passingNetworkMode === 'ultra'
+                      ? 'bg-indigo-600 text-white shadow-md'
+                      : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-200 hover:bg-zinc-200/60 dark:hover:bg-zinc-800'
+                  }`}
+                >
+                  <span>Ultimat (5)</span>
+                  <span className="text-[11px] opacity-75 font-medium lowercase">trianglar + 5 närmaste</span>
+                </button>
+                <button
+                  onClick={() => {
+                    setPassingNetworkMode('lanes');
+                    setHasUnsavedChanges(true);
+                  }}
+                  className={`flex px-3 min-h-10 py-2 rounded-xl text-xs font-semibold transition-all flex-col items-center justify-center gap-1 text-center col-span-2 ${
+                    passingNetworkMode === 'lanes'
+                      ? 'bg-indigo-600 text-white shadow-md'
+                      : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-200 hover:bg-zinc-200/60 dark:hover:bg-zinc-800'
+                  }`}
+                >
+                  <span>Spelvägar</span>
+                  <span className="text-[11px] opacity-75 font-medium lowercase">fria passningskanaler</span>
+                </button>
+              </div>
+            </div>
+
+          </div>
+        </div>
+
+      </div>
+  );
+
+  const renderSavedLineupsPanel = () => (
+    <div className="flex flex-col gap-4">
+      {isCoachOrAdmin && (
+        <Button block icon={<Plus size={16} />} onClick={() => { handleCreateNew(); setMobilePanel(null); }}>
+          Ny uppställning
+        </Button>
+      )}
+      <div className="flex flex-col gap-6">
+        <Reorder.Group 
+          axis="y" 
+          values={Array.from(new Map((isCoachOrAdmin ? lineups.filter(l => !l.isArchived) : lineups.filter(l => l.isPublishedToPlayers && !l.isArchived)).map(l => [l.id, l])).values())} 
+          onReorder={(reordered) => {
+            if (!isCoachOrAdmin) return;
+            const archived = lineups.filter(l => l.isArchived);
+            onReorderLineups([...reordered, ...archived]);
+          }}
+          className="flex flex-col gap-3 w-full"
+        >
+          {(() => {
+            const visible = isCoachOrAdmin 
+              ? lineups.filter(l => !l.isArchived)
+              : lineups.filter(l => l.isPublishedToPlayers && !l.isArchived);
+
+            if (visible.length === 0) {
+              return (
+                <div className="p-8 text-center bg-zinc-50 dark:bg-zinc-950 rounded-2xl border-2 border-dashed border-zinc-150 dark:border-zinc-800/60">
+                  <p className="text-zinc-400 font-medium italic text-xs">
+                    {isCoachOrAdmin ? 'Inga sparade laguppställningar än...' : 'Inga publicerade laguppställningar än...'}
+                  </p>
+                </div>
+              );
+            }
+
+            return Array.from(new Map(visible.map(l => [l.id, l])).values()).map(l => (
+              <LineupReorderItem
+                key={l.id}
+                l={l}
+                activeLineupId={lineup?.id}
+                onSelectLineup={(id) => { handleSelectLineupWithHistory(id); setMobilePanel(null); }}
+                toggleArchive={toggleArchive}
+                onCopyLineup={onCopyLineup}
+                onDeleteLineup={onDeleteLineup}
+                onEditTitle={openTitleEditForLineup}
+                onTogglePublish={(id) => {
+                  const target = lineups.find(x => x.id === id);
+                  if (target) {
+                    onSaveLineup({ ...target, isPublishedToPlayers: !target.isPublishedToPlayers });
+                  }
+                }}
+                sessions={sessions}
+                isCoachOrAdmin={isCoachOrAdmin}
+              />
+            ));
+          })()}
+        </Reorder.Group>
+
+        {/* Manuell synkronisering under Laguppställningar */}
+        {onManualSync && (
+          <div className="pt-3 mt-2 border-t border-zinc-100 dark:border-zinc-800 animate-in fade-in duration-300">
+            <div className="flex flex-col items-stretch gap-3 p-3.5 bg-zinc-50 dark:bg-zinc-950/60 rounded-2xl border border-zinc-200/80 dark:border-zinc-800/80 shadow-sm">
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 rounded-xl bg-indigo-50 dark:bg-indigo-950/40 text-indigo-600 dark:text-indigo-400 flex items-center justify-center shrink-0 shadow-inner">
+                  <RefreshCw size={18} className={isSyncing ? "animate-spin" : ""} />
+                </div>
+                <div className="flex flex-col">
+                  <span className="text-xs font-semibold text-zinc-900 dark:text-white">Synkronisering</span>
+                  <span className="text-[11px] font-medium text-zinc-500 dark:text-zinc-400">
+                    {isSyncing ? 'Hämtar och synkar med molnet...' : 'Hämta senaste ändringar mellan enheter'}
+                  </span>
+                </div>
+              </div>
+              <button
+                onClick={async () => {
+                  try {
+                    if (hasUnsavedChanges && lineup) {
+                      const pushTime = Date.now();
+                      lastPushedDateRef.current = pushTime;
+                      const pushState: Lineup = {
+                        ...lineup,
+                        matchTitle: lineupName,
+                        teamName,
+                        players,
+                        playerScale,
+                        nameTagStyle,
+                        nameDisplayMode,
+                        showNameBackground,
+                        nameBackgroundType,
+                        showPhoto,
+                        showName,
+                        showNumber,
+                        teamLogoUrl,
+                        pitchType,
+                        orientation,
+                        attackDirection,
+                        formation: currentFormation,
+                        notes: {
+                          team: { text: teamNotes, media: teamMedia },
+                          opponent: { text: opponentNotes, media: opponentMedia }
+                        },
+                        tacticalBoard: {
+                          drawings: tacticalDrawings,
+                          footballPos,
+                          footballScale,
+                          opponents,
+                          showOpponents,
+                          opponentColor,
+                          players: tacticalPlayers
+                        },
+                        date: pushTime
+                      };
+                      onUpdateLineup(pushState);
+                      setHasUnsavedChanges(false);
+                    }
+                    if (onManualPush) {
+                      await onManualPush();
+                    } else if (onManualSync) {
+                      await onManualSync();
+                    }
+                  } catch (err) {
+                    console.error("Manual sync failed:", err);
+                  }
+                }}
+                disabled={isSyncing}
+                className="flex items-center justify-center gap-2 px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-400 text-white rounded-xl font-bold text-xs transition-all shadow-md active:scale-95 shrink-0 cursor-pointer"
+              >
+                <RefreshCw size={14} className={isSyncing ? "animate-spin" : ""} />
+                <span>{isSyncing ? 'Synkar...' : 'Synka nu'}</span>
+              </button>
+            </div>
+            {sessionActionCount > 0 && (
+              <p className="text-xs font-bold text-amber-600 dark:text-amber-400 mt-2 px-1">
+                Obs: Du har {sessionActionCount} osynkade lokala ändringar som sparas och skickas upp till molnet först.
+              </p>
+            )}
+          </div>
+        )}
+
+        {/* Archived Lineups Section */}
+        {isCoachOrAdmin && lineups.some(l => l.isArchived) && (
+          <div className="pt-4 mt-2 border-t border-zinc-100 dark:border-zinc-800">
+            <button 
+              onClick={() => setIsArchiveExpanded(!isArchiveExpanded)}
+              className="flex items-center justify-between w-full px-4 py-3 bg-zinc-100 dark:bg-zinc-950 rounded-2xl hover:bg-zinc-200 dark:hover:bg-zinc-900/60 transition-all group border border-zinc-200 dark:border-zinc-800/50"
+            >
+              <div className="flex items-center gap-2">
+                <Archive size={16} className="text-zinc-400 group-hover:text-amber-500 transition-colors" />
+                <span className="text-xs font-semibold text-zinc-700 dark:text-zinc-400">
+                  Arkiverade ({lineups.filter(l => l.isArchived).length})
+                </span>
+              </div>
+              {isArchiveExpanded ? <ChevronUp size={16} className="text-zinc-400" /> : <ChevronDown size={16} className="text-zinc-400" />}
+            </button>
+
+            <AnimatePresence>
+              {isArchiveExpanded && (
+                <motion.div
+                  initial={{ height: 0, opacity: 0 }}
+                  animate={{ height: 'auto', opacity: 1 }}
+                  exit={{ height: 0, opacity: 0 }}
+                  className="overflow-hidden"
+                >
+                  <div className="flex flex-col gap-3 w-full mt-4">
+                    {Array.from(new Map(lineups.filter(l => l.isArchived).map(l => [l.id, l])).values()).map(l => (
+                      <div 
+                        key={l.id}
+                        className="group p-4 bg-zinc-50/50 dark:bg-zinc-900/20 rounded-[20px] border border-zinc-100/80 dark:border-zinc-800 flex items-center justify-between w-full min-w-0 opacity-70 hover:opacity-100 transition-all"
+                      >
+                        <div 
+                          className="flex-1 cursor-pointer min-w-0 pr-2" 
+                          onClick={() => handleSelectLineupWithHistory(l.id)}
+                        >
+                          <h4 className="font-bold text-zinc-700 dark:text-zinc-300 tracking-tight leading-tight truncate text-xs">
+                            {l.matchTitle || 'Namnlös match'}
+                          </h4>
+                          <span className="text-xs font-medium text-zinc-400 leading-none mt-1.5 block">
+                            Arkiverad
+                          </span>
+                        </div>
+
+                        <div className="flex items-center gap-1 shrink-0 ml-2">
+                          <button
+                            onClick={() => openTitleEditForLineup(l.id, l.matchTitle || '', l.teamName || '', l.sessionId)}
+                            className="w-10 h-10 flex items-center justify-center text-zinc-400 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-zinc-100/50 dark:hover:bg-zinc-900/40 rounded-lg transition-all cursor-pointer"
+                            title="Redigera rubriker & matchkoppling"
+                          >
+                            <Pencil size={14} />
+                          </button>
+                          <button
+                            onClick={(e) => toggleArchive(e, l.id)}
+                            className="w-10 h-10 flex items-center justify-center text-zinc-400 hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-150/50 dark:hover:bg-emerald-950/20 rounded-lg transition-all"
+                            title="Återställ"
+                          >
+                            <ArchiveRestore size={14} />
+                          </button>
+                          <button
+                            onClick={() => onCopyLineup(l.id)}
+                            className="w-10 h-10 flex items-center justify-center text-zinc-400 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-indigo-100/50 dark:hover:bg-indigo-900/40 rounded-lg transition-all"
+                            title="Kopiera"
+                          >
+                            <Copy size={14} />
+                          </button>
+                          <button
+                            onClick={() => onDeleteLineup(l.id)}
+                            className="w-10 h-10 flex items-center justify-center text-zinc-400 hover:text-red-650 dark:hover:text-red-405 hover:bg-red-150/50 dark:hover:bg-red-955/20 rounded-lg transition-all"
+                            title="Radera"
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+
+  const renderNotesContent = (compact: boolean) => (
+    <>
+      {uploadError && (
+        <div className="mb-6 p-4 bg-red-50 dark:bg-red-900/20 border border-red-100 dark:border-red-900/50 rounded-2xl flex items-center gap-3 text-red-600 dark:text-red-400 text-sm font-bold animate-in fade-in slide-in-from-top-2">
+          <X size={18} className="shrink-0" />
+          <p>{uploadError}</p>
+          <button onClick={() => setUploadError(null)} className="ml-auto p-1 hover:bg-red-100 dark:hover:bg-red-900/40 rounded-lg transition-colors">
+            <X size={14} />
+          </button>
+        </div>
+      )}
+
+      <div className={compact ? 'grid grid-cols-1 gap-8' : 'grid grid-cols-1 lg:grid-cols-2 gap-8'}>
+        {/* Team Notes */}
+        <div className="space-y-4">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-indigo-100 dark:bg-indigo-900/30 flex items-center justify-center text-indigo-600">
+              <Trophy size={20} />
+            </div>
+            <h4 className="text-xl font-semibold text-zinc-900 dark:text-white">Vårt lag</h4>
+          </div>
+          <textarea
+            ref={teamTextareaRef}
+            value={teamNotes}
+            onChange={(e) => {
+              setTeamNotes(e.target.value);
+              setHasUnsavedChanges(true);
+            }}
+            placeholder="Skriv anteckningar om ditt lag..."
+            style={{ minHeight: '100px' }}
+            className="w-full p-4 rounded-3xl bg-white dark:bg-zinc-900 border-2 border-zinc-100 dark:border-zinc-800 focus:border-indigo-500 transition-all outline-none text-sm resize-none overflow-hidden"
+          />
+          
+          {/* Media Upload */}
+          <div className="space-y-3">
+            <span className="text-xs font-semibold text-zinc-400 pl-2">Media</span>
+            <div className="grid grid-cols-4 gap-2">
+               {teamMedia.map((url, i) => (
+                 <div key={i} className="relative aspect-square rounded-2xl bg-zinc-200 dark:bg-zinc-800 overflow-hidden group cursor-pointer" onClick={() => setSelectedMediaUrl(url)}>
+                   {isVideo(url) ? (
+                     <div className="w-full h-full flex items-center justify-center bg-zinc-900">
+                       <Play size={24} className="text-white group-hover:scale-125 transition-transform" />
+                     </div>
+                   ) : (
+                     <CachedImage src={url} alt="Media" className="w-full h-full object-cover group-hover:scale-110 transition-transform" />
+                   )}
+                   <button 
+                     onClick={(e) => {
+                       e.stopPropagation();
+                       handleMediaDelete(url, 'team');
+                     }}
+                     className="absolute top-1.5 right-1.5 bg-black/70 hover:bg-red-600 text-white p-2 rounded-xl transition-all shadow-lg z-10"
+                     title="Ta bort media"
+                   >
+                     <Trash2 size={14} />
+                   </button>
+                 </div>
+               ))}
+               <label className={`aspect-square rounded-2xl border-2 border-dashed border-zinc-200 dark:border-zinc-800 flex flex-col items-center justify-center gap-1 cursor-pointer hover:bg-zinc-100 dark:hover:bg-zinc-900/50 transition-all group ${isUploadingMedia ? 'opacity-50 pointer-events-none' : ''}`}>
+                 {isUploadingMedia ? (
+                   <RefreshCw size={16} className="text-indigo-600 animate-spin" />
+                 ) : (
+                   <Plus size={16} className="text-zinc-400 group-hover:scale-110 transition-transform" />
+                 )}
+                 <span className="text-[11px] font-semibold text-zinc-400">{isUploadingMedia ? 'Laddar...' : 'Lägg till'}</span>
+                 <input 
+                   type="file" 
+                   accept="image/*,video/*" 
+                   className="hidden" 
+                   disabled={isUploadingMedia}
+                   onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (file) handleMediaUpload(file, 'team');
+                   }}
+                 />
+               </label>
+            </div>
+          </div>
+        </div>
+
+        {/* Opponent Notes */}
+        <div className="space-y-4">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-red-100 dark:bg-red-900/30 flex items-center justify-center text-red-600">
+              <Target size={20} />
+            </div>
+            <h4 className="text-xl font-semibold text-zinc-900 dark:text-white">Motståndarna</h4>
+          </div>
+          <textarea
+            ref={opponentTextareaRef}
+            value={opponentNotes}
+            onChange={(e) => {
+              setOpponentNotes(e.target.value);
+              setHasUnsavedChanges(true);
+            }}
+            placeholder="Skriv anteckningar om motståndarna..."
+            style={{ minHeight: '100px' }}
+            className="w-full p-4 rounded-3xl bg-white dark:bg-zinc-900 border-2 border-zinc-100 dark:border-zinc-800 focus:border-red-500 transition-all outline-none text-sm resize-none overflow-hidden"
+          />
+
+          {/* Media Upload */}
+          <div className="space-y-3">
+            <span className="text-xs font-semibold text-zinc-400 pl-2">Media</span>
+            <div className="grid grid-cols-4 gap-2">
+               {opponentMedia.map((url, i) => (
+                 <div key={i} className="relative aspect-square rounded-2xl bg-zinc-200 dark:bg-zinc-800 overflow-hidden group cursor-pointer" onClick={() => setSelectedMediaUrl(url)}>
+                   {isVideo(url) ? (
+                     <div className="w-full h-full flex items-center justify-center bg-zinc-900">
+                       <Play size={24} className="text-white group-hover:scale-125 transition-transform" />
+                     </div>
+                   ) : (
+                     <CachedImage src={url} alt="Media" className="w-full h-full object-cover group-hover:scale-110 transition-transform" />
+                   )}
+                   <button 
+                     onClick={(e) => {
+                       e.stopPropagation();
+                       handleMediaDelete(url, 'opponent');
+                     }}
+                     className="absolute top-1.5 right-1.5 bg-black/70 hover:bg-red-600 text-white p-2 rounded-xl transition-all shadow-lg z-10"
+                     title="Ta bort media"
+                   >
+                     <Trash2 size={14} />
+                   </button>
+                 </div>
+               ))}
+               <label className={`aspect-square rounded-2xl border-2 border-dashed border-zinc-200 dark:border-zinc-800 flex flex-col items-center justify-center gap-1 cursor-pointer hover:bg-zinc-100 dark:hover:bg-zinc-900/50 transition-all group ${isUploadingMedia ? 'opacity-50 pointer-events-none' : ''}`}>
+                 {isUploadingMedia ? (
+                   <RefreshCw size={16} className="text-red-500 animate-spin" />
+                 ) : (
+                   <Plus size={16} className="text-zinc-400 group-hover:scale-110 transition-transform" />
+                 )}
+                 <span className="text-[11px] font-semibold text-zinc-400">{isUploadingMedia ? 'Laddar...' : 'Lägg till'}</span>
+                 <input 
+                   type="file" 
+                   accept="image/*,video/*" 
+                   className="hidden" 
+                   disabled={isUploadingMedia}
+                   onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (file) handleMediaUpload(file, 'opponent');
+                   }}
+                 />
+               </label>
+            </div>
+          </div>
+        </div>
+      </div>
+    </>
+  );
+
+  const renderPanel = (panel: LineupPanel) => {
+    switch (panel) {
+      case 'lineups': return renderSavedLineupsPanel();
+      case 'formation': return renderFormationsPanel();
+      case 'settings': return renderSettingsPanel();
+      case 'notes': return renderNotesContent(true);
+    }
+  };
+
+  const panelTabs: TabItem<LineupPanel>[] = [
+    { id: 'lineups', label: 'Sparade', icon: <FolderOpen size={16} /> },
+    { id: 'formation', label: 'Formation', icon: <Footprints size={16} /> },
+    { id: 'settings', label: 'Utseende', icon: <Settings size={16} /> },
+    { id: 'notes', label: 'Anteckningar', icon: <ClipboardList size={16} /> },
+  ];
+
+  const openTacticalBoard = () => {
+    setIsMaximized(true);
+    setShowSavedLineups(false);
+    setShowBenchMaximized(false);
+    setShowZoomMenu(false);
+  };
+
+  // Verktygsraden under planen.
+  const renderToolbar = () => (
+    <div className="flex flex-col gap-2 mt-3 px-3 sm:px-0">
+      {!isWide && (
+        <Button block icon={<Camera size={18} />} onClick={enterSnapshotMode}>
+          Skärmbild att skicka till spelarna
+        </Button>
+      )}
+      <div className={`flex flex-col gap-2 ${isWide ? '2xl:flex-row' : 'sm:flex-row'}`}>
+        <div className="grid grid-cols-2 gap-2 sm:flex-1">
+          <Button variant="secondary" className="min-w-0" icon={<Users size={16} className="shrink-0" />} onClick={() => setPickerMode('starter')} title="Välj spelare på planen">
+            <span className="truncate">På planen</span>
+            <Badge tone="brand">{starters.length}</Badge>
+          </Button>
+          <Button variant="secondary" className="min-w-0" icon={<Plus size={16} className="shrink-0" />} onClick={() => setPickerMode('sub')} title="Välj avbytare">
+            <span className="truncate">På bänken</span>
+            <Badge>{subs.length}</Badge>
+          </Button>
+        </div>
+        <div className="flex items-center justify-between sm:justify-start gap-1 p-1 bg-white dark:bg-zinc-900 border border-zinc-200/80 dark:border-zinc-800 rounded-2xl overflow-x-auto no-scrollbar">
+          <IconButton label="Ångra" onClick={handleUndo} disabled={history.length === 0}><Undo2 size={18} /></IconButton>
+          <IconButton label="Gör om" onClick={handleRedo} disabled={future.length === 0}><Redo2 size={18} /></IconButton>
+          <span className="w-px h-6 bg-zinc-200 dark:bg-zinc-800 mx-0.5 shrink-0" />
+          <IconButton label={isEditMode ? 'Sluta redigera spelare' : 'Redigera spelare'} active={isEditMode} onClick={() => setIsEditMode(!isEditMode)}><Edit2 size={18} /></IconButton>
+          <IconButton
+            label={orientation === 'landscape' ? 'Byt till stående plan' : 'Byt till liggande plan (tv)'}
+            active={orientation === 'landscape'}
+            onClick={() => {
+              const newOrientation = orientation === 'vertical' ? 'landscape' : 'vertical';
+              setOrientation(newOrientation);
+              setAttackDirection(newOrientation === 'landscape' ? 'right' : 'up');
+            }}
+          >
+            {orientation === 'landscape' ? <Smartphone size={18} /> : <Monitor size={18} />}
+          </IconButton>
+          <IconButton
+            label={showPositionDescriptions ? 'Dölj positionsbeskrivningar' : 'Visa positionsbeskrivningar'}
+            active={showPositionDescriptions}
+            onClick={() => {
+              setShowPositionDescriptions(!showPositionDescriptions);
+              setHasUnsavedChanges(true);
+            }}
+          >
+            {showPositionDescriptions ? <EyeOff size={18} /> : <Eye size={18} />}
+          </IconButton>
+          <IconButton label="Öppna rittavlan" onClick={openTacticalBoard}><Maximize2 size={18} /></IconButton>
+        </div>
+      </div>
+      {!isWide && (
+        <div className="grid grid-cols-4 gap-1.5">
+          {panelTabs.map(tab => (
+            <button
+              key={tab.id}
+              type="button"
+              onClick={() => setMobilePanel(tab.id)}
+              className="h-14 min-w-0 flex flex-col items-center justify-center gap-1 rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-200/80 dark:border-zinc-800 text-zinc-700 dark:text-zinc-200 hover:bg-zinc-50 dark:hover:bg-zinc-800 text-[11px] font-semibold active:scale-[0.98] transition-all cursor-pointer"
+            >
+              {tab.icon}
+              <span className="truncate max-w-full">{tab.label}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+
+  const pitchArea = (
+    <div className={isMaximized ? "w-full h-full flex items-center justify-center overflow-hidden" : presentationMode ? "flex items-center justify-center" : "w-full rounded-3xl"}>
+      <div
+        ref={presentRef}
+        className={isMaximized ? "w-full h-full flex items-center justify-center overflow-hidden transition-all duration-300" : "transition-all duration-300"}
+        style={{
+          zoom: isMaximized ? fullScreenZoom : presentationMode ? presentZoom : undefined,
+          width: presentationMode && !isMaximized ? (orientation === 'landscape' ? 1100 : 640) : undefined,
+        }}
+      >
+        {renderLineupContent(false)}
+      </div>
+    </div>
+  );
+
+
   return (
-    <div 
+    <div
+      ref={rootRef} 
       className={`mx-auto transition-all duration-500 w-full px-0 sm:px-6 ${isMaximized ? 'fixed inset-0 z-50 bg-zinc-50 dark:bg-zinc-955 text-zinc-900 dark:text-zinc-100 p-1 xs:p-2 md:p-3 pt-safe overflow-hidden flex flex-col items-center justify-center' : presentationMode ? 'flex-1 min-h-0 flex items-center justify-center overflow-hidden' : 'max-w-[1600px] pt-safe sm:pt-4 pb-16'}`}
     >
       {isMaximized && (
@@ -5641,976 +6712,40 @@ export default function LineupBuilder({
 
 
 
-      <div className={isMaximized ? "w-full h-full flex items-center justify-center overflow-hidden" : presentationMode ? "flex items-center justify-center" : "w-full rounded-3xl"}>
+      {!isMaximized && !presentationMode ? (
         <div
-          ref={presentRef}
-          className={isMaximized ? "w-full h-full flex items-center justify-center overflow-hidden transition-all duration-300" : "transition-all duration-300"}
-          style={{
-            zoom: isMaximized ? fullScreenZoom : presentationMode ? presentZoom : undefined,
-            width: presentationMode && !isMaximized ? (orientation === 'landscape' ? 1100 : 640) : undefined,
-          }}
+          className={isWide ? 'grid gap-6 items-start' : ''}
+          style={isWide ? { gridTemplateColumns: `minmax(0, 1fr) ${sidePanelWidth}px` } : undefined}
         >
-          {renderLineupContent(false)}
-        </div>
-      </div>
-
-        {!isMaximized && !presentationMode && (
-          <>
-            <div className="flex flex-col items-center gap-2 mt-3 pb-8 px-2 transition-all">
-            {/* Consolidated Player Controls */}
-            <div className="flex flex-wrap sm:flex-nowrap justify-center items-center gap-2">
-              <div className="flex items-center gap-1 p-1 bg-zinc-100/50 dark:bg-zinc-900/50 rounded-2xl border border-zinc-200 dark:border-zinc-800 shadow-sm">
-                <button
-                  onClick={() => setPickerMode('starter')}
-                  className="flex items-center gap-1.5 sm:gap-2 px-2 sm:px-3 py-2 bg-white dark:bg-zinc-900 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-50 dark:hover:bg-zinc-800 rounded-xl transition-all font-black text-[9px] uppercase shadow-sm active:scale-95 group whitespace-nowrap"
-                  title="Hantera startelva"
-                >
-                  <div className="flex items-center shrink-0">
-                    <span className="whitespace-nowrap">På planen ({starters.length})</span>
-                  </div>
-                  <div className="w-[1px] h-3 bg-zinc-200 dark:bg-zinc-800 shrink-0" />
-                  <Plus size={12} className="group-hover:scale-110 transition-transform shrink-0" />
-                </button>
-
-                <div className="w-[1px] h-5 bg-zinc-200 dark:bg-zinc-800 mx-0.5 sm:mx-1 shrink-0" />
-
-                <button
-                  onClick={() => setPickerMode('sub')}
-                  className="flex items-center gap-1.5 sm:gap-2 px-2 sm:px-3 py-2 bg-white dark:bg-zinc-900 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-800 rounded-xl transition-all font-black text-[9px] uppercase shadow-sm active:scale-95 group whitespace-nowrap"
-                  title="Hantera bänk"
-                >
-                  <div className="flex items-center shrink-0">
-                    <span className="whitespace-nowrap">På bänken ({subs.length})</span>
-                  </div>
-                  <div className="w-[1px] h-3 bg-zinc-200 dark:bg-zinc-800 shrink-0" />
-                  <Plus size={12} className="group-hover:scale-110 transition-transform shrink-0" />
-                </button>
-              </div>
-
-              {/* Mode & Global Actions Group */}
-            <div className="flex items-center gap-1 p-1 bg-zinc-100/50 dark:bg-zinc-900/50 rounded-2xl border border-zinc-200 dark:border-zinc-800 shadow-sm flex-nowrap overflow-x-auto no-scrollbar">
-              <button
-                onClick={() => setIsEditMode(!isEditMode)}
-                className={`p-2.5 rounded-xl transition-all shrink-0 ${
-                  isEditMode 
-                    ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-200 dark:shadow-none' 
-                    : 'bg-white dark:bg-zinc-900 text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-800 shadow-sm border border-transparent'
-                }`}
-                title="Redigera spelare"
-              >
-                <Edit2 size={20} />
-              </button>
-              <button
-                onClick={() => setShowNotesModal(true)}
-                className="p-2.5 bg-white dark:bg-zinc-900 text-zinc-400 rounded-xl border border-transparent shadow-sm hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-all active:scale-95 shrink-0"
-                title="Anteckningar"
-              >
-                <ClipboardList size={20} />
-              </button>
-              <button
-                onClick={handleUndo}
-                disabled={history.length === 0}
-                className={`p-2.5 rounded-xl transition-all shrink-0 ${
-                  history.length === 0 
-                    ? 'text-zinc-300 dark:text-zinc-700 cursor-not-allowed opacity-50 border border-transparent' 
-                    : 'bg-white dark:bg-zinc-900 text-zinc-500 hover:bg-zinc-50 dark:hover:bg-zinc-800 shadow-sm border border-zinc-100 dark:border-zinc-800 active:scale-95'
-                }`}
-                title="Ångra"
-              >
-                <Undo2 size={20} />
-              </button>
-              <button
-                onClick={handleRedo}
-                disabled={future.length === 0}
-                className={`p-2.5 rounded-xl transition-all shrink-0 ${
-                  future.length === 0 
-                    ? 'text-zinc-300 dark:text-zinc-700 cursor-not-allowed opacity-50 border border-transparent' 
-                    : 'bg-white dark:bg-zinc-900 text-zinc-500 hover:bg-zinc-50 dark:hover:bg-zinc-800 shadow-sm border border-zinc-100 dark:border-zinc-800 active:scale-95'
-                }`}
-                title="Gör om"
-              >
-                <Redo2 size={20} />
-              </button>
-              <div className="w-[1px] h-5 bg-zinc-200 dark:bg-zinc-800 mx-1 shrink-0" />
-              <button
-                onClick={() => {
-                  const newOrientation = orientation === 'vertical' ? 'landscape' : 'vertical';
-                  setOrientation(newOrientation);
-                  if (newOrientation === 'landscape') {
-                    setAttackDirection('right');
-                  } else {
-                    setAttackDirection('up');
-                  }
-                }}
-                className={`p-2.5 rounded-xl border transition-all active:scale-95 shrink-0 shadow-sm ${
-                  orientation === 'landscape' 
-                    ? 'bg-indigo-600 text-white border-indigo-500' 
-                    : 'bg-white dark:bg-zinc-900 text-zinc-500 border-zinc-100 dark:border-zinc-800 hover:bg-zinc-50'
-                }`}
-                title={orientation === 'landscape' ? "Byt till stående läge" : "Byt till liggande läge (TV)"}
-              >
-                {orientation === 'landscape' ? <Smartphone size={20} /> : <Monitor size={20} />}
-              </button>
-              <button
-                onClick={() => setShowSavedLineups(!showSavedLineups)}
-                className={`p-2.5 rounded-xl border transition-all active:scale-95 shrink-0 shadow-sm ${
-                  showSavedLineups 
-                    ? 'bg-amber-600 text-white border-amber-500 shadow-md' 
-                    : 'bg-white dark:bg-zinc-900 text-zinc-500 border-zinc-100 dark:border-zinc-800 hover:bg-zinc-50'
-                }`}
-                title={showSavedLineups ? "Dölj sparade laguppställningar" : "Visa sparade laguppställningar"}
-              >
-                <FolderOpen size={20} />
-              </button>
-              <button
-                onClick={() => {
-                  setShowPositionDescriptions(!showPositionDescriptions);
-                  setHasUnsavedChanges(true);
-                }}
-                className={`p-2.5 rounded-xl border transition-all active:scale-95 shrink-0 shadow-sm ${
-                  showPositionDescriptions 
-                    ? 'bg-indigo-600 text-white border-indigo-500' 
-                    : 'bg-white dark:bg-zinc-900 text-zinc-500 border-zinc-100 dark:border-zinc-800 hover:bg-zinc-50'
-                }`}
-                title={showPositionDescriptions ? "Dölj positionsbeskrivningar under spelarna på planen" : "Visa positionsbeskrivningar under spelarna på planen"}
-              >
-                {showPositionDescriptions ? <EyeOff size={20} /> : <Eye size={20} />}
-              </button>
-              <button
-                onClick={() => setShowPreview(true)}
-                className="p-2.5 bg-white dark:bg-zinc-900 text-zinc-500 rounded-xl border border-zinc-100 dark:border-zinc-800 shadow-sm hover:bg-zinc-50 transition-all active:scale-95 shrink-0"
-                title="Förhandsgranska & Skärmklipp"
-              >
-                <Camera size={20} />
-              </button>
-              <button
-                onClick={() => {
-                  const targetMaximized = !isMaximized;
-                  setIsMaximized(targetMaximized);
-                  setShowSavedLineups(!targetMaximized);
-                  setShowBenchMaximized(false);
-                  setShowZoomMenu(false);
-                }}
-                className="p-2.5 bg-white dark:bg-zinc-900 text-zinc-500 rounded-xl border border-zinc-100 dark:border-zinc-800 shadow-sm hover:bg-zinc-50 transition-all active:scale-95 shrink-0"
-                title={isMaximized ? "Lämna rittavlan" : "Rittavla"}
-              >
-                {isMaximized ? <Minimize2 size={20} /> : <Maximize2 size={20} />}
-              </button>
-            </div>
+          <div className="min-w-0">
+            {pitchArea}
+            {renderToolbar()}
           </div>
-        </div>
-
-        <div className={`grid grid-cols-1 gap-6 mt-6 items-start w-full ${
-          showSavedLineups 
-            ? 'lg:grid-cols-2' 
-            : 'max-w-4xl mx-auto'
-        }`}>
-          {/* Column 1: Formationer & Inställningar för Zoom, Storlek och Layout */}
-          <div className="flex flex-col gap-6">
-            {/* Section: Formationer */}
-            <div className="flex flex-col bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-200 dark:border-zinc-800 shadow-sm overflow-hidden animate-in fade-in slide-in-from-bottom-2">
-                <button 
-                  onClick={() => setIsFormationsExpanded(!isFormationsExpanded)}
-                  className="flex items-center justify-between p-4 w-full hover:bg-zinc-50 dark:hover:bg-zinc-800/50 transition-colors group/header"
-                >
-                  <div className="flex items-center justify-between flex-1 pr-4">
-                    <div className="flex items-center gap-2">
-                      <Footprints size={16} className="text-zinc-400 group-hover/header:text-indigo-500 transition-colors" />
-                      <span className="text-xs font-black text-zinc-600 dark:text-zinc-400 uppercase tracking-widest">Formationer</span>
-                    </div>
-                    {currentFormation && (
-                      <span className="text-[10px] font-bold text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-900/30 px-2.5 py-0.5 rounded-full uppercase border border-indigo-100 dark:border-indigo-800/50">
-                        {currentFormation}
-                      </span>
-                    )}
-                  </div>
-                  {isFormationsExpanded ? <ChevronUp size={16} className="text-zinc-400" /> : <ChevronDown size={16} className="text-zinc-400" />}
-                </button>
-
-                <motion.div
-                  initial={false}
-                  animate={{ height: isFormationsExpanded ? 'auto' : 0, opacity: isFormationsExpanded ? 1 : 0 }}
-                  className="overflow-hidden"
-                >
-                  <div className="flex flex-wrap gap-2 p-5 pt-0">
-                    {/* Dynamic Quick Access based on pins - Ensure unique IDs */}
-                    {Array.from(new Set(pinnedFormationIds)).map(id => {
-                      // Check if it's a standard formation first
-                      const temp = FORMATION_TEMPLATES.find(t => t.id === id);
-                      if (temp) {
-                        const variant = temp.variants[0];
-                        const isSelected = currentFormation === variant.name;
-                        return (
-                          <button
-                            key={id}
-                            onClick={() => applyFormation(variant)}
-                            className={`px-4 py-2 rounded-xl text-xs font-black transition-all ${
-                              isSelected
-                                ? 'bg-indigo-600 text-white shadow-md'
-                                : 'bg-zinc-50 dark:bg-zinc-950 text-zinc-600 dark:text-zinc-400 border border-zinc-200 dark:border-zinc-800 hover:bg-zinc-100'
-                            }`}
-                          >
-                            {temp.name}
-                          </button>
-                        );
-                      }
-
-                      // Check if it's a custom formation
-                      const custom = customFormations.find(f => f.id === id);
-                      if (custom) {
-                        const isSelected = currentFormation === custom.name;
-                        return (
-                          <button
-                            key={id}
-                            onClick={() => applyFormation(custom)}
-                            className={`px-4 py-2 rounded-xl text-xs font-black transition-all ${
-                              isSelected
-                                ? 'bg-emerald-600 text-white shadow-md'
-                                : 'bg-zinc-50 dark:bg-zinc-950 text-zinc-600 dark:text-zinc-400 border border-zinc-200 dark:border-zinc-800 hover:bg-zinc-100'
-                            }`}
-                          >
-                            {custom.name}
-                          </button>
-                        );
-                      }
-
-                      return null;
-                    })}
-                    
-                    {/* Fill defaults if no pins (fallback UX) */}
-                    {pinnedFormationIds.length === 0 && ['4-4-2', '4-3-3', '4-2-3-1'].map(id => {
-                      const temp = FORMATION_TEMPLATES.find(t => t.id === id);
-                      if (!temp) return null;
-                      return (
-                        <button
-                          key={id}
-                          onClick={() => applyFormation(temp.variants[0])}
-                          className="px-4 py-2 rounded-xl text-xs font-black bg-zinc-100 dark:bg-zinc-950 text-zinc-700 dark:text-zinc-300 border border-zinc-200 dark:border-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-800 transition-all font-mono"
-                        >
-                          {temp.name}
-                        </button>
-                      );
-                    })}
-
-                    <button
-                      onClick={() => setShowFormationModal(true)}
-                      className="px-4 py-2 rounded-xl text-xs font-black bg-zinc-900 dark:bg-white text-white dark:text-black hover:opacity-90 transition-all flex items-center gap-2"
-                    >
-                      <Plus size={14} />
-                      <span>Fler formationer</span>
-                    </button>
-                    <button
-                      onClick={() => setShowSaveFormation(true)}
-                      className="px-4 py-2 rounded-xl text-xs font-black bg-emerald-600 text-white hover:bg-emerald-700 transition-all flex items-center gap-2 shadow-lg shadow-emerald-100 dark:shadow-none"
-                    >
-                      <Plus size={14} />
-                      <span>Spara egen formation</span>
-                    </button>
-                  </div>
-                </motion.div>
-            </div>
-
-            {/* Combined Section: Zoom, Storlek & Layout */}
-            <div className="flex flex-col bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-200 dark:border-zinc-800 shadow-sm overflow-hidden animate-in fade-in slide-in-from-bottom-2">
-              <button 
-                onClick={() => setIsSettingsExpanded(!isSettingsExpanded)}
-                className="flex items-center justify-between p-4 w-full hover:bg-zinc-50 dark:hover:bg-zinc-800/50 transition-colors group/header"
-              >
-                <div className="flex items-center gap-2">
-                  <Settings size={16} className="text-zinc-400 group-hover/header:text-indigo-500 transition-colors" />
-                  <span className="text-xs font-black text-zinc-600 dark:text-zinc-400 uppercase tracking-widest">Inställningar</span>
+          {isWide ? (
+            <aside className="sticky top-4 min-w-0">
+              <Card padded={false} className="flex flex-col overflow-hidden max-h-[calc(100dvh-7rem)]">
+                <div className="p-2 flex flex-col gap-2 border-b border-zinc-100 dark:border-zinc-800">
+                  <Button block icon={<Camera size={18} />} onClick={enterSnapshotMode}>
+                    Skärmbild att skicka till spelarna
+                  </Button>
+                  <SegmentedTabs<LineupPanel> size="sm" tabs={panelTabs.map(({ id, label }) => ({ id, label }))} value={sidePanel} onChange={setSidePanel} />
                 </div>
-                {isSettingsExpanded ? <ChevronUp size={16} className="text-zinc-400" /> : <ChevronDown size={16} className="text-zinc-400" />}
-              </button>
-
-              <motion.div
-                initial={false}
-                animate={{ height: isSettingsExpanded ? 'auto' : 0, opacity: isSettingsExpanded ? 1 : 0 }}
-                className="overflow-hidden"
-              >
-                <div className="flex flex-col gap-6 p-5 pt-0">
-                  {/* Part 1: Zoom & Storlek (HÖGST UPP) */}
-                  <div className="flex flex-col gap-3">
-                    <span className="text-[10px] font-black text-zinc-600 dark:text-zinc-400 uppercase tracking-widest ml-1">Zoom & Storlek</span>
-                    
-                    {/* Zoom interface rows */}
-                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 bg-zinc-100 dark:bg-zinc-950 p-3 rounded-2xl border border-zinc-200 dark:border-zinc-800/80">
-                      <div className="flex flex-col">
-                        <span className="text-[10px] font-black text-zinc-800 dark:text-zinc-200 uppercase tracking-widest leading-none mb-1">Zoom Gränssnitt</span>
-                        <span className="text-[10px] font-bold text-zinc-600 dark:text-zinc-400">Anpassa storleken på skärmen</span>
-                      </div>
-                      <div className="flex items-center gap-1 shrink-0">
-                        <button 
-                          onClick={() => setPreviewZoom(Math.max(0.5, Math.round((previewZoom - 0.05) * 100) / 100))}
-                          className="w-8 h-8 flex items-center justify-center bg-white dark:bg-zinc-900 hover:bg-zinc-200 dark:hover:bg-zinc-800 rounded-lg text-zinc-700 dark:text-zinc-300 hover:text-zinc-900 dark:hover:text-white transition-all border border-zinc-200 dark:border-zinc-800/80"
-                          title="Minska zoom"
-                        >
-                          <Minus size={14} />
-                        </button>
-                        <div className="px-3 py-1.5 bg-zinc-200/80 dark:bg-zinc-800 rounded-lg shadow-inner min-w-[60px] text-center flex items-center justify-center">
-                          <span className="text-xs font-mono font-black text-zinc-900 dark:text-zinc-100">
-                            {Math.round(previewZoom * 100)}%
-                          </span>
-                        </div>
-                        <button 
-                          onClick={() => setPreviewZoom(Math.min(1.5, Math.round((previewZoom + 0.05) * 100) / 100))}
-                          className="w-8 h-8 flex items-center justify-center bg-white dark:bg-zinc-900 hover:bg-zinc-200 dark:hover:bg-zinc-800 rounded-lg text-zinc-700 dark:text-zinc-300 hover:text-zinc-900 dark:hover:text-white transition-all border border-zinc-200 dark:border-zinc-800/80"
-                          title="Öka zoom"
-                        >
-                          <Plus size={14} />
-                        </button>
-                        {previewZoom !== 1 && (
-                          <button 
-                            onClick={() => setPreviewZoom(1)}
-                            className="w-8 h-8 flex items-center justify-center bg-white dark:bg-zinc-900 hover:bg-zinc-200 dark:hover:bg-zinc-800 rounded-lg text-zinc-600 dark:text-zinc-400 hover:text-indigo-600 transition-all border border-zinc-200 dark:border-zinc-800/80"
-                            title="Återställ zoom (100%)"
-                          >
-                            <RotateCcw size={12} />
-                          </button>
-                        )}
-                      </div>
-                    </div>
-
-                    {/* Scale interface rows */}
-                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 bg-zinc-100 dark:bg-zinc-950 p-3 rounded-2xl border border-zinc-200 dark:border-zinc-800/80">
-                      <div className="flex flex-col">
-                        <span className="text-[10px] font-black text-zinc-800 dark:text-zinc-200 uppercase tracking-widest leading-none mb-1">Spelarstorlek</span>
-                        <span className="text-[10px] font-bold text-zinc-600 dark:text-zinc-400">Ändra cirklarnas storlek på spelplanen</span>
-                      </div>
-                      <div className="flex items-center gap-1 shrink-0">
-                        <button 
-                          onClick={() => {
-                            setPlayerScale(Math.max(0.5, Math.round((playerScale - 0.05) * 100) / 100));
-                            setHasUnsavedChanges(true);
-                          }}
-                          className="w-8 h-8 flex items-center justify-center bg-white dark:bg-zinc-900 hover:bg-zinc-200 dark:hover:bg-zinc-800 rounded-lg text-zinc-700 dark:text-zinc-300 hover:text-zinc-900 dark:hover:text-white transition-all border border-zinc-200 dark:border-zinc-800/80"
-                          title="Minska spelarstorlek"
-                        >
-                          <Minus size={14} />
-                        </button>
-                        <div className="px-3 py-1.5 bg-zinc-200/80 dark:bg-zinc-800 rounded-lg shadow-inner min-w-[60px] text-center flex items-center justify-center">
-                          <span className="text-xs font-mono font-black text-zinc-900 dark:text-zinc-100">
-                            {Math.round(playerScale * 100)}%
-                          </span>
-                        </div>
-                        <button 
-                          onClick={() => {
-                            setPlayerScale(Math.min(1.5, Math.round((playerScale + 0.05) * 100) / 100));
-                            setHasUnsavedChanges(true);
-                          }}
-                          className="w-8 h-8 flex items-center justify-center bg-white dark:bg-zinc-900 hover:bg-zinc-200 dark:hover:bg-zinc-800 rounded-lg text-zinc-700 dark:text-zinc-300 hover:text-zinc-900 dark:hover:text-white transition-all border border-zinc-200 dark:border-zinc-800/80"
-                          title="Öka spelarstorlek"
-                        >
-                          <Plus size={14} />
-                        </button>
-                        {playerScale !== 1 && (
-                          <button 
-                            onClick={() => {
-                              setPlayerScale(1);
-                              setHasUnsavedChanges(true);
-                            }}
-                            className="w-8 h-8 flex items-center justify-center bg-white dark:bg-zinc-900 hover:bg-zinc-200 dark:hover:bg-zinc-800 rounded-lg text-zinc-600 dark:text-zinc-400 hover:text-indigo-600 transition-all border border-zinc-200 dark:border-zinc-800/80"
-                            title="Återställ spelarstorlek"
-                          >
-                            <RotateCcw size={12} />
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Horizontal Line Divider */}
-                  <div className="h-[1px] bg-zinc-150 dark:bg-zinc-800/80 w-full" />
-
-                  {/* Part 2: Spelarutseende */}
-                  <div className="flex flex-col gap-3">
-                    <span className="text-[10px] font-black text-zinc-500 dark:text-zinc-400 uppercase tracking-widest ml-1">Spelarutseende</span>
-                    
-                    <div className="grid grid-cols-2 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                      {/* Theme Style */}
-                      <div className="flex flex-col gap-2">
-                        <span className="text-[10px] font-black text-zinc-500 dark:text-zinc-400 uppercase tracking-widest ml-1">Namnfärg</span>
-                        <div className="flex gap-1 p-1 bg-zinc-100 dark:bg-zinc-950 rounded-2xl border border-zinc-200 dark:border-zinc-800">
-                          <button
-                            onClick={() => {
-                              setNameTagStyle('light');
-                              setHasUnsavedChanges(true);
-                            }}
-                            className={`flex-1 px-3 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${
-                              nameTagStyle === 'light'
-                                ? 'bg-indigo-600 text-white shadow-lg'
-                                : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-200 hover:bg-zinc-200/60 dark:hover:bg-zinc-800'
-                            }`}
-                          >
-                            Ljus
-                          </button>
-                          <button
-                            onClick={() => {
-                              setNameTagStyle('dark');
-                              setHasUnsavedChanges(true);
-                            }}
-                            className={`flex-1 px-3 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${
-                              nameTagStyle === 'dark'
-                                ? 'bg-indigo-600 text-white shadow-lg'
-                                : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-200 hover:bg-zinc-200/60 dark:hover:bg-zinc-800'
-                            }`}
-                          >
-                            Mörk
-                          </button>
-                        </div>
-                      </div>
-
-                      {/* Photo Toggle */}
-                      <div className="flex flex-col gap-2">
-                        <span className="text-[10px] font-black text-zinc-500 dark:text-zinc-400 uppercase tracking-widest ml-1">Spelarfoto</span>
-                        <button
-                          onClick={() => {
-                            setShowPhoto(!showPhoto);
-                            setHasUnsavedChanges(true);
-                          }}
-                          className={`flex items-center justify-between px-4 py-3 rounded-2xl border transition-all ${
-                            showPhoto
-                              ? 'bg-indigo-600 border-indigo-500 text-white shadow-lg'
-                              : 'bg-zinc-100 dark:bg-zinc-950 border-zinc-200 dark:border-zinc-800 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-200 dark:hover:bg-zinc-800'
-                          }`}
-                        >
-                          <span className="text-[10px] font-black uppercase tracking-widest">{showPhoto ? 'Ja' : 'Nej'}</span>
-                          <Camera size={14} className={showPhoto ? 'text-white' : 'text-zinc-400'} />
-                        </button>
-                      </div>
-
-                      {/* Number Toggle */}
-                      <div className="flex flex-col gap-2">
-                        <span className="text-[10px] font-black text-zinc-500 dark:text-zinc-400 uppercase tracking-widest ml-1">Tröjnummer</span>
-                        <button
-                          onClick={() => {
-                            setShowNumber(!showNumber);
-                            setHasUnsavedChanges(true);
-                          }}
-                          className={`flex items-center justify-between px-4 py-3 rounded-2xl border transition-all ${
-                            showNumber
-                              ? 'bg-indigo-600 border-indigo-500 text-white shadow-lg'
-                              : 'bg-zinc-100 dark:bg-zinc-950 border-zinc-200 dark:border-zinc-800 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-200 dark:hover:bg-zinc-800'
-                          }`}
-                        >
-                          <span className="text-[10px] font-black uppercase tracking-widest">{showNumber ? 'Ja' : 'Nej'}</span>
-                          <div className={`w-3 h-3 rounded-md border-2 border-current flex items-center justify-center ${showNumber ? 'bg-white border-white' : 'border-zinc-400'}`}>
-                            {showNumber && <div className="w-1.5 h-1.5 bg-indigo-600 rounded-sm" />}
-                          </div>
-                        </button>
-                      </div>
-
-                      {/* Name Toggle */}
-                      <div className="flex flex-col gap-2">
-                        <span className="text-[10px] font-black text-zinc-500 dark:text-zinc-400 uppercase tracking-widest ml-1">Spelarnamn</span>
-                        <button
-                          onClick={() => {
-                            setShowName(!showName);
-                            setHasUnsavedChanges(true);
-                          }}
-                          className={`flex items-center justify-between px-4 py-3 rounded-2xl border transition-all ${
-                            showName
-                              ? 'bg-indigo-600 border-indigo-500 text-white shadow-lg'
-                              : 'bg-zinc-100 dark:bg-zinc-950 border-zinc-200 dark:border-zinc-800 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-200 dark:hover:bg-zinc-800'
-                          }`}
-                        >
-                          <span className="text-[10px] font-black uppercase tracking-widest">{showName ? 'Ja' : 'Nej'}</span>
-                          <User size={14} className={showName ? 'text-white' : 'text-zinc-400'} />
-                        </button>
-                      </div>
-
-                      {/* Position Description Toggle */}
-                      <div className="flex flex-col gap-2">
-                        <span className="text-[10px] font-black text-zinc-500 dark:text-zinc-400 uppercase tracking-widest ml-1">Positionsbeskrivning</span>
-                        <button
-                          onClick={() => {
-                            setShowPositionDescriptions(!showPositionDescriptions);
-                            setHasUnsavedChanges(true);
-                          }}
-                          className={`flex items-center justify-between px-4 py-3 rounded-2xl border transition-all cursor-pointer ${
-                            showPositionDescriptions
-                              ? 'bg-indigo-600 border-indigo-500 text-white shadow-lg'
-                              : 'bg-zinc-100 dark:bg-zinc-950 border-zinc-200 dark:border-zinc-800 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-200 dark:hover:bg-zinc-800'
-                          }`}
-                        >
-                          <span className="text-[10px] font-black uppercase tracking-widest">{showPositionDescriptions ? 'Ja' : 'Nej'}</span>
-                          {showPositionDescriptions ? <Eye size={14} className="text-white" /> : <EyeOff size={14} className="text-zinc-400" />}
-                        </button>
-                      </div>
-
-                      {/* Name Mode */}
-                      <div className="flex flex-col gap-2 col-span-2 md:col-span-2 lg:col-span-3">
-                        <span className="text-[10px] font-black text-zinc-500 dark:text-zinc-400 uppercase tracking-widest ml-1">Namnformat</span>
-                        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-1 p-1 bg-zinc-100 dark:bg-zinc-950 rounded-2xl border border-zinc-200 dark:border-zinc-800">
-                          <button onClick={() => {
-                            setNameDisplayMode('first');
-                            setHasUnsavedChanges(true);
-                          }} className={`px-2 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${nameDisplayMode === 'first' ? 'bg-indigo-600 text-white shadow-md' : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-200 hover:bg-zinc-200/60 dark:hover:bg-zinc-800'}`}>Förnamn</button>
-                          <button onClick={() => {
-                            setNameDisplayMode('last');
-                            setHasUnsavedChanges(true);
-                          }} className={`px-2 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${nameDisplayMode === 'last' ? 'bg-indigo-600 text-white shadow-md' : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-200 hover:bg-zinc-200/60 dark:hover:bg-zinc-800'}`}>Efternamn</button>
-                          <button onClick={() => {
-                            setNameDisplayMode('full');
-                            setHasUnsavedChanges(true);
-                          }} className={`px-2 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${nameDisplayMode === 'full' ? 'bg-indigo-600 text-white shadow-md' : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-200 hover:bg-zinc-200/60 dark:hover:bg-zinc-800'}`}>Hela namnet</button>
-                          <button onClick={() => {
-                            setNameDisplayMode('initials');
-                            setHasUnsavedChanges(true);
-                          }} className={`px-2 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${nameDisplayMode === 'initials' ? 'bg-indigo-600 text-white shadow-md' : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-200 hover:bg-zinc-200/60 dark:hover:bg-zinc-800'}`}>Initialer</button>
-                          <button onClick={() => {
-                            setNameDisplayMode('firstLastInitial');
-                            setHasUnsavedChanges(true);
-                          }} className={`px-2 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${nameDisplayMode === 'firstLastInitial' ? 'bg-indigo-600 text-white shadow-md' : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-200 hover:bg-zinc-200/60 dark:hover:bg-zinc-800'}`}>Namn + I.</button>
-                          <button onClick={() => {
-                            setNameDisplayMode('initialLastName');
-                            setHasUnsavedChanges(true);
-                          }} className={`px-2 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${nameDisplayMode === 'initialLastName' ? 'bg-indigo-600 text-white shadow-md' : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-200 hover:bg-zinc-200/60 dark:hover:bg-zinc-800'}`}>I. + Efternamn</button>
-                        </div>
-                      </div>
-
-                      {/* Background Type */}
-                      <div className="flex flex-col gap-2 col-span-2 md:col-span-3">
-                        <span className="text-[10px] font-black text-zinc-500 dark:text-zinc-400 uppercase tracking-widest ml-1">Skyltstil</span>
-                        <div className="flex gap-1 p-1 bg-zinc-100 dark:bg-zinc-950 rounded-2xl border border-zinc-200 dark:border-zinc-800">
-                          <button onClick={() => {
-                            setNameBackgroundType('badge');
-                            setShowNameBackground(true);
-                            setHasUnsavedChanges(true);
-                          }} className={`flex-1 px-1 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${nameBackgroundType === 'badge' && showNameBackground ? 'bg-indigo-600 text-white shadow-md' : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-200 hover:bg-zinc-200/60 dark:hover:bg-zinc-800'}`}>Badge</button>
-                          <button onClick={() => {
-                            setNameBackgroundType('transparent');
-                            setShowNameBackground(true);
-                            setHasUnsavedChanges(true);
-                          }} className={`flex-1 px-1 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${nameBackgroundType === 'transparent' && showNameBackground ? 'bg-indigo-600 text-white shadow-md' : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-200 hover:bg-zinc-200/60 dark:hover:bg-zinc-800'}`}>Genomskinlig</button>
-                          <button onClick={() => {
-                            setNameBackgroundType('solid');
-                            setShowNameBackground(true);
-                            setHasUnsavedChanges(true);
-                          }} className={`flex-1 px-1 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${nameBackgroundType === 'solid' && showNameBackground ? 'bg-indigo-600 text-white shadow-md' : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-200 hover:bg-zinc-200/60 dark:hover:bg-zinc-800'}`}>Bakgrund</button>
-                          <button onClick={() => {
-                            setNameBackgroundType('none');
-                            setShowNameBackground(false);
-                            setHasUnsavedChanges(true);
-                          }} className={`flex-1 px-1 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${(!showNameBackground || nameBackgroundType === 'none') ? 'bg-indigo-600 text-white shadow-md' : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-200 hover:bg-zinc-200/60 dark:hover:bg-zinc-800'}`}>Ingen</button>
-                        </div>
-                      </div>
-
-                      <div className="flex flex-col gap-2 col-span-2 md:col-span-3">
-                        <span className="text-[10px] font-black text-zinc-500 dark:text-zinc-400 uppercase tracking-widest ml-1">Planstil</span>
-                        <div className="grid grid-cols-2 xs:grid-cols-3 gap-1 p-1 bg-zinc-100 dark:bg-zinc-950 rounded-2xl border border-zinc-200 dark:border-zinc-800">
-                          <button onClick={() => {
-                            setPitchType('classic');
-                            setHasUnsavedChanges(true);
-                          }} className={`px-1 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${pitchType === 'classic' ? 'bg-indigo-600 text-white shadow-md' : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-200 hover:bg-zinc-200/60 dark:hover:bg-zinc-800'}`}>Grön Ränder</button>
-                          <button onClick={() => {
-                            setPitchType('blue-stripes');
-                            setHasUnsavedChanges(true);
-                          }} className={`px-1 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${pitchType === 'blue-stripes' ? 'bg-indigo-600 text-white shadow-md' : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-200 hover:bg-zinc-200/60 dark:hover:bg-zinc-800'}`}>Blå Ränder</button>
-                          <button onClick={() => {
-                            setPitchType('grass');
-                            setHasUnsavedChanges(true);
-                          }} className={`px-1 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${pitchType === 'grass' ? 'bg-indigo-600 text-white shadow-md' : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-200 hover:bg-zinc-200/60 dark:hover:bg-zinc-800'}`}>Gräs</button>
-                          <button onClick={() => {
-                            setPitchType('blue-grass');
-                            setHasUnsavedChanges(true);
-                          }} className={`px-1 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${pitchType === 'blue-grass' ? 'bg-indigo-600 text-white shadow-md' : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-200 hover:bg-zinc-200/60 dark:hover:bg-zinc-800'}`}>Blå Gräs</button>
-                          <button onClick={() => {
-                            setPitchType('blue');
-                            setHasUnsavedChanges(true);
-                          }} className={`px-1 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${pitchType === 'blue' ? 'bg-indigo-600 text-white shadow-md' : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-200 hover:bg-zinc-200/60 dark:hover:bg-zinc-800'}`}>Mix Blå</button>
-                          <button onClick={() => {
-                            setPitchType('solid-blue');
-                            setHasUnsavedChanges(true);
-                          }} className={`px-1 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${pitchType === 'solid-blue' ? 'bg-indigo-600 text-white shadow-md' : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-200 hover:bg-zinc-200/60 dark:hover:bg-zinc-800'}`}>Solid Blå</button>
-                          <button onClick={() => {
-                            setPitchType('solid-white');
-                            setHasUnsavedChanges(true);
-                          }} className={`px-1 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${pitchType === 'solid-white' ? 'bg-indigo-600 text-white shadow-md' : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-200 hover:bg-zinc-200/60 dark:hover:bg-zinc-800'}`}>Solid Vit</button>
-                          <button onClick={() => {
-                            setPitchType('solid-black');
-                            setHasUnsavedChanges(true);
-                          }} className={`px-1 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${pitchType === 'solid-black' ? 'bg-indigo-600 text-white shadow-md' : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-200 hover:bg-zinc-200/60 dark:hover:bg-zinc-800'}`}>Solid Svart</button>
-                        </div>
-                      </div>
-
-                      <div className="flex flex-col gap-2 col-span-2 md:col-span-3">
-                        <span className="text-[10px] font-black text-zinc-500 dark:text-zinc-400 uppercase tracking-widest ml-1">Spelriktning</span>
-                        <div className="flex gap-1 p-1 bg-zinc-100 dark:bg-zinc-950 rounded-2xl border border-zinc-200 dark:border-zinc-800">
-                          {orientation === 'vertical' ? (
-                            <>
-                              <button onClick={() => {
-                                setAttackDirection('up');
-                              }} className={`flex-1 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${attackDirection === 'up' ? 'bg-indigo-600 text-white shadow-md' : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-200 hover:bg-zinc-200/60 dark:hover:bg-zinc-800'}`}>Uppåt</button>
-                              <button onClick={() => {
-                                setAttackDirection('down');
-                              }} className={`flex-1 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${attackDirection === 'down' ? 'bg-indigo-600 text-white shadow-md' : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-200 hover:bg-zinc-200/60 dark:hover:bg-zinc-800'}`}>Nedåt</button>
-                            </>
-                          ) : (
-                            <>
-                              <button onClick={() => {
-                                setAttackDirection('left');
-                              }} className={`flex-1 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${attackDirection === 'left' ? 'bg-indigo-600 text-white shadow-md' : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-200 hover:bg-zinc-200/60 dark:hover:bg-zinc-800'}`}>Vänster</button>
-                              <button onClick={() => {
-                                setAttackDirection('right');
-                              }} className={`flex-1 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${attackDirection === 'right' ? 'bg-indigo-600 text-white shadow-md' : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-200 hover:bg-zinc-200/60 dark:hover:bg-zinc-800'}`}>Höger</button>
-                            </>
-                          )}
-                        </div>
-                      </div>
-
-                      {/* Automated Pass network setting */}
-                      <div className="flex flex-col gap-2 col-span-2 md:col-span-3">
-                        <span className="text-[10px] font-black text-zinc-500 dark:text-zinc-400 uppercase tracking-widest ml-1">Automatiskt Passningsnätverk</span>
-                        <div className="grid grid-cols-2 xs:grid-cols-3 sm:grid-cols-5 gap-1 p-1 bg-zinc-100 dark:bg-zinc-950 rounded-2xl border border-zinc-200 dark:border-zinc-800">
-                          <button
-                            onClick={() => {
-                              setPassingNetworkMode('triangulation');
-                              setHasUnsavedChanges(true);
-                            }}
-                            className={`flex px-3 py-2 rounded-xl text-[10px] font-black uppercase transition-all flex-col items-center justify-center gap-1 text-center ${
-                              passingNetworkMode === 'triangulation'
-                                ? 'bg-indigo-600 text-white shadow-md'
-                                : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-200 hover:bg-zinc-200/60 dark:hover:bg-zinc-800'
-                            }`}
-                          >
-                            <span>Triangulering</span>
-                            <span className="text-[8px] opacity-75 font-medium lowercase">enbart trianglar</span>
-                          </button>
-                          <button
-                            onClick={() => {
-                              setPassingNetworkMode('standard');
-                              setHasUnsavedChanges(true);
-                            }}
-                            className={`flex px-3 py-2 rounded-xl text-[10px] font-black uppercase transition-all flex-col items-center justify-center gap-1 text-center ${
-                              passingNetworkMode === 'standard'
-                                ? 'bg-indigo-600 text-white shadow-md'
-                                : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-200 hover:bg-zinc-200/60 dark:hover:bg-zinc-800'
-                            }`}
-                          >
-                            <span>Standard (3)</span>
-                            <span className="text-[8px] opacity-75 font-medium lowercase">trianglar + 3 närmaste</span>
-                          </button>
-                          <button
-                            onClick={() => {
-                              setPassingNetworkMode('maximum');
-                              setHasUnsavedChanges(true);
-                            }}
-                            className={`flex px-3 py-2 rounded-xl text-[10px] font-black uppercase transition-all flex-col items-center justify-center gap-1 text-center ${
-                              passingNetworkMode === 'maximum'
-                                ? 'bg-indigo-600 text-white shadow-md'
-                                : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-200 hover:bg-zinc-200/60 dark:hover:bg-zinc-800'
-                            }`}
-                          >
-                            <span>Maximalt (4)</span>
-                            <span className="text-[8px] opacity-75 font-medium lowercase">trianglar + 4 närmaste</span>
-                          </button>
-                          <button
-                            onClick={() => {
-                              setPassingNetworkMode('ultra');
-                              setHasUnsavedChanges(true);
-                            }}
-                            className={`flex px-3 py-2 rounded-xl text-[10px] font-black uppercase transition-all flex-col items-center justify-center gap-1 text-center ${
-                              passingNetworkMode === 'ultra'
-                                ? 'bg-indigo-600 text-white shadow-md'
-                                : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-200 hover:bg-zinc-200/60 dark:hover:bg-zinc-800'
-                            }`}
-                          >
-                            <span>Ultimat (5)</span>
-                            <span className="text-[8px] opacity-75 font-medium lowercase">trianglar + 5 närmaste</span>
-                          </button>
-                          <button
-                            onClick={() => {
-                              setPassingNetworkMode('lanes');
-                              setHasUnsavedChanges(true);
-                            }}
-                            className={`flex px-3 py-2 rounded-xl text-[10px] font-black uppercase transition-all flex-col items-center justify-center gap-1 text-center col-span-2 xs:col-span-1 sm:col-span-1 ${
-                              passingNetworkMode === 'lanes'
-                                ? 'bg-indigo-600 text-white shadow-md'
-                                : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-200 hover:bg-zinc-200/60 dark:hover:bg-zinc-800'
-                            }`}
-                          >
-                            <span>Spelvägar</span>
-                            <span className="text-[8px] opacity-75 font-medium lowercase">fria passningskanaler</span>
-                          </button>
-                        </div>
-                      </div>
-
-                    </div>
-                  </div>
-
+                <div className="flex-1 min-h-0 overflow-y-auto p-4 custom-scrollbar">
+                  {renderPanel(sidePanel)}
                 </div>
-              </motion.div>
-            </div>
-          </div>
-
-          {/* Column 2: Sparade laguppställningar */}
-          {showSavedLineups && (
-            <div className="flex flex-col bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-200 dark:border-zinc-800 shadow-sm overflow-hidden animate-in fade-in slide-in-from-bottom-2 duration-300">
-              <div 
-                onClick={() => setIsSavedLineupsExpanded(!isSavedLineupsExpanded)}
-                className="flex items-center justify-between p-4 w-full hover:bg-zinc-50 dark:hover:bg-zinc-800/50 transition-colors cursor-pointer group/header"
-              >
-                <div className="flex items-center justify-between flex-1 pr-4 min-w-0">
-                  <div className="flex items-center gap-2 min-w-0">
-                    <FolderOpen size={16} className="text-zinc-400 group-hover/header:text-indigo-500 transition-colors shrink-0" />
-                    <h3 className="text-xs font-black text-zinc-650 dark:text-zinc-400 uppercase tracking-widest leading-none truncate">
-                      Sparade Laguppställningar
-                    </h3>
-                  </div>
-                  <span className="text-[10px] font-bold text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-900/30 px-2.5 py-0.5 rounded-full border border-indigo-100 dark:border-indigo-800/50 shrink-0 ml-2">
-                    {isCoachOrAdmin 
-                      ? lineups.filter(l => !l.isArchived).length 
-                      : lineups.filter(l => l.isPublishedToPlayers && !l.isArchived).length}
-                  </span>
-                </div>
-
-                <div className="flex items-center gap-2 shrink-0">
-                  {isCoachOrAdmin && (
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleCreateNew();
-                      }}
-                      className="flex items-center justify-center gap-1.5 px-3 py-1.5 bg-indigo-600 text-white rounded-xl font-bold text-[10px] uppercase tracking-wider hover:bg-indigo-700 transition-all shadow-md active:scale-95 shrink-0"
-                      title="Skapa ny laguppställning"
-                    >
-                      <Plus size={14} />
-                      <span className="hidden xs:inline sm:inline">Skapa Ny</span>
-                    </button>
-                  )}
-                  <button
-                    type="button"
-                    className="p-1 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 transition-colors"
-                    aria-label={isSavedLineupsExpanded ? "Dölj" : "Visa"}
-                  >
-                    {isSavedLineupsExpanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
-                  </button>
-                </div>
-              </div>
-
-              <motion.div
-                initial={false}
-                animate={{ height: isSavedLineupsExpanded ? 'auto' : 0, opacity: isSavedLineupsExpanded ? 1 : 0 }}
-                className="overflow-hidden"
-              >
-                <div className="flex flex-col gap-6 p-5 pt-1">
-                  <Reorder.Group 
-                    axis="y" 
-                    values={Array.from(new Map((isCoachOrAdmin ? lineups.filter(l => !l.isArchived) : lineups.filter(l => l.isPublishedToPlayers && !l.isArchived)).map(l => [l.id, l])).values())} 
-                    onReorder={(reordered) => {
-                      if (!isCoachOrAdmin) return;
-                      const archived = lineups.filter(l => l.isArchived);
-                      onReorderLineups([...reordered, ...archived]);
-                    }}
-                    className="flex flex-col gap-3 w-full"
-                  >
-                    {(() => {
-                      const visible = isCoachOrAdmin 
-                        ? lineups.filter(l => !l.isArchived)
-                        : lineups.filter(l => l.isPublishedToPlayers && !l.isArchived);
-
-                      if (visible.length === 0) {
-                        return (
-                          <div className="p-8 text-center bg-zinc-50 dark:bg-zinc-950 rounded-2xl border-2 border-dashed border-zinc-150 dark:border-zinc-800/60">
-                            <p className="text-zinc-400 font-medium italic text-xs">
-                              {isCoachOrAdmin ? 'Inga sparade laguppställningar än...' : 'Inga publicerade laguppställningar än...'}
-                            </p>
-                          </div>
-                        );
-                      }
-
-                      return Array.from(new Map(visible.map(l => [l.id, l])).values()).map(l => (
-                        <LineupReorderItem
-                          key={l.id}
-                          l={l}
-                          activeLineupId={lineup?.id}
-                          onSelectLineup={handleSelectLineupWithHistory}
-                          toggleArchive={toggleArchive}
-                          onCopyLineup={onCopyLineup}
-                          onDeleteLineup={onDeleteLineup}
-                          onEditTitle={openTitleEditForLineup}
-                          onTogglePublish={(id) => {
-                            const target = lineups.find(x => x.id === id);
-                            if (target) {
-                              onSaveLineup({ ...target, isPublishedToPlayers: !target.isPublishedToPlayers });
-                            }
-                          }}
-                          sessions={sessions}
-                          isCoachOrAdmin={isCoachOrAdmin}
-                        />
-                      ));
-                    })()}
-                  </Reorder.Group>
-
-                  {/* Manuell synkronisering under Laguppställningar */}
-                  {onManualSync && (
-                    <div className="pt-3 mt-2 border-t border-zinc-100 dark:border-zinc-800 animate-in fade-in duration-300">
-                      <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 p-3.5 bg-zinc-50 dark:bg-zinc-950/60 rounded-2xl border border-zinc-200/80 dark:border-zinc-800/80 shadow-sm">
-                        <div className="flex items-center gap-3">
-                          <div className="w-9 h-9 rounded-xl bg-indigo-50 dark:bg-indigo-950/40 text-indigo-600 dark:text-indigo-400 flex items-center justify-center shrink-0 shadow-inner">
-                            <RefreshCw size={18} className={isSyncing ? "animate-spin" : ""} />
-                          </div>
-                          <div className="flex flex-col">
-                            <span className="text-xs font-black text-zinc-900 dark:text-white uppercase tracking-wider">Synkronisering</span>
-                            <span className="text-[11px] font-medium text-zinc-500 dark:text-zinc-400">
-                              {isSyncing ? 'Hämtar och synkar med molnet...' : 'Hämta senaste ändringar mellan enheter'}
-                            </span>
-                          </div>
-                        </div>
-                        <button
-                          onClick={async () => {
-                            try {
-                              if (hasUnsavedChanges && lineup) {
-                                const pushTime = Date.now();
-                                lastPushedDateRef.current = pushTime;
-                                const pushState: Lineup = {
-                                  ...lineup,
-                                  matchTitle: lineupName,
-                                  teamName,
-                                  players,
-                                  playerScale,
-                                  nameTagStyle,
-                                  nameDisplayMode,
-                                  showNameBackground,
-                                  nameBackgroundType,
-                                  showPhoto,
-                                  showName,
-                                  showNumber,
-                                  teamLogoUrl,
-                                  pitchType,
-                                  orientation,
-                                  attackDirection,
-                                  formation: currentFormation,
-                                  notes: {
-                                    team: { text: teamNotes, media: teamMedia },
-                                    opponent: { text: opponentNotes, media: opponentMedia }
-                                  },
-                                  tacticalBoard: {
-                                    drawings: tacticalDrawings,
-                                    footballPos,
-                                    footballScale,
-                                    opponents,
-                                    showOpponents,
-                                    opponentColor,
-                                    players: tacticalPlayers
-                                  },
-                                  date: pushTime
-                                };
-                                onUpdateLineup(pushState);
-                                setHasUnsavedChanges(false);
-                              }
-                              if (onManualPush) {
-                                await onManualPush();
-                              } else if (onManualSync) {
-                                await onManualSync();
-                              }
-                            } catch (err) {
-                              console.error("Manual sync failed:", err);
-                            }
-                          }}
-                          disabled={isSyncing}
-                          className="flex items-center justify-center gap-2 px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-400 text-white rounded-xl font-bold text-xs uppercase tracking-wider transition-all shadow-md active:scale-95 shrink-0 cursor-pointer"
-                        >
-                          <RefreshCw size={14} className={isSyncing ? "animate-spin" : ""} />
-                          <span>{isSyncing ? 'Synkar...' : 'Synka nu'}</span>
-                        </button>
-                      </div>
-                      {sessionActionCount > 0 && (
-                        <p className="text-[10px] font-bold text-amber-600 dark:text-amber-400 mt-2 px-1">
-                          Obs: Du har {sessionActionCount} osynkade lokala ändringar som sparas och skickas upp till molnet först.
-                        </p>
-                      )}
-                    </div>
-                  )}
-
-                  {/* Archived Lineups Section */}
-                  {isCoachOrAdmin && lineups.some(l => l.isArchived) && (
-                    <div className="pt-4 mt-2 border-t border-zinc-100 dark:border-zinc-800">
-                      <button 
-                        onClick={() => setIsArchiveExpanded(!isArchiveExpanded)}
-                        className="flex items-center justify-between w-full px-4 py-3 bg-zinc-100 dark:bg-zinc-950 rounded-2xl hover:bg-zinc-200 dark:hover:bg-zinc-900/60 transition-all group border border-zinc-200 dark:border-zinc-800/50"
-                      >
-                        <div className="flex items-center gap-2">
-                          <Archive size={16} className="text-zinc-400 group-hover:text-amber-500 transition-colors" />
-                          <span className="text-xs font-black text-zinc-700 dark:text-zinc-400 uppercase tracking-widest">
-                            Arkiverade ({lineups.filter(l => l.isArchived).length})
-                          </span>
-                        </div>
-                        {isArchiveExpanded ? <ChevronUp size={16} className="text-zinc-400" /> : <ChevronDown size={16} className="text-zinc-400" />}
-                      </button>
-
-                      <AnimatePresence>
-                        {isArchiveExpanded && (
-                          <motion.div
-                            initial={{ height: 0, opacity: 0 }}
-                            animate={{ height: 'auto', opacity: 1 }}
-                            exit={{ height: 0, opacity: 0 }}
-                            className="overflow-hidden"
-                          >
-                            <div className="flex flex-col gap-3 w-full mt-4">
-                              {Array.from(new Map(lineups.filter(l => l.isArchived).map(l => [l.id, l])).values()).map(l => (
-                                <div 
-                                  key={l.id}
-                                  className="group p-4 bg-zinc-50/50 dark:bg-zinc-900/20 rounded-[20px] border border-zinc-100/80 dark:border-zinc-800 flex items-center justify-between w-full min-w-0 opacity-70 hover:opacity-100 transition-all"
-                                >
-                                  <div 
-                                    className="flex-1 cursor-pointer min-w-0 pr-2" 
-                                    onClick={() => handleSelectLineupWithHistory(l.id)}
-                                  >
-                                    <h4 className="font-bold text-zinc-700 dark:text-zinc-300 tracking-tight leading-tight truncate text-xs">
-                                      {l.matchTitle || 'Namnlös Match'}
-                                    </h4>
-                                    <span className="text-[9px] font-medium text-zinc-400 uppercase tracking-widest leading-none mt-1.5 block">
-                                      Arkiverad
-                                    </span>
-                                  </div>
-
-                                  <div className="flex items-center gap-1 shrink-0 ml-2">
-                                    <button
-                                      onClick={() => openTitleEditForLineup(l.id, l.matchTitle || '', l.teamName || '', l.sessionId)}
-                                      className="p-1.5 text-zinc-400 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-zinc-100/50 dark:hover:bg-zinc-900/40 rounded-lg transition-all cursor-pointer"
-                                      title="Redigera rubriker & matchkoppling"
-                                    >
-                                      <Pencil size={14} />
-                                    </button>
-                                    <button
-                                      onClick={(e) => toggleArchive(e, l.id)}
-                                      className="p-1.5 text-zinc-400 hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-150/50 dark:hover:bg-emerald-950/20 rounded-lg transition-all"
-                                      title="Återställ"
-                                    >
-                                      <ArchiveRestore size={14} />
-                                    </button>
-                                    <button
-                                      onClick={() => onCopyLineup(l.id)}
-                                      className="p-1.5 text-zinc-400 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-indigo-100/50 dark:hover:bg-indigo-900/40 rounded-lg transition-all"
-                                      title="Kopiera"
-                                    >
-                                      <Copy size={14} />
-                                    </button>
-                                    <button
-                                      onClick={() => onDeleteLineup(l.id)}
-                                      className="p-1.5 text-zinc-400 hover:text-red-650 dark:hover:text-red-405 hover:bg-red-150/50 dark:hover:bg-red-955/20 rounded-lg transition-all"
-                                      title="Radera"
-                                    >
-                                      <Trash2 size={14} />
-                                    </button>
-                                  </div>
-                                </div>
-                              ))}
-                            </div>
-                          </motion.div>
-                        )}
-                      </AnimatePresence>
-                    </div>
-                  )}
-                </div>
-              </motion.div>
-            </div>
+              </Card>
+            </aside>
+          ) : (
+            <Sheet
+              open={mobilePanel !== null}
+              onClose={() => setMobilePanel(null)}
+              title={PANEL_TITLES[mobilePanel ?? lastMobilePanel]}
+            >
+              <div className="px-2 pb-2">{renderPanel(mobilePanel ?? lastMobilePanel)}</div>
+            </Sheet>
           )}
         </div>
-      </>
-    )}
+      ) : pitchArea}
       <AnimatePresence>
         {/* Logo Cropping Modal */}
         {showLogoPicker && logoToCrop && (
@@ -7757,151 +7892,7 @@ export default function LineupBuilder({
                 </button>
               </div>
 
-              {uploadError && (
-                <div className="mb-6 p-4 bg-red-50 dark:bg-red-900/20 border border-red-100 dark:border-red-900/50 rounded-2xl flex items-center gap-3 text-red-600 dark:text-red-400 text-sm font-bold animate-in fade-in slide-in-from-top-2">
-                  <X size={18} className="shrink-0" />
-                  <p>{uploadError}</p>
-                  <button onClick={() => setUploadError(null)} className="ml-auto p-1 hover:bg-red-100 dark:hover:bg-red-900/40 rounded-lg transition-colors">
-                    <X size={14} />
-                  </button>
-                </div>
-              )}
-
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-                {/* Team Notes */}
-                <div className="space-y-4">
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-xl bg-indigo-100 dark:bg-indigo-900/30 flex items-center justify-center text-indigo-600">
-                      <Trophy size={20} />
-                    </div>
-                    <h4 className="text-xl font-black text-zinc-900 dark:text-white uppercase tracking-tighter">Vårt Lag</h4>
-                  </div>
-                  <textarea
-                    ref={teamTextareaRef}
-                    value={teamNotes}
-                    onChange={(e) => {
-                      setTeamNotes(e.target.value);
-                      setHasUnsavedChanges(true);
-                    }}
-                    placeholder="Skriv anteckningar om ditt lag..."
-                    style={{ minHeight: '100px' }}
-                    className="w-full p-4 rounded-3xl bg-white dark:bg-zinc-900 border-2 border-zinc-100 dark:border-zinc-800 focus:border-indigo-500 transition-all outline-none text-sm resize-none overflow-hidden"
-                  />
-                  
-                  {/* Media Upload */}
-                  <div className="space-y-3">
-                    <span className="text-[10px] font-black text-zinc-400 uppercase tracking-widest pl-2">Media</span>
-                    <div className="grid grid-cols-4 gap-2">
-                       {teamMedia.map((url, i) => (
-                         <div key={i} className="relative aspect-square rounded-2xl bg-zinc-200 dark:bg-zinc-800 overflow-hidden group cursor-pointer" onClick={() => setSelectedMediaUrl(url)}>
-                           {isVideo(url) ? (
-                             <div className="w-full h-full flex items-center justify-center bg-zinc-900">
-                               <Play size={24} className="text-white group-hover:scale-125 transition-transform" />
-                             </div>
-                           ) : (
-                             <CachedImage src={url} alt="Media" className="w-full h-full object-cover group-hover:scale-110 transition-transform" />
-                           )}
-                           <button 
-                             onClick={(e) => {
-                               e.stopPropagation();
-                               handleMediaDelete(url, 'team');
-                             }}
-                             className="absolute top-1.5 right-1.5 bg-black/70 hover:bg-red-600 text-white p-2 rounded-xl transition-all shadow-lg z-10"
-                             title="Ta bort media"
-                           >
-                             <Trash2 size={14} />
-                           </button>
-                         </div>
-                       ))}
-                       <label className={`aspect-square rounded-2xl border-2 border-dashed border-zinc-200 dark:border-zinc-800 flex flex-col items-center justify-center gap-1 cursor-pointer hover:bg-zinc-100 dark:hover:bg-zinc-900/50 transition-all group ${isUploadingMedia ? 'opacity-50 pointer-events-none' : ''}`}>
-                         {isUploadingMedia ? (
-                           <RefreshCw size={16} className="text-indigo-600 animate-spin" />
-                         ) : (
-                           <Plus size={16} className="text-zinc-400 group-hover:scale-110 transition-transform" />
-                         )}
-                         <span className="text-[8px] font-black text-zinc-400 uppercase">{isUploadingMedia ? 'Laddar...' : 'Lägg till'}</span>
-                         <input 
-                           type="file" 
-                           accept="image/*,video/*" 
-                           className="hidden" 
-                           disabled={isUploadingMedia}
-                           onChange={(e) => {
-                              const file = e.target.files?.[0];
-                              if (file) handleMediaUpload(file, 'team');
-                           }}
-                         />
-                       </label>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Opponent Notes */}
-                <div className="space-y-4">
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-xl bg-red-100 dark:bg-red-900/30 flex items-center justify-center text-red-600">
-                      <Target size={20} />
-                    </div>
-                    <h4 className="text-xl font-black text-zinc-900 dark:text-white uppercase tracking-tighter">Motståndarna</h4>
-                  </div>
-                  <textarea
-                    ref={opponentTextareaRef}
-                    value={opponentNotes}
-                    onChange={(e) => {
-                      setOpponentNotes(e.target.value);
-                      setHasUnsavedChanges(true);
-                    }}
-                    placeholder="Skriv anteckningar om motståndarna..."
-                    style={{ minHeight: '100px' }}
-                    className="w-full p-4 rounded-3xl bg-white dark:bg-zinc-900 border-2 border-zinc-100 dark:border-zinc-800 focus:border-red-500 transition-all outline-none text-sm resize-none overflow-hidden"
-                  />
-
-                  {/* Media Upload */}
-                  <div className="space-y-3">
-                    <span className="text-[10px] font-black text-zinc-400 uppercase tracking-widest pl-2">Media</span>
-                    <div className="grid grid-cols-4 gap-2">
-                       {opponentMedia.map((url, i) => (
-                         <div key={i} className="relative aspect-square rounded-2xl bg-zinc-200 dark:bg-zinc-800 overflow-hidden group cursor-pointer" onClick={() => setSelectedMediaUrl(url)}>
-                           {isVideo(url) ? (
-                             <div className="w-full h-full flex items-center justify-center bg-zinc-900">
-                               <Play size={24} className="text-white group-hover:scale-125 transition-transform" />
-                             </div>
-                           ) : (
-                             <CachedImage src={url} alt="Media" className="w-full h-full object-cover group-hover:scale-110 transition-transform" />
-                           )}
-                           <button 
-                             onClick={(e) => {
-                               e.stopPropagation();
-                               handleMediaDelete(url, 'opponent');
-                             }}
-                             className="absolute top-1.5 right-1.5 bg-black/70 hover:bg-red-600 text-white p-2 rounded-xl transition-all shadow-lg z-10"
-                             title="Ta bort media"
-                           >
-                             <Trash2 size={14} />
-                           </button>
-                         </div>
-                       ))}
-                       <label className={`aspect-square rounded-2xl border-2 border-dashed border-zinc-200 dark:border-zinc-800 flex flex-col items-center justify-center gap-1 cursor-pointer hover:bg-zinc-100 dark:hover:bg-zinc-900/50 transition-all group ${isUploadingMedia ? 'opacity-50 pointer-events-none' : ''}`}>
-                         {isUploadingMedia ? (
-                           <RefreshCw size={16} className="text-red-500 animate-spin" />
-                         ) : (
-                           <Plus size={16} className="text-zinc-400 group-hover:scale-110 transition-transform" />
-                         )}
-                         <span className="text-[8px] font-black text-zinc-400 uppercase">{isUploadingMedia ? 'Laddar...' : 'Lägg till'}</span>
-                         <input 
-                           type="file" 
-                           accept="image/*,video/*" 
-                           className="hidden" 
-                           disabled={isUploadingMedia}
-                           onChange={(e) => {
-                              const file = e.target.files?.[0];
-                              if (file) handleMediaUpload(file, 'opponent');
-                           }}
-                         />
-                       </label>
-                    </div>
-                  </div>
-                </div>
-              </div>
+              {renderNotesContent(false)}
 
               <div className="mt-12 p-6 bg-indigo-50 dark:bg-indigo-900/10 rounded-[32px] border border-indigo-100 dark:border-indigo-900/30 flex items-center justify-between">
                  <div className="flex items-center gap-4">
@@ -8492,161 +8483,40 @@ export default function LineupBuilder({
         )}
       </AnimatePresence>
       
-      {/* Preview & Export Modal */}
-      <AnimatePresence>
-        {showPreview && (
-          <motion.div 
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-zinc-950/98 backdrop-blur-md z-[250] flex flex-col items-center justify-between p-0 overflow-hidden select-none"
+      {/* Bildläge: bara lagkortet, anpassat till skärmen, för att ta en skärmbild och skicka till spelarna. */}
+      {isSnapshotMode && (
+        <div
+          className="fixed inset-0 z-[300] bg-white dark:bg-zinc-900 flex items-center justify-center overflow-hidden select-none outline-none"
+          style={{ WebkitTapHighlightColor: 'transparent' }}
+          onClick={() => flashSnapshotDone()}
+        >
+          <div
+            ref={snapshotRef}
+            className="pointer-events-none"
+            style={{ zoom: snapshotZoom, width: orientation === 'landscape' ? 1000 : 560 }}
           >
-            {/* Screenshot Tip Banner */}
-            <AnimatePresence>
-              {isScreenshotMode && showScreenshotTip && (
-                <motion.div
-                  initial={{ opacity: 0, y: -20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -20 }}
-                  className="fixed top-8 left-1/2 -translate-x-1/2 z-[270] bg-zinc-900/90 backdrop-blur-md border border-zinc-800 text-white font-black uppercase text-[10px] tracking-widest px-6 py-3 rounded-2xl shadow-2xl pointer-events-none text-center"
-                >
-                  Tips: Klicka var som helst för att visa knapparna igen!
-                </motion.div>
-              )}
-            </AnimatePresence>
-
-            {/* Top Toolbar - Fades out in screenshot mode */}
-            <div className={`w-full bg-zinc-900/80 backdrop-blur-md border-b border-zinc-800 p-4 flex flex-col sm:flex-row items-center justify-between gap-4 z-[260] transition-all duration-300 ${isScreenshotMode ? 'opacity-0 pointer-events-none h-0 p-0 overflow-hidden border-none' : 'opacity-100'}`}>
-              <div className="flex flex-col items-center sm:items-start text-center sm:text-left">
-                <h2 className="text-sm font-black text-white uppercase tracking-widest flex items-center gap-1.5 leading-none">
-                  <Camera size={14} className="text-zinc-400" /> Skärmbildsläge
-                </h2>
-                <p className="text-[10px] text-zinc-400 font-medium tracking-wide mt-1">
-                  Planen och bänken anpassas automatiskt. Justera zoom och spelarstorlek så allt ryms.
-                </p>
-              </div>
-
-              {/* Sliders and Toggles Row */}
-              <div className="flex flex-wrap items-center justify-center gap-4 sm:gap-6">
-                {/* Scale control */}
-                <div className="flex flex-col gap-1 w-28 sm:w-32">
-                  <div className="flex justify-between text-[9px] font-black uppercase tracking-widest text-zinc-500">
-                    <span>Minska kort</span>
-                    <span className="text-zinc-400">{Math.round(previewZoom * 100)}%</span>
-                  </div>
-                  <input 
-                    type="range" 
-                    min="0.3" 
-                    max="1.2" 
-                    step="0.01" 
-                    value={previewZoom}
-                    onChange={(e) => setPreviewZoom(parseFloat(e.target.value))}
-                    className="w-full h-1 bg-zinc-800 rounded-lg appearance-none cursor-pointer accent-white"
-                  />
-                </div>
-
-                {/* Player Scale control */}
-                <div className="flex flex-col gap-1 w-28 sm:w-32">
-                  <div className="flex justify-between text-[9px] font-black uppercase tracking-widest text-zinc-500">
-                    <span>Spelare</span>
-                    <span className="text-zinc-400">{Math.round(playerScale * 100)}%</span>
-                  </div>
-                  <input 
-                    type="range" 
-                    min="0.5" 
-                    max="1.5" 
-                    step="0.05" 
-                    value={playerScale}
-                    onChange={(e) => {
-                      setPlayerScale(parseFloat(e.target.value));
-                      setHasUnsavedChanges(true);
-                    }}
-                    className="w-full h-1 bg-zinc-800 rounded-lg appearance-none cursor-pointer accent-indigo-400"
-                  />
-                </div>
-
-                {/* Quick reset button */}
-                <button
-                  onClick={() => {
-                    setPreviewZoom(0.85);
-                    setPlayerScale(1.0);
+            {renderLineupContent(true)}
+          </div>
+          {showSnapshotDone && (
+              <div
+                className="fixed top-[calc(0.75rem+env(safe-area-inset-top,0px))] left-3 right-3 flex items-center justify-between gap-3 pointer-events-none"
+              >
+                <span className="px-3 py-2 rounded-xl bg-zinc-900/85 text-white text-sm font-medium shadow-lg">
+                  Ta skärmbilden när knappen har försvunnit
+                </span>
+                <Button
+                  className="pointer-events-auto shadow-lg"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    exitSnapshotMode();
                   }}
-                  className="p-2 bg-zinc-800 hover:bg-zinc-700 hover:text-white text-zinc-400 rounded-xl transition-all"
-                  title="Återställ inställningar"
                 >
-                  <RotateCcw size={14} />
-                </button>
-
-                {/* Switch Orientation */}
-                <button
-                  onClick={() => {
-                    const newOrientation = orientation === 'landscape' ? 'vertical' : 'landscape';
-                    setOrientation(newOrientation);
-                    if (newOrientation === 'landscape') {
-                      setAttackDirection('right');
-                    } else {
-                      setAttackDirection('up');
-                    }
-                  }}
-                  className="flex items-center gap-1.5 px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 hover:text-white text-zinc-300 rounded-xl transition-all text-[9px] font-black uppercase tracking-widest whitespace-nowrap"
-                >
-                  <RefreshCw size={10} />
-                  <span>{orientation === 'landscape' ? 'Stående' : 'Liggande'}</span>
-                </button>
+                  Klar
+                </Button>
               </div>
-
-              {/* Close button */}
-              <button 
-                onClick={() => {
-                  setShowPreview(false);
-                  setIsScreenshotMode(false);
-                }}
-                className="p-2 sm:p-2.5 bg-zinc-800 hover:bg-red-950 hover:text-red-300 text-zinc-400 rounded-full transition-all active:scale-90"
-              >
-                <X size={18} />
-              </button>
-            </div>
-
-            {/* Immersive Preview Area */}
-            <div 
-              className={`flex-1 w-full max-w-full flex items-center justify-center overflow-auto p-4 transition-all duration-300 ${isScreenshotMode ? 'p-0 bg-zinc-950' : 'bg-zinc-900/10'}`}
-              onClick={isScreenshotMode ? () => {
-                setIsScreenshotMode(false);
-                setShowScreenshotTip(false);
-              } : undefined}
-            >
-              <div 
-                className="transition-transform duration-300 origin-center select-none animate-in fade-in zoom-in-95 duration-500 w-full max-w-full flex justify-center"
-                style={{ 
-                  maxWidth: '1000px',
-                }}
-              >
-                {/* Simulated Device Frame Border for preview if not in screenshot mode */}
-                <div className={`transition-all duration-300 overflow-hidden ${isScreenshotMode ? 'rounded-none border-none shadow-none p-0' : 'bg-white dark:bg-zinc-900 rounded-3xl shadow-[0_0_85px_rgba(0,0,0,0.65)] border border-white/5 overflow-hidden'}`}>
-                  {renderLineupContent(true)}
-                </div>
-              </div>
-            </div>
-
-            {/* Bottom action bar - Fades out in screenshot mode */}
-            <div className={`w-full p-6 bg-gradient-to-t from-zinc-950 to-transparent flex justify-center items-center gap-4 z-[260] transition-all duration-300 ${isScreenshotMode ? 'opacity-0 pointer-events-none h-0 p-0 overflow-hidden' : 'opacity-100'}`}>
-              <button
-                onClick={() => {
-                  setIsScreenshotMode(true);
-                  setShowScreenshotTip(true);
-                  setTimeout(() => {
-                    setShowScreenshotTip(false);
-                  }, 3000);
-                }}
-                className="flex items-center justify-center gap-2 px-8 py-4 bg-white text-zinc-950 hover:bg-zinc-100 rounded-2xl font-black uppercase text-[11px] tracking-widest shadow-2xl transition-all active:scale-95 duration-200"
-              >
-                <Camera size={16} />
-                <span>Klar för skärmbild! (Dölj knappar)</span>
-              </button>
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+          )}
+        </div>
+      )}
     </div>
   );
 }

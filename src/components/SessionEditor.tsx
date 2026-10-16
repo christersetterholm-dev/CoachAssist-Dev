@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useRef, useEffect } from 'react';
-import { ArrowLeft, Trash2, GripVertical, Clock, Calendar, Check, ListTodo, Save, ChevronDown, ChevronUp, Play, PlusCircle, Users, X, Edit2, Image as ImageIcon, Link as LinkIcon, Youtube, ExternalLink, Maximize2, Upload, Loader2, FileText, Copy, Library, Download, ChevronRight, Layout, Bell, Eye, EyeOff, UserCheck, Trophy, Dumbbell } from 'lucide-react';
+import { ArrowLeft, Trash2, GripVertical, Clock, Calendar, Check, CheckCircle2, ListTodo, Save, ChevronDown, ChevronLeft, ChevronRight, Play, PlusCircle, Users, X, Edit2, Image as ImageIcon, Link as LinkIcon, Youtube, ExternalLink, Maximize2, Upload, Loader2, FileText, Copy, Library, Download, Layout, Bell, Eye, EyeOff, UserCheck, Trophy, Dumbbell, MapPin, RotateCcw } from 'lucide-react';
 import { motion, AnimatePresence, Reorder, useDragControls } from 'motion/react';
 import { storage, ref, uploadBytesResumable, getDownloadURL, deleteObject } from '../lib/firebase';
 import { TrainingSession, SessionMoment, Exercise, SquadPlayer, UserProfile, getExerciseImages } from '../types';
@@ -9,6 +9,7 @@ import TacticalBoardModal from './TacticalBoardModal';
 import { SessionRsvpView } from './SessionRsvpView';
 import { isMatchSession } from '../utils/sessionCategory';
 import { optimizeImageForUpload } from '../utils/imageOptimizer';
+import { Button, IconButton, Card, SectionHeader, SegmentedTabs, Badge, EmptyState, Sheet } from './ui';
 
 interface SessionEditorProps {
   session: TrainingSession;
@@ -41,7 +42,7 @@ interface SessionEditorProps {
 interface MomentItemProps {
   moment: SessionMoment;
   details: any;
-  mode: 'plan' | 'live';
+  mode: 'plan' | 'live' | 'view';
   exercises: Exercise[];
   sessionDate: number;
   updateMoment: (id: string, updates: Partial<SessionMoment>) => void;
@@ -66,7 +67,7 @@ interface MomentItemProps {
 function MomentItem({ 
   moment, 
   details, 
-  mode: originalMode, 
+  mode, 
   exercises, 
   sessionDate,
   sessionTitle,
@@ -87,7 +88,6 @@ function MomentItem({
   onOpenTacticalBoard,
   isCoachOrAdmin = true
 }: MomentItemProps & { onAddAfter?: () => void }) {
-  const mode = isCoachOrAdmin ? originalMode : (originalMode === 'live' ? 'live' : 'view');
   const dragControls = useDragControls();
   const [showMediaInputs, setShowMediaInputs] = useState(false);
   const [uploadProgress, setUploadProgress] = useState<number | null>(null);
@@ -267,575 +267,463 @@ function MomentItem({
     if (e.target) e.target.value = '';
   };
 
+  const isPlan = mode === 'plan';
+  const isLive = mode === 'live';
+  const boardCount = moment.tacticalBoards?.length || 0;
+
+  const addImageUrl = () => {
+    if (!imageUrlInput.trim()) return;
+    const newUrls = [...allMomentImages, imageUrlInput.trim()];
+    updateMoment(moment.id, { imageUrls: newUrls, imageUrl: newUrls[0] || undefined });
+    setImageUrlInput('');
+  };
+
   return (
     <Reorder.Item
       key={moment.id}
       value={moment}
       dragListener={false}
       dragControls={dragControls}
-      className="group relative bg-white dark:bg-zinc-900 rounded-3xl p-5 shadow-sm border border-zinc-100 dark:border-zinc-800"
+      className="relative flex gap-3 sm:gap-4"
     >
-      <div className="flex gap-4">
-        {/* Time/Reorder indicator */}
-        <div className="flex flex-col items-center gap-2 pt-1 select-none">
-          {/* Enhanced Drag Handle for better touch response */}
-          {isCoachOrAdmin && mode === 'plan' && (
-            <div 
-              onPointerDown={(e) => dragControls.start(e)}
-              className="p-3 -m-3 cursor-grab active:cursor-grabbing touch-none text-zinc-300 dark:text-zinc-700 hover:text-indigo-500 transition-colors"
-            >
-              <GripVertical size={24} />
-            </div>
-          )}
-          
-          <div className={`font-black flex flex-col items-center pointer-events-none ${mode === 'live' ? 'mt-1 gap-1' : 'mt-2 text-[10px]'}`}>
-            <span className={`${mode === 'live' ? 'bg-indigo-600 text-white px-2.5 py-1 text-sm sm:text-base rounded-xl font-black shadow-md' : 'bg-indigo-600 text-white px-1.5 py-0.5 rounded-md mb-0.5'} whitespace-nowrap shadow-sm`}>{details.startTimeStr}</span>
-            <div className={`w-px bg-zinc-200 dark:bg-zinc-700 ${mode === 'live' ? 'h-3 my-0.5' : 'h-4 my-0.5'}`} />
-            <span className={`${mode === 'live' ? 'bg-zinc-800 dark:bg-zinc-700 text-white px-2.5 py-1 text-sm sm:text-base rounded-xl font-black shadow-md' : 'bg-zinc-800 dark:bg-zinc-700 text-white px-1.5 py-0.5 rounded-md'} whitespace-nowrap shadow-sm`}>{details.endTimeStr}</span>
-          </div>
-        </div>
-        {/* Main moment info */}
-        <div className="flex-1 min-w-0 space-y-3">
-          <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-2 sm:gap-4">
+      {/* Tidslinje */}
+      <div className="w-12 sm:w-14 shrink-0 flex flex-col items-center select-none" aria-hidden="true">
+        <span className={`mt-4 font-bold tabular-nums ${isLive ? 'text-base text-indigo-600 dark:text-indigo-400' : 'text-sm text-zinc-900 dark:text-white'}`}>
+          {details.startTimeStr}
+        </span>
+        <span className="text-xs font-medium tabular-nums text-zinc-400">{details.endTimeStr}</span>
+        <span className="mt-2 flex-1 w-0.5 rounded-full bg-zinc-200 dark:bg-zinc-800" />
+      </div>
+
+      <div className="flex-1 min-w-0 pb-4">
+        <Card padded={false} className="p-3.5 sm:p-4 space-y-3">
+          <div className="flex items-start gap-1.5">
+            {isCoachOrAdmin && isPlan && (
+              <div
+                onPointerDown={(e) => dragControls.start(e)}
+                className="w-10 h-10 -ml-1.5 shrink-0 flex items-center justify-center rounded-xl cursor-grab active:cursor-grabbing touch-none text-zinc-300 dark:text-zinc-600 hover:text-indigo-500 hover:bg-zinc-50 dark:hover:bg-zinc-800"
+                title="Dra för att flytta"
+                aria-label="Dra för att flytta momentet"
+              >
+                <GripVertical size={20} />
+              </div>
+            )}
             <div className="flex-1 min-w-0">
-              {mode === 'plan' ? (
+              {isPlan ? (
                 <input
                   type="text"
                   value={moment.name || ''}
                   onChange={(e) => updateMoment(moment.id, { name: e.target.value })}
-                  className="w-full bg-transparent border-none p-0 text-lg font-black text-zinc-900 dark:text-white focus:ring-0"
-                  placeholder="Namn på moment..."
+                  className="w-full h-10 bg-transparent border-none px-0 text-base sm:text-lg font-bold text-zinc-900 dark:text-white focus:ring-0 placeholder:text-zinc-300 dark:placeholder:text-zinc-600"
+                  placeholder="Namn på momentet"
+                  aria-label="Namn på momentet"
                 />
               ) : (
-                <h4 className="text-xl font-black text-zinc-900 dark:text-white uppercase tracking-tight break-words [overflow-wrap:anywhere]">
+                <h4 className="pt-1.5 text-base sm:text-lg font-bold text-zinc-900 dark:text-white break-words [overflow-wrap:anywhere]">
                   {moment.name || sessionTitle || 'Namnlöst moment'}
                 </h4>
               )}
             </div>
-            <div className={`flex items-center gap-1 font-black shrink-0 w-fit ${
-              mode === 'live'
-                ? 'bg-indigo-100/80 dark:bg-indigo-900/40 border-2 border-indigo-200 dark:border-indigo-900/30 px-3 py-1.5 rounded-2xl scale-110 origin-right shadow-sm'
-                : 'bg-zinc-50 dark:bg-zinc-950 px-2 py-1 rounded-lg border border-zinc-100 dark:border-zinc-800'
-            }`}>
-              <Clock size={mode === 'live' ? 14 : 12} className={mode === 'live' ? 'text-indigo-600 dark:text-indigo-400 font-bold' : 'text-zinc-400'} />
-              {mode === 'plan' ? (
-                <div className="relative flex items-center">
-                  <select
-                    value={Number(moment.duration) || 10}
-                    onChange={(e) => updateMoment(moment.id, { duration: Math.max(1, parseInt(e.target.value, 10) || 1) })}
-                    className="appearance-none bg-transparent border-none p-0 pr-1 text-sm font-black text-zinc-900 dark:text-white focus:ring-0 text-center cursor-pointer min-w-[20px]"
-                  >
-                    {Array.from({ length: 120 }, (_, i) => i + 1).map(v => (
-                      <option key={v} value={v}>{v}</option>
-                    ))}
-                  </select>
-                </div>
-              ) : (
-                <span className={`font-black ${mode === 'live' ? 'text-lg text-indigo-700 dark:text-indigo-300' : 'text-sm text-zinc-900 dark:text-white'}`}>{moment.duration}</span>
-              )}
-              <span className={`font-bold uppercase ${mode === 'live' ? 'text-[11px] text-indigo-600 dark:text-indigo-400' : 'text-[10px] text-zinc-400'}`}>min</span>
-            </div>
+            {isPlan ? (
+              <label className="shrink-0 h-10 inline-flex items-center gap-1 pl-2.5 pr-2.5 rounded-xl bg-zinc-100 dark:bg-zinc-800 text-sm font-semibold text-zinc-700 dark:text-zinc-200 cursor-pointer">
+                <Clock size={14} className="text-zinc-400" />
+                <select
+                  value={Number(moment.duration) || 10}
+                  onChange={(e) => updateMoment(moment.id, { duration: Math.max(1, parseInt(e.target.value, 10) || 1) })}
+                  className="appearance-none bg-transparent border-none p-0 text-sm font-semibold text-zinc-900 dark:text-white focus:ring-0 text-right cursor-pointer"
+                  aria-label="Längd i minuter"
+                >
+                  {Array.from({ length: 120 }, (_, i) => i + 1).map(v => (
+                    <option key={v} value={v}>{v}</option>
+                  ))}
+                </select>
+                <span className="text-zinc-500 dark:text-zinc-400">min</span>
+              </label>
+            ) : (
+              <Badge tone={isLive ? 'brand' : 'neutral'} icon={<Clock size={12} />} className="shrink-0 mt-2">{moment.duration} min</Badge>
+            )}
           </div>
 
-          {mode === 'plan' ? (
+          {isPlan ? (
             <textarea
               ref={textareaRef}
               value={moment.description || ''}
               onChange={(e) => updateMoment(moment.id, { description: e.target.value })}
-              className="w-full bg-transparent border-none p-0 text-base text-zinc-500 dark:text-zinc-400 focus:ring-0 resize-none overflow-hidden min-h-[40px]"
-              placeholder="Beskriv vad som ska göras i det här momentet..."
+              className="w-full bg-transparent border-none p-0 text-base sm:text-sm text-zinc-600 dark:text-zinc-300 focus:ring-0 resize-none overflow-hidden min-h-[40px] placeholder:text-zinc-400"
+              placeholder="Beskriv vad som ska göras i momentet"
+              aria-label="Beskrivning"
               rows={1}
             />
           ) : (
             moment.description && (
-               <p className="text-sm text-zinc-600 dark:text-zinc-400 font-medium leading-relaxed break-words [overflow-wrap:anywhere]">
-                 {moment.description}
-               </p>
+              <p className="text-sm text-zinc-600 dark:text-zinc-300 leading-relaxed whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
+                {moment.description}
+              </p>
             )
           )}
 
-          {/* Media Section */}
-          <div className="space-y-4 pt-2">
-            {mode === 'plan' ? (
-              <div className="flex flex-col gap-3">
-                <button
-                  type="button"
-                  onClick={() => setShowMediaInputs(!showMediaInputs)}
-                  className="flex items-center gap-2 text-[10px] font-black text-zinc-400 uppercase tracking-widest hover:text-indigo-600 transition-colors w-fit relative"
-                >
-                  <ImageIcon size={14} />
-                  <span>Media & Länkar</span>
-                  {(!showMediaInputs && mediaCount > 0) && (
-                    <span className="flex h-4 min-w-[1rem] px-1 items-center justify-center bg-indigo-500 text-white text-[8px] font-bold rounded-full shadow-sm">
-                      {mediaCount}
-                    </span>
-                  )}
-                  <ChevronDown size={14} className={`transition-transform ${showMediaInputs ? 'rotate-180' : ''}`} />
-                </button>
+          {/* Bilder och länkar */}
+          {isPlan ? (
+            <div className="space-y-3">
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-10 -ml-2"
+                icon={<ImageIcon size={16} />}
+                onClick={() => setShowMediaInputs(!showMediaInputs)}
+                aria-expanded={showMediaInputs}
+              >
+                Bilder och länk
+                {!showMediaInputs && mediaCount > 0 && <Badge tone="brand" className="h-5 px-1.5">{mediaCount}</Badge>}
+                <ChevronDown size={16} className={`transition-transform ${showMediaInputs ? 'rotate-180' : ''}`} />
+              </Button>
 
-                <AnimatePresence>
-                  {showMediaInputs && (
-                    <motion.div
-                      initial={{ height: 0, opacity: 0 }}
-                      animate={{ height: 'auto', opacity: 1 }}
-                      exit={{ height: 0, opacity: 0 }}
-                      className="space-y-3 overflow-hidden"
-                    >
-                      <div className="flex flex-col gap-2 bg-zinc-50 dark:bg-zinc-950 p-3 rounded-2xl border border-zinc-100 dark:border-zinc-800">
-                        {/* Title & Count */}
-                        <div className="flex items-center justify-between px-1">
-                          <span className="text-[10px] font-black uppercase tracking-wider text-zinc-400">
-                            Övningsbilder ({allMomentImages.length})
-                          </span>
-                        </div>
-
-                        {/* Thumbnails if any */}
-                        {allMomentImages.length > 0 && (
-                          <div className="flex flex-wrap gap-2 p-2 bg-white dark:bg-zinc-900 rounded-xl border border-zinc-100 dark:border-zinc-800">
-                            {allMomentImages.map((url, idx) => (
-                              <div key={idx} className="relative group w-16 h-16 rounded-lg overflow-hidden border border-zinc-200 dark:border-zinc-805 shadow-sm shrink-0 bg-white dark:bg-zinc-950">
-                                <img src={url} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    const targetUrl = allMomentImages[idx];
-                                    const newUrls = allMomentImages.filter((_, i) => i !== idx);
-                                    updateMoment(moment.id, {
-                                      imageUrls: newUrls.length > 0 ? newUrls : undefined,
-                                      imageUrl: newUrls[0] || undefined
-                                    });
-                                    if (targetUrl && (targetUrl.includes('/uploads/') || targetUrl.includes('photo_'))) {
-                                      deleteObject(targetUrl).catch(e => console.warn('Could not delete image on moment image removal:', e));
-                                    }
-                                  }}
-                                  className="absolute top-1 right-1 p-1 bg-black/60 hover:bg-black/80 text-white rounded-full transition-colors opacity-90 group-hover:opacity-100"
-                                  title="Ta bort bild"
-                                >
-                                  <X size={10} />
-                                </button>
-                                {idx === 0 && (
-                                  <span className="absolute bottom-1 left-1 px-1 bg-indigo-600 text-white text-[8px] font-black uppercase rounded">
-                                    Huvudbild
-                                  </span>
-                                )}
-                              </div>
-                            ))}
-                          </div>
-                        )}
-
-                        {/* Add image (link & upload) */}
-                        <div className="flex flex-col gap-2">
-                          <div className="flex gap-2">
-                            <div className="flex-1 flex items-center gap-2 bg-white dark:bg-zinc-900 px-3 py-2 rounded-xl border border-zinc-150 dark:border-zinc-800 min-w-0">
-                              <ImageIcon size={14} className="text-zinc-400 shrink-0" />
-                              <input
-                                type="text"
-                                value={imageUrlInput}
-                                onChange={(e) => setImageUrlInput(e.target.value)}
-                                placeholder="Klistra in en bildlänk..."
-                                className="flex-1 min-w-0 bg-transparent border-none p-0 text-xs font-bold text-zinc-805 dark:text-zinc-100 focus:ring-0 placeholder:text-zinc-400"
-                                onKeyDown={(e) => {
-                                  if (e.key === 'Enter') {
-                                    e.preventDefault();
-                                    if (imageUrlInput.trim()) {
-                                      const newUrls = [...allMomentImages, imageUrlInput.trim()];
-                                      updateMoment(moment.id, {
-                                        imageUrls: newUrls,
-                                        imageUrl: newUrls[0] || undefined
-                                      });
-                                      setImageUrlInput('');
-                                    }
-                                  }
-                                }}
-                              />
-                            </div>
-                            
-                            {imageUrlInput.trim() && (
+              <AnimatePresence>
+                {showMediaInputs && (
+                  <motion.div
+                    initial={{ height: 0, opacity: 0 }}
+                    animate={{ height: 'auto', opacity: 1 }}
+                    exit={{ height: 0, opacity: 0 }}
+                    className="space-y-3 overflow-hidden"
+                  >
+                    <div className="space-y-2 p-3 rounded-xl bg-zinc-50 dark:bg-zinc-800/50">
+                      <p className="text-xs font-semibold text-zinc-500 dark:text-zinc-400">Bilder ({allMomentImages.length})</p>
+                      {allMomentImages.length > 0 && (
+                        <div className="flex flex-wrap gap-2">
+                          {allMomentImages.map((url, idx) => (
+                            <div key={idx} className="relative w-16 h-16 rounded-lg overflow-hidden border border-zinc-200 dark:border-zinc-700 shrink-0 bg-white dark:bg-zinc-950">
+                              <img src={url} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
                               <button
                                 type="button"
                                 onClick={() => {
-                                  if (imageUrlInput.trim()) {
-                                    const newUrls = [...allMomentImages, imageUrlInput.trim()];
-                                    updateMoment(moment.id, {
-                                      imageUrls: newUrls,
-                                      imageUrl: newUrls[0] || undefined
-                                    });
-                                    setImageUrlInput('');
+                                  const targetUrl = allMomentImages[idx];
+                                  const newUrls = allMomentImages.filter((_, i) => i !== idx);
+                                  updateMoment(moment.id, {
+                                    imageUrls: newUrls.length > 0 ? newUrls : undefined,
+                                    imageUrl: newUrls[0] || undefined
+                                  });
+                                  if (targetUrl && (targetUrl.includes('/uploads/') || targetUrl.includes('photo_'))) {
+                                    deleteObject(targetUrl).catch(e => console.warn('Could not delete image on moment image removal:', e));
                                   }
                                 }}
-                                className="bg-zinc-200 dark:bg-zinc-800 hover:bg-zinc-350 dark:hover:bg-zinc-700 px-3 rounded-xl text-xs font-bold transition-colors text-zinc-700 dark:text-zinc-300"
+                                className="absolute top-0 right-0 w-7 h-7 flex items-center justify-center bg-black/60 hover:bg-black/80 text-white rounded-bl-lg"
+                                title="Ta bort bild"
+                                aria-label="Ta bort bild"
                               >
-                                Lägg till
+                                <X size={14} />
                               </button>
-                            )}
-
-                            <input
-                              type="file"
-                              ref={fileInputRef}
-                              onChange={handleFileUpload}
-                              accept="image/*, .heic, .HEIC, .heif, .HEIF, .png, .jpg, .jpeg, .webp"
-                              multiple
-                              className="hidden"
-                            />
-                            <button
-                              type="button"
-                              onClick={() => fileInputRef.current?.click()}
-                              disabled={uploadProgress !== null}
-                              className={`flex items-center justify-center gap-1.5 bg-indigo-55 hover:bg-indigo-105 dark:bg-indigo-950/40 dark:hover:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 px-3.5 rounded-xl text-xs font-bold uppercase tracking-wider transition-colors disabled:opacity-50 border border-indigo-100/20 whitespace-nowrap`}
-                            >
-                              {uploadProgress !== null ? (
-                                <Loader2 size={14} className="animate-spin" />
-                              ) : (
-                                <Upload size={14} />
-                              )}
-                              <span>{allMomentImages.length > 0 ? 'Fler' : 'Välj bilder'}</span>
-                            </button>
-                          </div>
-                        </div>
-                      </div>
-
-                      {uploadProgress !== null && (
-                        <div className="px-3 pb-1">
-                          <div className="w-full h-1 bg-zinc-100 dark:bg-zinc-800 rounded-full overflow-hidden">
-                            <motion.div 
-                              className="h-full bg-indigo-600"
-                              initial={{ width: 0 }}
-                              animate={{ width: `${uploadProgress}%` }}
-                            />
-                          </div>
-                          <span className="text-[8px] font-black text-indigo-600 uppercase tracking-widest mt-1 block">
-                            Laddar upp {Math.round(uploadProgress)}%
-                          </span>
+                            </div>
+                          ))}
                         </div>
                       )}
-
-                      <div className="flex items-center gap-3 bg-zinc-50 dark:bg-zinc-950 p-3 rounded-2xl border border-zinc-100 dark:border-zinc-800">
-                        <div className="w-8 h-8 rounded-lg bg-zinc-200 dark:bg-zinc-800 flex items-center justify-center text-zinc-500 shrink-0">
-                          {isYouTube(moment.externalLink) ? <Youtube size={16} /> : <LinkIcon size={16} />}
-                        </div>
-                        <div className="flex-1 min-w-0 flex items-center gap-2">
-                          <input
-                            type="text"
-                            value={moment.externalLink || ''}
-                            onChange={(e) => updateMoment(moment.id, { externalLink: e.target.value })}
-                            className="flex-1 min-w-0 bg-transparent border-none p-0 text-base font-bold text-zinc-900 dark:text-white focus:ring-0 placeholder:text-zinc-400"
-                            placeholder="Externt klipp eller länk (t.ex. YouTube)..."
-                          />
-                          {moment.externalLink && (
-                            <button
-                              type="button"
-                              onClick={() => updateMoment(moment.id, { externalLink: undefined })}
-                              className="p-2 text-zinc-400 hover:text-red-500 transition-colors"
-                              title="Ta bort länk"
-                            >
-                              <X size={14} />
-                            </button>
-                          )}
-                        </div>
-                      </div>
-                    </motion.div>
-                  )}
-                </AnimatePresence>
-              </div>
-            ) : (
-              (allMomentImages.length > 0 || moment.externalLink) && (
-                <div className="flex flex-wrap gap-4">
-                  {allMomentImages.map((url, idx) => (
-                    <button
-                      key={idx}
-                      onClick={() => {
-                        onViewImage && onViewImage(allMomentImages, idx);
-                      }}
-                      className="relative group w-32 aspect-video bg-zinc-100 dark:bg-zinc-800 rounded-xl overflow-hidden border border-zinc-200 dark:border-zinc-700 shadow-sm hover:shadow-md transition-all active:scale-95"
-                    >
-                      <img 
-                        src={url} 
-                        alt={`Beskrivande bild ${idx + 1}`}
-                        className="w-full h-full object-cover"
-                      />
-                      <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 flex items-center justify-center transition-all">
-                        <Maximize2 size={24} className="text-white opacity-0 group-hover:opacity-100 scale-75 group-hover:scale-100 transition-all" />
-                      </div>
-                    </button>
-                  ))}
-
-                  {moment.externalLink && (
-                    <a
-                      href={moment.externalLink}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="h-full flex flex-col justify-center gap-1.5 p-4 bg-indigo-50 dark:bg-indigo-900/20 border border-indigo-100 dark:border-indigo-900/30 rounded-2xl hover:bg-indigo-100 dark:hover:bg-indigo-900/40 transition-all group"
-                    >
-                      <div className="flex items-center gap-2">
-                        {isYouTube(moment.externalLink) ? (
-                          <div className="w-8 h-8 rounded-lg bg-red-600 text-white flex items-center justify-center shadow-lg shadow-red-200 dark:shadow-none">
-                            <Youtube size={16} />
-                          </div>
-                        ) : (
-                          <div className="w-8 h-8 rounded-lg bg-indigo-600 text-white flex items-center justify-center shadow-lg shadow-indigo-200 dark:shadow-none">
-                            <LinkIcon size={16} />
-                          </div>
-                        )}
-                        <div className="flex flex-col">
-                          <span className="text-[10px] font-black text-zinc-500 dark:text-zinc-400 uppercase tracking-widest">Öppna länk</span>
-                          <span className="text-xs font-bold text-zinc-900 dark:text-white flex items-center gap-1">
-                            {isYouTube(moment.externalLink) ? 'Visa videoklipp' : 'Visa extern länk'}
-                            <ExternalLink size={10} className="text-zinc-400" />
-                          </span>
-                        </div>
-                      </div>
-                    </a>
-                  )}
-                </div>
-              )
-            )}
-          </div>
-
-          <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-zinc-50 dark:border-zinc-950">
-            {mode === 'plan' ? (
-              <>
-                <div className="flex items-center gap-2 bg-zinc-50 dark:bg-zinc-950 p-1.5 rounded-xl border border-zinc-100 dark:border-zinc-800">
-                  <div className="relative">
-                    <select
-                      value={moment.exerciseId || ''}
-                      onChange={(e) => updateMoment(moment.id, { exerciseId: e.target.value || undefined })}
-                      className="appearance-none bg-transparent text-[10px] font-bold text-zinc-500 px-3 py-1 pr-8 rounded-lg focus:ring-0 cursor-pointer max-w-[150px] truncate uppercase tracking-wider border-none"
-                    >
-                      <option value="">Ingen tävling...</option>
-                      {exercises.map(ex => (
-                        <option key={ex.id} value={ex.id}>{ex.name}</option>
-                      ))}
-                    </select>
-                    <ChevronDown size={12} className="absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none text-zinc-400" />
-                  </div>
-
-                  {moment.exerciseId && (
-                    <div className="flex items-center gap-1 border-l border-zinc-200 dark:border-zinc-800 ml-1 pl-1">
-                      {onEditExercise && (
-                        <button
-                          onClick={() => onEditExercise(moment.exerciseId!)}
-                          className="p-1.5 text-zinc-400 hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors"
-                          title="Redigera tävlingsmoment"
-                        >
-                          <Edit2 size={14} />
-                        </button>
-                      )}
-                      {onDeleteExercise && (
-                        <button
-                          onClick={() => {
-                            setConfirmDeleteExercise({
-                              exerciseId: moment.exerciseId!,
-                              momentId: moment.id,
-                              name: exercises.find(ex => ex.id === moment.exerciseId)?.name || 'Tävlingsmoment'
-                            });
+                      <div className="flex gap-2">
+                        <input
+                          type="url"
+                          value={imageUrlInput}
+                          onChange={(e) => setImageUrlInput(e.target.value)}
+                          placeholder="Klistra in en bildlänk"
+                          aria-label="Bildlänk"
+                          className="flex-1 min-w-0 h-10 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-xl px-3 text-base sm:text-sm text-zinc-900 dark:text-white outline-none focus:ring-2 focus:ring-indigo-500 placeholder:text-zinc-400"
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              e.preventDefault();
+                              addImageUrl();
+                            }
                           }}
-                          className="p-1.5 text-zinc-400 hover:text-red-500 transition-colors"
-                          title="Radera tävlingsmoment"
+                        />
+                        {imageUrlInput.trim() && (
+                          <Button variant="secondary" size="sm" className="h-10" onClick={addImageUrl}>Lägg till</Button>
+                        )}
+                        <input
+                          type="file"
+                          ref={fileInputRef}
+                          onChange={handleFileUpload}
+                          accept="image/*, .heic, .HEIC, .heif, .HEIF, .png, .jpg, .jpeg, .webp"
+                          multiple
+                          className="hidden"
+                        />
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          className="h-10"
+                          onClick={() => fileInputRef.current?.click()}
+                          disabled={uploadProgress !== null}
+                          icon={uploadProgress !== null ? <Loader2 size={16} className="animate-spin" /> : <Upload size={16} />}
                         >
-                          <Trash2 size={14} />
-                        </button>
+                          {allMomentImages.length > 0 ? 'Fler' : 'Välj bild'}
+                        </Button>
+                      </div>
+                      {uploadProgress !== null && (
+                        <div>
+                          <div className="w-full h-1.5 bg-zinc-200 dark:bg-zinc-700 rounded-full overflow-hidden">
+                            <motion.div className="h-full bg-indigo-600" initial={{ width: 0 }} animate={{ width: `${uploadProgress}%` }} />
+                          </div>
+                          <span className="text-xs font-semibold text-indigo-600 mt-1 block">Laddar upp {Math.round(uploadProgress)} %</span>
+                        </div>
                       )}
                     </div>
-                  )}
-                </div>
 
-                <button
-                  type="button"
-                  onClick={() => onOpenTacticalBoard && onOpenTacticalBoard(moment)}
-                  className="flex items-center gap-1 text-[10px] font-black uppercase tracking-wider px-2.5 py-1.5 rounded-lg transition-all border shadow-sm bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/25 text-emerald-700 dark:text-emerald-400 border-emerald-200 dark:border-emerald-900/40 active:scale-95"
-                  title="Öppna rittavla för att förklara övningen"
-                >
-                  <Layout size={11} />
-                  <span>Rittavla {moment.tacticalBoards && moment.tacticalBoards.length > 0 ? `(${moment.tacticalBoards.length})` : ''}</span>
-                </button>
-
-                {onCreateExercise && !moment.exerciseId && (
-                  <button
-                    onClick={() => {
-                      const dateObj = new Date(sessionDate);
-                      const dateStr = `${dateObj.getDate()}/${dateObj.getMonth() + 1} -${dateObj.getFullYear().toString().slice(-2)}`;
-                      const baseName = (moment.name && moment.name.trim()) || sessionTitle || 'Nytt tävlingsmoment';
-                      const exerciseName = `${baseName} - ${dateStr}`;
-                      onCreateExercise(exerciseName, moment.id);
-                    }}
-                    className="flex items-center gap-1 text-[10px] font-black text-indigo-600 dark:text-indigo-400 uppercase tracking-wider hover:bg-indigo-50 dark:hover:bg-indigo-900/20 px-2 py-1.5 rounded-lg transition-colors border border-indigo-100 dark:border-indigo-900/30 shadow-sm"
-                  >
-                    + Tävling
-                  </button>
+                    <div className="flex items-center gap-2 p-3 rounded-xl bg-zinc-50 dark:bg-zinc-800/50">
+                      <span className="w-10 h-10 rounded-xl bg-white dark:bg-zinc-900 flex items-center justify-center text-zinc-500 shrink-0">
+                        {isYouTube(moment.externalLink) ? <Youtube size={18} /> : <LinkIcon size={18} />}
+                      </span>
+                      <input
+                        type="url"
+                        value={moment.externalLink || ''}
+                        onChange={(e) => updateMoment(moment.id, { externalLink: e.target.value })}
+                        className="flex-1 min-w-0 h-10 bg-transparent border-none p-0 text-base sm:text-sm text-zinc-900 dark:text-white focus:ring-0 placeholder:text-zinc-400"
+                        placeholder="Länk till video eller sida (t.ex. YouTube)"
+                        aria-label="Länk"
+                      />
+                      {moment.externalLink && (
+                        <IconButton label="Ta bort länk" onClick={() => updateMoment(moment.id, { externalLink: undefined })}>
+                          <X size={16} />
+                        </IconButton>
+                      )}
+                    </div>
+                  </motion.div>
                 )}
-
-                {onSaveToBank && (
-                  <>
-                    {!isSavedInBank ? (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const newBankId = onSaveToBank(moment);
-                          if (newBankId && typeof newBankId === 'string') {
-                            updateMoment(moment.id, { bankExerciseId: newBankId });
-                          }
-                        }}
-                        className="flex items-center gap-1 text-[10px] font-black uppercase tracking-wider px-2.5 py-1.5 rounded-lg transition-colors border shadow-sm bg-zinc-50 dark:bg-zinc-900/50 text-zinc-650 dark:text-zinc-350 border-zinc-200 dark:border-zinc-705/55 hover:bg-zinc-100 dark:hover:bg-zinc-805"
-                      >
-                        <Library size={10} />
-                        <span>Spara till bank</span>
-                      </button>
-                    ) : (
-                      <>
-                        {hasModifications && onUpdateBankExercise ? (
-                          <div className="flex flex-wrap gap-2 items-center">
-                            <button
-                              type="button"
-                              onClick={() => {
-                                if (bankExercise) {
-                                  if (!moment.bankExerciseId) {
-                                    updateMoment(moment.id, { bankExerciseId: bankExercise.id });
-                                  }
-                                  const momentImages = allMomentImages;
-                                  const primaryImg = momentImages[0] || undefined;
-                                  onUpdateBankExercise(bankExercise.id, {
-                                    name: moment.name,
-                                    duration: moment.duration || 15,
-                                    description: moment.description,
-                                    externalLink: moment.externalLink,
-                                    imageUrl: primaryImg,
-                                    imageUrls: momentImages.length > 0 ? momentImages : undefined,
-                                    tacticalBoards: moment.tacticalBoards,
-                                  });
-                                  setJustUpdatedBank(true);
-                                  setTimeout(() => setJustUpdatedBank(false), 2000);
-                                }
-                              }}
-                              className="flex items-center gap-1.5 text-[10px] font-black uppercase tracking-wider px-2.5 py-1.5 rounded-lg transition-colors border shadow-sm bg-amber-50 hover:bg-amber-100/80 dark:bg-amber-950/25 text-amber-700 dark:text-amber-400 border-amber-200 dark:border-amber-900/40"
-                              title="Uppdatera övningen i övningsbanken med den här träningens ändringar"
-                            >
-                              <Upload size={11} />
-                              <span>{justUpdatedBank ? 'Bank uppdaterad!' : 'Uppdatera i banken'}</span>
-                            </button>
-
-                            <button
-                              type="button"
-                              onClick={() => {
-                                if (bankExercise) {
-                                  const bankImages = getExerciseImages(bankExercise);
-                                  const primaryImg = bankImages[0] || undefined;
-                                  updateMoment(moment.id, {
-                                    name: bankExercise.name || '',
-                                    duration: bankExercise.duration || 15,
-                                    description: bankExercise.description || '',
-                                    externalLink: bankExercise.externalLink || '',
-                                    imageUrl: primaryImg,
-                                    imageUrls: bankImages.length > 0 ? bankImages : undefined,
-                                    bankExerciseId: bankExercise.id,
-                                    tacticalBoards: bankExercise.tacticalBoards ? JSON.parse(JSON.stringify(bankExercise.tacticalBoards)) : undefined,
-                                  });
-                                  setJustFetchedBank(true);
-                                  setTimeout(() => setJustFetchedBank(false), 2000);
-                                }
-                              }}
-                              className="flex items-center gap-1.5 text-[10px] font-black uppercase tracking-wider px-2.5 py-1.5 rounded-lg transition-colors border shadow-sm bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/25 text-indigo-700 dark:text-indigo-400 border-indigo-200 dark:border-indigo-900/40"
-                              title="Hämta den sparade versionen från övningsbanken och skriv över ändringarna i detta pass"
-                            >
-                              <Download size={11} className={justFetchedBank ? "animate-bounce" : ""} />
-                              <span>{justFetchedBank ? 'Hämtat!' : 'Hämta från banken'}</span>
-                            </button>
-                          </div>
-                        ) : (
-                          <button
-                            type="button"
-                            disabled
-                            className="flex items-center gap-1 text-[10px] font-black uppercase tracking-wider px-2.5 py-1.5 rounded-lg transition-colors border shadow-sm bg-emerald-50 dark:bg-emerald-950/20 text-emerald-600 dark:text-emerald-400 border-emerald-100 dark:border-emerald-900/30"
-                          >
-                            <Check size={11} className="stroke-[3]" />
-                            <span>{justUpdatedBank ? 'Bank uppdaterad!' : justFetchedBank ? 'Hämtat!' : 'Sparad i banken'}</span>
-                          </button>
-                        )}
-                      </>
-                    )}
-                  </>
-                )}
-              </>
-            ) : (
-              <div className="flex flex-wrap items-center gap-2">
-                {onOpenTacticalBoard && (
+              </AnimatePresence>
+            </div>
+          ) : (
+            (allMomentImages.length > 0 || moment.externalLink) && (
+              <div className="flex flex-wrap gap-2">
+                {allMomentImages.map((url, idx) => (
                   <button
+                    key={idx}
                     type="button"
-                    onClick={() => onOpenTacticalBoard(moment)}
-                    className={`flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl font-black text-xs uppercase tracking-wider transition-all border shadow-sm active:scale-95 cursor-pointer ${
-                      moment.tacticalBoards && moment.tacticalBoards.length > 0
-                        ? 'bg-emerald-600 hover:bg-emerald-700 text-white border-emerald-500 shadow-emerald-100 dark:shadow-none'
-                        : 'bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-zinc-700 dark:text-zinc-300 border-zinc-200 dark:border-zinc-700'
-                    }`}
-                    title="Öppna rittavla för att visa övningen"
+                    onClick={() => onViewImage && onViewImage(allMomentImages, idx)}
+                    className="relative group w-32 aspect-video bg-zinc-100 dark:bg-zinc-800 rounded-xl overflow-hidden border border-zinc-200 dark:border-zinc-700 transition-all active:scale-95 cursor-pointer"
+                    aria-label={`Visa bild ${idx + 1}`}
                   >
-                    <Layout size={14} />
-                    <span>Visa rittavla {moment.tacticalBoards && moment.tacticalBoards.length > 0 ? `(${moment.tacticalBoards.length})` : ''}</span>
+                    <img src={url} alt="" className="w-full h-full object-cover" />
+                    <span className="absolute inset-0 bg-black/0 group-hover:bg-black/20 flex items-center justify-center transition-all">
+                      <Maximize2 size={22} className="text-white opacity-0 group-hover:opacity-100 transition-all" />
+                    </span>
                   </button>
-                )}
-
-                {moment.exerciseId && onSelectExercise && (
-                  <>
-                    <button
-                      onClick={() => onSelectExercise(moment.exerciseId!)}
-                      className="bg-indigo-600 text-white px-3.5 py-2 rounded-xl font-black text-xs flex items-center justify-center gap-2 shadow-md shadow-indigo-100 dark:shadow-none hover:bg-indigo-700 transition-all active:scale-[0.98] cursor-pointer"
-                    >
-                      <Play fill="currentColor" size={12} />
-                      Starta tävling
-                    </button>
-                    <button
-                      onClick={() => onShowTeams && onShowTeams(moment.exerciseId!)}
-                      className="p-2.5 bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 rounded-2xl hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-all border border-zinc-200 dark:border-zinc-700 cursor-pointer"
-                      title="Visa lagöversikt"
-                    >
-                      <Users size={16} />
-                    </button>
-                  </>
-                )}
-                {moment.exerciseId && onEditExercise && (
-                  <button
-                    onClick={() => onEditExercise(moment.exerciseId!)}
-                    className="p-2.5 bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 rounded-2xl hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-all border border-zinc-200 dark:border-zinc-700 cursor-pointer"
-                    title="Redigera tävlingsmoment"
+                ))}
+                {moment.externalLink && (
+                  <a
+                    href={moment.externalLink}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="min-h-[44px] inline-flex items-center gap-2.5 px-3 py-2 rounded-xl bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 transition-colors text-sm font-semibold"
                   >
-                    <Edit2 size={16} />
-                  </button>
+                    {isYouTube(moment.externalLink) ? <Youtube size={18} className="text-red-600" /> : <LinkIcon size={18} />}
+                    {isYouTube(moment.externalLink) ? 'Visa video' : 'Öppna länk'}
+                    <ExternalLink size={14} className="opacity-60" />
+                  </a>
                 )}
               </div>
-            )}
+            )
+          )}
 
-            <div className="ml-auto flex items-center gap-2">
-              {mode === 'plan' && onAddAfter && (
-                <motion.button
-                  whileTap={{ scale: 0.9 }}
-                  onClick={onAddAfter}
-                  className="p-2 text-zinc-300 hover:text-indigo-500 transition-colors"
-                  title="Lägg till moment under"
+          {/* Åtgärder */}
+          {isPlan ? (
+            <div className="flex flex-wrap items-center gap-2 pt-3 border-t border-zinc-100 dark:border-zinc-800">
+              <div className="inline-flex items-center gap-0.5">
+                <label className="relative">
+                  <span className="sr-only">Tävlingsmoment</span>
+                  <select
+                    value={moment.exerciseId || ''}
+                    onChange={(e) => updateMoment(moment.id, { exerciseId: e.target.value || undefined })}
+                    className="appearance-none h-10 max-w-[180px] truncate bg-zinc-100 dark:bg-zinc-800 border-none rounded-xl pl-3 pr-8 text-sm font-semibold text-zinc-700 dark:text-zinc-200 focus:ring-2 focus:ring-indigo-500 cursor-pointer"
+                  >
+                    <option value="">Ingen tävling</option>
+                    {exercises.map(ex => (
+                      <option key={ex.id} value={ex.id}>{ex.name}</option>
+                    ))}
+                  </select>
+                  <ChevronDown size={14} className="absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none text-zinc-400" />
+                </label>
+                {moment.exerciseId && onEditExercise && (
+                  <IconButton label="Redigera tävlingen" onClick={() => onEditExercise(moment.exerciseId!)}>
+                    <Edit2 size={16} />
+                  </IconButton>
+                )}
+                {moment.exerciseId && onDeleteExercise && (
+                  <IconButton
+                    label="Radera tävlingen"
+                    className="hover:text-red-600"
+                    onClick={() => setConfirmDeleteExercise({
+                      exerciseId: moment.exerciseId!,
+                      momentId: moment.id,
+                      name: exercises.find(ex => ex.id === moment.exerciseId)?.name || 'Tävlingsmoment'
+                    })}
+                  >
+                    <Trash2 size={16} />
+                  </IconButton>
+                )}
+              </div>
+
+              {onCreateExercise && !moment.exerciseId && (
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  className="h-10"
+                  icon={<Trophy size={15} />}
+                  onClick={() => {
+                    const dateObj = new Date(sessionDate);
+                    const dateStr = `${dateObj.getDate()}/${dateObj.getMonth() + 1} -${dateObj.getFullYear().toString().slice(-2)}`;
+                    const baseName = (moment.name && moment.name.trim()) || sessionTitle || 'Nytt tävlingsmoment';
+                    onCreateExercise(`${baseName} - ${dateStr}`, moment.id);
+                  }}
                 >
-                  <PlusCircle size={18} />
-                </motion.button>
+                  Ny tävling
+                </Button>
               )}
-              <button
-                onClick={() => setConfirmDeleteMoment({ id: moment.id, name: moment.name || 'Namnlöst moment' })}
-                className={`p-2 text-zinc-300 hover:text-red-500 transition-colors ${mode === 'plan' ? 'block' : 'hidden'}`}
-                title="Ta bort moment"
+
+              <Button
+                variant="secondary"
+                size="sm"
+                className="h-10"
+                icon={<Layout size={15} />}
+                onClick={() => onOpenTacticalBoard && onOpenTacticalBoard(moment)}
               >
-                <Trash2 size={16} />
-              </button>
+                Rittavla{boardCount > 0 ? ` (${boardCount})` : ''}
+              </Button>
+
+              {onSaveToBank && (
+                !isSavedInBank ? (
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    className="h-10"
+                    icon={<Library size={15} />}
+                    onClick={() => {
+                      const newBankId = onSaveToBank(moment);
+                      if (newBankId && typeof newBankId === 'string') {
+                        updateMoment(moment.id, { bankExerciseId: newBankId });
+                      }
+                    }}
+                  >
+                    Spara i banken
+                  </Button>
+                ) : hasModifications && onUpdateBankExercise ? (
+                  <>
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      className="h-10"
+                      icon={<Upload size={15} />}
+                      title="Uppdatera övningen i övningsbanken med ändringarna i det här passet"
+                      onClick={() => {
+                        if (!bankExercise) return;
+                        if (!moment.bankExerciseId) updateMoment(moment.id, { bankExerciseId: bankExercise.id });
+                        const momentImages = allMomentImages;
+                        onUpdateBankExercise(bankExercise.id, {
+                          name: moment.name,
+                          duration: moment.duration || 15,
+                          description: moment.description,
+                          externalLink: moment.externalLink,
+                          imageUrl: momentImages[0] || undefined,
+                          imageUrls: momentImages.length > 0 ? momentImages : undefined,
+                          tacticalBoards: moment.tacticalBoards,
+                        });
+                        setJustUpdatedBank(true);
+                        setTimeout(() => setJustUpdatedBank(false), 2000);
+                      }}
+                    >
+                      {justUpdatedBank ? 'Banken uppdaterad' : 'Uppdatera banken'}
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      className="h-10"
+                      icon={<Download size={15} />}
+                      title="Hämta den sparade versionen från övningsbanken och skriv över ändringarna i passet"
+                      onClick={() => {
+                        if (!bankExercise) return;
+                        const bankImages = getExerciseImages(bankExercise);
+                        updateMoment(moment.id, {
+                          name: bankExercise.name || '',
+                          duration: bankExercise.duration || 15,
+                          description: bankExercise.description || '',
+                          externalLink: bankExercise.externalLink || '',
+                          imageUrl: bankImages[0] || undefined,
+                          imageUrls: bankImages.length > 0 ? bankImages : undefined,
+                          bankExerciseId: bankExercise.id,
+                          tacticalBoards: bankExercise.tacticalBoards ? JSON.parse(JSON.stringify(bankExercise.tacticalBoards)) : undefined,
+                        });
+                        setJustFetchedBank(true);
+                        setTimeout(() => setJustFetchedBank(false), 2000);
+                      }}
+                    >
+                      {justFetchedBank ? 'Hämtat' : 'Hämta från banken'}
+                    </Button>
+                  </>
+                ) : (
+                  <Badge tone="success" icon={<Check size={12} strokeWidth={3} />} className="h-10 px-3">
+                    {justUpdatedBank ? 'Banken uppdaterad' : justFetchedBank ? 'Hämtat' : 'Sparad i banken'}
+                  </Badge>
+                )
+              )}
+
+              <div className="ml-auto flex items-center">
+                {onAddAfter && (
+                  <IconButton label="Lägg till moment efter det här" onClick={onAddAfter}>
+                    <PlusCircle size={18} />
+                  </IconButton>
+                )}
+                <IconButton
+                  label="Ta bort momentet"
+                  className="hover:text-red-600"
+                  onClick={() => setConfirmDeleteMoment({ id: moment.id, name: moment.name || 'Namnlöst moment' })}
+                >
+                  <Trash2 size={18} />
+                </IconButton>
+              </div>
             </div>
-          </div>
-        </div>
+          ) : (
+            (isCoachOrAdmin || boardCount > 0) && (
+              <div className="flex flex-wrap items-center gap-2 pt-1">
+                {isCoachOrAdmin && moment.exerciseId && onSelectExercise && (
+                  <Button size="sm" className="h-10" icon={<Play size={14} fill="currentColor" />} onClick={() => onSelectExercise(moment.exerciseId!)}>
+                    Starta tävling
+                  </Button>
+                )}
+                {onOpenTacticalBoard && (isCoachOrAdmin || boardCount > 0) && (
+                  <Button variant="secondary" size="sm" className="h-10" icon={<Layout size={15} />} onClick={() => onOpenTacticalBoard(moment)}>
+                    Rittavla{boardCount > 0 ? ` (${boardCount})` : ''}
+                  </Button>
+                )}
+                {isCoachOrAdmin && moment.exerciseId && onShowTeams && (
+                  <IconButton label="Visa lagen" onClick={() => onShowTeams(moment.exerciseId!)}>
+                    <Users size={18} />
+                  </IconButton>
+                )}
+                {isCoachOrAdmin && moment.exerciseId && onEditExercise && (
+                  <IconButton label="Redigera tävlingen" onClick={() => onEditExercise(moment.exerciseId!)}>
+                    <Edit2 size={18} />
+                  </IconButton>
+                )}
+              </div>
+            )
+          )}
+        </Card>
       </div>
     </Reorder.Item>
   );
 }
 
-export default function SessionEditor({ 
-  session, 
-  exercises, 
+const dateInputValue = (ts: number) => {
+  const d = new Date(ts);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+};
+
+const fieldClass =
+  'w-full h-11 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-xl px-3.5 text-base text-zinc-900 dark:text-white outline-none focus:ring-2 focus:ring-indigo-500 placeholder:text-zinc-400';
+const fieldLabel = 'block text-sm font-semibold text-zinc-700 dark:text-zinc-300 mb-1.5';
+
+type EditorTab = 'plan' | 'live' | 'rsvp';
+
+export default function SessionEditor({
+  session,
+  exercises,
   squad = [],
-  onUpdate, 
-  onClose, 
-  onCreateExercise, 
+  onUpdate,
+  onClose,
+  onCreateExercise,
   onSelectExercise,
   onEditExercise,
   onDeleteExercise,
@@ -856,8 +744,15 @@ export default function SessionEditor({
   userRoles,
   userProfile
 }: SessionEditorProps) {
+  const isCoachOrAdmin = useMemo(() => {
+    if (!user) return true; // Offline or fallback mode
+    return userRoles?.includes('admin') || userRoles?.includes('coach') || false;
+  }, [user, userRoles]);
+
+  // Spelare landar på kallelsen; tränare där de valde.
+  const startTab = isCoachOrAdmin ? initialTab : 'rsvp';
+
   const [showTimePicker, setShowTimePicker] = useState(false);
-  const [showNotes, setShowNotes] = useState(false);
   const [showCopyModal, setShowCopyModal] = useState(false);
   const [showVisibilityInfoModal, setShowVisibilityInfoModal] = useState(false);
   const [showCompletionInfoModal, setShowCompletionInfoModal] = useState(false);
@@ -865,7 +760,7 @@ export default function SessionEditor({
   const [exerciseToDelete, setExerciseToDelete] = useState<{ exerciseId: string, momentId: string, name: string } | null>(null);
   const [momentToDelete, setMomentToDelete] = useState<{ id: string, name: string } | null>(null);
   const [viewingImageInfo, setViewingImageInfo] = useState<{ urls: string[], index: number } | null>(null);
-  const [activeTab, setActiveTab] = useState<'schema' | 'attendance' | 'rsvp'>(initialTab);
+  const [activeTab, setActiveTab] = useState<'schema' | 'attendance' | 'rsvp'>(startTab);
   const [tacticalBoardMoment, setTacticalBoardMoment] = useState<SessionMoment | null>(null);
   const mode = initialMode;
   const setMode = onModeChange || (() => {});
@@ -873,44 +768,50 @@ export default function SessionEditor({
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const notesTextareaRef = useRef<HTMLTextAreaElement>(null);
 
-  // Sync activeTab when initialTab or session changes
   useEffect(() => {
-    setActiveTab(initialTab);
-  }, [initialTab, session.id]);
+    setActiveTab(startTab);
+  }, [startTab, session.id]);
 
   // Use a ref for the session to avoid stale closures in event handlers
   const sessionRef = useRef(session);
   sessionRef.current = session;
 
-  // Determine if this session is a match or training session (auto-detected from title and metadata)
   const isMatch = useMemo(() => isMatchSession(session), [session]);
+  const contentHidden = !isCoachOrAdmin && !!session.hideContentForPlayers;
+  const canEditPlan = isCoachOrAdmin && mode === 'plan';
+  // Spelare ser alltid passet i läsläge; tränare planerar eller kör passet.
+  const momentMode: 'plan' | 'live' | 'view' = isCoachOrAdmin ? mode : 'view';
 
-  const isCoachOrAdmin = useMemo(() => {
-    if (!user) return true; // Offline or fallback mode
-    return userRoles?.includes('admin') || userRoles?.includes('coach') || false;
-  }, [user, userRoles]);
-
-  // Auto-resize notes textarea
-  useEffect(() => {
-    const adjustHeight = () => {
-      if (notesTextareaRef.current) {
-        notesTextareaRef.current.style.height = 'auto';
-        notesTextareaRef.current.style.height = `${notesTextareaRef.current.scrollHeight}px`;
-      }
-    };
-
-    if (showNotes) {
-      adjustHeight();
-      const timeoutId = setTimeout(adjustHeight, 10);
-      window.addEventListener('resize', adjustHeight);
-      return () => {
-        clearTimeout(timeoutId);
-        window.removeEventListener('resize', adjustHeight);
-      };
+  const currentTab: EditorTab = activeTab === 'schema' && !contentHidden ? (isCoachOrAdmin ? mode : 'plan') : 'rsvp';
+  const handleTabChange = (t: EditorTab) => {
+    if (t === 'rsvp') {
+      setActiveTab('attendance');
+      return;
     }
-  }, [session.notes, showNotes, mode]);
+    if (isCoachOrAdmin) setMode(t);
+    setActiveTab('schema');
+  };
 
-  const currentExercise = useMemo(() => 
+  const tabs: { id: EditorTab; label: string; icon?: React.ReactNode; count?: number }[] = isCoachOrAdmin
+    ? [
+        { id: 'plan', label: 'Planera', icon: <Edit2 size={15} /> },
+        { id: 'live', label: 'Träna', icon: <Play size={15} /> },
+        { id: 'rsvp', label: 'Närvaro', icon: <UserCheck size={15} />, count: session.attendance?.length || 0 },
+      ]
+    : [
+        { id: 'rsvp', label: 'Kallelse', icon: <Bell size={15} /> },
+        ...(contentHidden ? [] : [{ id: 'plan' as EditorTab, label: 'Upplägg', icon: <ListTodo size={15} /> }]),
+      ];
+
+  // Notes textarea grows with its content
+  useEffect(() => {
+    const el = notesTextareaRef.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = `${el.scrollHeight}px`;
+  }, [session.notes, mode, activeTab]);
+
+  const currentExercise = useMemo(() =>
     exercises.find(e => e.id === selectedExerciseForTeams),
   [exercises, selectedExerciseForTeams]);
 
@@ -925,16 +826,11 @@ export default function SessionEditor({
     return session.moments.map(moment => {
       const momentStart = new Date(startDate.getTime() + currentMinutes * 60000);
       const momentEnd = new Date(momentStart.getTime() + moment.duration * 60000);
-      
-      const startTimeStr = momentStart.toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' });
-      const endTimeStr = momentEnd.toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' });
-      
       currentMinutes += moment.duration;
-      
       return {
         ...moment,
-        startTimeStr,
-        endTimeStr
+        startTimeStr: momentStart.toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' }),
+        endTimeStr: momentEnd.toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' })
       };
     });
   }, [session.startTime, session.moments]);
@@ -951,19 +847,17 @@ export default function SessionEditor({
     if (!session.endTime) return totalPlannedMinutes;
     const [startH, startM] = session.startTime.split(':').map(Number);
     const [endH, endM] = session.endTime.split(':').map(Number);
-    const start = startH * 60 + startM;
-    const end = endH * 60 + endM;
-    let diff = end - start;
-    if (diff < 0) diff += 24 * 60; // Handle overnight (rare for training but still)
+    let diff = (endH * 60 + endM) - (startH * 60 + startM);
+    if (diff < 0) diff += 24 * 60;
     return diff;
   }, [session.startTime, session.endTime, totalPlannedMinutes]);
 
   const timeStatus = useMemo(() => {
-    if (!session.endTime) return { label: 'Sätt sluttid för att spåra tidsbudget', color: 'text-zinc-400' };
+    if (!session.endTime) return { label: 'Sätt en sluttid för att se hur mycket tid som är kvar', color: 'text-zinc-500 dark:text-zinc-400' };
     const diff = sessionDuration - totalPlannedMinutes;
-    if (diff === 0) return { label: 'Perfekt planerat!', color: 'text-green-500' };
-    if (diff > 0) return { label: `${diff} min kvar att fylla`, color: 'text-amber-500' };
-    return { label: `${Math.abs(diff)} min för mycket planerat`, color: 'text-red-500' };
+    if (diff === 0) return { label: 'Precis rätt planerat', color: 'text-emerald-600 dark:text-emerald-400' };
+    if (diff > 0) return { label: `${diff} min kvar att fylla`, color: 'text-amber-600 dark:text-amber-400' };
+    return { label: `${Math.abs(diff)} min för mycket planerat`, color: 'text-red-600 dark:text-red-400' };
   }, [sessionDuration, totalPlannedMinutes, session.endTime]);
 
   const addMoment = (index?: number) => {
@@ -973,31 +867,18 @@ export default function SessionEditor({
       duration: 10,
       description: ''
     };
-    
     const currentSession = sessionRef.current;
     const newMoments = [...currentSession.moments];
-    if (typeof index === 'number') {
-      newMoments.splice(index + 1, 0, newMoment);
-    } else {
-      newMoments.push(newMoment);
-    }
+    if (typeof index === 'number') newMoments.splice(index + 1, 0, newMoment);
+    else newMoments.push(newMoment);
 
-    const updated = {
-      ...currentSession,
-      moments: newMoments,
-      updatedAt: Date.now()
-    };
+    const updated = { ...currentSession, moments: newMoments, updatedAt: Date.now() };
     sessionRef.current = updated;
     onUpdate(updated);
 
     if (typeof index !== 'number') {
       setTimeout(() => {
-        if (scrollContainerRef.current) {
-          scrollContainerRef.current.scrollTo({
-            top: scrollContainerRef.current.scrollHeight,
-            behavior: 'smooth'
-          });
-        }
+        scrollContainerRef.current?.scrollTo({ top: scrollContainerRef.current.scrollHeight, behavior: 'smooth' });
       }, 100);
     }
   };
@@ -1015,11 +896,7 @@ export default function SessionEditor({
 
   const removeMoment = (id: string) => {
     const currentSession = sessionRef.current;
-    const updated = {
-      ...currentSession,
-      moments: currentSession.moments.filter(m => m.id !== id),
-      updatedAt: Date.now()
-    };
+    const updated = { ...currentSession, moments: currentSession.moments.filter(m => m.id !== id), updatedAt: Date.now() };
     sessionRef.current = updated;
     onUpdate(updated);
   };
@@ -1030,7 +907,6 @@ export default function SessionEditor({
       id: `guest_${Date.now()}_${Math.random().toString(36).substring(7)}`,
       name: name.trim(),
     };
-
     const updated = {
       ...currentSession,
       guestPlayers: [...(currentSession.guestPlayers || []), newGuest],
@@ -1043,17 +919,124 @@ export default function SessionEditor({
 
   const handleReorder = (newMoments: SessionMoment[]) => {
     const currentSession = sessionRef.current;
-    const updated = {
-      ...currentSession,
-      moments: newMoments,
-      updatedAt: Date.now()
-    };
+    const updated = { ...currentSession, moments: newMoments, updatedAt: Date.now() };
     sessionRef.current = updated;
     onUpdate(updated);
   };
 
+  const dateLabel = new Date(session.date).toLocaleDateString('sv-SE', { weekday: 'short', day: 'numeric', month: 'short' });
+  const timeLabel = `${session.startTime}–${session.endTime || calculatedEndTime}`;
+
+  const metaContent = (
+    <>
+      <span className="inline-flex items-center gap-1.5">
+        {isMatch ? <Trophy size={15} className="text-amber-500" /> : <Dumbbell size={15} className="text-indigo-500" />}
+        {isMatch ? 'Match' : 'Träning'}
+      </span>
+      <span className="text-zinc-300 dark:text-zinc-600">·</span>
+      <span className="inline-flex items-center gap-1.5"><Calendar size={15} className="text-zinc-400" />{dateLabel}</span>
+      <span className="text-zinc-300 dark:text-zinc-600">·</span>
+      <span className="inline-flex items-center gap-1.5 tabular-nums"><Clock size={15} className="text-zinc-400" />{timeLabel}</span>
+      {session.location && (
+        <>
+          <span className="text-zinc-300 dark:text-zinc-600">·</span>
+          <span className="inline-flex items-center gap-1.5 min-w-0"><MapPin size={15} className="text-zinc-400 shrink-0" /><span className="truncate">{session.location}</span></span>
+        </>
+      )}
+    </>
+  );
+
+  const timeUsageCard = canEditPlan ? (
+    <Card>
+      <SectionHeader
+        title="Tid"
+        action={
+          <span className={`text-sm font-bold tabular-nums ${session.endTime && totalPlannedMinutes > sessionDuration ? 'text-red-600' : 'text-zinc-900 dark:text-white'}`}>
+            {totalPlannedMinutes}{session.endTime ? ` av ${sessionDuration}` : ''} min
+          </span>
+        }
+      />
+      {session.endTime && (
+        <div className="w-full h-2 bg-zinc-100 dark:bg-zinc-800 rounded-full overflow-hidden">
+          <div
+            className={`h-full rounded-full transition-all duration-500 ${totalPlannedMinutes > sessionDuration ? 'bg-red-500' : 'bg-indigo-500'}`}
+            style={{ width: `${Math.min(100, sessionDuration ? (totalPlannedMinutes / sessionDuration) * 100 : 0)}%` }}
+          />
+        </div>
+      )}
+      <p className={`text-sm font-medium mt-2 ${timeStatus.color}`}>{timeStatus.label}</p>
+    </Card>
+  ) : null;
+
+  const liveCard = isCoachOrAdmin && mode === 'live' ? (
+    <Card>
+      {session.isStarted ? (
+        <div className="flex items-center justify-between gap-3">
+          <span className="inline-flex items-center gap-2 text-sm font-semibold text-indigo-700 dark:text-indigo-300">
+            <span className="w-2.5 h-2.5 rounded-full bg-indigo-500 animate-pulse" />
+            Passet är igång
+          </span>
+          <Button variant="secondary" size="sm" className="h-10" onClick={() => onUpdate({ ...session, isStarted: false, updatedAt: Date.now() })}>
+            Avsluta
+          </Button>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          <p className="text-sm text-zinc-500 dark:text-zinc-400">Starta passet så får du en notis när det är dags att byta moment.</p>
+          <Button
+            block
+            icon={<Play size={16} fill="currentColor" />}
+            onClick={() => {
+              if ('Notification' in window && Notification.permission === 'default') {
+                Notification.requestPermission();
+              }
+              onUpdate({ ...session, isStarted: true, actualStartTime: Date.now(), updatedAt: Date.now() });
+            }}
+          >
+            Starta passet
+          </Button>
+        </div>
+      )}
+    </Card>
+  ) : null;
+
+  const notesCard = canEditPlan || session.notes ? (
+    <Card>
+      <SectionHeader title="Syfte och anteckningar" icon={<FileText size={16} />} />
+      {canEditPlan ? (
+        <textarea
+          ref={notesTextareaRef}
+          value={session.notes || ''}
+          onChange={(e) => {
+            const updated = { ...sessionRef.current, notes: e.target.value, updatedAt: Date.now() };
+            sessionRef.current = updated;
+            onUpdate(updated);
+          }}
+          placeholder="Mål och syfte med passet"
+          aria-label="Syfte och anteckningar"
+          className="w-full bg-zinc-50 dark:bg-zinc-800/60 border border-zinc-200 dark:border-zinc-700 rounded-xl p-3 text-base sm:text-sm text-zinc-700 dark:text-zinc-200 focus:ring-2 focus:ring-indigo-500 outline-none resize-none min-h-[88px] overflow-hidden"
+          rows={2}
+        />
+      ) : (
+        <p className="text-sm text-zinc-700 dark:text-zinc-300 whitespace-pre-wrap leading-relaxed">{session.notes}</p>
+      )}
+    </Card>
+  ) : null;
+
+  const completeButton = isCoachOrAdmin ? (
+    session.isCompleted ? (
+      <Button variant="secondary" block icon={<Check size={16} strokeWidth={3} className="text-emerald-600" />} onClick={() => setShowCompletionInfoModal(true)}>
+        Passet är genomfört
+      </Button>
+    ) : (
+      <Button variant="success" block icon={<Check size={16} strokeWidth={3} />} onClick={() => onUpdate({ ...session, isCompleted: true, updatedAt: Date.now() })}>
+        Klarmarkera passet
+      </Button>
+    )
+  ) : null;
+
   return (
-    <div ref={scrollContainerRef} className="fixed inset-0 bg-zinc-50 dark:bg-black z-[60] flex flex-col overflow-y-auto overflow-x-hidden">
+    <div ref={scrollContainerRef} className="fixed inset-0 bg-zinc-50 dark:bg-zinc-950 z-[60] flex flex-col overflow-y-auto overflow-x-hidden">
       {/* Team Overview Modal */}
       <AnimatePresence>
         {selectedExerciseForTeams && currentExercise && (
@@ -1070,11 +1053,7 @@ export default function SessionEditor({
               const currentSession = sessionRef.current;
               const currentAttendance = currentSession.attendance || [];
               if (!currentAttendance.includes(playerId)) {
-                onUpdate({
-                  ...currentSession,
-                  attendance: [...currentAttendance, playerId],
-                  updatedAt: Date.now()
-                });
+                onUpdate({ ...currentSession, attendance: [...currentAttendance, playerId], updatedAt: Date.now() });
               }
             }}
             onRemovePlayerFromAttendance={(playerId) => {
@@ -1096,6 +1075,8 @@ export default function SessionEditor({
           />
         )}
       </AnimatePresence>
+
+      {/* Bildvisning */}
       <AnimatePresence>
         {viewingImageInfo && (
           <motion.div
@@ -1106,654 +1087,238 @@ export default function SessionEditor({
             onClick={() => setViewingImageInfo(null)}
           >
             <motion.div
-              initial={{ scale: 0.9, opacity: 0 }}
+              initial={{ scale: 0.95, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.9, opacity: 0 }}
-              className="relative max-w-5xl w-full max-h-full flex flex-col items-center gap-6"
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="relative max-w-5xl w-full max-h-full flex flex-col items-center gap-4"
               onClick={(e) => e.stopPropagation()}
             >
-              <button
-                onClick={() => setViewingImageInfo(null)}
-                className="absolute -top-12 sm:top-0 sm:-right-16 p-3 text-white/50 hover:text-white transition-colors"
-                title="Stäng bild"
-              >
-                <X size={32} />
-              </button>
-              
-              <div className="relative w-full h-[60vh] sm:h-[70vh] rounded-2xl overflow-hidden shadow-2xl bg-zinc-900 border border-white/10 flex items-center justify-center group">
-                <img 
-                  src={viewingImageInfo.urls[viewingImageInfo.index]} 
-                  alt="Fullskärmsbild" 
+              <div className="relative w-full h-[65vh] sm:h-[72vh] rounded-2xl overflow-hidden bg-zinc-900 flex items-center justify-center">
+                <img
+                  src={viewingImageInfo.urls[viewingImageInfo.index]}
+                  alt=""
                   className="max-w-full max-h-full object-contain"
                   referrerPolicy="no-referrer"
                 />
-
                 {viewingImageInfo.urls.length > 1 && (
                   <>
                     <button
+                      type="button"
+                      aria-label="Föregående bild"
                       onClick={() => setViewingImageInfo(prev => prev ? ({ ...prev, index: (prev.index - 1 + prev.urls.length) % prev.urls.length }) : null)}
-                      className="absolute left-4 top-1/2 -translate-y-1/2 p-3 bg-black/40 hover:bg-black/60 text-white rounded-full transition-all opacity-100 sm:opacity-0 group-hover:opacity-100"
+                      className="absolute left-3 top-1/2 -translate-y-1/2 w-11 h-11 flex items-center justify-center bg-black/50 hover:bg-black/70 text-white rounded-full"
                     >
-                      <ChevronDown className="rotate-90" size={24} />
+                      <ChevronLeft size={24} />
                     </button>
                     <button
+                      type="button"
+                      aria-label="Nästa bild"
                       onClick={() => setViewingImageInfo(prev => prev ? ({ ...prev, index: (prev.index + 1) % prev.urls.length }) : null)}
-                      className="absolute right-4 top-1/2 -translate-y-1/2 p-3 bg-black/40 hover:bg-black/60 text-white rounded-full transition-all opacity-100 sm:opacity-0 group-hover:opacity-100"
+                      className="absolute right-3 top-1/2 -translate-y-1/2 w-11 h-11 flex items-center justify-center bg-black/50 hover:bg-black/70 text-white rounded-full"
                     >
-                      <ChevronUp className="rotate-90" size={24} />
+                      <ChevronRight size={24} />
                     </button>
-                    <div className="absolute bottom-4 left-1/2 -translate-y-1/2 -translate-x-1/2 px-3 py-1 bg-black/40 text-white text-[10px] font-black rounded-full backdrop-blur-md">
-                      {viewingImageInfo.index + 1} / {viewingImageInfo.urls.length}
-                    </div>
+                    <span className="absolute bottom-3 left-1/2 -translate-x-1/2 px-3 py-1 bg-black/50 text-white text-xs font-semibold rounded-full tabular-nums">
+                      {viewingImageInfo.index + 1} av {viewingImageInfo.urls.length}
+                    </span>
                   </>
                 )}
               </div>
-
-              <div className="flex gap-4">
-                <button
-                  onClick={() => setViewingImageInfo(null)}
-                  className="bg-white/10 hover:bg-white/20 text-white px-8 py-3 rounded-2xl font-black text-xs uppercase tracking-widest backdrop-blur-md transition-all border border-white/10"
-                >
-                  Stäng
-                </button>
-              </div>
+              <Button variant="secondary" onClick={() => setViewingImageInfo(null)}>Stäng</Button>
             </motion.div>
           </motion.div>
         )}
       </AnimatePresence>
 
-      {/* Non-sticky Main Header Info */}
-      <div className="bg-white dark:bg-zinc-900 shrink-0 border-b border-zinc-100 dark:border-zinc-800 pt-safe">
-        <div className="max-w-4xl lg:max-w-5xl xl:max-w-6xl 2xl:max-w-7xl mx-auto px-4 py-2 sm:py-3 flex items-center gap-3">
-          <button 
-            onClick={onClose}
-            className="p-2 -ml-2 text-zinc-500 hover:text-zinc-900 dark:hover:text-white transition-colors"
-          >
-            <ArrowLeft size={22} />
-          </button>
-          
-          <div className="flex-1 min-w-0">
-            {mode === 'plan' ? (
-              <input
-                type="text"
-                value={session.title}
-                onChange={(e) => onUpdate({ ...session, title: e.target.value })}
-                placeholder="Träningspassets namn..."
-                className="w-full bg-transparent border-none p-0 text-base sm:text-lg font-black text-zinc-900 dark:text-white focus:ring-0 placeholder:text-zinc-300 dark:placeholder:text-zinc-700 leading-tight uppercase"
-              />
-            ) : (
-              <h2 className="text-base sm:text-lg font-black text-zinc-900 dark:text-white truncate uppercase leading-tight">
-                {session.title || 'Träning'}
-              </h2>
-            )}
-          </div>
-
-          <button
-            onClick={onClose}
-            className="bg-indigo-600 text-white p-2 sm:p-2.5 rounded-xl font-black flex items-center shadow-lg shadow-indigo-100 dark:shadow-none transition-all active:scale-95 shrink-0 hover:bg-indigo-700"
-            title="Spara"
-          >
-            <Save size={20} />
-          </button>
-        </div>
-
-        <div className="max-w-4xl lg:max-w-5xl xl:max-w-6xl 2xl:max-w-7xl mx-auto px-4 pb-3 flex flex-col gap-2">
-          <div className="flex items-center justify-between gap-1.5 sm:gap-2 w-full">
-            <button
-              type="button"
-              onClick={() => mode === 'plan' && setShowTimePicker(true)}
-              className={`flex-1 min-w-0 flex items-center justify-center gap-1 sm:gap-1.5 px-2 sm:px-3 h-11 rounded-xl border transition-colors ${
-                mode === 'plan' 
-                  ? 'bg-zinc-100 dark:bg-zinc-800 border-zinc-200 dark:border-zinc-700 hover:bg-zinc-200 dark:hover:bg-zinc-700' 
-                  : 'bg-indigo-50 dark:bg-indigo-900/20 border-indigo-100 dark:border-indigo-900/30'
-              }`}
-            >
-              <Calendar size={14} className={`shrink-0 ${mode === 'plan' ? "text-zinc-500" : "text-indigo-400"}`} />
-              <span className={`text-[10px] sm:text-xs md:text-sm font-black truncate uppercase tracking-tight ${mode === 'plan' ? "text-zinc-700 dark:text-zinc-300" : "text-indigo-600 dark:text-indigo-400"}`}>
-                {new Date(session.date).toLocaleDateString('sv-SE', { weekday: 'short', day: 'numeric', month: 'short' })}
-              </span>
-              <div className={`w-px h-3.5 mx-0.5 sm:mx-1 shrink-0 ${mode === 'plan' ? "bg-zinc-300 dark:bg-zinc-700" : "bg-indigo-200 dark:bg-indigo-900/30"}`} />
-              <Clock size={14} className={`shrink-0 ${mode === 'plan' ? "text-zinc-500" : "text-indigo-400"}`} />
-              <span className={`text-[10px] sm:text-xs md:text-sm font-black truncate uppercase tracking-tight ${mode === 'plan' ? "text-zinc-700 dark:text-zinc-300" : "text-indigo-600 dark:text-indigo-400"}`}>
-                {session.startTime} - {session.endTime || calculatedEndTime}
-              </span>
-            </button>
-
-            {/* Filter / Typ av aktivitet: Träning eller Match */}
-            <button
-              type="button"
-              onClick={() => {
-                if (mode === 'plan' || isCoachOrAdmin) {
-                  const nextType = isMatch ? 'training' : 'match';
-                  onUpdate({
-                    ...session,
-                    type: nextType,
-                    category: nextType
-                  });
-                }
-              }}
-              className={`h-11 px-2.5 sm:px-3.5 rounded-xl border transition-all flex items-center justify-center gap-1.5 shrink-0 cursor-pointer ${
-                isMatch
-                  ? 'bg-emerald-50 dark:bg-emerald-950/40 border-emerald-300 dark:border-emerald-800 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100 dark:hover:bg-emerald-900/60'
-                  : 'bg-indigo-50 dark:bg-indigo-950/40 border-indigo-200 dark:border-indigo-800 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 dark:hover:bg-indigo-900/60'
-              }`}
-              title={`Aktivitetstyp: ${isMatch ? 'Match' : 'Träning'} (Klicka för att växla mellan Träning och Match)`}
-            >
-              {isMatch ? (
-                <>
-                  <Trophy size={14} className="text-amber-500 shrink-0" />
-                  <span className="text-[10px] sm:text-xs font-black uppercase tracking-tight">Match</span>
-                </>
+      {/* Sidhuvud */}
+      <header className="sticky top-0 z-50 bg-white/95 dark:bg-zinc-900/95 backdrop-blur border-b border-zinc-200 dark:border-zinc-800 pt-safe shrink-0">
+        <div className="max-w-6xl mx-auto px-3 sm:px-6">
+          <div className="flex items-center gap-2 h-14">
+            <IconButton label="Tillbaka" onClick={onClose} className="-ml-1">
+              <ArrowLeft size={22} />
+            </IconButton>
+            <div className="flex-1 min-w-0">
+              {canEditPlan ? (
+                <input
+                  type="text"
+                  value={session.title}
+                  onChange={(e) => onUpdate({ ...session, title: e.target.value })}
+                  placeholder="Passets namn"
+                  aria-label="Passets namn"
+                  className="w-full h-10 bg-transparent border-none px-0 text-lg font-bold text-zinc-900 dark:text-white focus:ring-0 placeholder:text-zinc-300 dark:placeholder:text-zinc-600"
+                />
               ) : (
-                <>
-                  <Dumbbell size={14} className="text-indigo-600 dark:text-indigo-400 shrink-0" />
-                  <span className="text-[10px] sm:text-xs font-black uppercase tracking-tight">Träning</span>
-                </>
+                <h1 className="text-lg font-bold text-zinc-900 dark:text-white truncate">{session.title || (isMatch ? 'Match' : 'Träning')}</h1>
               )}
-            </button>
-
+            </div>
             {isCoachOrAdmin && (
-              <button
-                type="button"
-                onClick={() => setShowVisibilityInfoModal(true)}
-                className={`h-11 w-11 shrink-0 rounded-xl flex items-center justify-center border transition-all cursor-pointer ${
-                  session.hideContentForPlayers
-                    ? 'bg-amber-500 text-white border-amber-600 shadow-md hover:bg-amber-600'
-                    : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300 border-zinc-200 dark:border-zinc-700 hover:bg-zinc-200 dark:hover:bg-zinc-700'
-                }`}
-                title={session.hideContentForPlayers ? 'Passinnehållet är dolt för spelare (Klicka för info)' : 'Passinnehållet är synligt för spelare (Klicka för info)'}
-              >
-                {session.hideContentForPlayers ? (
-                  <EyeOff size={18} className="shrink-0" />
-                ) : (
-                  <Eye size={18} className="shrink-0 text-zinc-500 dark:text-zinc-400" />
-                )}
-              </button>
+              <>
+                <IconButton
+                  label={session.hideContentForPlayers ? 'Upplägget är dolt för spelare' : 'Upplägget syns för spelare'}
+                  onClick={() => setShowVisibilityInfoModal(true)}
+                  className={session.hideContentForPlayers ? 'bg-amber-100 text-amber-700 hover:bg-amber-200 dark:bg-amber-950/60 dark:text-amber-300' : ''}
+                >
+                  {session.hideContentForPlayers ? <EyeOff size={20} /> : <Eye size={20} />}
+                </IconButton>
+                <IconButton
+                  label={session.isCompleted ? 'Passet är genomfört' : 'Klarmarkera passet'}
+                  onClick={() => setShowCompletionInfoModal(true)}
+                  className={session.isCompleted ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200 dark:bg-emerald-950/60 dark:text-emerald-300' : ''}
+                >
+                  <CheckCircle2 size={20} />
+                </IconButton>
+                <span className="hidden sm:block"><Button size="sm" className="h-10" icon={<Save size={16} />} onClick={onClose}>Spara</Button></span>
+              </>
             )}
+          </div>
 
+          <div className="pb-3">
+            <div className="flex items-center gap-2">
+              {tabs.length > 1 && (
+                <SegmentedTabs size="lg" tabs={tabs} value={currentTab} onChange={handleTabChange} className="flex-1 sm:flex-none" />
+              )}
+              {isMatch && onOpenLineup && (
+                <Button variant="secondary" size="sm" className="h-11 shrink-0" icon={<Users size={16} />} onClick={() => onOpenLineup(session)}>
+                  <span className="hidden sm:inline">Laguppställning</span>
+                  <span className="sm:hidden">Uppställning</span>
+                </Button>
+              )}
+            </div>
+          </div>
+        </div>
+      </header>
+
+      {/* Innehåll */}
+      <main className="flex-1 w-full max-w-6xl mx-auto px-3 sm:px-6 py-4 sm:py-6">
+        {isCoachOrAdmin && (
+          <div className="mb-4">
             <button
               type="button"
-              onClick={() => setShowCompletionInfoModal(true)}
-              className={`h-11 w-11 shrink-0 rounded-xl flex items-center justify-center border transition-all cursor-pointer ${
-                session.isCompleted
-                  ? 'bg-emerald-600 text-white border-emerald-700 shadow-md hover:bg-emerald-700'
-                  : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400 border-zinc-200 dark:border-zinc-700 hover:bg-zinc-200 dark:hover:bg-zinc-700'
-              }`}
-              title={session.isCompleted ? 'Passet är klarmarkerat (Klicka för info)' : 'Klarmarkera passet (Klicka för info)'}
+              onClick={() => setShowTimePicker(true)}
+              className="max-w-full min-h-[40px] inline-flex flex-wrap items-center gap-x-2 gap-y-1 px-3 py-1.5 rounded-xl bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-750 text-sm font-semibold text-zinc-700 dark:text-zinc-200 text-left transition-colors cursor-pointer"
+              aria-label="Ändra typ, datum, tid och plats"
             >
-              <Check size={20} strokeWidth={session.isCompleted ? 3 : 2.5} className="shrink-0" />
+              {metaContent}
+              <Edit2 size={13} className="text-zinc-400 ml-0.5" />
             </button>
           </div>
-        </div>
-      </div>
-
-      {/* Sticky Navigation and Mode Tabs Row */}
-      <div className="bg-white dark:bg-zinc-900 border-b border-zinc-200 dark:border-zinc-800 sticky top-0 z-50 py-2.5 sm:py-3 shadow-md dark:shadow-zinc-950/20 shrink-0">
-        <div className="max-w-4xl lg:max-w-5xl xl:max-w-6xl 2xl:max-w-7xl mx-auto px-4">
-          <div className="grid grid-cols-[1.6fr_1fr] sm:flex sm:items-center gap-2 w-full sm:w-auto">
-            {/* Steg-kontroll: Planera & Träna */}
-            <div className="flex items-center p-0.5 h-11 bg-zinc-100 dark:bg-zinc-800 rounded-xl border border-zinc-200 dark:border-zinc-700 shrink-0 w-full sm:w-auto">
-              <button
-                onClick={() => {
-                  setMode('plan');
-                  setActiveTab('schema');
-                }}
-                className={`h-full px-2 xs:px-3 sm:px-4 rounded-lg text-[10px] xs:text-xs md:text-sm font-black uppercase tracking-tight transition-all flex items-center justify-center gap-1 xs:gap-1.5 flex-1 sm:flex-initial truncate ${
-                  activeTab === 'schema' && mode === 'plan' 
-                    ? 'bg-white text-zinc-900 dark:bg-zinc-700 dark:text-white border border-zinc-200/50 dark:border-zinc-600 shadow-sm scale-[1.01]' 
-                    : 'text-zinc-500 hover:text-zinc-900 dark:text-zinc-450 dark:hover:text-zinc-200'
-                }`}
-              >
-                <Edit2 size={12} className={`shrink-0 ${activeTab === 'schema' && mode === 'plan' ? 'text-emerald-600 dark:text-emerald-400' : 'text-zinc-400 dark:text-zinc-500'}`} />
-                <span className="truncate">Planera</span>
-              </button>
-
-              <div className="px-0.5 text-zinc-350 dark:text-zinc-650 shrink-0">
-                <ChevronRight size={12} className="stroke-[2.5]" />
-              </div>
-
-              <button
-                onClick={() => {
-                  setMode('live');
-                  setActiveTab('schema');
-                }}
-                className={`h-full px-2 xs:px-3 sm:px-4 rounded-lg text-[10px] xs:text-xs md:text-sm font-black uppercase tracking-tight transition-all flex items-center justify-center gap-1 xs:gap-1.5 flex-1 sm:flex-initial truncate ${
-                  activeTab === 'schema' && mode === 'live'
-                    ? 'bg-white text-zinc-900 dark:bg-zinc-700 dark:text-white border border-zinc-200/50 dark:border-zinc-600 shadow-sm scale-[1.01]' 
-                    : 'text-zinc-500 hover:text-zinc-900 dark:text-zinc-450 dark:hover:text-zinc-200'
-                }`}
-              >
-                <Play size={12} fill={activeTab === 'schema' && mode === 'live' ? 'currentColor' : 'none'} className={`shrink-0 ${activeTab === 'schema' && mode === 'live' ? 'text-emerald-600 dark:text-emerald-400' : 'text-zinc-400 dark:text-zinc-500'}`} />
-                <span className="truncate">Träna</span>
-              </button>
-            </div>
-
-            {/* Närvaro Knapp */}
-            <div className="flex items-center gap-2 w-full sm:w-auto">
-              <button
-                onClick={() => setActiveTab('attendance')}
-                className={`px-3.5 h-11 rounded-xl text-[10px] md:text-xs font-black uppercase tracking-tight border transition-all flex items-center justify-center gap-1.5 flex-1 sm:flex-initial cursor-pointer ${
-                  activeTab === 'attendance' || activeTab === 'rsvp'
-                    ? 'bg-indigo-600 text-white border-indigo-500 shadow-sm'
-                    : 'bg-white dark:bg-zinc-900 hover:bg-zinc-50 dark:hover:bg-zinc-800 text-zinc-550 dark:text-zinc-400 border-zinc-200 dark:border-zinc-800'
-                }`}
-              >
-                <UserCheck size={14} className={activeTab === 'attendance' || activeTab === 'rsvp' ? 'text-white shrink-0' : 'text-indigo-500 shrink-0'} />
-                <span className="truncate">Närvaro ({session.attendance?.length || 0})</span>
-              </button>
-
-              {/* Laguppställning visas endast om aktiviteten är en match */}
-              {isMatch && onOpenLineup && (
-                <button
-                  onClick={() => onOpenLineup(session)}
-                  className="px-3.5 h-11 rounded-xl text-[10px] md:text-xs font-black uppercase tracking-tight border transition-all flex items-center justify-center gap-1.5 flex-1 sm:flex-initial cursor-pointer bg-white dark:bg-zinc-900 hover:bg-zinc-50 dark:hover:bg-zinc-800 text-zinc-600 dark:text-zinc-300 border-zinc-200 dark:border-zinc-800"
-                  title="Öppna matchens laguppställning"
-                >
-                  <Users size={14} className="text-emerald-500 shrink-0" />
-                  <span className="truncate">Laguppställning</span>
-                </button>
-              )}
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <AnimatePresence>
-        {showTimePicker && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-black/40 backdrop-blur-sm z-[100] flex items-center justify-center p-4"
-            onClick={() => setShowTimePicker(false)}
-          >
-            <motion.div
-              initial={{ scale: 0.9, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.9, opacity: 0 }}
-              className="bg-white dark:bg-zinc-900 rounded-3xl p-8 max-w-sm w-full shadow-2xl border border-zinc-100 dark:border-zinc-800"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <div className="flex items-center justify-between mb-6">
-                <h3 className="text-xl font-black text-zinc-900 dark:text-white uppercase tracking-tight">Inställningar för träningspass</h3>
-                <button onClick={() => setShowTimePicker(false)} className="text-zinc-400 hover:text-zinc-600 p-1">
-                  <Check className="text-green-500" size={24} />
-                </button>
-              </div>
-
-              <div className="space-y-6">
-                <div>
-                  <label className="block text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-2">Typ av aktivitet</label>
-                  <div className="grid grid-cols-2 gap-2 bg-zinc-100 dark:bg-zinc-800 p-1 rounded-xl">
-                    <button
-                      type="button"
-                      onClick={() => onUpdate({ ...session, type: 'training', category: 'training' })}
-                      className={`py-2 rounded-lg text-xs font-black uppercase tracking-wider transition-all flex items-center justify-center gap-1.5 ${
-                        !isMatch
-                          ? 'bg-white dark:bg-zinc-700 text-zinc-900 dark:text-white shadow-sm'
-                          : 'text-zinc-500 hover:text-zinc-900 dark:text-zinc-400'
-                      }`}
-                    >
-                      <span>🏃 Träning</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => onUpdate({ ...session, type: 'match', category: 'match' })}
-                      className={`py-2 rounded-lg text-xs font-black uppercase tracking-wider transition-all flex items-center justify-center gap-1.5 ${
-                        isMatch
-                          ? 'bg-indigo-600 text-white shadow-sm'
-                          : 'text-zinc-500 hover:text-zinc-900 dark:text-zinc-400'
-                      }`}
-                    >
-                      <span>⚽ Match</span>
-                    </button>
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-2">Datum</label>
-                  <input
-                    type="date"
-                    value={(() => {
-                      const d = new Date(session.date);
-                      const y = d.getFullYear();
-                      const m = String(d.getMonth() + 1).padStart(2, '0');
-                      const day = String(d.getDate()).padStart(2, '0');
-                      return `${y}-${m}-${day}`;
-                    })()}
-                    onChange={(e) => {
-                      if (!e.target.value) return;
-                      const [y, m, d] = e.target.value.split('-').map(Number);
-                      const midday = new Date(y, m - 1, d, 12, 0, 0).getTime();
-                      onUpdate({ ...session, date: midday });
-                    }}
-                    className="w-full bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-xl px-4 py-3 text-base font-bold text-zinc-900 dark:text-white focus:ring-2 focus:ring-indigo-500 outline-none"
-                  />
-                </div>
-                
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-2">Starttid</label>
-                    <input
-                      type="time"
-                      value={session.startTime}
-                      onChange={(e) => onUpdate({ ...session, startTime: e.target.value })}
-                      className="w-full bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-xl px-4 py-3 text-base font-bold text-zinc-900 dark:text-white focus:ring-2 focus:ring-indigo-500 outline-none"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-2">Sluttid</label>
-                    <input
-                      type="time"
-                      value={session.endTime || calculatedEndTime}
-                      onChange={(e) => onUpdate({ ...session, endTime: e.target.value })}
-                      className="w-full bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-xl px-4 py-3 text-base font-bold text-zinc-900 dark:text-white focus:ring-2 focus:ring-indigo-500 outline-none"
-                    />
-                  </div>
-                </div>
-
-                <div className="bg-zinc-50 dark:bg-zinc-950 p-4 rounded-2xl border border-zinc-100 dark:border-zinc-800">
-                  <div className="flex justify-between items-center mb-2">
-                      <span className="text-xs font-bold text-zinc-500 uppercase">Tid nyttjad</span>
-                      <span className={`text-[10px] font-black px-2 py-0.5 rounded-full ${session.endTime && totalPlannedMinutes > sessionDuration ? 'bg-red-100 text-red-600' : 'bg-indigo-100 text-indigo-600'}`}>
-                          {totalPlannedMinutes} {session.endTime ? `/ ${sessionDuration}` : ''} min
-                      </span>
-                  </div>
-                  {session.endTime && (
-                    <div className="w-full h-2 bg-zinc-200 dark:bg-zinc-800 rounded-full overflow-hidden">
-                        <div 
-                            className={`h-full transition-all duration-500 ${totalPlannedMinutes > sessionDuration ? 'bg-red-500' : 'bg-indigo-500'}`}
-                            style={{ width: `${Math.min(100, (totalPlannedMinutes / sessionDuration) * 100)}%` }}
-                        />
-                    </div>
-                  )}
-                  {timeStatus && (
-                      <p className={`text-[10px] font-bold mt-2 text-center ${timeStatus.color}`}>
-                          {timeStatus.label}
-                      </p>
-                  )}
-                </div>
-              </div>
-            </motion.div>
-          </motion.div>
         )}
-      </AnimatePresence>
 
-      {/* Content */}
-      <div 
-        className="flex-1 p-4 sm:p-6"
-      >
-        <div className="w-full max-w-4xl lg:max-w-5xl xl:max-w-6xl 2xl:max-w-7xl mx-auto space-y-6">
-          {activeTab === 'schema' && (
-            <>
-              {/* Notes Section */}
-              <motion.div 
-                initial={{ opacity: 0, y: -10 }}
-                animate={{ opacity: 1, y: 0 }}
-                className="bg-white dark:bg-zinc-900 rounded-3xl border border-zinc-100 dark:border-zinc-800 shadow-sm overflow-hidden"
-              >
-                <button 
-                  onClick={() => setShowNotes(!showNotes)}
-                  className="w-full flex items-center justify-between p-5 hover:bg-zinc-50 dark:hover:bg-zinc-800/50 transition-colors"
-                >
-                  <div className="flex items-center gap-2">
-                    <div className="w-8 h-8 rounded-xl bg-amber-100 dark:bg-amber-900/30 flex items-center justify-center text-amber-600 dark:text-amber-400">
-                      <FileText size={16} />
-                    </div>
-                    <span className="text-sm font-black text-zinc-900 dark:text-white uppercase tracking-tight">Syfte & Anteckningar</span>
-                    {session.notes && !showNotes && (
-                      <div className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse ml-1" />
-                    )}
-                  </div>
-                  <motion.div
-                    animate={{ rotate: showNotes ? 180 : 0 }}
-                    className="text-zinc-400"
-                  >
-                    <ChevronDown size={20} />
-                  </motion.div>
-                </button>
-                
-                <AnimatePresence>
-                  {showNotes && (
-                    <motion.div
-                      initial={{ height: 0, opacity: 0 }}
-                      animate={{ height: "auto", opacity: 1 }}
-                      exit={{ height: 0, opacity: 0 }}
-                      transition={{ duration: 0.2 }}
-                    >
-                      <div className="px-5 pb-5 pt-0">
-                        {mode === 'plan' ? (
-                          <textarea
-                            ref={notesTextareaRef}
-                            value={session.notes || ''}
-                            onChange={(e) => {
-                              const updated = { ...sessionRef.current, notes: e.target.value, updatedAt: Date.now() };
-                              sessionRef.current = updated;
-                              onUpdate(updated);
-                            }}
-                            placeholder="Skriv in mål, syfte eller anteckningar för träningen..."
-                            className="w-full bg-zinc-50 dark:bg-zinc-950 border border-zinc-100 dark:border-zinc-800 rounded-2xl p-4 text-base text-zinc-600 dark:text-zinc-400 focus:ring-2 focus:ring-indigo-500 outline-none resize-none min-h-[120px] font-medium overflow-hidden"
-                            rows={1}
-                          />
-                        ) : (
-                          session.notes ? (
-                            <div className="bg-zinc-50 dark:bg-zinc-950 rounded-2xl p-4 border border-zinc-100 dark:border-zinc-800">
-                              <p className="text-sm text-zinc-600 dark:text-zinc-400 font-medium whitespace-pre-wrap leading-relaxed italic">
-                                "{session.notes}"
-                              </p>
-                            </div>
-                          ) : (
-                            <p className="text-xs text-zinc-400 italic px-2">Inga anteckningar för detta pass.</p>
-                          )
-                        )}
-                      </div>
-                    </motion.div>
-                  )}
-                </AnimatePresence>
-              </motion.div>
-
-              {mode === 'plan' && (
-                <motion.div 
-                  initial={{ opacity: 0, y: -10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  className="bg-zinc-50 dark:bg-zinc-900/50 p-4 rounded-3xl border border-zinc-100 dark:border-zinc-800 shadow-sm"
-                >
-                  <div className="flex justify-between items-center mb-2">
-                    <div className="flex items-center gap-2">
-                      <div className="w-8 h-8 rounded-xl bg-indigo-100 dark:bg-indigo-900/30 flex items-center justify-center text-indigo-600 dark:text-indigo-400">
-                        <Clock size={16} />
-                      </div>
-                      <span className="text-sm font-black text-zinc-900 dark:text-white uppercase tracking-tight">Tidsanvändning</span>
-                    </div>
-                    <span className={`text-[10px] font-black px-2 py-0.5 rounded-full ${session.endTime && totalPlannedMinutes > sessionDuration ? 'bg-red-100 text-red-600' : 'bg-indigo-100 text-indigo-600'}`}>
-                      {totalPlannedMinutes} {session.endTime ? `/ ${sessionDuration}` : ''} min
-                    </span>
-                  </div>
-                  {session.endTime && (
-                    <div className="w-full h-2 bg-zinc-200 dark:bg-zinc-800 rounded-full overflow-hidden">
-                      <div 
-                        className={`h-full transition-all duration-500 ${totalPlannedMinutes > sessionDuration ? 'bg-red-500' : 'bg-indigo-500'}`}
-                        style={{ width: `${Math.min(100, (totalPlannedMinutes / sessionDuration) * 100)}%` }}
-                      />
-                    </div>
-                  )}
-                  {timeStatus && (
-                    <p className={`text-[10px] font-bold mt-2 text-center ${timeStatus.color}`}>
-                      {timeStatus.label}
-                    </p>
-                  )}
-                </motion.div>
-              )}
-
-              {(!isCoachOrAdmin && session.hideContentForPlayers) ? (
-                <div className="bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800/60 rounded-3xl p-6 sm:p-8 text-center space-y-4 my-4">
-                  <div className="w-14 h-14 bg-amber-100 dark:bg-amber-900/40 text-amber-600 dark:text-amber-400 rounded-2xl flex items-center justify-center mx-auto shadow-sm">
-                    <EyeOff size={28} />
-                  </div>
-                  <div className="space-y-1">
-                    <h4 className="text-base sm:text-lg font-black text-amber-900 dark:text-amber-200 uppercase tracking-tight">Passinnehållet är dolt för spelare</h4>
-                    <p className="text-xs sm:text-sm font-medium text-amber-800/90 dark:text-amber-300/90 max-w-md mx-auto leading-relaxed">
-                      Tränaren har valt att inte visa passets övningar och taktiska detaljer än. Du hittar samlingsnoteringar, tid, plats och kallelse under fliken <strong>Anmälan</strong>.
-                    </p>
-                  </div>
-                  <div className="pt-2">
-                    <button
-                      type="button"
-                      onClick={() => setActiveTab('rsvp')}
-                      className="px-5 py-2.5 bg-amber-600 hover:bg-amber-700 text-white rounded-xl font-black text-xs uppercase tracking-widest transition-all shadow-md shadow-amber-200 dark:shadow-none inline-flex items-center gap-2 cursor-pointer"
-                    >
-                      <Bell size={14} />
-                      <span>Svara på anmälan</span>
-                    </button>
-                  </div>
-                </div>
-              ) : (
-                <>
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-2">
-                    <h3 className="text-sm font-black text-zinc-400 uppercase tracking-widest flex items-center gap-2">
-                      <ListTodo size={16} />
-                      Schema ({totalPlannedMinutes} minuter)
-                    </h3>
-                    {mode === 'live' && !session.isStarted && isCoachOrAdmin && (
-                      <button
-                        onClick={() => {
-                          if ('Notification' in window && Notification.permission === 'default') {
-                            Notification.requestPermission();
-                          }
-                          onUpdate({ ...session, isStarted: true, actualStartTime: Date.now(), updatedAt: Date.now() });
-                        }}
-                        className="flex items-center gap-2 bg-indigo-600 text-white px-6 py-2.5 rounded-2xl font-black text-xs uppercase tracking-widest shadow-xl shadow-indigo-200 dark:shadow-none hover:bg-indigo-700 transition-all active:scale-95"
-                      >
-                        <Play size={14} fill="currentColor" />
-                        Starta passet (aktiverar notiser)
-                      </button>
-                    )}
-                    {mode === 'live' && session.isStarted && (
-                       <div className="flex items-center gap-2 px-3 py-1.5 bg-indigo-50 dark:bg-indigo-900/20 border border-indigo-100 dark:border-indigo-900/30 rounded-xl">
-                         <div className="w-2 h-2 rounded-full bg-indigo-500 animate-pulse" />
-                         <span className="text-[10px] font-black text-indigo-600 dark:text-indigo-400 uppercase tracking-widest">Passet är igång</span>
-                         {isCoachOrAdmin && (
-                           <button
-                              onClick={() => onUpdate({ ...session, isStarted: false, updatedAt: Date.now() })}
-                              className="ml-2 text-[8px] font-bold text-zinc-400 hover:text-red-500 uppercase cursor-pointer"
-                           >
-                             Avsluta
-                           </button>
-                         )}
-                       </div>
-                    )}
-                    {mode === 'plan' && isCoachOrAdmin && (
-                      <div className="flex flex-wrap items-center gap-2">
-                        <motion.button
-                          whileTap={{ scale: 0.95 }}
-                          onClick={() => addMoment()}
-                          className="flex items-center justify-center gap-2 bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400 px-5 py-2.5 rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-indigo-100 dark:hover:bg-indigo-900/40 transition-colors shadow-sm"
-                        >
-                          <PlusCircle size={16} />
-                          Lägg till moment
-                        </motion.button>
-                        {allSessions && onUpdateSession && (
-                          <motion.button
-                            whileTap={{ scale: 0.95 }}
-                            onClick={() => setShowCopyModal(true)}
-                            className="flex items-center justify-center gap-2 bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-350 px-5 py-2.5 rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-colors shadow-sm border border-zinc-200/50 dark:border-zinc-700/50"
-                          >
-                            <Copy size={14} />
-                            Kopiera / Hämta övningar
-                          </motion.button>
-                        )}
-                      </div>
-                    )}
-                  </div>
-
-                  <Reorder.Group axis="y" values={session.moments} onReorder={handleReorder} className="space-y-4">
-                    {session.moments.map((moment, index) => (
-                      <MomentItem
-                        key={moment.id}
-                        moment={moment}
-                        details={momentDetails[index]}
-                        mode={mode}
-                        exercises={exercises}
-                        sessionDate={session.date}
-                        sessionTitle={session.title}
-                        updateMoment={updateMoment}
-                        removeMoment={removeMoment}
-                        onCreateExercise={onCreateExercise}
-                        onSelectExercise={onSelectExercise}
-                        onEditExercise={onEditExercise}
-                        onDeleteExercise={onDeleteExercise}
-                        setConfirmDeleteExercise={setExerciseToDelete}
-                        setConfirmDeleteMoment={setMomentToDelete}
-                        onShowTeams={(id) => setSelectedExerciseForTeams(id)}
-                        onViewImage={(urls, idx) => setViewingImageInfo({ urls, index: idx })}
-                        onAddAfter={() => addMoment(index)}
-                        exerciseBank={exerciseBank}
-                        onSaveToBank={onSaveToBank}
-                        onUpdateBankExercise={onUpdateBankExercise}
-                        onOpenTacticalBoard={(m) => setTacticalBoardMoment(m)}
-                        isCoachOrAdmin={isCoachOrAdmin}
-                      />
-                    ))}
-                  </Reorder.Group>
-
-                  {session.moments.length > 0 && mode === 'plan' && isCoachOrAdmin && (
-                    <div className="pt-4 pb-4 flex justify-center">
-                      <motion.button
-                        whileTap={{ scale: 0.95 }}
-                        onClick={() => addMoment()}
-                        className="flex items-center gap-2 bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400 px-6 py-3 rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-indigo-100 dark:hover:bg-indigo-900/40 transition-colors shadow-sm"
-                      >
-                        <PlusCircle size={18} />
-                        Lägg till moment längst ner
-                      </motion.button>
-                    </div>
-                  )}
-                </>
-              )}
-
-              {/* Completion button at bottom - very prominent */}
-              {!session.isCompleted && isCoachOrAdmin && (
-                <div className="pt-6 pb-8 flex flex-col items-center justify-center">
-                  <button
-                    onClick={() => onUpdate({ ...session, isCompleted: true })}
-                    className="w-full max-w-xs py-3 px-4 bg-green-600 text-white rounded-xl font-black text-xs sm:text-sm flex items-center justify-center gap-2 shadow-lg shadow-green-100/50 dark:shadow-none hover:bg-green-700 transition-all active:scale-[0.98] uppercase tracking-wider"
-                  >
-                    <Check size={16} strokeWidth={3} className="shrink-0" />
-                    <span className="text-center leading-none">Klarmarkera träningspass</span>
-                  </button>
-                  <p className="text-center text-zinc-400 text-[10px] font-bold uppercase tracking-wider mt-2.5">
-                    Avsluta passet och arkivera det under genomförda
+        {activeTab === 'schema' && !contentHidden && (
+          <div className="flex flex-col gap-4 md:grid md:grid-cols-[minmax(0,1fr)_300px] lg:grid-cols-[minmax(0,1fr)_340px] md:grid-rows-[auto_1fr] md:gap-x-6 md:gap-y-4 md:items-start">
+            {(liveCard || notesCard) && (
+              <div className="md:col-start-2 md:row-start-1 space-y-4">
+                {liveCard}
+                {notesCard}
+              </div>
+            )}
+            <div className="md:col-start-2 md:row-start-2 space-y-4 md:order-none order-last">
+              {timeUsageCard}
+              {isCoachOrAdmin && session.hideContentForPlayers && (
+                <Card className="bg-amber-50 dark:bg-amber-950/30 border-amber-200 dark:border-amber-800/60">
+                  <p className="flex items-center gap-2 text-sm font-semibold text-amber-900 dark:text-amber-200">
+                    <EyeOff size={16} /> Upplägget är dolt för spelarna
                   </p>
+                  <p className="mt-1 text-sm text-amber-800 dark:text-amber-300">De ser bara tid, plats och kallelse.</p>
+                </Card>
+              )}
+              {completeButton}
+            </div>
+
+            <section className="md:col-start-1 md:row-start-1 md:row-span-2 min-w-0">
+              <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+                <h2 className="text-sm font-bold text-zinc-500 dark:text-zinc-400">
+                  Upplägg · {session.moments.length} moment ·{' '}
+                  <span className={canEditPlan && session.endTime && totalPlannedMinutes !== sessionDuration ? timeStatus.color : ''}>
+                    {totalPlannedMinutes}{canEditPlan && session.endTime ? ` av ${sessionDuration}` : ''} min
+                  </span>
+                </h2>
+                {canEditPlan && session.moments.length > 0 && (
+                  <div className="flex flex-wrap items-center gap-2">
+                    {allSessions && onUpdateSession && (
+                      <Button variant="secondary" size="sm" className="h-10" icon={<Copy size={15} />} onClick={() => setShowCopyModal(true)}>
+                        Hämta övningar
+                      </Button>
+                    )}
+                    <Button size="sm" className="h-10" icon={<PlusCircle size={16} />} onClick={() => addMoment()}>
+                      Nytt moment
+                    </Button>
+                  </div>
+                )}
+              </div>
+
+              {session.moments.length === 0 ? (
+                <Card>
+                  <EmptyState
+                    icon={<ListTodo size={24} />}
+                    title="Inga moment än"
+                    text={isCoachOrAdmin ? 'Bygg passet moment för moment, eller hämta övningar från ett annat pass eller övningsbanken.' : 'Tränaren har inte lagt in något upplägg för passet.'}
+                    action={canEditPlan ? (
+                      <div className="flex flex-wrap items-center justify-center gap-2">
+                        <Button icon={<PlusCircle size={16} />} onClick={() => addMoment()}>Lägg till första momentet</Button>
+                        {allSessions && onUpdateSession && (
+                          <Button variant="secondary" icon={<Copy size={15} />} onClick={() => setShowCopyModal(true)}>Hämta övningar</Button>
+                        )}
+                      </div>
+                    ) : isCoachOrAdmin ? (
+                      <Button variant="secondary" icon={<Edit2 size={15} />} onClick={() => handleTabChange('plan')}>Gå till Planera</Button>
+                    ) : undefined}
+                  />
+                </Card>
+              ) : (
+                <Reorder.Group axis="y" values={session.moments} onReorder={handleReorder}>
+                  {session.moments.map((moment, index) => (
+                    <MomentItem
+                      key={moment.id}
+                      moment={moment}
+                      details={momentDetails[index]}
+                      mode={momentMode}
+                      exercises={exercises}
+                      sessionDate={session.date}
+                      sessionTitle={session.title}
+                      updateMoment={updateMoment}
+                      removeMoment={removeMoment}
+                      onCreateExercise={onCreateExercise}
+                      onSelectExercise={onSelectExercise}
+                      onEditExercise={onEditExercise}
+                      onDeleteExercise={onDeleteExercise}
+                      setConfirmDeleteExercise={setExerciseToDelete}
+                      setConfirmDeleteMoment={setMomentToDelete}
+                      onShowTeams={(id) => setSelectedExerciseForTeams(id)}
+                      onViewImage={(urls, idx) => setViewingImageInfo({ urls, index: idx })}
+                      onAddAfter={() => addMoment(index)}
+                      exerciseBank={exerciseBank}
+                      onSaveToBank={onSaveToBank}
+                      onUpdateBankExercise={onUpdateBankExercise}
+                      onOpenTacticalBoard={(m) => setTacticalBoardMoment(m)}
+                      isCoachOrAdmin={isCoachOrAdmin}
+                    />
+                  ))}
+                </Reorder.Group>
+              )}
+
+              {canEditPlan && session.moments.length > 0 && (
+                <div className="flex gap-3 sm:gap-4">
+                  <div className="w-12 sm:w-14 shrink-0 text-center text-sm font-bold tabular-nums text-zinc-400 pt-3">{calculatedEndTime}</div>
+                  <Button variant="secondary" className="flex-1 border-dashed" icon={<PlusCircle size={18} />} onClick={() => addMoment()}>
+                    Lägg till moment
+                  </Button>
                 </div>
               )}
 
-              {session.moments.length === 0 && (
-                <div className="text-center py-12 border-2 border-dashed border-zinc-200 dark:border-zinc-800 rounded-3xl flex flex-col items-center justify-center gap-3">
-                  <p className="text-zinc-400 text-sm font-medium">Inga moment tillagda än</p>
-                  {isCoachOrAdmin && (
-                    <div className="flex flex-wrap items-center justify-center gap-2">
-                      <button
-                        onClick={() => addMoment()}
-                        className="bg-indigo-600 text-white px-4 py-2 rounded-xl font-bold text-sm hover:bg-indigo-700 transition-colors shadow-sm"
-                      >
-                        Lägg till första momentet
-                      </button>
-                      {allSessions && onUpdateSession && (
-                        <button
-                          onClick={() => setShowCopyModal(true)}
-                          className="bg-zinc-105 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 px-4 py-2 rounded-xl font-bold text-sm hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-colors"
-                        >
-                          Hämta från annat pass
-                        </button>
-                      )}
-                    </div>
-                  )}
-                </div>
-              )}
-            </>
-          )}
+            </section>
+          </div>
+        )}
 
-          {(activeTab === 'attendance' || activeTab === 'rsvp') && (
+        {activeTab !== 'schema' || contentHidden ? (
+          <>
+            {contentHidden && (
+              <Card className="mb-4 bg-amber-50 dark:bg-amber-950/30 border-amber-200 dark:border-amber-800/60">
+                <p className="flex items-center gap-2 text-sm font-semibold text-amber-900 dark:text-amber-200">
+                  <EyeOff size={16} /> Tränaren har inte visat upplägget än
+                </p>
+              </Card>
+            )}
             <SessionRsvpView
               session={session}
               squad={squad}
@@ -1764,101 +1329,127 @@ export default function SessionEditor({
               adminUrl={adminUrl}
               onOpenLineup={isMatch && onOpenLineup ? () => onOpenLineup(session) : undefined}
             />
-          )}
-          
-          <div className="pb-32" />
+          </>
+        ) : null}
+
+        <div className="pb-24" />
+      </main>
+
+      {/* Typ, datum, tid och plats */}
+      <Sheet
+        open={showTimePicker && isCoachOrAdmin}
+        onClose={() => setShowTimePicker(false)}
+        title="Tid och plats"
+        footer={<Button block onClick={() => setShowTimePicker(false)}>Klar</Button>}
+      >
+        <div className="px-2 pb-2 space-y-4">
+          <div>
+            <p className={fieldLabel}>Typ</p>
+            <SegmentedTabs
+              size="lg"
+              tabs={[
+                { id: 'training', label: 'Träning', icon: <Dumbbell size={15} /> },
+                { id: 'match', label: 'Match', icon: <Trophy size={15} /> },
+              ]}
+              value={isMatch ? 'match' : 'training'}
+              onChange={(t) => onUpdate({ ...session, type: t, category: t, updatedAt: Date.now() })}
+            />
+          </div>
+          <div>
+            <label htmlFor="session-date" className={fieldLabel}>Datum</label>
+            <input
+              id="session-date"
+              type="date"
+              value={dateInputValue(session.date)}
+              onChange={(e) => {
+                if (!e.target.value) return;
+                const [y, m, d] = e.target.value.split('-').map(Number);
+                onUpdate({ ...session, date: new Date(y, m - 1, d, 12, 0, 0).getTime(), updatedAt: Date.now() });
+              }}
+              className={fieldClass}
+            />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label htmlFor="session-start" className={fieldLabel}>Start</label>
+              <input id="session-start" type="time" value={session.startTime} onChange={(e) => onUpdate({ ...session, startTime: e.target.value, updatedAt: Date.now() })} className={fieldClass} />
+            </div>
+            <div>
+              <label htmlFor="session-end" className={fieldLabel}>Slut</label>
+              <input id="session-end" type="time" value={session.endTime || calculatedEndTime} onChange={(e) => onUpdate({ ...session, endTime: e.target.value, updatedAt: Date.now() })} className={fieldClass} />
+            </div>
+          </div>
+          <div>
+            <label htmlFor="session-location" className={fieldLabel}>Plats</label>
+            <input
+              id="session-location"
+              type="text"
+              value={session.location || ''}
+              onChange={(e) => onUpdate({ ...session, location: e.target.value || undefined, updatedAt: Date.now() })}
+              placeholder="T.ex. Kungsgårdens IP, plan 2"
+              className={fieldClass}
+            />
+          </div>
+          <p className={`text-sm font-medium ${timeStatus.color}`}>
+            Planerat {totalPlannedMinutes}{session.endTime ? ` av ${sessionDuration}` : ''} min. {timeStatus.label}.
+          </p>
         </div>
-      </div>
+      </Sheet>
 
-      {/* Exercise Delete Confirmation Modal */}
-      <AnimatePresence>
-        {exerciseToDelete && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-black/40 backdrop-blur-sm z-[200] flex items-center justify-center p-4 text-left"
-            onClick={() => setExerciseToDelete(null)}
-          >
-            <motion.div
-              initial={{ scale: 0.9, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.9, opacity: 0 }}
-              className="bg-white dark:bg-zinc-900 rounded-3xl p-8 max-w-sm w-full shadow-2xl border border-zinc-100 dark:border-zinc-800"
-              onClick={(e) => e.stopPropagation()}
+      {/* Radera tävling */}
+      <Sheet
+        open={!!exerciseToDelete}
+        onClose={() => setExerciseToDelete(null)}
+        title="Radera tävlingen?"
+        footer={
+          <div className="flex gap-2">
+            <Button variant="secondary" className="flex-1" onClick={() => setExerciseToDelete(null)}>Avbryt</Button>
+            <Button
+              variant="danger"
+              className="flex-1"
+              onClick={() => {
+                if (exerciseToDelete && onDeleteExercise) {
+                  updateMoment(exerciseToDelete.momentId, { exerciseId: undefined });
+                  onDeleteExercise(exerciseToDelete.exerciseId);
+                }
+                setExerciseToDelete(null);
+              }}
             >
-              <h3 className="text-xl font-black text-zinc-900 dark:text-white mb-2 uppercase tracking-tight">Radera tävling?</h3>
-              <p className="text-zinc-500 dark:text-zinc-400 mb-8 font-medium">
-                Är du säker på att du vill radera "{exerciseToDelete.name}"? 
-                Detta tar även bort alla lag och resultat permanent.
-              </p>
-              <div className="flex flex-col gap-3">
-                <button
-                  onClick={() => {
-                    if (onDeleteExercise) {
-                      updateMoment(exerciseToDelete.momentId, { exerciseId: undefined });
-                      onDeleteExercise(exerciseToDelete.exerciseId);
-                    }
-                    setExerciseToDelete(null);
-                  }}
-                  className="w-full py-4 bg-red-600 text-white rounded-2xl font-black hover:bg-red-700 transition-all uppercase text-xs shadow-lg shadow-red-200 dark:shadow-none"
-                >
-                  Ja, radera tävlingen
-                </button>
-                <button
-                  onClick={() => setExerciseToDelete(null)}
-                  className="w-full py-4 bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300 rounded-2xl font-black hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-all uppercase text-xs"
-                >
-                  Avbryt
-                </button>
-              </div>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+              Radera
+            </Button>
+          </div>
+        }
+      >
+        <p className="px-2 pb-2 text-sm text-zinc-600 dark:text-zinc-300">
+          ”{exerciseToDelete?.name}” raderas tillsammans med alla lag och resultat. Det går inte att ångra.
+        </p>
+      </Sheet>
 
-      {/* Moment Delete Confirmation Modal */}
-      <AnimatePresence>
-        {momentToDelete && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-black/40 backdrop-blur-sm z-[200] flex items-center justify-center p-4 text-left"
-            onClick={() => setMomentToDelete(null)}
-          >
-            <motion.div
-              initial={{ scale: 0.9, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.9, opacity: 0 }}
-              className="bg-white dark:bg-zinc-900 rounded-3xl p-8 max-w-sm w-full shadow-2xl border border-zinc-100 dark:border-zinc-800"
-              onClick={(e) => e.stopPropagation()}
+      {/* Radera moment */}
+      <Sheet
+        open={!!momentToDelete}
+        onClose={() => setMomentToDelete(null)}
+        title="Ta bort momentet?"
+        footer={
+          <div className="flex gap-2">
+            <Button variant="secondary" className="flex-1" onClick={() => setMomentToDelete(null)}>Avbryt</Button>
+            <Button
+              variant="danger"
+              className="flex-1"
+              onClick={() => {
+                if (momentToDelete) removeMoment(momentToDelete.id);
+                setMomentToDelete(null);
+              }}
             >
-              <h3 className="text-xl font-black text-zinc-900 dark:text-white mb-2 uppercase tracking-tight">Radera moment?</h3>
-              <p className="text-zinc-500 dark:text-zinc-400 mb-8 font-medium text-sm">
-                Är du säker på att du vill radera "{momentToDelete.name}" från schemat?
-              </p>
-              <div className="flex flex-col gap-3">
-                <button
-                  onClick={() => {
-                    removeMoment(momentToDelete.id);
-                    setMomentToDelete(null);
-                  }}
-                  className="w-full py-4 bg-red-600 text-white rounded-2xl font-black hover:bg-red-700 transition-all uppercase text-xs shadow-lg shadow-red-200 dark:shadow-none"
-                >
-                  Ja, radera momentet
-                </button>
-                <button
-                  onClick={() => setMomentToDelete(null)}
-                  className="w-full py-4 bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300 rounded-2xl font-black hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-all uppercase text-xs"
-                >
-                  Avbryt
-                </button>
-              </div>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+              Ta bort
+            </Button>
+          </div>
+        }
+      >
+        <p className="px-2 pb-2 text-sm text-zinc-600 dark:text-zinc-300">
+          ”{momentToDelete?.name}” tas bort från passets upplägg.
+        </p>
+      </Sheet>
 
       {/* Moment Copy Modal */}
       {allSessions && onUpdateSession && (
@@ -1873,211 +1464,76 @@ export default function SessionEditor({
         />
       )}
 
-      {/* Reusable Whiteboard Modal for Moments */}
+      {/* Rittavla för ett moment (spelare kan titta men inte spara) */}
       {tacticalBoardMoment && (
         <TacticalBoardModal
           boards={tacticalBoardMoment.tacticalBoards || []}
           onSave={(updatedBoards) => {
-            updateMoment(tacticalBoardMoment.id, { tacticalBoards: updatedBoards });
+            if (isCoachOrAdmin) updateMoment(tacticalBoardMoment.id, { tacticalBoards: updatedBoards });
             setTacticalBoardMoment(null);
           }}
           onClose={() => setTacticalBoardMoment(null)}
           squad={squad}
-          title={`Rittavla - ${tacticalBoardMoment.name || 'Moment'}`}
+          title={`Rittavla – ${tacticalBoardMoment.name || 'Moment'}`}
         />
       )}
 
-      {/* Modal: Innehållssekretess (Visibility Info) */}
-      {showVisibilityInfoModal && (
-        <motion.div
-          key="visibility-info-modal"
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-          className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs"
-        >
-          <motion.div 
-            initial={{ scale: 0.95, opacity: 0 }}
-            animate={{ scale: 1, opacity: 1 }}
-            exit={{ scale: 0.95, opacity: 0 }}
-            className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-3xl p-6 max-w-sm w-full space-y-4 shadow-2xl"
+      {/* Synlighet för spelare */}
+      <Sheet
+        open={showVisibilityInfoModal && isCoachOrAdmin}
+        onClose={() => setShowVisibilityInfoModal(false)}
+        title="Synlighet för spelare"
+        footer={
+          <Button
+            block
+            variant={session.hideContentForPlayers ? 'primary' : 'secondary'}
+            icon={session.hideContentForPlayers ? <Eye size={16} /> : <EyeOff size={16} />}
+            onClick={() => {
+              onUpdate({ ...session, hideContentForPlayers: !session.hideContentForPlayers, updatedAt: Date.now() });
+              setShowVisibilityInfoModal(false);
+            }}
           >
-            <div className="flex items-center justify-between pb-2 border-b border-zinc-100 dark:border-zinc-800">
-              <div className="flex items-center gap-2">
-                <div className={`p-2 rounded-xl ${session.hideContentForPlayers ? 'bg-amber-100 dark:bg-amber-900/40 text-amber-600 dark:text-amber-400' : 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-600 dark:text-emerald-400'}`}>
-                  {session.hideContentForPlayers ? <EyeOff size={20} /> : <Eye size={20} />}
-                </div>
-                <div>
-                  <h3 className="font-black text-sm text-zinc-900 dark:text-white uppercase tracking-tight">Innehållssekretess</h3>
-                  <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">Passets synlighet</p>
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => setShowVisibilityInfoModal(false)}
-                className="p-1.5 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors cursor-pointer"
-              >
-                <X size={18} />
-              </button>
-            </div>
+            {session.hideContentForPlayers ? 'Visa upplägget för spelarna' : 'Dölj upplägget för spelarna'}
+          </Button>
+        }
+      >
+        <div className="px-2 pb-2 space-y-3">
+          <Badge tone={session.hideContentForPlayers ? 'warning' : 'success'} icon={session.hideContentForPlayers ? <EyeOff size={12} /> : <Eye size={12} />}>
+            {session.hideContentForPlayers ? 'Dolt för spelare' : 'Synligt för spelare'}
+          </Badge>
+          <p className="text-sm text-zinc-600 dark:text-zinc-300">
+            {session.hideContentForPlayers
+              ? 'Spelarna ser bara tid, plats och kallelse – inte moment, övningar eller anteckningar.'
+              : 'Spelarna kan se passets upplägg, övningar och anteckningar.'}
+          </p>
+        </div>
+      </Sheet>
 
-            <div className={`p-3.5 rounded-2xl border ${
-              session.hideContentForPlayers
-                ? 'bg-amber-50 dark:bg-amber-950/30 border-amber-200 dark:border-amber-800/60 text-amber-900 dark:text-amber-200'
-                : 'bg-emerald-50 dark:bg-emerald-950/30 border-emerald-200 dark:border-emerald-800/60 text-emerald-900 dark:text-emerald-200'
-            }`}>
-              <p className="text-xs font-black uppercase tracking-wider mb-1 flex items-center gap-1.5">
-                {session.hideContentForPlayers ? <EyeOff size={14} /> : <Eye size={14} />}
-                <span>{session.hideContentForPlayers ? 'Innehållet är DOLT för spelare' : 'Innehållet är SYNLIGT för spelare'}</span>
-              </p>
-              <p className="text-xs font-medium leading-relaxed opacity-90">
-                {session.hideContentForPlayers
-                  ? 'Spelarna kan för närvarande inte se övningar och moment. De ser endast passets tid, plats och anmälan.'
-                  : 'Alla spelare kan se passets schema, övningar och detaljer i appen.'}
-              </p>
-            </div>
-
-            <div className="pt-2 space-y-2">
-              <button
-                type="button"
-                onClick={() => {
-                  onUpdate({ ...session, hideContentForPlayers: !session.hideContentForPlayers, updatedAt: Date.now() });
-                  setShowVisibilityInfoModal(false);
-                }}
-                className={`w-full py-3 px-4 rounded-xl font-black text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition-all shadow-md cursor-pointer ${
-                  session.hideContentForPlayers
-                    ? 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-emerald-200 dark:shadow-none'
-                    : 'bg-amber-600 hover:bg-amber-700 text-white shadow-amber-200 dark:shadow-none'
-                }`}
-              >
-                {session.hideContentForPlayers ? (
-                  <>
-                    <Eye size={16} />
-                    <span>Gör synligt för spelare</span>
-                  </>
-                ) : (
-                  <>
-                    <EyeOff size={16} />
-                    <span>Dölj innehåll för spelare</span>
-                  </>
-                )}
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setShowVisibilityInfoModal(false)}
-                className="w-full py-2.5 px-4 bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-zinc-700 dark:text-zinc-300 rounded-xl font-black text-xs uppercase tracking-wider transition-colors cursor-pointer"
-              >
-                Stäng
-              </button>
-            </div>
-          </motion.div>
-        </motion.div>
-      )}
-
-      {/* Modal: Klarmarkering (Completion Info) */}
-      {showCompletionInfoModal && (
-        <motion.div
-          key="completion-info-modal"
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-          className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs"
-        >
-          <motion.div 
-            initial={{ scale: 0.95, opacity: 0 }}
-            animate={{ scale: 1, opacity: 1 }}
-            exit={{ scale: 0.95, opacity: 0 }}
-            className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-3xl p-6 max-w-sm w-full space-y-4 shadow-2xl"
+      {/* Klarmarkering */}
+      <Sheet
+        open={showCompletionInfoModal && isCoachOrAdmin}
+        onClose={() => setShowCompletionInfoModal(false)}
+        title={session.isCompleted ? 'Passet är genomfört' : 'Klarmarkera passet'}
+        footer={
+          <Button
+            block
+            variant={session.isCompleted ? 'secondary' : 'success'}
+            icon={session.isCompleted ? <RotateCcw size={16} /> : <Check size={16} strokeWidth={3} />}
+            onClick={() => {
+              onUpdate({ ...session, isCompleted: !session.isCompleted, updatedAt: Date.now() });
+              setShowCompletionInfoModal(false);
+            }}
           >
-            <div className="flex items-center justify-between pb-2 border-b border-zinc-100 dark:border-zinc-800">
-              <div className="flex items-center gap-2">
-                <div className={`p-2 rounded-xl ${session.isCompleted ? 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-600 dark:text-emerald-400' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-500'}`}>
-                  <Check size={20} strokeWidth={3} />
-                </div>
-                <div>
-                  <h3 className="font-black text-sm text-zinc-900 dark:text-white uppercase tracking-tight">Passstatus</h3>
-                  <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">Genomförande</p>
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => setShowCompletionInfoModal(false)}
-                className="p-1.5 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors cursor-pointer"
-              >
-                <X size={18} />
-              </button>
-            </div>
-
-            <div className={`p-3.5 rounded-2xl border ${
-              session.isCompleted
-                ? 'bg-emerald-50 dark:bg-emerald-950/30 border-emerald-200 dark:border-emerald-800/60 text-emerald-900 dark:text-emerald-200'
-                : 'bg-zinc-50 dark:bg-zinc-950/30 border-zinc-200 dark:border-zinc-800 text-zinc-800 dark:text-zinc-200'
-            }`}>
-              <p className="text-xs font-black uppercase tracking-wider mb-1 flex items-center gap-1.5">
-                <Check size={14} strokeWidth={3} />
-                <span>{session.isCompleted ? 'Passet är KLARMARKERAT' : 'Passet är EJ klarmarkerat'}</span>
-              </p>
-              <p className="text-xs font-medium leading-relaxed opacity-90">
-                {session.isCompleted
-                  ? 'Detta träningspass har genomförts och är markerat som klart i kalendern och statistiken.'
-                  : 'Klarmarkera passet när det är slutfört för att uppdatera träningsstatistiken för träningsgruppen.'}
-              </p>
-            </div>
-
-            {isCoachOrAdmin ? (
-              <div className="pt-2 space-y-2">
-                <button
-                  type="button"
-                  onClick={() => {
-                    onUpdate({ ...session, isCompleted: !session.isCompleted, updatedAt: Date.now() });
-                    setShowCompletionInfoModal(false);
-                  }}
-                  className={`w-full py-3 px-4 rounded-xl font-black text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition-all shadow-md cursor-pointer ${
-                    session.isCompleted
-                      ? 'bg-zinc-200 hover:bg-zinc-300 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-zinc-800 dark:text-zinc-200'
-                      : 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-emerald-200 dark:shadow-none'
-                  }`}
-                >
-                  {session.isCompleted ? (
-                    <>
-                      <Clock size={16} />
-                      <span>Markera som ej genomfört</span>
-                    </>
-                  ) : (
-                    <>
-                      <Check size={16} strokeWidth={3} />
-                      <span>Klarmarkera passet</span>
-                    </>
-                  )}
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setShowCompletionInfoModal(false)}
-                  className="w-full py-2.5 px-4 bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-zinc-700 dark:text-zinc-300 rounded-xl font-black text-xs uppercase tracking-wider transition-colors cursor-pointer"
-                >
-                  Stäng
-                </button>
-              </div>
-            ) : (
-              <div className="pt-2 space-y-2">
-                <p className="text-xs text-zinc-500 font-medium text-center py-1">
-                  Endast tränare och administratörer kan ändra klarmarkering.
-                </p>
-                <button
-                  type="button"
-                  onClick={() => setShowCompletionInfoModal(false)}
-                  className="w-full py-2.5 px-4 bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-zinc-700 dark:text-zinc-300 rounded-xl font-black text-xs uppercase tracking-wider transition-colors cursor-pointer"
-                >
-                  Stäng
-                </button>
-              </div>
-            )}
-          </motion.div>
-        </motion.div>
-      )}
+            {session.isCompleted ? 'Markera som ej genomfört' : 'Klarmarkera passet'}
+          </Button>
+        }
+      >
+        <p className="px-2 pb-2 text-sm text-zinc-600 dark:text-zinc-300">
+          {session.isCompleted
+            ? 'Passet räknas som genomfört i kalendern och statistiken.'
+            : 'Klarmarkera passet när det är genomfört, så räknas det med i lagets statistik.'}
+        </p>
+      </Sheet>
     </div>
   );
 }
-

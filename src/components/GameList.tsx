@@ -1,11 +1,14 @@
 import React from 'react';
-import { Trophy, Clock, Trash2, ChevronRight, Plus, Copy, Edit2, GripVertical, ArrowUpDown, Gamepad2, Dice5, Target, Sword, Shield, Crown, Star, Heart, Zap, Flame, Ghost, Skull, Rocket, Car, Bike, Footprints, Dribbble, Music, Coffee, Check, Link, Layout, Users } from 'lucide-react';
-import { motion, AnimatePresence, Reorder } from 'motion/react';
+import { Trophy, Clock, Trash2, ChevronRight, Plus, Copy, Edit2, GripVertical, ArrowUpDown, Gamepad2, Dice5, Target, Sword, Shield, Crown, Star, Heart, Zap, Flame, Ghost, Skull, Rocket, Car, Bike, Footprints, Dribbble, Music, Coffee, Check, Link, Users, MoreVertical, Play } from 'lucide-react';
+import { Reorder } from 'motion/react';
 import { Exercise, TrainingSession } from '../types';
+import { Badge, Button, EmptyState, IconButton, MenuItem, SegmentedTabs, Sheet } from './ui';
 
 const ICON_MAP: Record<string, any> = {
   Trophy, Gamepad2, Dice5, Target, Sword, Shield, Crown, Star, Heart, Zap, Flame, Ghost, Skull, Rocket, Car, Bike, Footprints, Dribbble, Music, Coffee
 };
+
+type Filter = 'all' | 'standalone' | 'linked';
 
 interface GameListProps {
   exercises: Exercise[];
@@ -17,304 +20,235 @@ interface GameListProps {
   onReorderExercises: (exercises: Exercise[]) => void;
   onNewExercise: () => void;
   onShowTeams?: (id: string) => void;
+  /** Tränare/admin. Spelare ser bara listan och kan öppna/visa lag. */
+  canManage?: boolean;
   key?: React.Key;
 }
 
-export default function GameList({ 
-  exercises, 
-  sessions = [], 
-  onSelectExercise, 
-  onDeleteExercise, 
-  onCopyExercise, 
-  onEditExercise, 
-  onReorderExercises, 
+export default function GameList({
+  exercises,
+  sessions = [],
+  onSelectExercise,
+  onDeleteExercise,
+  onCopyExercise,
+  onEditExercise,
+  onReorderExercises,
   onNewExercise,
-  onShowTeams
+  onShowTeams,
+  canManage = true,
 }: GameListProps) {
   const [exerciseToDelete, setExerciseToDelete] = React.useState<string | null>(null);
+  const [menuExerciseId, setMenuExerciseId] = React.useState<string | null>(null);
   const [isReorderMode, setIsReorderMode] = React.useState(false);
-  const [filter, setFilter] = React.useState<'all' | 'standalone' | 'linked'>('all');
+  const [filter, setFilter] = React.useState<Filter>('all');
 
-  const handleDeleteConfirm = (e: React.MouseEvent, id: string) => {
-    e.stopPropagation();
-    setExerciseToDelete(id);
-  };
-
-  const confirmDelete = () => {
-    if (exerciseToDelete) {
-      onDeleteExercise(exerciseToDelete);
-      setExerciseToDelete(null);
-    }
-  };
+  const isLinked = (ex: Exercise) => !!ex.sessionId || sessions.some(s => s.moments?.some(m => m.exerciseId === ex.id));
 
   const filteredExercises = exercises.filter(ex => {
-    if (filter === 'all') return true;
-    const isLinked = ex.sessionId || sessions.some(s => s.moments.some(m => m.exerciseId === ex.id));
-    if (filter === 'standalone') return !isLinked;
-    if (filter === 'linked') return isLinked;
+    if (filter === 'standalone') return !isLinked(ex);
+    if (filter === 'linked') return isLinked(ex);
     return true;
   });
 
-  const standaloneCount = exercises.filter(ex => !(ex.sessionId || sessions.some(s => s.moments.some(m => m.exerciseId === ex.id)))).length;
+  const standaloneCount = exercises.filter(ex => !isLinked(ex)).length;
   const linkedCount = exercises.length - standaloneCount;
 
-  return (
-    <div className="w-full max-w-4xl lg:max-w-5xl xl:max-w-6xl 2xl:max-w-7xl mx-auto sm:p-6 pb-32">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6 px-4 sm:px-0 pt-1 sm:pt-0">
-        <div className="flex p-0.5 sm:p-1 bg-zinc-100 dark:bg-zinc-900 rounded-xl w-full sm:w-auto">
-          <button
-            onClick={() => setFilter('all')}
-            className={`flex-1 sm:flex-none px-2 sm:px-4 py-2 rounded-lg text-[10px] sm:text-xs font-black sm:font-bold uppercase sm:capitalize tracking-tight sm:tracking-normal transition-all ${
-              filter === 'all'
-                ? 'bg-white dark:bg-zinc-800 text-indigo-600 dark:text-indigo-400 shadow-sm'
-                : 'text-zinc-400 dark:text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300'
-            }`}
-          >
-            Alla ({exercises.length})
-          </button>
-          <button
-            onClick={() => setFilter('standalone')}
-            className={`flex-1 sm:flex-none px-2 sm:px-4 py-2 rounded-lg text-[10px] sm:text-xs font-black sm:font-bold uppercase sm:capitalize tracking-tight sm:tracking-normal transition-all ${
-              filter === 'standalone'
-                ? 'bg-white dark:bg-zinc-800 text-indigo-600 dark:text-indigo-400 shadow-sm'
-                : 'text-zinc-400 dark:text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300'
-            }`}
-          >
-            Fristående ({standaloneCount})
-          </button>
-          <button
-            onClick={() => setFilter('linked')}
-            className={`flex-1 sm:flex-none px-2 sm:px-4 py-2 rounded-lg text-[10px] sm:text-xs font-black sm:font-bold uppercase sm:capitalize tracking-tight sm:tracking-normal transition-all ${
-              filter === 'linked'
-                ? 'bg-white dark:bg-zinc-800 text-indigo-600 dark:text-indigo-400 shadow-sm'
-                : 'text-zinc-400 dark:text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300'
-            }`}
-          >
-            Kopplade ({linkedCount})
-          </button>
-        </div>
+  const menuExercise = menuExerciseId ? exercises.find(e => e.id === menuExerciseId) : undefined;
+  const closeMenu = () => setMenuExerciseId(null);
+  const runFromMenu = (fn: (id: string) => void) => {
+    if (!menuExerciseId) return;
+    const id = menuExerciseId;
+    closeMenu();
+    fn(id);
+  };
 
-        <div className="flex items-center gap-2">
-          {exercises.length > 1 && (
-            <button
-              onClick={() => setIsReorderMode(!isReorderMode)}
-              className={`flex items-center gap-2 px-3 py-2 rounded-xl font-bold transition-all text-sm border ${
-                isReorderMode 
-                  ? 'bg-indigo-50 border-indigo-200 text-indigo-600 dark:bg-indigo-950/30 dark:border-indigo-800' 
-                  : 'bg-white border-zinc-200 text-zinc-600 dark:bg-zinc-900 dark:border-zinc-800 dark:text-zinc-400'
-              }`}
-              title={isReorderMode ? 'Avsluta sortering' : 'Sortera tävlingsmoment'}
-            >
-              <ArrowUpDown size={18} />
-              <span className="hidden xs:inline">{isReorderMode ? 'Klar' : 'Sortera'}</span>
-            </button>
-          )}
-          <button
-            onClick={onNewExercise}
-            className="flex-1 sm:flex-none flex items-center justify-center gap-2 bg-indigo-600 text-white px-4 py-2 rounded-xl font-bold hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-100 dark:shadow-none text-sm"
-          >
-            <Plus size={18} />
-            Nytt tävlingsmoment
-          </button>
-        </div>
+  // Sortering görs bara i "Alla", annars skulle dolda moment försvinna ur ordningen.
+  const canReorder = canManage && filter === 'all' && exercises.length > 1;
+  const reordering = isReorderMode && canReorder;
+
+  return (
+    <div className="w-full max-w-4xl lg:max-w-5xl xl:max-w-6xl 2xl:max-w-7xl mx-auto px-4 sm:px-6 sm:pt-2 pb-32">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-5">
+        <SegmentedTabs<Filter>
+          size="sm"
+          className="sm:w-auto"
+          value={filter}
+          onChange={(f) => { setFilter(f); setIsReorderMode(false); }}
+          tabs={[
+            { id: 'all', label: 'Alla', count: exercises.length },
+            { id: 'standalone', label: 'Fristående', count: standaloneCount },
+            { id: 'linked', label: 'Kopplade', count: linkedCount },
+          ]}
+        />
+
+        {canManage && (
+          <div className="flex items-center gap-2 min-w-0">
+            {canReorder && (
+              <Button
+                variant={reordering ? 'primary' : 'secondary'}
+                icon={reordering ? <Check size={18} /> : <ArrowUpDown size={18} />}
+                onClick={() => setIsReorderMode(!reordering)}
+                aria-label={reordering ? 'Klar' : 'Ändra ordning'}
+                className={reordering ? 'flex-1 sm:flex-none' : ''}
+              >
+                {reordering ? 'Klar' : <span className="hidden sm:inline">Ändra ordning</span>}
+              </Button>
+            )}
+            {!reordering && (
+              <Button icon={<Plus size={18} />} onClick={onNewExercise} className="flex-1 sm:flex-none">
+                Nytt tävlingsmoment
+              </Button>
+            )}
+          </div>
+        )}
       </div>
 
+      {reordering && (
+        <p className="mb-3 text-sm text-zinc-500 dark:text-zinc-400">Dra i handtaget för att flytta ett moment. Tryck på Klar när du är nöjd.</p>
+      )}
+
       {filteredExercises.length === 0 ? (
-        <div className="bg-white dark:bg-zinc-900 rounded-3xl p-8 sm:p-12 text-center border-2 border-dashed border-zinc-200 dark:border-zinc-800 mx-4 sm:mx-0">
-          <div className="w-12 h-12 sm:w-16 sm:h-16 bg-zinc-50 dark:bg-zinc-950 rounded-2xl flex items-center justify-center mx-auto mb-4 text-zinc-400">
-            <Layout size={24} className="sm:size-8" />
-          </div>
-          <h3 className="text-lg sm:text-xl font-bold text-zinc-800 dark:text-zinc-200 mb-2">Inga tävlingsmoment hittades</h3>
-          <p className="text-sm text-zinc-500 dark:text-zinc-400 mb-6 sm:mb-8">
-            {filter === 'all' ? 'Skapa ditt första tävlingsmoment för att börja samla poäng!' : 'Inga tävlingsmoment matchar ditt filter.'}
-          </p>
-          {filter === 'all' && (
-            <button
-              onClick={onNewExercise}
-              className="bg-indigo-600 text-white px-6 py-2.5 sm:px-8 sm:py-3 rounded-2xl font-bold hover:bg-indigo-700 transition-all text-sm sm:text-base"
-            >
-              Skapa tävlingsmoment
-            </button>
-          )}
+        <div className="bg-white dark:bg-zinc-900 rounded-2xl border border-dashed border-zinc-200 dark:border-zinc-800">
+          <EmptyState
+            icon={<Trophy size={26} />}
+            title={filter === 'all' ? 'Inga tävlingsmoment än' : 'Inga tävlingsmoment här'}
+            text={filter === 'all'
+              ? (canManage ? 'Skapa ditt första tävlingsmoment för att börja samla poäng.' : 'Tränaren har inte skapat några tävlingsmoment än.')
+              : 'Inga tävlingsmoment matchar filtret.'}
+            action={filter === 'all' && canManage ? (
+              <Button icon={<Plus size={18} />} onClick={onNewExercise}>Skapa tävlingsmoment</Button>
+            ) : undefined}
+          />
         </div>
       ) : (
-        <Reorder.Group 
-          axis="y" 
-          values={filteredExercises} 
+        <Reorder.Group
+          axis="y"
+          values={filteredExercises}
           onReorder={onReorderExercises}
-          className="flex flex-col gap-2 sm:gap-4"
+          className="flex flex-col gap-2.5"
         >
           {filteredExercises.map((exercise) => {
-            const leader = [...exercise.teams].sort((a, b) => b.score - a.score)[0];
+            const sortedTeams = [...exercise.teams].sort((a, b) => b.score - a.score);
+            const leader = sortedTeams[0];
+            const hasScores = exercise.teams.some(t => t.score !== 0);
             const date = new Date(exercise.date || exercise.updatedAt).toLocaleDateString('sv-SE', {
               month: 'short',
               day: 'numeric',
             });
             const ExerciseIcon = ICON_MAP[exercise.icon] || Trophy;
-            const isLinked = exercise.sessionId || sessions.some(s => s.moments.some(m => m.exerciseId === exercise.id));
+            const linked = isLinked(exercise);
 
             return (
               <Reorder.Item
                 key={exercise.id}
                 value={exercise}
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                dragListener={isReorderMode}
-                className={`group bg-white dark:bg-zinc-900 py-3 px-4 sm:rounded-2xl border-b sm:border border-zinc-100 dark:border-zinc-800 shadow-sm hover:shadow-md transition-all flex items-center gap-3 sm:gap-4 w-full z-0 ${
-                  isReorderMode ? 'cursor-grab active:cursor-grabbing active:scale-[0.98] active:shadow-lg' : 'cursor-pointer'
+                dragListener={reordering}
+                className={`group bg-white dark:bg-zinc-900 border border-zinc-200/80 dark:border-zinc-800 rounded-2xl shadow-[0_1px_2px_rgba(16,24,40,0.04)] flex items-center gap-3 pl-3 pr-1.5 py-3 min-h-[72px] w-full transition-colors ${
+                  reordering ? 'cursor-grab active:cursor-grabbing touch-none' : 'cursor-pointer hover:border-indigo-300 dark:hover:border-indigo-700'
                 }`}
-                onClick={() => !isReorderMode && onSelectExercise(exercise.id)}
+                onClick={() => !reordering && onSelectExercise(exercise.id)}
               >
-                <AnimatePresence>
-                  {isReorderMode && (
-                    <motion.div 
-                      initial={{ opacity: 0, width: 0 }}
-                      animate={{ opacity: 1, width: 'auto' }}
-                      exit={{ opacity: 0, width: 0 }}
-                      className="text-zinc-300 dark:text-zinc-700 p-1 -ml-2 hover:text-zinc-400 transition-colors shrink-0 overflow-hidden"
-                    >
-                      <GripVertical size={20} />
-                    </motion.div>
-                  )}
-                </AnimatePresence>
+                {reordering && (
+                  <span className="text-zinc-400 shrink-0 -ml-1" aria-hidden>
+                    <GripVertical size={20} />
+                  </span>
+                )}
 
-                <div className="relative shrink-0">
-                  <div 
-                    className="w-12 h-12 sm:w-14 sm:h-14 rounded-xl sm:rounded-2xl flex items-center justify-center text-white shadow-inner"
-                    style={{ backgroundColor: leader?.color || '#6366f1' }}
-                  >
-                    <ExerciseIcon size={24} className="sm:size-7" fill="currentColor" />
-                  </div>
-                  {isLinked && (
-                    <div className="absolute -top-1.5 -right-1.5 bg-indigo-600 text-white p-1 rounded-lg shadow-sm border-2 border-white dark:border-zinc-900" title="Kopplad till träningspass">
-                      <Link size={10} strokeWidth={3} />
-                    </div>
-                  )}
+                <div
+                  className="w-11 h-11 rounded-xl flex items-center justify-center text-white shrink-0"
+                  style={{ backgroundColor: leader?.color || '#6366f1' }}
+                >
+                  <ExerciseIcon size={22} fill="currentColor" />
                 </div>
 
-                <div className="flex-1 min-w-0 flex flex-col justify-center">
-                  <div className="flex items-center gap-2 mb-1">
-                    <h3 className="font-black text-base sm:text-xl text-zinc-900 dark:text-white truncate leading-tight">
-                      {exercise.name}
-                    </h3>
-                    {isLinked && (
-                      <span className="px-1.5 py-0.5 bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 text-[8px] font-black uppercase tracking-tighter rounded border border-indigo-100 dark:border-indigo-800">
-                        Kopplad
-                      </span>
+                <div className="flex-1 min-w-0">
+                  <h3 className="font-semibold text-[15px] sm:text-base text-zinc-900 dark:text-white leading-snug line-clamp-2 break-words">
+                    {exercise.name}
+                  </h3>
+                  <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-zinc-500 dark:text-zinc-400">
+                    <span className="inline-flex items-center gap-1">
+                      <Clock size={12} />
+                      {date}
+                    </span>
+                    <span aria-hidden>·</span>
+                    <span>{exercise.teams.length} lag</span>
+                    {hasScores && leader && (
+                      <>
+                        <span aria-hidden>·</span>
+                        <span className="truncate max-w-[10rem]">
+                          {exercise.isFinished ? 'Vann' : 'Leder'}: <span className="font-semibold text-zinc-700 dark:text-zinc-200">{leader.name}</span> ({leader.score})
+                        </span>
+                      </>
                     )}
                   </div>
-                  
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="flex items-center gap-2 text-[10px] sm:text-xs text-zinc-400 dark:text-zinc-500 font-medium">
-                      <span className="flex items-center gap-1">
-                        <Clock size={10} className="sm:size-3" />
-                        {date}
-                      </span>
-                      <span>•</span>
-                      <span>{exercise.teams.length} lag</span>
-                      {exercise.isFinished && (
-                        <>
-                          <span>•</span>
-                          <span className="flex items-center gap-1 text-green-600 dark:text-green-400 font-bold">
-                            <Check size={10} strokeWidth={3} className="sm:size-3" />
-                            Avslutad
-                          </span>
-                        </>
-                      )}
+                  {(exercise.isFinished || linked) && (
+                    <div className="mt-1.5 flex flex-wrap gap-1.5">
+                      {exercise.isFinished && <Badge tone="success" icon={<Check size={12} strokeWidth={3} />}>Avslutad</Badge>}
+                      {linked && <Badge tone="brand" icon={<Link size={12} />}>Kopplad till pass</Badge>}
                     </div>
-
-                    <div className="flex items-center gap-1">
-                      {onShowTeams && (
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            onShowTeams(exercise.id);
-                          }}
-                          className="p-2 text-zinc-300 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-950/30 rounded-xl transition-all"
-                          title="Visa lag"
-                        >
-                          <Users size={18} className="sm:size-5" />
-                        </button>
-                      )}
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onEditExercise(exercise.id);
-                        }}
-                        className="p-2 text-zinc-300 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-950/30 rounded-xl transition-all"
-                        title="Redigera"
-                      >
-                        <Edit2 size={18} className="sm:size-5" />
-                      </button>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onCopyExercise(exercise.id);
-                        }}
-                        className="p-2 text-zinc-300 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-950/30 rounded-xl transition-all"
-                        title="Kopiera"
-                      >
-                        <Copy size={18} className="sm:size-5" />
-                      </button>
-                      <button
-                        onClick={(e) => handleDeleteConfirm(e, exercise.id)}
-                        className="p-2 text-zinc-200 dark:text-zinc-700 hover:text-red-500 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/30 rounded-xl transition-all"
-                        title="Radera"
-                      >
-                        <Trash2 size={18} className="sm:size-5" />
-                      </button>
-                    </div>
-                  </div>
+                  )}
                 </div>
 
-                <div className="text-zinc-300 dark:text-zinc-700 group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors shrink-0">
-                  <ChevronRight size={20} className="sm:size-6" />
-                </div>
+                {!reordering && (
+                  canManage || onShowTeams ? (
+                    <IconButton
+                      label="Fler val"
+                      onClick={(e) => { e.stopPropagation(); setMenuExerciseId(exercise.id); }}
+                    >
+                      <MoreVertical size={20} />
+                    </IconButton>
+                  ) : (
+                    <ChevronRight size={20} className="text-zinc-300 dark:text-zinc-600 shrink-0 mr-2" />
+                  )
+                )}
               </Reorder.Item>
             );
           })}
         </Reorder.Group>
       )}
 
-      {/* Delete Confirmation Modal */}
-      <AnimatePresence>
-        {exerciseToDelete && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4"
-            onClick={() => setExerciseToDelete(null)}
-          >
-            <motion.div
-              initial={{ scale: 0.9, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.9, opacity: 0 }}
-              className="bg-white dark:bg-zinc-900 rounded-3xl p-8 max-w-sm w-full shadow-2xl border border-zinc-100 dark:border-zinc-800"
-              onClick={(e) => e.stopPropagation()}
+      {/* Meny per tävlingsmoment */}
+      <Sheet open={!!menuExercise} onClose={closeMenu} title={menuExercise?.name}>
+        <div className="flex flex-col gap-0.5">
+          <MenuItem icon={<Play size={18} />} label="Öppna poängräkningen" onClick={() => runFromMenu(onSelectExercise)} />
+          {onShowTeams && (
+            <MenuItem icon={<Users size={18} />} label="Visa lag" onClick={() => runFromMenu(onShowTeams)} />
+          )}
+          {canManage && (
+            <>
+              <MenuItem icon={<Edit2 size={18} />} label="Redigera" description="Lag, poäng och inställningar" onClick={() => runFromMenu(onEditExercise)} />
+              <MenuItem icon={<Copy size={18} />} label="Kopiera" description="Skapa ett nytt moment med samma lag" onClick={() => runFromMenu(onCopyExercise)} />
+              <MenuItem icon={<Trash2 size={18} />} label="Radera" tone="danger" onClick={() => runFromMenu(setExerciseToDelete)} />
+            </>
+          )}
+        </div>
+      </Sheet>
+
+      {/* Bekräfta radering */}
+      <Sheet
+        open={!!exerciseToDelete}
+        onClose={() => setExerciseToDelete(null)}
+        title="Radera tävlingsmoment?"
+        footer={
+          <div className="flex flex-col-reverse sm:flex-row gap-2 sm:justify-end">
+            <Button variant="secondary" onClick={() => setExerciseToDelete(null)}>Avbryt</Button>
+            <Button
+              variant="danger"
+              icon={<Trash2 size={18} />}
+              onClick={() => {
+                if (exerciseToDelete) onDeleteExercise(exerciseToDelete);
+                setExerciseToDelete(null);
+              }}
             >
-              <h3 className="text-xl font-bold text-zinc-900 dark:text-white mb-2">Radera tävlingsmoment?</h3>
-              <p className="text-zinc-500 dark:text-zinc-400 mb-8">
-                Är du säker på att du vill radera "{exercises.find(e => e.id === exerciseToDelete)?.name}"? Detta kan inte ångras.
-              </p>
-              <div className="flex flex-col gap-3">
-                <button
-                  onClick={confirmDelete}
-                  className="w-full py-3 bg-red-600 text-white rounded-xl font-bold hover:bg-red-700 transition-colors"
-                >
-                  Ja, radera
-                </button>
-                <button
-                  onClick={() => setExerciseToDelete(null)}
-                  className="w-full py-3 bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300 rounded-xl font-bold hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-colors"
-                >
-                  Avbryt
-                </button>
-              </div>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+              Ja, radera
+            </Button>
+          </div>
+        }
+      >
+        <p className="px-2 pb-2 text-sm text-zinc-600 dark:text-zinc-300">
+          "{exercises.find(e => e.id === exerciseToDelete)?.name}" tas bort. Det går inte att ångra.
+        </p>
+      </Sheet>
     </div>
   );
 }

@@ -4,6 +4,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { SquadPlayer, PRESET_COLORS, Exercise, Team, PointsConfig, TrainingSession } from '../types';
 import { sortPlayersByPosition, findSquadMatch } from '../lib/teamUtils';
 import ColorPicker from './ColorPicker';
+import { Badge, Button, Card, IconButton, MenuItem, SectionHeader, SegmentedTabs, Sheet } from './ui';
 
 interface GameSetupProps {
   onStartGame: (
@@ -589,1229 +590,748 @@ export default function GameSetup({
     submitShouldStartRef.current = false;
   };
 
+  const addAbsentToAttendance = (playerId: string) => {
+    if (!playerId) return;
+    if (activeSessionId && onAddSquadPlayerToAttendance) {
+      onAddSquadPlayerToAttendance(playerId);
+    } else {
+      setStandaloneAttendance(prev => [...prev, playerId]);
+    }
+  };
+
+  const submitGuest = () => {
+    if (!guestName.trim()) return;
+    onAddGuest && onAddGuest(guestName.trim(), guestPosition || undefined);
+    setGuestName('');
+    setGuestPosition('');
+    setShowGuestInput(false);
+  };
+
+  const toggleExcludeGoalkeepers = () => {
+    const newValue = !excludeGoalkeepers;
+    setExcludeGoalkeepers(newValue);
+    if (newValue) {
+      // Ta bort målvakter ur alla lag och jokrar
+      const keep = (pid: string) => {
+        const p = combinedSquad.find(player => player.id === pid);
+        return p ? !isGoalkeeper(p) : true;
+      };
+      setTeams(prev => prev.map(t => ({ ...t, playerIds: t.playerIds.filter(keep) })));
+      setJokerPlayerIds(prev => prev.filter(keep));
+    }
+  };
+
+  const isIndividualMode = teams.length > 0 && teams.every(t => t.playerIds.length === 1 && t.name === '');
+
+  // Spelare som visas som valbara (närvarande om närvaro används)
+  const selectablePlayerIds = sortPlayersByPosition(combinedSquad.map(p => p.id), combinedSquad).filter(pid => {
+    if (!isAttendanceActive) return true;
+    const isGuest = typeof pid === 'string' && pid.startsWith('guest_');
+    return currentAttendanceIds.includes(pid) || (isGuest && (guestPlayers || []).some(gp => gp.id === pid));
+  });
+
+  const chipBase = 'min-h-[40px] px-3 rounded-xl text-sm font-semibold transition-all border inline-flex items-center gap-1.5 cursor-pointer active:scale-[0.97]';
+  const positionTag = (p: SquadPlayer, light = false) =>
+    p.role === 'leader'
+      ? <span className={`text-[11px] font-semibold px-1.5 rounded-md ${light ? 'bg-white/25' : 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300'}`}>Ledare</span>
+      : p.position
+        ? <span className="text-[11px] opacity-70">{p.position}</span>
+        : null;
+
+  const renderOverviewChip = (pid: string, idx: number, keyPrefix: string, variant: { color?: string; neutral?: boolean }, onRemove: () => void, removeLabel: string) => {
+    const player = combinedSquad.find(p => p.id === pid);
+    if (!player) return null;
+    return (
+      <motion.div
+        key={`${keyPrefix}-${pid}-${idx}`}
+        drag
+        dragSnapToOrigin
+        whileDrag={{ zIndex: 9999, scale: 1.08, pointerEvents: 'none' }}
+        onDragStart={() => setDraggedPlayerId(pid)}
+        onDragEnd={(e: any, info) => {
+          const point = (e.nativeEvent || e).clientX !== undefined ? (e.nativeEvent || e) : info.point;
+          handleDragEndInOverview(pid, point.clientX || point.x, point.clientY || point.y);
+        }}
+        className={`h-9 pl-3 pr-1 rounded-lg text-sm font-semibold flex items-center gap-1.5 cursor-grab active:cursor-grabbing touch-none z-50 select-none ${
+          variant.neutral
+            ? 'text-zinc-800 dark:text-zinc-100 bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700'
+            : 'text-white shadow-sm'
+        }`}
+        style={variant.neutral ? undefined : { backgroundColor: variant.color }}
+      >
+        <span className="truncate max-w-[9rem]">{player.name}</span>
+        {positionTag(player, !variant.neutral)}
+        <button
+          type="button"
+          onPointerDown={(e) => e.stopPropagation()}
+          onClick={(e) => { e.stopPropagation(); onRemove(); }}
+          className={`w-7 h-7 rounded-md flex items-center justify-center shrink-0 cursor-pointer ${variant.neutral ? 'text-zinc-400 hover:text-red-500 hover:bg-zinc-100 dark:hover:bg-zinc-700' : 'text-white/90 hover:bg-white/20'}`}
+          aria-label={`${removeLabel}: ${player.name}`}
+          title={removeLabel}
+        >
+          <X size={14} />
+        </button>
+      </motion.div>
+    );
+  };
+
+  const dropHint = (tone: 'neutral' | 'brand' = 'neutral') => (
+    <div className={`w-full h-9 border border-dashed rounded-lg flex items-center justify-center text-xs font-semibold pointer-events-none ${
+      tone === 'brand' ? 'border-indigo-200 dark:border-indigo-800 text-indigo-400' : 'border-zinc-200 dark:border-zinc-800 text-zinc-400'
+    }`}>
+      Dra hit
+    </div>
+  );
+
   return (
-    <motion.div 
+    <motion.div
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
-      className="w-full max-w-3xl mx-auto sm:p-6"
+      className="w-full max-w-3xl mx-auto px-4 sm:px-6 pt-4 sm:pt-6"
     >
-      <div className="bg-white dark:bg-zinc-900 sm:rounded-3xl sm:shadow-xl p-4 sm:p-8 sm:border border-zinc-100 dark:border-zinc-800 transition-colors duration-300 pb-32">
-        <form id="game-setup-form" onSubmit={handleStart} className="space-y-6">
-          <div className="space-y-4">
-            {/* Header: Name and Top Save */}
-            <div className="flex items-center gap-3">
-              <div className="flex-1 min-w-0">
-                <input
-                  type="text"
-                  value={gameName}
-                  onChange={(e) => setGameName(e.target.value)}
-                  placeholder="Tävlingens namn..."
-                  className="w-full bg-transparent border-none focus:ring-0 text-xl sm:text-2xl font-black text-zinc-900 dark:text-white placeholder:text-zinc-200 p-0 outline-none truncate"
-                />
-                <div className="flex items-center gap-1 mt-0.5">
-                  <Trophy size={10} className="text-zinc-400" />
-                  <span className="text-[9px] font-bold text-zinc-400 uppercase tracking-widest">Tävlingsmoment</span>
-                </div>
-              </div>
-
-              <button
-                type="submit"
-                form="game-setup-form"
-                className="w-7 h-7 flex items-center justify-center bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 active:scale-95 transition-all shadow-sm shrink-0"
-                title="Spara ändringar"
-              >
-                <Save size={14} />
-              </button>
-            </div>
-
-            {/* Linked Session Badge & Planning Source Selector */}
-            {linkedSession ? (
-              <div className="bg-indigo-50/50 dark:bg-indigo-950/20 border border-indigo-100/80 dark:border-indigo-900/30 rounded-2xl p-4 space-y-3 shadow-xs">
-                <div className="flex items-center gap-2.5">
-                  <div className="w-8 h-8 bg-indigo-100 dark:bg-indigo-900/50 rounded-xl flex items-center justify-center text-indigo-600 dark:text-indigo-400">
-                    <Calendar size={18} />
-                  </div>
-                  <div className="flex flex-col text-left">
-                    <span className="text-[10px] font-black text-indigo-950 dark:text-indigo-300 uppercase tracking-widest leading-none mb-1">
-                      Kopplad till: {sessionTitle}
-                    </span>
-                    <span className="text-[9px] text-zinc-500 dark:text-zinc-400 uppercase font-extrabold tracking-wider">
-                      Välj vilka spelare du vill planera lag utifrån:
-                    </span>
-                  </div>
-                </div>
-                
-                <div className="grid grid-cols-2 gap-2 p-1 bg-zinc-100/80 dark:bg-zinc-900 rounded-xl">
-                  <button
-                    type="button"
-                    onClick={() => setPlanningSource('rsvp')}
-                    className={`py-2 px-3 rounded-lg text-xs font-black uppercase tracking-tight transition-all flex flex-col items-center justify-center gap-0.5 border ${
-                      planningSource === 'rsvp'
-                        ? 'bg-white dark:bg-zinc-800 text-indigo-600 dark:text-indigo-400 border-zinc-200/50 dark:border-zinc-700 shadow-xs'
-                        : 'text-zinc-500 dark:text-zinc-400 border-transparent hover:text-zinc-800 dark:hover:text-zinc-200'
-                    }`}
-                  >
-                    <span>Utgå från anmälda</span>
-                    <span className="text-[9px] opacity-75 font-bold">
-                      ({rsvpAttendingIds.length} st)
-                    </span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setPlanningSource('attendance')}
-                    className={`py-2 px-3 rounded-lg text-xs font-black uppercase tracking-tight transition-all flex flex-col items-center justify-center gap-0.5 border ${
-                      planningSource === 'attendance'
-                        ? 'bg-white dark:bg-zinc-800 text-indigo-600 dark:text-indigo-400 border-zinc-200/50 dark:border-zinc-700 shadow-xs'
-                        : 'text-zinc-500 dark:text-zinc-400 border-transparent hover:text-zinc-800 dark:hover:text-zinc-200'
-                    }`}
-                  >
-                    <span>Utgå från närvarande</span>
-                    <span className="text-[9px] opacity-75 font-bold">
-                      ({(sessionAttendance || []).length} st)
-                    </span>
-                  </button>
-                </div>
-              </div>
-            ) : (sessionAttendance || initialGame?.sessionId) ? (
-              <div className="bg-indigo-50 dark:bg-indigo-900/10 border border-indigo-100/50 dark:border-indigo-900/30 rounded-xl px-3 py-2 flex items-center gap-3">
-                <Calendar size={14} className="text-indigo-600 dark:text-indigo-400" />
-                <div className="flex items-center gap-2">
-                  <span className="text-[10px] font-black text-indigo-900 dark:text-indigo-100 uppercase tracking-tight">
-                    Kopplad till: {sessionTitle}
-                  </span>
-                </div>
-              </div>
-            ) : null}
-
-            <div className="p-4 bg-zinc-50 dark:bg-zinc-950 rounded-2xl border border-zinc-100 dark:border-zinc-800">
-              <button 
-                type="button"
-                onClick={() => setShowTimerSettings(!showTimerSettings)}
-                className="w-full flex items-center justify-between"
-              >
-                <div className="flex items-center gap-3">
-                  <div className={`p-2 rounded-xl ${showTimer ? 'bg-indigo-100 text-indigo-600' : 'bg-zinc-200 text-zinc-500'} dark:bg-zinc-800 transition-colors`}>
-                    <Clock size={20} />
-                  </div>
-                  <div className="flex flex-col text-left">
-                    <span className="font-bold text-zinc-900 dark:text-white text-sm">Timer-inställningar</span>
-                    <span className="text-[10px] text-zinc-500 dark:text-zinc-400 uppercase font-bold tracking-wider">
-                      {showTimer ? `${defaultMinutes}:${defaultSeconds.toString().padStart(2, '0')} aktiv` : 'Inaktiverad'}
-                    </span>
-                  </div>
-                </div>
-                {showTimerSettings ? <ChevronUp size={20} className="text-zinc-400" /> : <ChevronDown size={20} className="text-zinc-400" />}
-              </button>
-
-              <AnimatePresence>
-                {showTimerSettings && (
-                  <motion.div
-                    initial={{ opacity: 0, height: 0 }}
-                    animate={{ opacity: 1, height: 'auto' }}
-                    exit={{ opacity: 0, height: 0 }}
-                    className="overflow-hidden mt-6 pt-6 border-t border-zinc-200 dark:border-zinc-800 space-y-6"
-                  >
-                    <div className="flex items-center justify-between p-4 bg-white dark:bg-zinc-900 rounded-xl border border-zinc-100 dark:border-zinc-800">
-                      <div className="flex flex-col">
-                        <span className="font-bold text-zinc-900 dark:text-white text-xs">Visa timer</span>
-                        <span className="text-[9px] text-zinc-500 dark:text-zinc-400 uppercase font-bold tracking-wider">AKTIVERA I TÄVLINGSMOMENTET</span>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => setShowTimer(!showTimer)}
-                        className={`relative w-10 h-5 rounded-full transition-colors duration-200 focus:outline-none ${
-                          showTimer ? 'bg-indigo-600' : 'bg-zinc-300 dark:bg-zinc-700'
-                        }`}
-                      >
-                        <motion.div
-                          animate={{ x: showTimer ? 22 : 2 }}
-                          className="absolute top-0.5 w-4 h-4 bg-white rounded-full shadow-sm"
-                        />
-                      </button>
-                    </div>
-
-                    {showTimer && (
-                      <div className="space-y-4">
-                        <div className="flex flex-col">
-                          <span className="font-bold text-zinc-900 dark:text-white text-xs">Standardtid</span>
-                          <span className="text-[9px] text-zinc-500 dark:text-zinc-400 uppercase font-bold tracking-wider">Tid per omgång</span>
-                        </div>
-                        <div className="grid grid-cols-2 gap-4">
-                          <div className="flex flex-col items-center gap-2">
-                            <span className="text-[10px] font-bold text-zinc-400 uppercase">Minuter</span>
-                            <div className="flex items-center gap-4">
-                              <button type="button" onClick={() => adjustDefaultTime('min', -1)} className="p-2 bg-white dark:bg-zinc-900 rounded-xl shadow-sm border border-zinc-100 dark:border-zinc-800 active:scale-90 transition-all">
-                                <Minus size={18} />
-                              </button>
-                              <span className="text-2xl font-black min-w-[2ch] text-center dark:text-white">{defaultMinutes}</span>
-                              <button type="button" onClick={() => adjustDefaultTime('min', 1)} className="p-2 bg-white dark:bg-zinc-900 rounded-xl shadow-sm border border-zinc-100 dark:border-zinc-800 active:scale-90 transition-all">
-                                <Plus size={18} />
-                              </button>
-                            </div>
-                          </div>
-                          <div className="flex flex-col items-center gap-2">
-                            <span className="text-[10px] font-bold text-zinc-400 uppercase">Sekunder</span>
-                            <div className="flex items-center gap-4">
-                              <button type="button" onClick={() => adjustDefaultTime('sec', -10)} className="p-2 bg-white dark:bg-zinc-900 rounded-xl shadow-sm border border-zinc-100 dark:border-zinc-800 active:scale-90 transition-all">
-                                <Minus size={18} />
-                              </button>
-                              <span className="text-2xl font-black min-w-[2ch] text-center dark:text-white">{defaultSeconds.toString().padStart(2, '0')}</span>
-                              <button type="button" onClick={() => adjustDefaultTime('sec', 10)} className="p-2 bg-white dark:bg-zinc-900 rounded-xl shadow-sm border border-zinc-100 dark:border-zinc-800 active:scale-90 transition-all">
-                                <Plus size={18} />
-                              </button>
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    )}
-                  </motion.div>
-                )}
-              </AnimatePresence>
-            </div>
-
-            <div className="p-4 bg-zinc-50 dark:bg-zinc-950 rounded-2xl border border-zinc-100 dark:border-zinc-800">
-              <button 
-                type="button"
-                onClick={() => setShowPointsSettings(!showPointsSettings)}
-                className="w-full flex items-center justify-between"
-              >
-                <div className="flex items-center gap-3">
-                  <div className="p-2 rounded-xl bg-orange-100 text-orange-600 dark:bg-zinc-800">
-                    <Trophy size={20} />
-                  </div>
-                  <div className="flex flex-col text-left">
-                    <span className="font-bold text-zinc-900 dark:text-white text-sm">Poäng & Sortering</span>
-                    <span className="text-[10px] text-zinc-500 dark:text-zinc-400 uppercase font-bold tracking-wider">
-                      {pointsConfig.first}-{pointsConfig.second}-{pointsConfig.third} poäng • {sortByScore ? 'Auto-sortering' : 'Fast ordning'}
-                    </span>
-                  </div>
-                </div>
-                {showPointsSettings ? <ChevronUp size={20} className="text-zinc-400" /> : <ChevronDown size={20} className="text-zinc-400" />}
-              </button>
-
-              <AnimatePresence>
-                {showPointsSettings && (
-                  <motion.div
-                    initial={{ opacity: 0, height: 0 }}
-                    animate={{ opacity: 1, height: 'auto' }}
-                    exit={{ opacity: 0, height: 0 }}
-                    className="overflow-hidden mt-6 pt-6 border-t border-zinc-200 dark:border-zinc-800 space-y-6"
-                  >
-                    <div className="flex items-center justify-between p-4 bg-white dark:bg-zinc-900 rounded-xl border border-zinc-100 dark:border-zinc-800">
-                      <div className="flex flex-col text-left">
-                        <span className="font-bold text-zinc-900 dark:text-white text-xs">Automatisk sortering</span>
-                        <span className="text-[9px] text-zinc-500 dark:text-zinc-400 uppercase font-bold tracking-wider">SORTERA LAG DIREKT EFTER POÄNG</span>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => setSortByScore(!sortByScore)}
-                        className={`relative w-10 h-5 rounded-full transition-colors duration-200 focus:outline-none ${
-                          sortByScore ? 'bg-indigo-600' : 'bg-zinc-300 dark:bg-zinc-700'
-                        }`}
-                      >
-                        <motion.div
-                          animate={{ x: sortByScore ? 22 : 2 }}
-                          className="absolute top-0.5 w-4 h-4 bg-white rounded-full shadow-sm"
-                        />
-                      </button>
-                    </div>
-
-                    <div className="space-y-4">
-                      <div className="flex flex-col text-left">
-                        <span className="font-bold text-zinc-900 dark:text-white text-xs">Poängfördelning</span>
-                        <span className="text-[9px] text-zinc-500 dark:text-zinc-400 uppercase font-bold tracking-wider">POÄNG TILL 1:AN, 2:AN OCH 3:AN</span>
-                      </div>
-                      <div className="grid grid-cols-3 gap-3">
-                        <div className="flex flex-col items-center gap-1.5 p-3 bg-white dark:bg-zinc-900 rounded-xl border border-zinc-100 dark:border-zinc-800 shadow-sm">
-                          <div className="w-8 h-8 rounded-lg bg-yellow-100 dark:bg-yellow-900/30 text-yellow-600 dark:text-yellow-400 flex items-center justify-center">
-                            <Trophy size={16} />
-                          </div>
-                          <span className="text-[10px] font-bold text-zinc-400 uppercase">1:a</span>
-                          <div className="flex items-center gap-2">
-                            <button type="button" onClick={() => setPointsConfig(prev => ({ ...prev, first: Math.max(0, prev.first - 1) }))} className="w-7 h-7 flex items-center justify-center bg-zinc-50 dark:bg-zinc-950 rounded-lg border border-zinc-100 dark:border-zinc-800 active:scale-90 transition-all">
-                              <Minus size={12} />
-                            </button>
-                            <span className="text-lg font-black dark:text-white">{pointsConfig.first}</span>
-                            <button type="button" onClick={() => setPointsConfig(prev => ({ ...prev, first: prev.first + 1 }))} className="w-7 h-7 flex items-center justify-center bg-zinc-50 dark:bg-zinc-950 rounded-lg border border-zinc-100 dark:border-zinc-800 active:scale-90 transition-all">
-                              <Plus size={12} />
-                            </button>
-                          </div>
-                        </div>
-
-                        <div className="flex flex-col items-center gap-1.5 p-3 bg-white dark:bg-zinc-900 rounded-xl border border-zinc-100 dark:border-zinc-800 shadow-sm">
-                          <div className="w-8 h-8 rounded-lg bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 flex items-center justify-center">
-                            <Medal size={16} />
-                          </div>
-                          <span className="text-[10px] font-bold text-zinc-400 uppercase">2:a</span>
-                          <div className="flex items-center gap-2">
-                            <button type="button" onClick={() => setPointsConfig(prev => ({ ...prev, second: Math.max(0, prev.second - 1) }))} className="w-7 h-7 flex items-center justify-center bg-zinc-50 dark:bg-zinc-950 rounded-lg border border-zinc-100 dark:border-zinc-800 active:scale-90 transition-all">
-                              <Minus size={12} />
-                            </button>
-                            <span className="text-lg font-black dark:text-white">{pointsConfig.second}</span>
-                            <button type="button" onClick={() => setPointsConfig(prev => ({ ...prev, second: prev.second + 1 }))} className="w-7 h-7 flex items-center justify-center bg-zinc-50 dark:bg-zinc-950 rounded-lg border border-zinc-100 dark:border-zinc-800 active:scale-90 transition-all">
-                              <Plus size={12} />
-                            </button>
-                          </div>
-                        </div>
-
-                        <div className="flex flex-col items-center gap-1.5 p-3 bg-white dark:bg-zinc-900 rounded-xl border border-zinc-100 dark:border-zinc-800 shadow-sm">
-                          <div className="w-8 h-8 rounded-lg bg-orange-100 dark:bg-orange-900/30 text-orange-600 dark:text-orange-400 flex items-center justify-center">
-                            <Medal size={16} />
-                          </div>
-                          <span className="text-[10px] font-bold text-zinc-400 uppercase">3:e</span>
-                          <div className="flex items-center gap-2">
-                            <button type="button" onClick={() => setPointsConfig(prev => ({ ...prev, third: Math.max(0, prev.third - 1) }))} className="w-7 h-7 flex items-center justify-center bg-zinc-50 dark:bg-zinc-950 rounded-lg border border-zinc-100 dark:border-zinc-800 active:scale-90 transition-all">
-                              <Minus size={12} />
-                            </button>
-                            <span className="text-lg font-black dark:text-white">{pointsConfig.third}</span>
-                            <button type="button" onClick={() => setPointsConfig(prev => ({ ...prev, third: prev.third + 1 }))} className="w-7 h-7 flex items-center justify-center bg-zinc-50 dark:bg-zinc-950 rounded-lg border border-zinc-100 dark:border-zinc-800 active:scale-90 transition-all">
-                              <Plus size={12} />
-                            </button>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  </motion.div>
-                )}
-              </AnimatePresence>
-            </div>
+      <form id="game-setup-form" onSubmit={handleStart} className="space-y-5 pb-28">
+        {/* Namn och koppling till pass */}
+        <Card className="space-y-4">
+          <div>
+            <label htmlFor="game-name" className="block text-sm font-semibold text-zinc-600 dark:text-zinc-300 mb-1.5">Namn på tävlingsmomentet</label>
+            <input
+              id="game-name"
+              type="text"
+              value={gameName}
+              onChange={(e) => setGameName(e.target.value)}
+              placeholder="T.ex. Passningsspel 4 mot 4"
+              className={inputClass + ' text-base font-semibold'}
+            />
           </div>
 
-        <div>
-          <div className="p-4 bg-zinc-50 dark:bg-zinc-950 rounded-2xl border border-zinc-100 dark:border-zinc-800 mb-8">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-              <div className="flex flex-col shrink-0">
-                <label className="block text-xs font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-wider">Antal lag / Deltagare</label>
-                <div className="flex flex-col gap-2 mt-2">
-                   <button
-                    type="button"
-                    onClick={() => {
-                      const newValue = !excludeGoalkeepers;
-                      setExcludeGoalkeepers(newValue);
-                      if (newValue) {
-                        // If turning ON, remove goalkeepers from all teams and jokers
-                        setTeams(prev => prev.map(t => ({
-                          ...t,
-                          playerIds: t.playerIds.filter(pid => {
-                            const p = combinedSquad.find(player => player.id === pid);
-                            return p ? !isGoalkeeper(p) : true;
-                          })
-                        })));
-                        setJokerPlayerIds(prev => prev.filter(pid => {
-                          const p = combinedSquad.find(player => player.id === pid);
-                          return p ? !isGoalkeeper(p) : true;
-                        }));
-                      }
-                    }}
-                    className={`flex items-center gap-2 px-2.5 py-1.5 rounded-lg border transition-all ${
-                      excludeGoalkeepers 
-                        ? 'bg-indigo-50 border-indigo-200 dark:bg-indigo-900/10 dark:border-indigo-800' 
-                        : 'bg-white dark:bg-zinc-900 border-zinc-200 dark:border-zinc-800 hover:border-zinc-300'
-                    }`}
-                  >
-                    <div className={`w-8 h-4 rounded-full transition-colors relative ${excludeGoalkeepers ? 'bg-indigo-600' : 'bg-zinc-300 dark:bg-zinc-700'}`}>
-                      <div className={`absolute top-0.5 w-3 h-3 bg-white rounded-full transition-transform ${excludeGoalkeepers ? 'translate-x-4.5' : 'translate-x-0.5'}`} />
-                    </div>
-                    <span className={`text-[10px] font-black uppercase tracking-tight ${excludeGoalkeepers ? 'text-indigo-600 dark:text-indigo-400' : 'text-zinc-500 dark:text-zinc-400'}`}>Hoppa över målvakterna</span>
-                  </button>
+          {(linkedSession || sessionAttendance || initialGame?.sessionId) && (
+            <div className="flex items-center gap-2 text-sm text-zinc-600 dark:text-zinc-300">
+              <Calendar size={16} className="text-indigo-600 dark:text-indigo-400 shrink-0" />
+              <span className="truncate">Kopplat till <span className="font-semibold">{sessionTitle}</span></span>
+            </div>
+          )}
 
-                  <button
-                    type="button"
-                    onClick={() => setIncludeLeaders(!includeLeaders)}
-                    className={`flex items-center gap-2 px-2.5 py-1.5 rounded-lg border transition-all ${
-                      includeLeaders 
-                        ? 'bg-emerald-50 border-emerald-200 dark:bg-emerald-950/20 dark:border-emerald-900/40' 
-                        : 'bg-white dark:bg-zinc-900 border-zinc-200 dark:border-zinc-800 hover:border-zinc-300'
-                    }`}
-                  >
-                    <div className={`w-8 h-4 rounded-full transition-colors relative ${includeLeaders ? 'bg-emerald-600' : 'bg-zinc-300 dark:bg-zinc-700'}`}>
-                      <div className={`absolute top-0.5 w-3 h-3 bg-white rounded-full transition-transform ${includeLeaders ? 'translate-x-4.5' : 'translate-x-0.5'}`} />
-                    </div>
-                    <span className={`text-[10px] font-black uppercase tracking-tight ${includeLeaders ? 'text-emerald-600 dark:text-emerald-400' : 'text-zinc-500 dark:text-zinc-400'}`}>Inkludera tränare & ledare</span>
-                  </button>
-                </div>
-              </div>
-              <div className="flex flex-wrap items-center justify-start sm:justify-end gap-2">
-                {[1, 2, 3, 4].map(num => (
-                  <button
-                    key={num}
-                    type="button"
-                    onClick={() => setTeamCount(num)}
-                    className={`w-9 h-9 rounded-xl text-xs font-bold transition-all border ${
-                      teams.length === num && !teams.every(t => t.playerIds.length === 1 && t.name === '') // Simple check for individual mode
-                        ? 'bg-indigo-600 border-indigo-600 text-white' 
-                        : 'bg-white dark:bg-zinc-900 border-zinc-200 dark:border-zinc-800 text-zinc-600 dark:text-zinc-400 hover:border-indigo-300'
-                    }`}
-                  >
-                    {num}
-                  </button>
-                ))}
-                <div className="flex items-center gap-2 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl px-3 h-9">
-                  <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-tighter">Eget:</span>
-                  <input
-                    type="number"
-                    min="1"
-                    max="50"
-                    placeholder="#"
-                    className="w-8 bg-transparent border-none focus:ring-0 outline-none text-xs font-black text-zinc-900 dark:text-white p-0 text-center"
-                    onChange={(e) => {
-                      const val = parseInt(e.target.value);
-                      if (val > 0) setTeamCount(val);
-                    }}
-                  />
-                </div>
+          {linkedSession && (
+            <div>
+              <p className="text-sm text-zinc-500 dark:text-zinc-400 mb-2">Planera lagen utifrån</p>
+              <SegmentedTabs<'rsvp' | 'attendance'>
+                value={planningSource}
+                onChange={setPlanningSource}
+                tabs={[
+                  { id: 'rsvp', label: 'Anmälda', count: rsvpAttendingIds.length },
+                  { id: 'attendance', label: 'Närvarande', count: (sessionAttendance || []).length },
+                ]}
+              />
+            </div>
+          )}
+        </Card>
+
+        {/* Antal lag */}
+        <Card className="space-y-4">
+          <SectionHeader title="Antal lag" icon={<Users size={16} />} className="mb-0" />
+          <div className="flex flex-wrap items-center gap-2">
+            {[1, 2, 3, 4].map(num => {
+              const selected = teams.length === num && !isIndividualMode;
+              return (
                 <button
+                  key={num}
                   type="button"
-                  onClick={() => setTeamCount(isAttendanceActive ? currentAttendanceIds.length : combinedSquad.length, true)}
-                  disabled={combinedSquad.length === 0}
-                  className="px-4 h-9 rounded-xl text-[10px] font-black transition-all border bg-white dark:bg-zinc-900 border-zinc-200 dark:border-zinc-800 text-zinc-600 dark:text-zinc-400 hover:border-indigo-300 uppercase disabled:opacity-50 tracking-tight"
+                  aria-pressed={selected}
+                  onClick={() => setTeamCount(num)}
+                  className={`w-11 h-11 rounded-xl text-base font-bold transition-all border cursor-pointer ${
+                    selected
+                      ? 'bg-indigo-600 border-indigo-600 text-white'
+                      : 'bg-white dark:bg-zinc-800 border-zinc-200 dark:border-zinc-700 text-zinc-700 dark:text-zinc-200 hover:border-indigo-300'
+                  }`}
                 >
-                  {isAttendanceActive ? 'En per närvarande' : 'En per spelare'}
+                  {num}
                 </button>
+              );
+            })}
+            <label className="h-11 flex items-center gap-2 bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-xl px-3">
+              <span className="text-sm text-zinc-500 dark:text-zinc-400">Annat</span>
+              <input
+                type="number"
+                inputMode="numeric"
+                min="1"
+                max="50"
+                placeholder={teams.length > 4 && !isIndividualMode ? String(teams.length) : '#'}
+                className="w-10 bg-transparent border-none focus:ring-0 outline-none text-base font-bold text-zinc-900 dark:text-white p-0 text-center"
+                onChange={(e) => {
+                  const val = parseInt(e.target.value);
+                  if (val > 0) setTeamCount(val);
+                }}
+              />
+            </label>
+            <Button
+              variant={isIndividualMode ? 'primary' : 'secondary'}
+              onClick={() => setTeamCount(isAttendanceActive ? currentAttendanceIds.length : combinedSquad.length, true)}
+              disabled={combinedSquad.length === 0}
+            >
+              {isAttendanceActive ? 'En per närvarande' : 'En per spelare'}
+            </Button>
+          </div>
+          <div className="divide-y divide-zinc-100 dark:divide-zinc-800 -mx-1">
+            <SwitchRow label="Hoppa över målvakterna" description="Målvakter delas inte in i lagen" checked={excludeGoalkeepers} onChange={toggleExcludeGoalkeepers} />
+            <SwitchRow label="Ta med tränare och ledare" description="Ledare kan delas in som spelare" checked={includeLeaders} onChange={() => setIncludeLeaders(!includeLeaders)} />
+          </div>
+        </Card>
+
+        {/* Fyll lagen */}
+        <Card padded={false} className="p-2">
+          <div className="px-3 pt-2 pb-1">
+            <SectionHeader title="Fyll lagen" icon={<Wand2 size={16} />} className="mb-0" />
+          </div>
+          {isAttendanceActive && (
+            <MenuItem
+              icon={<Wand2 size={18} />}
+              active
+              label="Dela in automatiskt"
+              description={`${currentAttendanceIds.length} ${linkedSession && planningSource === 'rsvp' ? 'anmälda' : 'närvarande'} fördelas jämnt efter position`}
+              onClick={generateTeamsFromSessionAttendance}
+            />
+          )}
+          {!sessionAttendance && (
+            <MenuItem
+              icon={<Users size={18} />}
+              label="Välj närvarande spelare"
+              description="Markera vilka som är på plats"
+              trailing={<Badge>{standaloneAttendance.length}</Badge>}
+              onClick={() => setShowStandaloneAttendance(true)}
+            />
+          )}
+          <MenuItem
+            icon={<ClipboardList size={18} />}
+            label="Klistra in en närvarolista"
+            description="Namnen matchas mot truppen och fördelas"
+            onClick={() => setShowAttendanceInput(true)}
+          />
+          {copyableExercisesForSetup.length > 0 && (
+            <MenuItem
+              icon={<Copy size={18} />}
+              label="Kopiera tidigare lagindelning"
+              description="Hämta lagen från ett annat moment"
+              onClick={() => setShowCopyFromDropdown(true)}
+            />
+          )}
+          {onAddGuest && (
+            <MenuItem
+              icon={<UserPlus size={18} />}
+              label="Lägg till spelare eller gäst"
+              description={absentSquadPlayers.length > 0 ? 'Gästspelare eller någon ur truppen som saknas' : 'Skapa en gästspelare'}
+              onClick={() => setShowGuestInput(true)}
+            />
+          )}
+          {teams.some(t => t.playerIds.length > 0) && (
+            <MenuItem icon={<RotateCcw size={18} />} label="Töm lagen" description="Alla spelare blir oindelade" tone="danger" onClick={clearAllTeams} />
+          )}
+        </Card>
+
+        {/* Lagöversikt med dra-och-släpp */}
+        {combinedSquad.length > 0 && (
+          <Card className="space-y-3">
+            <SectionHeader title="Lagöversikt" icon={<LayoutList size={16} />} className="mb-0" />
+            <p className="text-sm text-zinc-500 dark:text-zinc-400 -mt-1">Dra en spelare för att flytta den till ett annat lag.</p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+              {teams.map((team, idx) => {
+                const isThisTeamDragging = draggedPlayerId && team.playerIds.includes(draggedPlayerId);
+                return (
+                  <div
+                    key={team.id}
+                    data-overview-team-id={team.id}
+                    className={`p-3 rounded-xl border transition-all duration-200 bg-zinc-50 dark:bg-zinc-950 ${draggedPlayerId ? 'border-indigo-300 dark:border-indigo-700' : 'border-zinc-200/80 dark:border-zinc-800'}`}
+                    style={{ zIndex: isThisTeamDragging ? 100 : (draggedPlayerId ? 10 : 1), position: 'relative' }}
+                  >
+                    <div className="flex items-center gap-2 mb-2">
+                      <span className="w-3.5 h-3.5 rounded-full shrink-0" style={{ backgroundColor: team.color }} />
+                      <span className="font-semibold text-sm truncate flex-1">{team.name || `Lag ${idx + 1}`}</span>
+                      <Badge>{team.playerIds.length}</Badge>
+                    </div>
+                    <div className="flex flex-wrap gap-1.5 min-h-[36px]">
+                      {sortPlayersByPosition(team.playerIds || [], combinedSquad).map((pid, i) =>
+                        renderOverviewChip(pid, i, team.id, { color: team.color }, () => movePlayerInternal(pid, 'none'), 'Ta bort från laget')
+                      )}
+                      {team.playerIds.length === 0 && dropHint()}
+                    </div>
+                  </div>
+                );
+              })}
+
+              <div
+                data-overview-team-id="joker"
+                className={`p-3 rounded-xl border transition-all duration-200 bg-indigo-50/60 dark:bg-indigo-950/20 ${draggedPlayerId ? 'border-indigo-400' : 'border-indigo-100 dark:border-indigo-900/40'}`}
+                style={{ zIndex: draggedPlayerId && jokerPlayerIds.includes(draggedPlayerId) ? 100 : (draggedPlayerId ? 10 : 1), position: 'relative' }}
+              >
+                <div className="flex items-center gap-2 mb-2">
+                  <span className="w-3.5 h-3.5 rounded-full bg-indigo-600 shrink-0" />
+                  <span className="font-semibold text-sm flex-1">Jokrar</span>
+                  <Badge tone="brand">{jokerPlayerIds.length}</Badge>
+                </div>
+                <div className="flex flex-wrap gap-1.5 min-h-[36px]">
+                  {sortPlayersByPosition(jokerPlayerIds || [], combinedSquad).map((pid, i) =>
+                    renderOverviewChip(pid, i, 'joker', { color: '#4f46e5' }, () => movePlayerInternal(pid, 'none'), 'Ta bort från jokrar')
+                  )}
+                  {jokerPlayerIds.length === 0 && dropHint('brand')}
+                </div>
+              </div>
+
+              <div
+                data-overview-team-id="none"
+                className={`p-3 rounded-xl border border-dashed transition-all duration-200 ${draggedPlayerId ? 'border-zinc-400 dark:border-zinc-600' : 'border-zinc-200 dark:border-zinc-800'}`}
+                style={{ zIndex: draggedPlayerId && unassignedPlayers.some(p => p.id === draggedPlayerId) ? 100 : (draggedPlayerId ? 10 : 1), position: 'relative' }}
+              >
+                <div className="flex items-center gap-2 mb-2">
+                  <span className="w-3.5 h-3.5 rounded-full border border-zinc-400 dark:border-zinc-600 shrink-0" />
+                  <span className="font-semibold text-sm text-zinc-500 dark:text-zinc-400 flex-1">Ej indelade</span>
+                  <Badge>{unassignedPlayers.length}</Badge>
+                </div>
+                <div className="flex flex-wrap gap-1.5 min-h-[36px]">
+                  {sortPlayersByPosition(unassignedPlayers.map(p => p.id), combinedSquad).map((pid, i) =>
+                    renderOverviewChip(pid, i, 'unassigned', { neutral: true }, () => handleRemovePlayerFromAttendance(pid), 'Ta bort från närvaron')
+                  )}
+                  {unassignedPlayers.length === 0 && dropHint()}
+                </div>
               </div>
             </div>
-          </div>
+          </Card>
+        )}
 
-            <div className="space-y-4">
-              {onAddGuest && (
-                <div className="p-4 bg-zinc-50 dark:bg-zinc-950 rounded-2xl border border-zinc-100 dark:border-zinc-800 space-y-3">
-                  <div className="flex items-center justify-between">
-                    <span className="text-[10px] font-black text-zinc-500 dark:text-zinc-400 uppercase tracking-widest">Spelare & Gäster</span>
+        {/* Lagen var för sig: namn, färg och spelare */}
+        <div className="space-y-3">
+          <AnimatePresence mode="popLayout">
+            {teams.map((team, index) => (
+              <motion.div
+                key={team.id}
+                layout
+                initial={{ opacity: 0, scale: 0.97 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.97 }}
+              >
+                <Card className="space-y-4">
+                  <div className="flex items-center gap-3">
+                    <span className="w-4 h-10 rounded-full shrink-0" style={{ backgroundColor: team.color }} />
+                    <div className="flex-1 min-w-0">
+                      <input
+                        type="text"
+                        value={team.name}
+                        onChange={(e) => updateTeam(team.id, { name: e.target.value })}
+                        placeholder={`Lag ${index + 1}`}
+                        aria-label={`Namn på lag ${index + 1}`}
+                        className="w-full h-10 bg-transparent border-none focus:ring-0 outline-none text-lg font-bold text-zinc-900 dark:text-white p-0 placeholder:text-zinc-400"
+                      />
+                      <span className="text-xs text-zinc-500 dark:text-zinc-400">{team.playerIds.length} spelare</span>
+                    </div>
+                    <IconButton label="Ta bort laget" onClick={() => removeTeam(team.id)} disabled={teams.length <= 1} className="hover:!text-red-600">
+                      <Trash2 size={18} />
+                    </IconButton>
                   </div>
-                  
-                  {!showGuestInput ? (
-                    <div className={`grid grid-cols-1 ${absentSquadPlayers.length > 0 ? 'sm:grid-cols-2' : ''} gap-3`}>
-                      <button
-                        type="button"
-                        onClick={() => setShowGuestInput(true)}
-                        className="w-full flex items-center gap-3 px-4 py-3 bg-white dark:bg-zinc-900 text-zinc-650 dark:text-zinc-350 rounded-2xl font-black text-[10px] uppercase tracking-widest border border-zinc-100 dark:border-zinc-850 hover:border-indigo-200 dark:hover:border-indigo-900 transition-all shadow-sm cursor-pointer text-left"
-                      >
-                        <UserPlus size={16} className="text-zinc-400 dark:text-zinc-500 shrink-0" />
-                        <span>Skapa gästspelare</span>
-                      </button>
 
-                      {absentSquadPlayers.length > 0 && (
-                        <div className="relative w-full">
-                          <div className="absolute left-4 top-1/2 -translate-y-1/2 flex items-center pointer-events-none">
-                            <Users size={16} className="text-zinc-400 dark:text-zinc-500 shrink-0" />
-                          </div>
-                          <select
-                            value=""
-                            onChange={(e) => {
-                              const val = e.target.value;
-                              if (val) {
-                                if (activeSessionId && onAddSquadPlayerToAttendance) {
-                                  onAddSquadPlayerToAttendance(val);
-                                } else {
-                                  setStandaloneAttendance(prev => [...prev, val]);
-                                }
-                              }
-                            }}
-                            className="w-full bg-white dark:bg-zinc-900 text-zinc-650 dark:text-zinc-350 rounded-2xl font-black text-[10px] uppercase tracking-widest border border-zinc-100 dark:border-zinc-850 hover:border-indigo-200 dark:hover:border-indigo-900 transition-all shadow-sm outline-none pl-11 pr-10 py-3 cursor-pointer appearance-none text-left"
+                  <div className="flex items-center gap-3">
+                    <span className="text-sm font-semibold text-zinc-600 dark:text-zinc-300">Västfärg</span>
+                    <ColorPicker selectedColor={team.color} onChange={(color) => updateTeam(team.id, { color })} />
+                  </div>
+
+                  <div>
+                    <div className="flex items-center justify-between gap-2 mb-2">
+                      <span className="text-sm font-semibold text-zinc-600 dark:text-zinc-300">
+                        {guestPlayers.length > 0 ? 'Spelare (inkl. gäster)' : 'Spelare'}
+                      </span>
+                      {isAttendanceActive && <Badge tone="brand">Bara närvarande</Badge>}
+                    </div>
+                    {combinedSquad.length > 0 ? (
+                      <div className="flex flex-wrap gap-2">
+                        {selectablePlayerIds.map((pid, idx) => {
+                          const player = combinedSquad.find(p => p.id === pid);
+                          if (!player) return null;
+                          const isSelected = team.playerIds.includes(player.id);
+                          const isJoker = jokerPlayerIds.includes(player.id);
+                          return (
+                            <button
+                              key={`${player.id}-${idx}`}
+                              type="button"
+                              aria-pressed={isSelected}
+                              onClick={() => togglePlayerInTeam(team.id, player.id)}
+                              disabled={isJoker}
+                              className={`${chipBase} ${
+                                isSelected
+                                  ? 'text-white border-transparent shadow-sm'
+                                  : isJoker
+                                    ? 'bg-zinc-100 dark:bg-zinc-800 border-zinc-100 dark:border-zinc-800 text-zinc-400 opacity-50 cursor-not-allowed'
+                                    : 'bg-white dark:bg-zinc-800 border-zinc-200 dark:border-zinc-700 text-zinc-700 dark:text-zinc-200 hover:border-indigo-300'
+                              }`}
+                              style={isSelected ? { backgroundColor: team.color } : undefined}
+                            >
+                              {player.name}
+                              {player.position && <span className="text-[11px] opacity-70">{player.position}</span>}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <p className="text-sm text-zinc-500">Inga spelare i truppen än. Lägg till spelare under Truppen.</p>
+                    )}
+                  </div>
+                </Card>
+              </motion.div>
+            ))}
+          </AnimatePresence>
+        </div>
+
+        {/* Jokrar */}
+        <Card padded={false}>
+          <button
+            type="button"
+            onClick={() => setShowJokers(!showJokers)}
+            aria-expanded={showJokers}
+            className="w-full flex items-center gap-3 p-4 text-left cursor-pointer"
+          >
+            <span className="w-10 h-10 rounded-xl bg-indigo-50 dark:bg-indigo-950/50 text-indigo-600 dark:text-indigo-300 flex items-center justify-center shrink-0">
+              <Medal size={20} />
+            </span>
+            <span className="flex-1 min-w-0">
+              <span className="block font-semibold">Jokrar</span>
+              <span className="block text-sm text-zinc-500 dark:text-zinc-400">Spelare som är med i alla lag och alltid får poäng</span>
+            </span>
+            {jokerPlayerIds.length > 0 && <Badge tone="brand">{jokerPlayerIds.length}</Badge>}
+            {showJokers ? <ChevronUp size={20} className="text-zinc-400" /> : <ChevronDown size={20} className="text-zinc-400" />}
+          </button>
+          <AnimatePresence>
+            {showJokers && (
+              <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="overflow-hidden">
+                <div className="px-4 pb-4">
+                  {combinedSquad.length > 0 ? (
+                    <div className="flex flex-wrap gap-2">
+                      {selectablePlayerIds.map(pid => {
+                        const player = combinedSquad.find(p => p.id === pid);
+                        if (!player) return null;
+                        const isJoker = jokerPlayerIds.includes(player.id);
+                        return (
+                          <button
+                            key={player.id}
+                            type="button"
+                            aria-pressed={isJoker}
+                            onClick={() => toggleJoker(player.id)}
+                            className={`${chipBase} ${
+                              isJoker
+                                ? 'bg-indigo-600 border-indigo-600 text-white shadow-sm'
+                                : 'bg-white dark:bg-zinc-800 border-zinc-200 dark:border-zinc-700 text-zinc-700 dark:text-zinc-200 hover:border-indigo-300'
+                            }`}
                           >
-                            <option value="">Hämta från truppen...</option>
-                            {absentSquadPlayers.map(p => (
-                              <option key={p.id} value={p.id}>
-                                {p.name} {p.role === 'leader' ? '(Ledare)' : p.position ? `(${p.position})` : ''}
-                              </option>
-                            ))}
-                          </select>
-                          <div className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none text-zinc-400 dark:text-zinc-500">
-                            <ChevronDown size={14} />
-                          </div>
-                        </div>
-                      )}
+                            {player.name}
+                            {positionTag(player, isJoker)}
+                          </button>
+                        );
+                      })}
                     </div>
                   ) : (
-                    <div className="space-y-3">
-                      <div className="space-y-3 w-full">
-                        <input
-                          autoFocus
-                          type="text"
-                          value={guestName}
-                          onChange={(e) => setGuestName(e.target.value)}
-                          placeholder="Namn..."
-                          className="w-full bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl px-4 py-2 text-base font-bold text-zinc-900 dark:text-white focus:ring-2 focus:ring-indigo-500 outline-none"
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter') {
-                              e.preventDefault();
-                              if (guestName.trim()) {
-                                onAddGuest && onAddGuest(guestName.trim(), guestPosition || undefined);
-                                setGuestName("");
-                                setGuestPosition("");
-                                setShowGuestInput(false);
-                              }
-                            }
-                          }}
-                        />
-                        <div className="grid grid-cols-2 gap-2 w-full">
-                          <select
-                            value={guestPosition}
-                            onChange={(e) => setGuestPosition(e.target.value)}
-                            className="w-full bg-white dark:bg-zinc-900 border border-zinc-205 dark:border-zinc-800 rounded-xl px-3 py-2 text-sm font-bold text-zinc-700 dark:text-zinc-300 focus:ring-2 focus:ring-indigo-500 outline-none cursor-pointer"
-                          >
-                            <option value="">Position (Valfritt)</option>
-                            <option value="MV">Målvakt (MV)</option>
-                            <option value="MB">Mittback (MB)</option>
-                            <option value="YB">Ytterback (YB)</option>
-                            <option value="MF">Mittfältare (MF)</option>
-                            <option value="YMF">Yttermittfältare (YMF)</option>
-                            <option value="FW">Forward (FW)</option>
-                          </select>
-                          <div className="flex gap-2">
-                            <button
-                              type="button"
-                              onClick={() => {
-                                if (guestName.trim()) {
-                                  onAddGuest && onAddGuest(guestName.trim(), guestPosition || undefined);
-                                  setGuestName("");
-                                  setGuestPosition("");
-                                  setShowGuestInput(false);
-                                }
-                              }}
-                              className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-black text-[10px] uppercase tracking-widest shadow-sm whitespace-nowrap cursor-pointer flex items-center justify-center py-2"
-                            >
-                              Lägg till
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setShowGuestInput(false);
-                                setGuestName("");
-                                setGuestPosition("");
-                              }}
-                              className="p-2 text-zinc-400 hover:text-red-500 border border-zinc-200 dark:border-zinc-800 rounded-xl bg-white dark:bg-zinc-900 cursor-pointer flex items-center justify-center shrink-0"
-                            >
-                              <X size={16} />
-                            </button>
-                          </div>
-                        </div>
-                      </div>
+                    <p className="text-sm text-zinc-500">Inga spelare i truppen än.</p>
+                  )}
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </Card>
 
-                      {absentSquadPlayers.length > 0 && (
-                        <div className="pt-2 border-t border-zinc-100 dark:border-zinc-850">
-                          <div className="relative w-full">
-                            <div className="absolute left-4 top-1/2 -translate-y-1/2 flex items-center pointer-events-none">
-                              <Users size={16} className="text-zinc-400 dark:text-zinc-500 shrink-0" />
-                            </div>
-                            <select
-                              value=""
-                              onChange={(e) => {
-                                const val = e.target.value;
-                                if (val) {
-                                  if (activeSessionId && onAddSquadPlayerToAttendance) {
-                                    onAddSquadPlayerToAttendance(val);
-                                  } else {
-                                    setStandaloneAttendance(prev => [...prev, val]);
-                                  }
-                                }
-                              }}
-                              className="w-full bg-white dark:bg-zinc-900 text-zinc-650 dark:text-zinc-350 rounded-2xl font-black text-[10px] uppercase tracking-widest border border-zinc-100 dark:border-zinc-850 hover:border-indigo-200 dark:hover:border-indigo-900 transition-all shadow-sm outline-none pl-11 pr-10 py-3 cursor-pointer appearance-none text-left"
-                            >
-                              <option value="">Hämta från truppen...</option>
-                              {absentSquadPlayers.map(p => (
-                                <option key={p.id} value={p.id}>
-                                  {p.name} {p.position ? `(${p.position})` : ''}
-                                </option>
-                              ))}
-                            </select>
-                            <div className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none text-zinc-400 dark:text-zinc-500">
-                              <ChevronDown size={14} />
-                            </div>
-                          </div>
-                        </div>
-                      )}
+        {/* Timer */}
+        <Card padded={false}>
+          <button
+            type="button"
+            onClick={() => setShowTimerSettings(!showTimerSettings)}
+            aria-expanded={showTimerSettings}
+            className="w-full flex items-center gap-3 p-4 text-left cursor-pointer"
+          >
+            <span className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${showTimer ? 'bg-indigo-50 text-indigo-600 dark:bg-indigo-950/50 dark:text-indigo-300' : 'bg-zinc-100 text-zinc-500 dark:bg-zinc-800'}`}>
+              <Clock size={20} />
+            </span>
+            <span className="flex-1 min-w-0">
+              <span className="block font-semibold">Timer</span>
+              <span className="block text-sm text-zinc-500 dark:text-zinc-400">
+                {showTimer ? `${defaultMinutes}:${defaultSeconds.toString().padStart(2, '0')} per omgång` : 'Av'}
+              </span>
+            </span>
+            {showTimerSettings ? <ChevronUp size={20} className="text-zinc-400" /> : <ChevronDown size={20} className="text-zinc-400" />}
+          </button>
+          <AnimatePresence>
+            {showTimerSettings && (
+              <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="overflow-hidden">
+                <div className="px-3 pb-4 space-y-3">
+                  <SwitchRow label="Visa timer" description="Timern syns i poängräkningen" checked={showTimer} onChange={() => setShowTimer(!showTimer)} />
+                  {showTimer && (
+                    <div className="grid grid-cols-2 gap-3 px-1">
+                      <Stepper label="Minuter" value={String(defaultMinutes)} onMinus={() => adjustDefaultTime('min', -1)} onPlus={() => adjustDefaultTime('min', 1)} />
+                      <Stepper label="Sekunder" value={defaultSeconds.toString().padStart(2, '0')} onMinus={() => adjustDefaultTime('sec', -10)} onPlus={() => adjustDefaultTime('sec', 10)} />
                     </div>
                   )}
                 </div>
-              )}
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </Card>
 
-              {!sessionAttendance && (
-                <div className="space-y-2">
-                  <button
-                    type="button"
-                    onClick={() => setShowStandaloneAttendance(!showStandaloneAttendance)}
-                    className="w-full flex items-center justify-between p-4 bg-zinc-50 dark:bg-zinc-950 rounded-2xl border border-zinc-100 dark:border-zinc-800 transition-all hover:bg-zinc-100 dark:hover:bg-zinc-900"
-                  >
-                    <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 bg-zinc-100 dark:bg-zinc-800 rounded-xl flex items-center justify-center text-zinc-500">
-                        <Users size={20} />
-                      </div>
-                      <div className="flex flex-col text-left">
-                        <span className="font-bold text-zinc-900 dark:text-white text-sm">Välj närvarande spelare</span>
-                        <span className="text-[10px] text-zinc-500 dark:text-zinc-400 uppercase font-bold tracking-wider">MARKERA VILKA SOM ÄR PÅ PLATS</span>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <span className="bg-zinc-200 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 px-2 py-0.5 rounded-full text-[10px] font-black">
-                        {standaloneAttendance.length}
-                      </span>
-                      <div className="text-zinc-400">
-                        {showStandaloneAttendance ? <ChevronUp size={20} /> : <ChevronDown size={20} />}
-                      </div>
-                    </div>
-                  </button>
-
-                  <AnimatePresence>
-                    {showStandaloneAttendance && (
-                      <motion.div
-                        initial={{ opacity: 0, height: 0 }}
-                        animate={{ opacity: 1, height: 'auto' }}
-                        exit={{ opacity: 0, height: 0 }}
-                        className="overflow-hidden"
-                      >
-                        <div className="bg-white dark:bg-zinc-950 p-4 rounded-2xl border border-zinc-200 dark:border-zinc-800">
-                          <div className="flex flex-wrap gap-2">
-                            {sortPlayersByPosition(combinedSquad.map(p => p.id), combinedSquad).map(pid => {
-                              const player = combinedSquad.find(p => p.id === pid);
-                              if (!player) return null;
-                              return (
-                                <button
-                                  key={player.id}
-                                  type="button"
-                                  onClick={() => toggleStandaloneAttendance(player.id)}
-                                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all border flex items-center gap-1 ${
-                                    standaloneAttendance.includes(player.id)
-                                      ? 'bg-zinc-900 dark:bg-zinc-100 border-zinc-900 dark:border-zinc-100 text-white dark:text-zinc-900 shadow-sm'
-                                      : 'bg-white dark:bg-zinc-900 border-zinc-200 dark:border-zinc-800 text-gray-500 hover:border-indigo-300'
-                                  }`}
-                                >
-                                  {player.name}
-                                  {player.position && <span className="opacity-70 text-[8px]">({player.position})</span>}
-                                </button>
-                              );
-                            })}
-                          </div>
-                        </div>
-                      </motion.div>
-                    )}
-                  </AnimatePresence>
-                </div>
-              )}
-
-              {isAttendanceActive && (
-                <button
-                  type="button"
-                  onClick={generateTeamsFromSessionAttendance}
-                  className="w-full flex items-center justify-between p-4 bg-indigo-50 dark:bg-indigo-900/10 rounded-2xl border border-indigo-100 dark:border-indigo-900/30 transition-all hover:bg-indigo-100 dark:hover:bg-indigo-900/20 group"
-                >
-                  <div className="flex items-center gap-3 text-left">
-                    <div className="w-10 h-10 bg-indigo-600 rounded-xl flex items-center justify-center text-white shadow-md shadow-indigo-200 dark:shadow-none group-hover:scale-110 transition-transform">
-                      <Users size={20} />
-                    </div>
-                    <div>
-                      <span className="font-bold text-indigo-900 dark:text-indigo-100 text-sm block leading-none mb-1">
-                        Skapa lag automatiskt
-                      </span>
-                      <span className="text-[10px] text-indigo-600 dark:text-indigo-400 uppercase font-black tracking-widest">
-                        {currentAttendanceIds.length} {linkedSession && planningSource === 'rsvp' ? 'ANMÄLDA' : 'DELTAGARE'}
-                      </span>
-                    </div>
+        {/* Poäng och sortering */}
+        <Card padded={false}>
+          <button
+            type="button"
+            onClick={() => setShowPointsSettings(!showPointsSettings)}
+            aria-expanded={showPointsSettings}
+            className="w-full flex items-center gap-3 p-4 text-left cursor-pointer"
+          >
+            <span className="w-10 h-10 rounded-xl bg-amber-50 text-amber-600 dark:bg-amber-950/40 dark:text-amber-300 flex items-center justify-center shrink-0">
+              <Trophy size={20} />
+            </span>
+            <span className="flex-1 min-w-0">
+              <span className="block font-semibold">Poäng och sortering</span>
+              <span className="block text-sm text-zinc-500 dark:text-zinc-400">
+                {pointsConfig.first}–{pointsConfig.second}–{pointsConfig.third} poäng · {sortByScore ? 'sorteras efter poäng' : 'fast ordning'}
+              </span>
+            </span>
+            {showPointsSettings ? <ChevronUp size={20} className="text-zinc-400" /> : <ChevronDown size={20} className="text-zinc-400" />}
+          </button>
+          <AnimatePresence>
+            {showPointsSettings && (
+              <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="overflow-hidden">
+                <div className="px-3 pb-4 space-y-3">
+                  <SwitchRow label="Sortera lagen efter poäng" description="Ledande lag hamnar överst" checked={sortByScore} onChange={() => setSortByScore(!sortByScore)} />
+                  <p className="px-1 text-sm font-semibold text-zinc-600 dark:text-zinc-300">Poäng till poängligan</p>
+                  <div className="grid grid-cols-3 gap-2 px-1">
+                    <Stepper label="Etta" value={String(pointsConfig.first)} onMinus={() => setPointsConfig(prev => ({ ...prev, first: Math.max(0, prev.first - 1) }))} onPlus={() => setPointsConfig(prev => ({ ...prev, first: prev.first + 1 }))} />
+                    <Stepper label="Tvåa" value={String(pointsConfig.second)} onMinus={() => setPointsConfig(prev => ({ ...prev, second: Math.max(0, prev.second - 1) }))} onPlus={() => setPointsConfig(prev => ({ ...prev, second: prev.second + 1 }))} />
+                    <Stepper label="Trea" value={String(pointsConfig.third)} onMinus={() => setPointsConfig(prev => ({ ...prev, third: Math.max(0, prev.third - 1) }))} onPlus={() => setPointsConfig(prev => ({ ...prev, third: prev.third + 1 }))} />
                   </div>
-                  <Wand2 size={20} className="text-indigo-600 dark:text-indigo-400" />
-                </button>
-              )}
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </Card>
 
+        {/* Knappar längst ner (ligger kvar när man skrollar) */}
+        <div className="sticky bottom-0 -mx-4 sm:mx-0 px-4 sm:px-0 pt-3 pb-[max(1rem,env(safe-area-inset-bottom))] bg-gradient-to-t from-zinc-50 via-zinc-50/95 to-transparent dark:from-zinc-950 dark:via-zinc-950/95 z-20">
+          <div className="flex gap-2">
+            {!initialGame && (
+              <Button type="submit" variant="secondary" size="lg" icon={<Save size={18} />} onClick={() => { submitShouldStartRef.current = false; }}>
+                Spara
+              </Button>
+            )}
+            <Button
+              type="submit"
+              size="lg"
+              block
+              icon={initialGame ? <Check size={20} strokeWidth={3} /> : <Play size={18} fill="currentColor" />}
+              onClick={() => { submitShouldStartRef.current = !initialGame; }}
+            >
+              {initialGame ? 'Spara ändringar' : 'Starta tävlingsmomentet'}
+            </Button>
+          </div>
+        </div>
+      </form>
+
+      {/* Ark: välj närvarande (fristående moment) */}
+      <Sheet
+        open={showStandaloneAttendance}
+        onClose={() => setShowStandaloneAttendance(false)}
+        title="Välj närvarande spelare"
+        footer={<Button block onClick={() => setShowStandaloneAttendance(false)}>Klar ({standaloneAttendance.length})</Button>}
+      >
+        <div className="flex flex-wrap gap-2 px-2 pb-2">
+          {sortPlayersByPosition(combinedSquad.map(p => p.id), combinedSquad).map(pid => {
+            const player = combinedSquad.find(p => p.id === pid);
+            if (!player) return null;
+            const present = standaloneAttendance.includes(player.id);
+            return (
               <button
+                key={player.id}
                 type="button"
-                onClick={() => setShowAttendanceInput(!showAttendanceInput)}
-                className="w-full flex items-center justify-between p-4 bg-zinc-50 dark:bg-zinc-950 rounded-2xl border border-zinc-100 dark:border-zinc-800 transition-all hover:bg-zinc-100 dark:hover:bg-zinc-900"
+                aria-pressed={present}
+                onClick={() => toggleStandaloneAttendance(player.id)}
+                className={`${chipBase} ${
+                  present
+                    ? 'bg-indigo-600 border-indigo-600 text-white shadow-sm'
+                    : 'bg-white dark:bg-zinc-800 border-zinc-200 dark:border-zinc-700 text-zinc-700 dark:text-zinc-200 hover:border-indigo-300'
+                }`}
               >
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 bg-indigo-600 rounded-xl flex items-center justify-center text-white shadow-sm">
-                    <ClipboardList size={20} />
-                  </div>
-                  <div className="flex flex-col text-left">
-                    <span className="font-bold text-zinc-900 dark:text-white text-sm">Skapa lag från närvarolista</span>
-                    <span className="text-[10px] text-zinc-500 dark:text-zinc-400 uppercase font-bold tracking-wider">KLISTRA IN NAMN OCH FÖRDELA AUTOMATISKT</span>
-                  </div>
-                </div>
-                <div className="text-zinc-400">
-                  {showAttendanceInput ? <ChevronUp size={20} /> : <ChevronDown size={20} />}
-                </div>
+                {present && <Check size={14} strokeWidth={3} />}
+                {player.name}
+                {player.position && <span className="text-[11px] opacity-70">{player.position}</span>}
               </button>
+            );
+          })}
+        </div>
+      </Sheet>
 
-              <AnimatePresence>
-                {showAttendanceInput && (
-                  <motion.div
-                    initial={{ opacity: 0, height: 0 }}
-                    animate={{ opacity: 1, height: 'auto' }}
-                    exit={{ opacity: 0, height: 0 }}
-                    className="overflow-hidden"
-                  >
-                    <div className="bg-white dark:bg-zinc-950 p-4 rounded-2xl border border-zinc-200 dark:border-zinc-800 space-y-4">
-                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                        <p className="text-xs text-zinc-500 dark:text-zinc-400">
-                          Klistra in namnen på de spelare som är på plats (t.ex. från kallelsen). 
-                          Appen matchar namnen mot truppen och fördelar dem i de {teams.length} lag du valt.
-                        </p>
-                        <button
-                          type="button"
-                          onClick={handleSetupPasteClipboard}
-                          className="self-start sm:self-auto shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/60 dark:hover:bg-indigo-900/80 text-indigo-700 dark:text-indigo-300 text-xs font-bold transition-all border border-indigo-200 dark:border-indigo-800/80 cursor-pointer shadow-xs active:scale-95"
-                          title="Klistra in direkt från enhetens urklipp med 1 tryck"
-                        >
-                          {setupClipboardStatus === 'pasted' ? (
-                            <>
-                              <ClipboardCheck size={14} className="text-emerald-600 dark:text-emerald-400" />
-                              <span className="text-emerald-700 dark:text-emerald-300 font-bold">Inklistrat!</span>
-                            </>
-                          ) : (
-                            <>
-                              <ClipboardPaste size={14} />
-                              <span>Klistra in från urklipp</span>
-                            </>
-                          )}
-                        </button>
-                      </div>
+      {/* Ark: klistra in närvarolista */}
+      <Sheet
+        open={showAttendanceInput}
+        onClose={() => setShowAttendanceInput(false)}
+        title="Klistra in en närvarolista"
+        footer={
+          <Button block icon={<Wand2 size={18} />} onClick={generateTeamsFromAttendance} disabled={!attendanceText.trim()}>
+            Dela in i {teams.length} lag
+          </Button>
+        }
+      >
+        <div className="px-2 pb-2 space-y-3">
+          <p className="text-sm text-zinc-500 dark:text-zinc-400">
+            Klistra in namnen på dem som är på plats, till exempel från kallelsen. Namnen matchas mot truppen och fördelas i lagen.
+          </p>
+          <Button
+            variant="secondary"
+            icon={setupClipboardStatus === 'pasted' ? <ClipboardCheck size={18} className="text-emerald-600" /> : <ClipboardPaste size={18} />}
+            onClick={handleSetupPasteClipboard}
+          >
+            {setupClipboardStatus === 'pasted' ? 'Inklistrat' : 'Klistra in från urklipp'}
+          </Button>
+          <div className="relative">
+            <textarea
+              ref={attendanceTextareaRef}
+              autoComplete="off"
+              autoCorrect="off"
+              spellCheck={false}
+              value={attendanceText}
+              onChange={(e) => setAttendanceText(e.target.value)}
+              onPaste={(e) => {
+                const pasted = e.clipboardData?.getData('text');
+                if (pasted && !attendanceText) setAttendanceText(pasted);
+              }}
+              placeholder="Ett namn per rad, eller separerade med kommatecken"
+              className="w-full h-40 px-4 py-3 rounded-xl border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-white focus:ring-2 focus:ring-indigo-500 outline-none text-base resize-none"
+            />
+            {attendanceText && (
+              <Button
+                size="sm"
+                variant="secondary"
+                className="absolute top-2 right-2"
+                onClick={() => { setAttendanceText(''); attendanceTextareaRef.current?.focus(); }}
+              >
+                Rensa
+              </Button>
+            )}
+          </div>
+          {setupClipboardStatus === 'failed' && (
+            <p className="text-sm text-amber-600 dark:text-amber-400">
+              Kunde inte läsa urklippet. Tryck i rutan och välj Klistra in.
+            </p>
+          )}
+        </div>
+      </Sheet>
 
-                      <div className="relative">
-                        <textarea
-                          ref={attendanceTextareaRef}
-                          autoFocus
-                          autoComplete="off"
-                          autoCorrect="off"
-                          spellCheck={false}
-                          value={attendanceText}
-                          onChange={(e) => setAttendanceText(e.target.value)}
-                          onPaste={(e) => {
-                            const pasted = e.clipboardData?.getData('text');
-                            if (pasted && !attendanceText) {
-                              setAttendanceText(pasted);
-                            }
-                          }}
-                          placeholder="Klistra in namn här (separera med ny rad eller kommatecken)..."
-                          className="w-full h-32 px-4 py-3 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900 text-zinc-900 dark:text-white focus:ring-2 focus:ring-indigo-500 outline-none transition-all text-sm font-medium resize-none"
-                        />
-                        {attendanceText && (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setAttendanceText('');
-                              attendanceTextareaRef.current?.focus();
-                            }}
-                            className="absolute top-3 right-3 px-2 py-1 rounded-lg bg-zinc-200/80 hover:bg-zinc-300 dark:bg-zinc-700/80 dark:hover:bg-zinc-600 text-zinc-600 dark:text-zinc-300 text-[11px] font-bold transition-all cursor-pointer"
-                            title="Rensa text"
-                          >
-                            Rensa
-                          </button>
-                        )}
-                      </div>
+      {/* Ark: kopiera lagindelning */}
+      <Sheet open={showCopyFromDropdown} onClose={() => setShowCopyFromDropdown(false)} title="Kopiera lagindelning">
+        <div className="flex flex-col gap-0.5">
+          {copyableExercisesForSetup.map(ex => {
+            const totalPlayers = ex.teams.reduce((sum, t) => sum + (t.playerIds?.length || 0), 0);
+            return (
+              <MenuItem
+                key={ex.id}
+                icon={<Copy size={18} />}
+                label={ex.name}
+                description={`${new Date(ex.date).toLocaleDateString('sv-SE')} · ${ex.teams.length} lag`}
+                trailing={<Badge tone="brand">{totalPlayers} spelare</Badge>}
+                onClick={() => {
+                  handleCopyFromExercise(ex);
+                  setShowCopyFromDropdown(false);
+                }}
+              />
+            );
+          })}
+        </div>
+      </Sheet>
 
-                      {setupClipboardStatus === 'failed' && (
-                        <p className="text-[11px] text-amber-600 dark:text-amber-400 font-medium">
-                          Kunde inte läsa urklipp automatiskt. Klicka i rutan ovan och välj Klistra in (Cmd+V / Ctrl+V).
-                        </p>
-                      )}
-
-                      <button
-                        type="button"
-                        onClick={generateTeamsFromAttendance}
-                        disabled={!attendanceText.trim()}
-                        className="w-full flex items-center justify-center gap-2 bg-indigo-600 text-white py-3 rounded-xl font-bold hover:bg-indigo-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
-                      >
-                        <Wand2 size={18} />
-                        <span>Skapa lag automatiskt</span>
-                      </button>
-                    </div>
-                  </motion.div>
-                )}
-              </AnimatePresence>
-
-              {copyableExercisesForSetup.length > 0 && (
-                <>
-                  <button
-                    type="button"
-                    onClick={() => setShowCopyFromDropdown(!showCopyFromDropdown)}
-                    className="w-full flex items-center justify-between p-4 bg-zinc-50 dark:bg-zinc-950 rounded-2xl border border-zinc-100 dark:border-zinc-800 transition-all hover:bg-zinc-100 dark:hover:bg-zinc-900"
-                  >
-                    <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 bg-indigo-600 rounded-xl flex items-center justify-center text-white shadow-sm">
-                        <Copy size={20} />
-                      </div>
-                      <div className="flex flex-col text-left">
-                        <span className="font-bold text-zinc-900 dark:text-white text-sm">Kopiera från tidigare lagindelning</span>
-                        <span className="text-[10px] text-zinc-500 dark:text-zinc-400 uppercase font-bold tracking-wider">HÄMTA FRÅN ETT ANNAT MOMENT</span>
-                      </div>
-                    </div>
-                    <div className="text-zinc-400">
-                      {showCopyFromDropdown ? <ChevronUp size={20} /> : <ChevronDown size={20} />}
-                    </div>
-                  </button>
-
-                  <AnimatePresence>
-                    {showCopyFromDropdown && (
-                      <motion.div
-                        initial={{ opacity: 0, height: 0 }}
-                        animate={{ opacity: 1, height: 'auto' }}
-                        exit={{ opacity: 0, height: 0 }}
-                        className="overflow-hidden"
-                      >
-                        <div className="bg-white dark:bg-zinc-950 p-2 rounded-2xl border border-zinc-200 dark:border-zinc-800 divide-y divide-zinc-100 dark:divide-zinc-850 max-h-64 overflow-y-auto">
-                          {copyableExercisesForSetup.map(ex => {
-                            const totalPlayers = ex.teams.reduce((sum, t) => sum + (t.playerIds?.length || 0), 0);
-                            return (
-                              <button
-                                type="button"
-                                key={ex.id}
-                                onClick={() => {
-                                  handleCopyFromExercise(ex);
-                                  setShowCopyFromDropdown(false);
-                                }}
-                                className="w-full text-left px-4 py-3 hover:bg-zinc-50 dark:hover:bg-zinc-900/50 transition-colors flex items-center justify-between"
-                              >
-                                <div className="min-w-0 pr-2">
-                                  <p className="font-extrabold text-xs text-zinc-900 dark:text-white truncate">{ex.name}</p>
-                                  <p className="text-[10px] text-zinc-500 font-medium truncate">
-                                    {new Date(ex.date).toLocaleDateString('sv-SE')} • {ex.teams.length} lag
-                                  </p>
-                                </div>
-                                <span className="shrink-0 bg-indigo-50 dark:bg-indigo-950/40 text-indigo-600 dark:text-indigo-400 font-black text-[10px] px-2 py-1 rounded-lg">
-                                  {totalPlayers} spelare
-                                </span>
-                              </button>
-                            );
-                          })}
-                        </div>
-                      </motion.div>
-                    )}
-                  </AnimatePresence>
-                </>
-              )}
-
-              {teams.some(t => t.playerIds.length > 0) && (
-                <button
-                  type="button"
-                  onClick={clearAllTeams}
-                  className="w-full flex items-center justify-center gap-2 py-3 px-4 bg-zinc-100 dark:bg-zinc-800 text-zinc-500 rounded-xl font-bold hover:bg-red-50 dark:hover:bg-red-900/10 hover:text-red-500 transition-all text-xs uppercase tracking-widest border border-zinc-200 dark:border-zinc-700 hover:border-red-200"
-                >
-                  <RotateCcw size={14} />
-                  <span>Rensa alla spelare från lagen</span>
-                </button>
-              )}
+      {/* Ark: lägg till gäst eller spelare ur truppen */}
+      {onAddGuest && (
+        <Sheet
+          open={showGuestInput}
+          onClose={() => { setShowGuestInput(false); setGuestName(''); setGuestPosition(''); }}
+          title="Lägg till spelare"
+        >
+          <div className="px-2 pb-2 space-y-5">
+            <div className="space-y-3">
+              <p className="text-sm font-semibold text-zinc-600 dark:text-zinc-300">Ny gästspelare</p>
+              <input
+                type="text"
+                value={guestName}
+                onChange={(e) => setGuestName(e.target.value)}
+                placeholder="Namn"
+                aria-label="Gästspelarens namn"
+                className={inputClass}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    submitGuest();
+                  }
+                }}
+              />
+              <select
+                value={guestPosition}
+                onChange={(e) => setGuestPosition(e.target.value)}
+                aria-label="Position"
+                className={inputClass + ' cursor-pointer'}
+              >
+                <option value="">Position (valfritt)</option>
+                <option value="MV">Målvakt (MV)</option>
+                <option value="MB">Mittback (MB)</option>
+                <option value="YB">Ytterback (YB)</option>
+                <option value="MF">Mittfältare (MF)</option>
+                <option value="YMF">Yttermittfältare (YMF)</option>
+                <option value="FW">Forward (FW)</option>
+              </select>
+              <Button block icon={<UserPlus size={18} />} onClick={submitGuest} disabled={!guestName.trim()}>
+                Lägg till gäst
+              </Button>
             </div>
-
-            {combinedSquad.length > 0 && (
-              <div className="bg-zinc-50 dark:bg-zinc-950 rounded-3xl p-6 border border-zinc-100 dark:border-zinc-800 space-y-4">
-                <div className="flex items-center gap-2 mb-2">
-                  <LayoutList size={18} className="text-zinc-400" />
-                  <h3 className="text-sm font-bold text-zinc-900 dark:text-white uppercase tracking-wider">Lagöversikt</h3>
-                </div>
-                
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {teams.map((team, idx) => {
-                    const isThisTeamDragging = draggedPlayerId && team.playerIds.includes(draggedPlayerId);
-                    return (
-                      <div 
-                        key={team.id} 
-                        data-overview-team-id={team.id}
-                        className={`bg-white dark:bg-zinc-900 p-4 rounded-2xl shadow-sm border transition-all duration-200 ${draggedPlayerId ? 'scale-[1.02] border-indigo-200 dark:border-indigo-800 bg-indigo-50/10' : 'border-zinc-100 dark:border-zinc-800'}`}
-                        style={{ zIndex: isThisTeamDragging ? 100 : (draggedPlayerId ? 10 : 1), position: 'relative' }}
-                      >
-                        <div className="flex items-center gap-2 mb-3">
-                          <div className="w-3 h-3 rounded-full" style={{ backgroundColor: team.color }} />
-                          <span className="font-black text-sm text-zinc-900 dark:text-white uppercase tracking-tight">Lag {idx + 1}</span>
-                          <span className="text-[10px] bg-zinc-100 dark:bg-zinc-800 text-zinc-500 px-1.5 py-0.5 rounded-full font-bold">
-                            {team.playerIds.length}
-                          </span>
-                        </div>
-                        <div className="flex flex-wrap gap-1.5 min-h-[30px]">
-                          {sortPlayersByPosition(team.playerIds || [], combinedSquad).map((pid, idx) => {
-                            const player = combinedSquad.find(p => p.id === pid);
-                            return player ? (
-                              <motion.div 
-                                key={`${pid}-${idx}`} 
-                                drag
-                                dragSnapToOrigin
-                                whileDrag={{ 
-                                  zIndex: 9999, 
-                                  scale: 1.1,
-                                  pointerEvents: 'none'
-                                }}
-                                onDragStart={() => setDraggedPlayerId(pid)}
-                                onDragEnd={(e: any, info) => {
-                                  const point = (e.nativeEvent || e).clientX !== undefined ? (e.nativeEvent || e) : info.point;
-                                  handleDragEndInOverview(pid, point.clientX || point.x, point.clientY || point.y);
-                                }}
-                                className={`px-2 py-1 rounded-md text-[11px] font-bold text-white shadow-sm flex items-center gap-1 cursor-grab active:cursor-grabbing touch-none z-50`} 
-                                style={{ backgroundColor: team.color }}
-                              >
-                                <div className="flex items-center gap-1">
-                                  <span>{player.name}</span>
-                                  {player.role === 'leader' ? (
-                                    <span className="opacity-80 text-[8px] bg-white/25 px-1 rounded-xs">Ledare</span>
-                                  ) : player.position && (
-                                    <span className="opacity-70 text-[8px]">({player.position})</span>
-                                  )}
-                                  <button
-                                    type="button"
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      movePlayerInternal(pid, 'none');
-                                    }}
-                                    className="ml-1 p-0.5 hover:bg-white/20 rounded-full transition-colors cursor-pointer flex items-center justify-center text-white"
-                                    title="Ta bort från lag"
-                                  >
-                                    <X size={10} />
-                                  </button>
-                                </div>
-                              </motion.div>
-                            ) : null;
-                          })}
-                          {team.playerIds.length === 0 && (
-                            <div className="w-full py-2 border border-dashed border-zinc-200 dark:border-zinc-800 rounded-lg flex items-center justify-center text-[8px] font-bold text-zinc-400 uppercase tracking-widest pointer-events-none">
-                              Dra hit
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    );
-                  })}
-
-                  {(() => {
-                    const isJokerDragging = draggedPlayerId && jokerPlayerIds.includes(draggedPlayerId);
-                    return (
-                      <div 
-                        key="joker-overview"
-                        data-overview-team-id="joker"
-                        className={`bg-indigo-50 dark:bg-indigo-900/10 p-4 rounded-2xl shadow-sm border transition-all duration-200 ${draggedPlayerId ? 'scale-[1.02] border-indigo-400' : 'border-indigo-100 dark:border-indigo-900/30'}`}
-                        style={{ zIndex: isJokerDragging ? 100 : (draggedPlayerId ? 10 : 1), position: 'relative' }}
-                      >
-                        <div className="flex items-center gap-2 mb-3">
-                          <div className="w-3 h-3 rounded-full bg-indigo-600" />
-                          <span className="font-black text-sm text-indigo-900 dark:text-indigo-100 uppercase tracking-tight">Jokrar</span>
-                          <span className="text-[10px] bg-indigo-100 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 px-1.5 py-0.5 rounded-full font-bold">
-                            {jokerPlayerIds.length}
-                          </span>
-                        </div>
-                        <div className="flex flex-wrap gap-1.5 min-h-[30px]">
-                          {sortPlayersByPosition(jokerPlayerIds || [], combinedSquad).map((pid, idx) => {
-                            const player = combinedSquad.find(p => p.id === pid);
-                            return player ? (
-                              <motion.div 
-                                key={`joker-${pid}-${idx}`} 
-                                drag
-                                dragSnapToOrigin
-                                whileDrag={{ 
-                                  zIndex: 9999, 
-                                  scale: 1.1,
-                                  pointerEvents: 'none'
-                                }}
-                                onDragStart={() => setDraggedPlayerId(pid)}
-                                onDragEnd={(e: any, info) => {
-                                  const point = (e.nativeEvent || e).clientX !== undefined ? (e.nativeEvent || e) : info.point;
-                                  handleDragEndInOverview(pid, point.clientX || point.x, point.clientY || point.y);
-                                }}
-                                className={`px-2 py-1 rounded-md text-[11px] font-bold text-white bg-indigo-600 shadow-sm flex items-center gap-1 cursor-grab active:cursor-grabbing touch-none z-50`}
-                              >
-                                <div className="flex items-center gap-1">
-                                  <span>{player.name}</span>
-                                  {player.position && <span className="opacity-70 text-[8px]">({player.position})</span>}
-                                  <button
-                                    type="button"
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      movePlayerInternal(pid, 'none');
-                                    }}
-                                    className="ml-1 p-0.5 hover:bg-white/20 rounded-full transition-colors cursor-pointer flex items-center justify-center text-white"
-                                    title="Ta bort från jokrar"
-                                  >
-                                    <X size={10} />
-                                  </button>
-                                </div>
-                              </motion.div>
-                            ) : null;
-                          })}
-                          {jokerPlayerIds.length === 0 && (
-                            <div className="w-full py-2 border border-dashed border-indigo-200 dark:border-indigo-800 rounded-lg flex items-center justify-center text-[8px] font-bold text-indigo-400 uppercase tracking-widest pointer-events-none">
-                              Dra hit
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    );
-                  })()}
-
-                  {(() => {
-                    const isUnassignedDragging = draggedPlayerId && unassignedPlayers.some(p => p.id === draggedPlayerId);
-                    return (
-                      <div 
-                        key="unassigned-overview"
-                        data-overview-team-id="none"
-                        className={`bg-zinc-50 dark:bg-zinc-950/30 p-4 rounded-2xl shadow-sm border border-dashed transition-all duration-200 flex flex-col h-full ${draggedPlayerId ? 'scale-[1.02] border-zinc-300 dark:border-zinc-700 opacity-60' : 'border-zinc-200 dark:border-zinc-800'}`}
-                        style={{ zIndex: isUnassignedDragging ? 100 : (draggedPlayerId ? 10 : 1), position: 'relative' }}
-                      >
-                        <div className="flex items-center gap-2 mb-3">
-                          <div className="w-3 h-3 rounded-full border border-zinc-400 dark:border-zinc-600" />
-                          <span className="font-black text-sm text-zinc-500 dark:text-zinc-400 uppercase tracking-tight flex-1">Ej indelade / Avbytare</span>
-                          <span className="text-[10px] bg-zinc-200/55 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300 px-1.5 py-0.5 rounded-full font-bold">
-                            {unassignedPlayers.length}
-                          </span>
-                        </div>
-                        <div className="flex flex-wrap gap-1.5 min-h-[30px]">
-                          {sortPlayersByPosition(unassignedPlayers.map(p => p.id), combinedSquad).map((pid, idx) => {
-                            const player = combinedSquad.find(p => p.id === pid);
-                            return player ? (
-                              <motion.div 
-                                key={`unassigned-${pid}-${idx}`} 
-                                drag
-                                dragSnapToOrigin
-                                whileDrag={{ 
-                                  zIndex: 9999, 
-                                  scale: 1.1,
-                                  pointerEvents: 'none'
-                                }}
-                                onDragStart={() => setDraggedPlayerId(pid)}
-                                onDragEnd={(e: any, info) => {
-                                  const point = (e.nativeEvent || e).clientX !== undefined ? (e.nativeEvent || e) : info.point;
-                                  handleDragEndInOverview(pid, point.clientX || point.x, point.clientY || point.y);
-                                }}
-                                className={`pl-2.5 pr-1 py-1 rounded-md text-[11px] font-bold text-zinc-800 dark:text-zinc-100 bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 shadow-sm flex items-center gap-1.5 cursor-grab active:cursor-grabbing touch-none z-50 transition-colors hover:border-zinc-300 dark:hover:border-zinc-600`} 
-                              >
-                                <span>{player.name}</span>
-                                {player.role === 'leader' ? (
-                                  <span className="text-emerald-600 dark:text-emerald-400 text-[8px] bg-emerald-50 dark:bg-emerald-950/40 px-1 rounded-xs">Ledare</span>
-                                ) : player.position && (
-                                  <span className="text-zinc-500 dark:text-zinc-400 text-[8px]">({player.position})</span>
-                                )}
-                                <button
-                                  type="button"
-                                  onPointerDown={(e) => e.stopPropagation()}
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    handleRemovePlayerFromAttendance(pid);
-                                  }}
-                                  className="p-0.5 hover:bg-zinc-100 dark:hover:bg-zinc-700 text-zinc-400 dark:text-zinc-400 hover:text-red-500 dark:hover:text-red-400 rounded transition-colors cursor-pointer shrink-0 ml-0.5"
-                                  title="Ta bort från närvaro"
-                                >
-                                  <X size={10} />
-                                </button>
-                              </motion.div>
-                            ) : null;
-                          })}
-                          {unassignedPlayers.length === 0 && (
-                            <div className="w-full py-2 border border-dashed border-zinc-200/50 dark:border-zinc-800/50 rounded-lg flex items-center justify-center text-[8px] font-bold text-zinc-400 uppercase tracking-widest pointer-events-none">
-                              Dra hit
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    );
-                  })()}
+            {absentSquadPlayers.length > 0 && (
+              <div className="space-y-2 pt-4 border-t border-zinc-100 dark:border-zinc-800">
+                <p className="text-sm font-semibold text-zinc-600 dark:text-zinc-300">Från truppen (inte närvarande)</p>
+                <div className="flex flex-col gap-0.5 -mx-2">
+                  {absentSquadPlayers.map(p => (
+                    <MenuItem
+                      key={p.id}
+                      icon={<Plus size={18} />}
+                      label={p.name}
+                      description={p.role === 'leader' ? 'Ledare' : p.position || undefined}
+                      onClick={() => addAbsentToAttendance(p.id)}
+                    />
+                  ))}
                 </div>
               </div>
             )}
-
-            <div className="space-y-2">
-              <button
-                type="button"
-                onClick={() => setShowJokers(!showJokers)}
-                className="w-full flex items-center justify-between p-4 bg-zinc-50 dark:bg-zinc-950 rounded-2xl border border-zinc-100 dark:border-zinc-800 transition-all hover:bg-zinc-100 dark:hover:bg-zinc-900"
-              >
-                <div className="flex flex-col text-left">
-                  <label className="block text-xs font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-wider cursor-pointer">Jokrar</label>
-                  <span className="text-[10px] text-zinc-500 dark:text-zinc-400 font-medium">Spelare som är med i alla lag och alltid får poäng</span>
-                </div>
-                <div className="text-zinc-400">
-                  {showJokers ? <ChevronUp size={20} /> : <ChevronDown size={20} />}
-                </div>
-              </button>
-              
-              <AnimatePresence>
-                {showJokers && (
-                  <motion.div
-                    initial={{ opacity: 0, height: 0 }}
-                    animate={{ opacity: 1, height: 'auto' }}
-                    exit={{ opacity: 0, height: 0 }}
-                    className="overflow-hidden"
-                  >
-                    <div className="bg-indigo-50 dark:bg-indigo-950/20 p-4 rounded-2xl border border-indigo-100 dark:border-indigo-900/30 mb-4">
-                      <div className="flex items-center justify-between mb-3">
-                        <label className="block text-[10px] font-bold text-zinc-400 uppercase tracking-widest">Välj jokrar</label>
-                        {isAttendanceActive && (
-                          <span className="text-[9px] font-black text-indigo-600 uppercase">Visar närvarande spelare</span>
-                        )}
-                      </div>
-                      {combinedSquad.length > 0 ? (
-                        <div className="flex flex-wrap gap-2">
-                          {sortPlayersByPosition(combinedSquad.map(p => p.id), combinedSquad)
-                            .filter(pid => {
-                              if (!isAttendanceActive) return true;
-                              const isGuest = typeof pid === 'string' && pid.startsWith('guest_');
-                              return currentAttendanceIds.includes(pid) || (isGuest && (guestPlayers || []).some(gp => gp.id === pid));
-                            })
-                            .map(pid => {
-                              const player = combinedSquad.find(p => p.id === pid);
-                              if (!player) return null;
-                              const isJoker = jokerPlayerIds.includes(player.id);
-                            
-                            return (
-                              <button
-                                key={player.id}
-                                type="button"
-                                onClick={() => toggleJoker(player.id)}
-                                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all border flex items-center gap-1 ${
-                                  isJoker 
-                                    ? 'bg-indigo-600 border-indigo-600 text-white shadow-md shadow-indigo-200 dark:shadow-none' 
-                                    : 'bg-white dark:bg-zinc-900 border-zinc-200 dark:border-zinc-800 text-zinc-600 dark:text-zinc-400 hover:border-indigo-300'
-                                }`}
-                                style={isJoker ? { backgroundColor: '#6366f1', borderColor: '#6366f1' } : {}}
-                              >
-                                {player.name}
-                                {player.role === 'leader' ? (
-                                  <span className="opacity-85 text-[8px] bg-white/20 px-1 rounded-sm">Ledare</span>
-                                ) : player.position && (
-                                  <span className="opacity-70 text-[8px]">({player.position})</span>
-                                )}
-                              </button>
-                            );
-                          })}
-                        </div>
-                      ) : (
-                        <p className="text-xs text-zinc-500 italic">Inga spelare i truppen än.</p>
-                      )}
-                    </div>
-                  </motion.div>
-                )}
-              </AnimatePresence>
-            </div>
-
-            <div className="space-y-6">
-              <AnimatePresence mode="popLayout">
-                {teams.map((team, index) => (
-                  <motion.div
-                    key={team.id}
-                    layout
-                    initial={{ opacity: 0, scale: 0.9 }}
-                    animate={{ opacity: 1, scale: 1 }}
-                    exit={{ opacity: 0, scale: 0.9 }}
-                    className="bg-zinc-50 dark:bg-zinc-950 p-6 rounded-2xl border border-zinc-100 dark:border-zinc-800"
-                  >
-                    <div className="flex flex-col gap-4 mb-6">
-                      {/* Topp-rad: Namn och knappar */}
-                      <div className="flex items-center justify-between gap-4">
-                        <div className="flex flex-col min-w-0 flex-1">
-                          <input
-                            type="text"
-                            value={team.name}
-                            onChange={(e) => updateTeam(team.id, { name: e.target.value })}
-                            placeholder={`Lag ${index + 1}`}
-                            className="bg-transparent border-none focus:ring-0 text-lg font-black text-zinc-900 dark:text-white uppercase tracking-tight p-0 placeholder:text-zinc-300 w-full"
-                          />
-                          <div className="flex items-center gap-1.5 mt-0.5">
-                            <Users size={12} className="text-zinc-400" />
-                            <span className="text-[10px] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">{team.playerIds.length} spelare</span>
-                          </div>
-                        </div>
-
-                        <div className="flex items-center gap-1.5 shrink-0">
-                          <button
-                            type="submit"
-                            className="bg-indigo-600 text-white p-2 rounded-xl transition-all active:scale-95 hover:bg-indigo-700 shadow-sm"
-                            title="Spara hela tävlingen"
-                          >
-                            <Save size={18} />
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => removeTeam(team.id)}
-                            disabled={teams.length <= 1}
-                            className="bg-zinc-100 dark:bg-zinc-800 text-zinc-400 dark:text-zinc-600 hover:text-red-500 p-2 rounded-xl transition-all active:scale-95 disabled:opacity-0"
-                            title="Ta bort lag"
-                          >
-                            <Trash2 size={18} />
-                          </button>
-                        </div>
-                      </div>
-
-                      {/* Rad 2: Färgval */}
-                      <div className="flex items-center gap-3 bg-white dark:bg-zinc-900 p-2.5 rounded-2xl border border-zinc-100 dark:border-zinc-800 shadow-sm w-fit">
-                        <span className="text-[10px] font-black text-zinc-400 uppercase tracking-widest pl-1">Väst:</span>
-                        <ColorPicker 
-                          selectedColor={team.color} 
-                          onChange={(color) => updateTeam(team.id, { color })} 
-                        />
-                      </div>
-                    </div>
-
-                    <div>
-                      <div className="flex items-center justify-between mb-2">
-                        <label className="block text-[10px] font-bold text-zinc-400 uppercase tracking-widest">
-                          {guestPlayers.length > 0 ? 'Välj spelare (inkl. provspelare)' : 'Välj spelare från truppen'}
-                        </label>
-                        {isAttendanceActive && (
-                          <span className="text-[9px] font-black text-indigo-600 uppercase">Visar närvarande spelare</span>
-                        )}
-                      </div>
-                      {combinedSquad.length > 0 ? (
-                        <div className="flex flex-wrap gap-2">
-                          {sortPlayersByPosition(combinedSquad.map(p => p.id), combinedSquad)
-                            .filter(pid => {
-                              if (!isAttendanceActive) return true;
-                              const isGuest = typeof pid === 'string' && pid.startsWith('guest_');
-                              return currentAttendanceIds.includes(pid) || (isGuest && (guestPlayers || []).some(gp => gp.id === pid));
-                            })
-                            .map((pid, idx) => {
-                              const player = combinedSquad.find(p => p.id === pid);
-                              if (!player) return null;
-                              const isSelected = team.playerIds.includes(player.id);
-                              const isJoker = jokerPlayerIds.includes(player.id);
-                              
-                              return (
-                                <button
-                                key={`${player.id}-${idx}`}
-                                type="button"
-                                onClick={() => togglePlayerInTeam(team.id, player.id)}
-                                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all border flex items-center gap-1 ${
-                                  isSelected 
-                                    ? 'text-white shadow-md' 
-                                    : isJoker
-                                      ? 'bg-zinc-100 border-zinc-100 text-zinc-400 opacity-50 cursor-not-allowed'
-                                      : 'bg-white dark:bg-zinc-900 border-zinc-200 dark:border-zinc-800 text-zinc-600 dark:text-zinc-400 hover:border-indigo-300'
-                                }`}
-                                style={isSelected ? { backgroundColor: team.color, borderColor: team.color } : {}}
-                                disabled={isJoker}
-                              >
-                                {player.name}
-                                {player.position && <span className="opacity-70 text-[8px]">({player.position})</span>}
-                              </button>
-                            );
-                          })}
-                        </div>
-                      ) : (
-                        <p className="text-xs text-zinc-500 italic">Inga spelare i truppen än. Gå till "Truppen" för att lägga till spelare.</p>
-                      )}
-                    </div>
-                  </motion.div>
-                ))}
-              </AnimatePresence>
-            </div>
           </div>
-
-          <button
-            type="submit"
-            onClick={() => {
-              submitShouldStartRef.current = !initialGame;
-            }}
-            className="w-full bg-indigo-600 text-white py-4 rounded-2xl font-black text-xl flex items-center justify-center gap-3 hover:bg-indigo-700 active:scale-[0.98] transition-all shadow-lg shadow-indigo-200 dark:shadow-none"
-          >
-            {initialGame ? (
-              <>
-                <Check size={24} strokeWidth={3} />
-                Spara ändringar
-              </>
-            ) : (
-              <>
-                <Play fill="currentColor" size={24} />
-                Starta tävlingsmomentet
-              </>
-            )}
-          </button>
-        </form>
-      </div>
-
-      <AnimatePresence>
-      </AnimatePresence>
+        </Sheet>
+      )}
     </motion.div>
   );
 }
+
+const inputClass = 'w-full h-12 px-4 rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-950 text-zinc-900 dark:text-white outline-none focus:ring-2 focus:ring-indigo-500 text-base';
+
+const SwitchRow = ({ label, description, checked, onChange }: { label: string; description?: string; checked: boolean; onChange: () => void }) => (
+  <button
+    type="button"
+    role="switch"
+    aria-checked={checked}
+    onClick={onChange}
+    className="w-full flex items-center gap-3 px-1 py-3 text-left cursor-pointer"
+  >
+    <span className="flex-1 min-w-0">
+      <span className="block text-sm font-semibold text-zinc-900 dark:text-white">{label}</span>
+      {description && <span className="block text-sm text-zinc-500 dark:text-zinc-400">{description}</span>}
+    </span>
+    <span className={`relative w-12 h-7 rounded-full transition-colors shrink-0 ${checked ? 'bg-indigo-600' : 'bg-zinc-300 dark:bg-zinc-700'}`}>
+      <span className={`absolute top-1 left-1 w-5 h-5 bg-white rounded-full shadow-sm transition-transform ${checked ? 'translate-x-5' : ''}`} />
+    </span>
+  </button>
+);
+
+const Stepper = ({ label, value, onMinus, onPlus }: { label: string; value: string; onMinus: () => void; onPlus: () => void }) => (
+  <div className="flex flex-col items-center gap-1.5 p-2 rounded-xl bg-zinc-50 dark:bg-zinc-950 border border-zinc-100 dark:border-zinc-800">
+    <span className="text-sm text-zinc-500 dark:text-zinc-400">{label}</span>
+    <div className="flex items-center gap-1">
+      <button type="button" aria-label={`Minska ${label.toLowerCase()}`} onClick={onMinus} className="w-10 h-10 rounded-xl bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 flex items-center justify-center active:scale-95 cursor-pointer">
+        <Minus size={16} />
+      </button>
+      <span className="text-xl font-bold min-w-[2.5ch] text-center tabular-nums">{value}</span>
+      <button type="button" aria-label={`Öka ${label.toLowerCase()}`} onClick={onPlus} className="w-10 h-10 rounded-xl bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 flex items-center justify-center active:scale-95 cursor-pointer">
+        <Plus size={16} />
+      </button>
+    </div>
+  </div>
+);

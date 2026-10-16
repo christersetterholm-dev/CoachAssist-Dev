@@ -146,7 +146,7 @@ export function SegmentedTabs<T extends string>({
   value: T;
   onChange: (id: T) => void;
   className?: string;
-  size?: 'sm' | 'md';
+  size?: 'sm' | 'md' | 'lg'; // lg = tryckyta 40 px
 }) {
   return (
     <div
@@ -167,7 +167,7 @@ export function SegmentedTabs<T extends string>({
             onClick={() => onChange(tab.id)}
             className={cx(
               'flex-1 min-w-fit inline-flex items-center justify-center gap-1.5 rounded-xl font-semibold whitespace-nowrap transition-all cursor-pointer',
-              size === 'sm' ? 'h-8 px-3 text-xs' : 'h-9 px-3.5 text-sm',
+              size === 'sm' ? 'h-8 px-3 text-xs' : size === 'lg' ? 'h-10 px-4 text-sm' : 'h-9 px-3.5 text-sm',
               selected
                 ? 'bg-white dark:bg-zinc-800 text-zinc-900 dark:text-white shadow-sm'
                 : 'text-zinc-500 dark:text-zinc-400 hover:text-zinc-800 dark:hover:text-zinc-200'

@@ -113,6 +113,48 @@ const TeamMark: React.FC<{ clubName?: string; size?: number }> = ({ clubName, si
   );
 };
 
+/**
+ * Knappen för att lämna storskärmsläget. Ligger nere i hörnet så att den inte täcker innehållet
+ * och tonas bort efter några sekunder; den visas igen vid tryck, musrörelse eller tangent.
+ */
+const ExitPresentingButton: React.FC<{ onExit: () => void }> = ({ onExit }) => {
+  const [visible, setVisible] = React.useState(true);
+  React.useEffect(() => {
+    let timer = window.setTimeout(() => setVisible(false), 3000);
+    const wake = () => {
+      setVisible(true);
+      window.clearTimeout(timer);
+      timer = window.setTimeout(() => setVisible(false), 3000);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onExit();
+      else wake();
+    };
+    window.addEventListener('pointerdown', wake);
+    window.addEventListener('pointermove', wake);
+    window.addEventListener('keydown', onKey);
+    return () => {
+      window.clearTimeout(timer);
+      window.removeEventListener('pointerdown', wake);
+      window.removeEventListener('pointermove', wake);
+      window.removeEventListener('keydown', onKey);
+    };
+  }, [onExit]);
+  return (
+    <button
+      type="button"
+      onClick={onExit}
+      title="Avsluta storskärm (Esc)"
+      aria-label="Avsluta storskärm"
+      className={`fixed z-[80] bottom-[calc(env(safe-area-inset-bottom,0px)+16px)] right-4 w-12 h-12 rounded-full bg-zinc-900/70 text-white backdrop-blur-md shadow-lg flex items-center justify-center cursor-pointer hover:bg-zinc-900 transition-opacity duration-500 ${
+        visible ? 'opacity-100' : 'opacity-0 pointer-events-none'
+      }`}
+    >
+      <Minimize2 size={20} />
+    </button>
+  );
+};
+
 export const AppShell: React.FC<AppShellProps> = props => {
   const {
     view, onNavigate, canViewLineup, isCoachOrAdmin, title, actions, clubName, teamName, account,
@@ -276,15 +318,7 @@ export const AppShell: React.FC<AppShellProps> = props => {
         )}
       </div>
 
-      {presenting && onExitPresenting && (
-        <button
-          type="button"
-          onClick={onExitPresenting}
-          className="fixed z-[80] top-[calc(env(safe-area-inset-top,0px)+12px)] left-3 inline-flex items-center gap-2 h-10 px-3.5 rounded-xl bg-zinc-900/80 text-white text-sm font-semibold backdrop-blur-md shadow-lg cursor-pointer hover:bg-zinc-900"
-        >
-          <Minimize2 size={16} /> Avsluta storskärm
-        </button>
-      )}
+      {presenting && onExitPresenting && <ExitPresentingButton onExit={onExitPresenting} />}
 
       {/* Kontomeny */}
       <Sheet open={accountOpen} onClose={() => setAccountOpen(false)} title="Konto">

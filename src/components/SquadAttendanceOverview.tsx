@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import React, { useState, useMemo } from 'react';
 import { 
   Calendar, 
   Search, 
@@ -15,13 +15,14 @@ import {
   Download,
   CheckCircle2,
   XCircle,
-  Clock,
-  Users
+  Users,
+  Share2
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { SquadPlayer, TrainingSession } from '../types';
 import { CachedImage } from './CachedImage';
 import { isMatchSession } from '../utils/sessionCategory';
+import { Badge, Button, Card, EmptyState, IconButton, MenuItem, SegmentedTabs, Sheet } from './ui';
 
 interface SquadAttendanceOverviewProps {
   squad: SquadPlayer[];
@@ -63,6 +64,9 @@ export default function SquadAttendanceOverview({ squad, sessions }: SquadAttend
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [expandedPlayerId, setExpandedPlayerId] = useState<string | null>(null);
   const [copiedNotification, setCopiedNotification] = useState<boolean>(false);
+  const [showPeriodSheet, setShowPeriodSheet] = useState(false);
+  const [showSortSheet, setShowSortSheet] = useState(false);
+  const [showShareSheet, setShowShareSheet] = useState(false);
 
   // Custom date range state
   const [customStartDate, setCustomStartDate] = useState<string>(() => {
@@ -113,11 +117,11 @@ export default function SquadAttendanceOverview({ squad, sessions }: SquadAttend
       start = d.getTime();
       const endYear = new Date(now.getFullYear(), 11, 31, 23, 59, 59);
       end = endYear.getTime();
-      label = `Säsong/År ${now.getFullYear()}`;
+      label = `År ${now.getFullYear()}`;
     } else if (periodPreset === 'all') {
       start = 0;
       end = Date.now() + 86400000 * 365;
-      label = 'Alla registrerade tillfällen';
+      label = 'Alla registrerade pass';
     } else if (periodPreset === 'custom') {
       const s = new Date(customStartDate + 'T00:00:00');
       const e = new Date(customEndDate + 'T23:59:59');
@@ -305,10 +309,10 @@ export default function SquadAttendanceOverview({ squad, sessions }: SquadAttend
 
   // Copy attendance summary to clipboard
   const handleCopyReport = () => {
-    let report = `📊 NÄRVARORAPPORT: ${dateRangeLabel.toUpperCase()}\n`;
+    let report = `📊 Närvarorapport: ${dateRangeLabel}\n`;
     report += `Pass under perioden: ${totalTrainingsCount} träningar, ${totalMatchesCount} matcher (${totalSessionsCount} totalt)\n`;
     report += `Genomsnittlig närvaro i truppen: ${squadAveragePercentage}%\n\n`;
-    report += `SPELARE (${processedStats.length} st):\n`;
+    report += `Personer (${processedStats.length} st):\n`;
     report += `--------------------------------------------------\n`;
 
     processedStats.forEach((stat, index) => {
@@ -352,13 +356,6 @@ export default function SquadAttendanceOverview({ squad, sessions }: SquadAttend
     document.body.removeChild(link);
   };
 
-  const getBadgeColor = (pct: number) => {
-    if (pct >= 80) return 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800';
-    if (pct >= 60) return 'bg-indigo-100 text-indigo-800 dark:bg-indigo-950/60 dark:text-indigo-300 border-indigo-200 dark:border-indigo-800';
-    if (pct >= 40) return 'bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300 border-amber-200 dark:border-amber-800';
-    return 'bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400 border-zinc-200 dark:border-zinc-700';
-  };
-
   const getProgressColor = (pct: number) => {
     if (pct >= 80) return 'bg-emerald-500';
     if (pct >= 60) return 'bg-indigo-600';
@@ -366,436 +363,290 @@ export default function SquadAttendanceOverview({ squad, sessions }: SquadAttend
     return 'bg-zinc-400';
   };
 
+  const periodOptions: { id: PeriodPreset; label: string }[] = [
+    { id: 'last30', label: 'Senaste 30 dagarna' },
+    { id: 'thisMonth', label: 'Denna månad' },
+    { id: 'last90', label: 'Senaste 3 månaderna' },
+    { id: 'thisYear', label: 'I år' },
+    { id: 'lastYear', label: 'Senaste 12 månaderna' },
+    { id: 'all', label: 'All tid' },
+    { id: 'custom', label: 'Välj datum själv' },
+  ];
+  const sortOptions: { id: SortField; label: string }[] = [
+    { id: 'percentage', label: 'Närvaro i procent' },
+    { id: 'total', label: 'Antal pass totalt' },
+    { id: 'trainings', label: 'Antal träningar' },
+    { id: 'matches', label: 'Antal matcher' },
+    { id: 'name', label: 'Namn' },
+    { id: 'number', label: 'Tröjnummer' },
+  ];
+  const currentPeriodLabel = periodOptions.find(p => p.id === periodPreset)?.label || '';
+  const currentSortLabel = sortOptions.find(s => s.id === sortField)?.label || '';
+
   return (
-    <div className="w-full space-y-6 animate-in fade-in duration-300">
-      {/* Top Header Card with Period Selector & Actions */}
-      <div className="bg-white dark:bg-zinc-900 border border-zinc-150 dark:border-zinc-800 rounded-3xl p-5 sm:p-7 shadow-xs">
-        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-5 border-b border-zinc-100 dark:border-zinc-800">
-          <div>
-            <div className="flex items-center gap-2">
-              <span className="p-2 bg-indigo-50 dark:bg-indigo-950/50 text-indigo-600 dark:text-indigo-400 rounded-xl">
-                <Activity size={20} />
-              </span>
-              <h3 className="text-lg sm:text-xl font-black text-zinc-900 dark:text-white tracking-tight">
-                Närvarostatistik & Deltagande
-              </h3>
-            </div>
-            <p className="text-xs sm:text-sm text-zinc-500 dark:text-zinc-400 mt-1 font-medium">
-              {dateRangeLabel} • Baserat på registrerad närvaro i kalendern
-            </p>
-          </div>
+    <div className="w-full space-y-4 animate-in fade-in duration-300">
+      {/* Period och åtgärder */}
+      <div className="flex items-center gap-2">
+        <Button
+          variant="secondary"
+          icon={<Calendar size={18} />}
+          onClick={() => setShowPeriodSheet(true)}
+          className="flex-1 sm:flex-none justify-start"
+        >
+          <span className="truncate">{currentPeriodLabel}</span>
+          <ChevronDown size={16} className="ml-auto sm:ml-1 text-zinc-400" />
+        </Button>
+        <IconButton label="Dela rapport" onClick={() => setShowShareSheet(true)}>
+          {copiedNotification ? <Check size={20} className="text-emerald-600" /> : <Share2 size={20} />}
+        </IconButton>
+      </div>
+      <p className="text-sm text-zinc-500 dark:text-zinc-400 -mt-1">{dateRangeLabel}. Bygger på närvaron som registrerats i kalendern.</p>
 
-          <div className="flex flex-wrap items-center gap-2">
-            <button
-              onClick={handleCopyReport}
-              className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-zinc-700 dark:text-zinc-200 rounded-xl text-xs font-bold transition-all active:scale-95 cursor-pointer border border-zinc-200/80 dark:border-zinc-700"
-              title="Kopiera textrapport"
-            >
-              {copiedNotification ? <Check size={15} className="text-emerald-600" /> : <Copy size={15} />}
-              <span>{copiedNotification ? 'Kopierad!' : 'Kopiera rapport'}</span>
-            </button>
-            <button
-              onClick={handleExportCsv}
-              className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-zinc-700 dark:text-zinc-200 rounded-xl text-xs font-bold transition-all active:scale-95 cursor-pointer border border-zinc-200/80 dark:border-zinc-700"
-              title="Ladda ner som Excel/CSV"
-            >
-              <Download size={15} />
-              <span>Exportera CSV</span>
-            </button>
-          </div>
-        </div>
+      {periodPreset === 'custom' && (
+        <Card className="flex flex-wrap items-center gap-3">
+          <label className="flex items-center gap-2 text-sm font-semibold text-zinc-600 dark:text-zinc-300">
+            Från
+            <input
+              type="date"
+              value={customStartDate}
+              onChange={(e) => setCustomStartDate(e.target.value)}
+              className="h-11 px-3 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-700 rounded-xl text-sm text-zinc-800 dark:text-zinc-200 outline-none focus:border-indigo-500"
+            />
+          </label>
+          <label className="flex items-center gap-2 text-sm font-semibold text-zinc-600 dark:text-zinc-300">
+            Till
+            <input
+              type="date"
+              value={customEndDate}
+              onChange={(e) => setCustomEndDate(e.target.value)}
+              className="h-11 px-3 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-700 rounded-xl text-sm text-zinc-800 dark:text-zinc-200 outline-none focus:border-indigo-500"
+            />
+          </label>
+        </Card>
+      )}
 
-        {/* Period Selector Tabs */}
-        <div className="pt-5 space-y-4">
-          <div className="flex items-center gap-2 text-zinc-500 dark:text-zinc-400">
-            <Calendar size={15} className="text-indigo-500" />
-            <span className="text-[11px] font-black uppercase tracking-wider">Välj tidsperiod:</span>
-          </div>
+      {/* Nyckeltal */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <StatTile icon={<Dumbbell size={18} className="text-indigo-500" />} label="Träningar" value={String(totalTrainingsCount)} />
+        <StatTile icon={<Shirt size={18} className="text-emerald-500" />} label="Matcher" value={String(totalMatchesCount)} />
+        <StatTile icon={<Activity size={18} className="text-amber-500" />} label="Snittnärvaro" value={`${squadAveragePercentage}%`} />
+        <StatTile
+          icon={<Trophy size={18} className="text-amber-500" />}
+          label="Flitigast"
+          value={topAttendee ? topAttendee.player.name : '–'}
+          sub={topAttendee ? `${topAttendee.percentage}%, ${topAttendee.totalAttended} av ${topAttendee.totalSessionsCount} pass` : 'Ingen närvaro registrerad'}
+          small
+        />
+      </div>
 
-          <div className="flex flex-wrap gap-1.5">
-            {[
-              { id: 'last30', label: 'Senaste månaden (30 d)' },
-              { id: 'thisMonth', label: 'Denna månad' },
-              { id: 'last90', label: 'Senaste 3 månaderna' },
-              { id: 'thisYear', label: 'Innevarande år' },
-              { id: 'lastYear', label: 'Senaste året (12 mån)' },
-              { id: 'all', label: 'All tid' },
-              { id: 'custom', label: 'Anpassad period...' }
-            ].map(p => (
-              <button
-                key={p.id}
-                onClick={() => setPeriodPreset(p.id as PeriodPreset)}
-                className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer border ${
-                  periodPreset === p.id
-                    ? 'bg-indigo-600 border-indigo-500 text-white shadow-xs'
-                    : 'bg-zinc-50 dark:bg-zinc-950 border-zinc-200 dark:border-zinc-800 text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white'
-                }`}
-              >
-                {p.label}
-              </button>
-            ))}
-          </div>
-
-          {/* Custom Date Pickers */}
-          {periodPreset === 'custom' && (
-            <div className="flex flex-wrap items-center gap-3 p-3.5 bg-zinc-50 dark:bg-zinc-950 rounded-2xl border border-zinc-200 dark:border-zinc-800 animate-in fade-in">
-              <div className="flex items-center gap-2">
-                <label className="text-[11px] font-bold text-zinc-500 uppercase tracking-wider">Från:</label>
-                <input
-                  type="date"
-                  value={customStartDate}
-                  onChange={(e) => setCustomStartDate(e.target.value)}
-                  className="px-3 py-1.5 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl text-xs font-bold text-zinc-800 dark:text-zinc-200 outline-none focus:border-indigo-500"
-                />
-              </div>
-              <div className="flex items-center gap-2">
-                <label className="text-[11px] font-bold text-zinc-500 uppercase tracking-wider">Till:</label>
-                <input
-                  type="date"
-                  value={customEndDate}
-                  onChange={(e) => setCustomEndDate(e.target.value)}
-                  className="px-3 py-1.5 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl text-xs font-bold text-zinc-800 dark:text-zinc-200 outline-none focus:border-indigo-500"
-                />
-              </div>
-            </div>
+      {/* Sök och filter */}
+      <div className="space-y-2.5">
+        <div className="relative">
+          <Search size={18} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-zinc-400 pointer-events-none" />
+          <input
+            type="search"
+            placeholder="Sök person"
+            aria-label="Sök på namn, nummer eller position"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="w-full h-11 pl-10 pr-11 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl text-base sm:text-sm text-zinc-900 dark:text-white placeholder:text-zinc-400 outline-none focus:border-indigo-500"
+          />
+          {searchQuery && (
+            <IconButton label="Rensa sökningen" onClick={() => setSearchQuery('')} className="absolute right-0.5 top-1/2 -translate-y-1/2">
+              <X size={16} />
+            </IconButton>
           )}
         </div>
-      </div>
-
-      {/* Overview Stat Cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3.5">
-        <div className="bg-white dark:bg-zinc-900 border border-zinc-150 dark:border-zinc-800 rounded-3xl p-4 sm:p-5 shadow-xs flex flex-col justify-between">
-          <div className="flex items-center justify-between text-zinc-400">
-            <span className="text-[10px] sm:text-xs font-black uppercase tracking-wider">Genomförda träningar</span>
-            <Dumbbell size={18} className="text-indigo-500" />
-          </div>
-          <div className="mt-3">
-            <div className="text-2xl sm:text-3xl font-black text-zinc-900 dark:text-white">{totalTrainingsCount}</div>
-            <p className="text-[10px] sm:text-xs text-zinc-400 mt-0.5 font-medium">registrerade träningspass</p>
-          </div>
+        <div className="flex flex-col sm:flex-row gap-2">
+          <SegmentedTabs<RoleFilter>
+            size="sm"
+            value={roleFilter}
+            onChange={setRoleFilter}
+            tabs={[
+              { id: 'players', label: 'Spelare' },
+              { id: 'leaders', label: 'Ledare' },
+              { id: 'all', label: 'Alla' },
+            ]}
+          />
+          <SegmentedTabs<EventTypeFilter>
+            size="sm"
+            value={eventTypeFilter}
+            onChange={setEventTypeFilter}
+            tabs={[
+              { id: 'all', label: 'Alla pass' },
+              { id: 'training', label: 'Träning' },
+              { id: 'match', label: 'Match' },
+            ]}
+          />
         </div>
-
-        <div className="bg-white dark:bg-zinc-900 border border-zinc-150 dark:border-zinc-800 rounded-3xl p-4 sm:p-5 shadow-xs flex flex-col justify-between">
-          <div className="flex items-center justify-between text-zinc-400">
-            <span className="text-[10px] sm:text-xs font-black uppercase tracking-wider">Spelade matcher</span>
-            <Shirt size={18} className="text-emerald-500" />
-          </div>
-          <div className="mt-3">
-            <div className="text-2xl sm:text-3xl font-black text-zinc-900 dark:text-white">{totalMatchesCount}</div>
-            <p className="text-[10px] sm:text-xs text-zinc-400 mt-0.5 font-medium">registrerade matcher</p>
-          </div>
-        </div>
-
-        <div className="bg-white dark:bg-zinc-900 border border-zinc-150 dark:border-zinc-800 rounded-3xl p-4 sm:p-5 shadow-xs flex flex-col justify-between">
-          <div className="flex items-center justify-between text-zinc-400">
-            <span className="text-[10px] sm:text-xs font-black uppercase tracking-wider">Snittnärvaro</span>
-            <Activity size={18} className="text-amber-500" />
-          </div>
-          <div className="mt-3">
-            <div className="text-2xl sm:text-3xl font-black text-zinc-900 dark:text-white">{squadAveragePercentage}%</div>
-            <p className="text-[10px] sm:text-xs text-zinc-400 mt-0.5 font-medium">deltagande i truppen</p>
-          </div>
-        </div>
-
-        <div className="bg-white dark:bg-zinc-900 border border-zinc-150 dark:border-zinc-800 rounded-3xl p-4 sm:p-5 shadow-xs flex flex-col justify-between">
-          <div className="flex items-center justify-between text-zinc-400">
-            <span className="text-[10px] sm:text-xs font-black uppercase tracking-wider">Flitigast deltagande</span>
-            <Trophy size={18} className="text-amber-500" />
-          </div>
-          <div className="mt-3 min-w-0">
-            <div className="text-lg sm:text-xl font-black text-zinc-900 dark:text-white truncate">
-              {topAttendee ? topAttendee.player.name : '—'}
-            </div>
-            <p className="text-[10px] sm:text-xs text-emerald-600 dark:text-emerald-400 mt-0.5 font-bold truncate">
-              {topAttendee ? `${topAttendee.percentage}% (${topAttendee.totalAttended} av ${topAttendee.totalSessionsCount} pass)` : 'Ingen data'}
-            </p>
-          </div>
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-sm text-zinc-500 dark:text-zinc-400">{processedStats.length} personer</span>
+          <Button variant="ghost" icon={<ArrowUpDown size={16} />} onClick={() => setShowSortSheet(true)}>
+            {currentSortLabel} {sortAsc ? '↑' : '↓'}
+          </Button>
         </div>
       </div>
 
-      {/* Filter, Search & View Controls */}
-      <div className="bg-white dark:bg-zinc-900 border border-zinc-150 dark:border-zinc-800 rounded-3xl p-4 sm:p-5 shadow-xs space-y-3.5">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
-          {/* Search Box */}
-          <div className="relative flex-1">
-            <Search size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-zinc-400" />
-            <input
-              type="text"
-              placeholder="Sök spelare efter namn, tröjnummer eller position..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full pl-9 pr-4 py-2.5 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-2xl text-xs font-bold text-zinc-900 dark:text-white placeholder:text-zinc-400 outline-none focus:border-indigo-500"
-            />
-            {searchQuery && (
-              <button 
-                onClick={() => setSearchQuery('')}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200"
-              >
-                <X size={14} />
-              </button>
-            )}
-          </div>
-
-          {/* Role Filter & Event Type Tabs */}
-          <div className="flex flex-wrap items-center gap-2">
-            <div className="flex items-center bg-zinc-50 dark:bg-zinc-950 p-1 border border-zinc-200 dark:border-zinc-800 rounded-xl">
-              {[
-                { id: 'players', label: 'Spelare' },
-                { id: 'leaders', label: 'Ledare' },
-                { id: 'all', label: 'Alla' }
-              ].map(r => (
-                <button
-                  key={r.id}
-                  onClick={() => setRoleFilter(r.id as RoleFilter)}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                    roleFilter === r.id
-                      ? 'bg-indigo-600 text-white shadow-xs'
-                      : 'text-zinc-500 hover:text-zinc-900 dark:hover:text-white'
-                  }`}
-                >
-                  {r.label}
-                </button>
-              ))}
-            </div>
-
-            <div className="flex items-center bg-zinc-50 dark:bg-zinc-950 p-1 border border-zinc-200 dark:border-zinc-800 rounded-xl">
-              {[
-                { id: 'all', label: 'Alla pass' },
-                { id: 'training', label: 'Endast träning' },
-                { id: 'match', label: 'Endast match' }
-              ].map(t => (
-                <button
-                  key={t.id}
-                  onClick={() => setEventTypeFilter(t.id as EventTypeFilter)}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                    eventTypeFilter === t.id
-                      ? 'bg-indigo-600 text-white shadow-xs'
-                      : 'text-zinc-500 hover:text-zinc-900 dark:hover:text-white'
-                  }`}
-                >
-                  {t.label}
-                </button>
-              ))}
-            </div>
-          </div>
-        </div>
-
-        {/* Sort Bar */}
-        <div className="flex items-center justify-between gap-2 pt-2 border-t border-zinc-100 dark:border-zinc-800 text-xs overflow-x-auto scrollbar-none">
-          <div className="flex items-center gap-1 text-zinc-400 shrink-0 font-bold">
-            <ArrowUpDown size={14} />
-            <span className="text-[10px] uppercase tracking-wider">Sortera:</span>
-          </div>
-          <div className="flex items-center gap-1.5 shrink-0">
-            {[
-              { id: 'percentage', label: 'Närvaro %' },
-              { id: 'trainings', label: 'Träningar' },
-              { id: 'matches', label: 'Matcher' },
-              { id: 'total', label: 'Totalt pass' },
-              { id: 'name', label: 'Namn' },
-              { id: 'number', label: 'Nummer' }
-            ].map(s => (
-              <button
-                key={s.id}
-                onClick={() => handleToggleSort(s.id as SortField)}
-                className={`px-2.5 py-1 rounded-lg font-bold text-[11px] transition-all cursor-pointer ${
-                  sortField === s.id
-                    ? 'bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-800'
-                    : 'text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200'
-                }`}
-              >
-                {s.label} {sortField === s.id ? (sortAsc ? '↑' : '↓') : ''}
-              </button>
-            ))}
-          </div>
-        </div>
-      </div>
-
-      {/* Players Attendance List */}
+      {/* Lista */}
       {processedStats.length === 0 ? (
-        <div className="bg-white dark:bg-zinc-900 border border-dashed border-zinc-200 dark:border-zinc-800 rounded-3xl p-12 text-center text-zinc-400">
-          <Users size={36} className="mx-auto mb-3 opacity-50" />
-          <p className="font-bold text-sm text-zinc-600 dark:text-zinc-300">Inga personer matchade dina filter</p>
-          <p className="text-xs text-zinc-400 mt-1">Prova att ändra sökord eller tidsperiod.</p>
-        </div>
+        <Card>
+          <EmptyState icon={<Users size={26} />} title="Ingen matchar filtret" text="Prova ett annat sökord eller en annan period." />
+        </Card>
       ) : (
-        <div className="space-y-3">
+        <Card padded={false} className="divide-y divide-zinc-100 dark:divide-zinc-800 overflow-hidden">
           {processedStats.map(({ player, trainingsAttended, totalTrainingsCount, trainingPct, matchesAttended, totalMatchesCount, matchPct, totalAttended, totalSessionsCount, percentage, sessionHistory }) => {
             const isExpanded = expandedPlayerId === player.id;
-
             return (
-              <div 
-                key={player.id}
-                className="bg-white dark:bg-zinc-900 border border-zinc-150 dark:border-zinc-800 rounded-3xl shadow-xs overflow-hidden transition-all hover:border-zinc-300 dark:hover:border-zinc-700"
-              >
-                {/* Main Row */}
-                <div 
+              <div key={player.id}>
+                <button
+                  type="button"
+                  aria-expanded={isExpanded}
                   onClick={() => setExpandedPlayerId(isExpanded ? null : player.id)}
-                  className="p-4 sm:p-5 flex flex-col md:flex-row md:items-center justify-between gap-4 cursor-pointer select-none"
+                  className="w-full flex items-center gap-3 px-4 py-3 min-h-[64px] text-left cursor-pointer hover:bg-zinc-50 dark:hover:bg-zinc-800/50 transition-colors"
                 >
-                  {/* Player Info */}
-                  <div className="flex items-center gap-3.5 min-w-0 flex-1">
-                    <div className="relative shrink-0">
-                      <div className="w-12 h-12 rounded-2xl overflow-hidden bg-indigo-50 dark:bg-indigo-950/30 flex items-center justify-center text-indigo-600 dark:text-indigo-400 font-black border border-zinc-100 dark:border-zinc-800 shadow-inner">
-                        {player.photoUrl ? (
-                          <CachedImage 
-                            src={player.photoUrl} 
-                            alt={player.name} 
-                            className="w-full h-full object-cover" 
-                            loading="lazy"
-                            decoding="async"
-                          />
-                        ) : (
-                          <span className="text-sm uppercase">{player.name.charAt(0)}</span>
-                        )}
-                      </div>
-                      {player.number && (
-                        <div className="absolute -top-1.5 -right-1.5 w-6 h-6 bg-indigo-600 text-white rounded-full flex items-center justify-center text-[10px] font-black border-2 border-white dark:border-zinc-900 shadow-xs">
-                          {player.number}
-                        </div>
-                      )}
+                  <PlayerPhoto player={player} />
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <span className="font-semibold truncate">{player.name}</span>
+                      {player.role === 'leader' && <Badge>Ledare</Badge>}
                     </div>
-
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-2">
-                        <h4 className="font-extrabold text-sm sm:text-base text-zinc-900 dark:text-white truncate">
-                          {player.name}
-                        </h4>
-                        {player.role === 'leader' && (
-                          <span className="bg-zinc-100 dark:bg-zinc-800 text-zinc-500 font-bold text-[9px] px-1.5 py-0.5 rounded-md uppercase tracking-wider shrink-0">
-                            Ledare
-                          </span>
-                        )}
-                      </div>
-                      <div className="flex items-center gap-2 text-[11px] text-zinc-400 font-semibold mt-0.5">
-                        {player.position && <span>{player.position}</span>}
-                        {player.position && <span>•</span>}
-                        <span>Totalt {totalAttended} av {totalSessionsCount} pass</span>
-                      </div>
+                    <div className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5 truncate">
+                      {totalAttended} av {totalSessionsCount} pass
+                      <span className="hidden sm:inline"> · Träning {trainingsAttended}/{totalTrainingsCount} ({trainingPct}%) · Match {matchesAttended}/{totalMatchesCount} ({matchPct}%)</span>
                     </div>
                   </div>
-
-                  {/* Attendance Visual & Stats Breakdown */}
-                  <div className="flex items-center justify-between md:justify-end gap-5 shrink-0 border-t md:border-t-0 pt-3 md:pt-0 border-zinc-100 dark:border-zinc-800">
-                    {/* Detailed Counts Breakdown */}
-                    <div className="grid grid-cols-2 gap-3 text-right">
-                      <div className="flex flex-col">
-                        <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">Träning</span>
-                        <span className="text-xs font-black text-zinc-800 dark:text-zinc-200">
-                          {trainingsAttended}/{totalTrainingsCount} <span className="text-[10px] font-semibold text-zinc-400">({trainingPct}%)</span>
-                        </span>
-                      </div>
-                      <div className="flex flex-col">
-                        <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">Match</span>
-                        <span className="text-xs font-black text-zinc-800 dark:text-zinc-200">
-                          {matchesAttended}/{totalMatchesCount} <span className="text-[10px] font-semibold text-zinc-400">({matchPct}%)</span>
-                        </span>
-                      </div>
-                    </div>
-
-                    {/* Percentage Badge & Progress */}
-                    <div className="flex items-center gap-3">
-                      <div className="w-24 sm:w-28 flex flex-col gap-1.5">
-                        <div className="flex items-center justify-between text-[11px] font-black">
-                          <span className="text-zinc-500">Närvaro</span>
-                          <span className="text-zinc-900 dark:text-white font-black">{percentage}%</span>
-                        </div>
-                        <div className="w-full h-2 bg-zinc-100 dark:bg-zinc-800 rounded-full overflow-hidden">
-                          <div 
-                            className={`h-full rounded-full transition-all duration-500 ${getProgressColor(percentage)}`}
-                            style={{ width: `${Math.min(100, Math.max(0, percentage))}%` }}
-                          />
-                        </div>
-                      </div>
-
-                      <div className={`px-2.5 py-1.5 rounded-xl border text-xs font-black shrink-0 ${getBadgeColor(percentage)}`}>
-                        {percentage}%
-                      </div>
-
-                      <div className="p-1 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200">
-                        {isExpanded ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
-                      </div>
+                  <div className="w-20 sm:w-28 shrink-0 flex flex-col items-end gap-1">
+                    <span className="text-base font-bold tabular-nums">{percentage}%</span>
+                    <div className="w-full h-1.5 bg-zinc-100 dark:bg-zinc-800 rounded-full overflow-hidden">
+                      <div className={`h-full rounded-full ${getProgressColor(percentage)}`} style={{ width: `${Math.min(100, Math.max(0, percentage))}%` }} />
                     </div>
                   </div>
-                </div>
+                  {isExpanded ? <ChevronUp size={18} className="text-zinc-400 shrink-0" /> : <ChevronDown size={18} className="text-zinc-400 shrink-0" />}
+                </button>
 
-                {/* Expanded Session Attendance Timeline */}
                 <AnimatePresence>
                   {isExpanded && (
                     <motion.div
                       initial={{ height: 0, opacity: 0 }}
                       animate={{ height: 'auto', opacity: 1 }}
                       exit={{ height: 0, opacity: 0 }}
-                      className="border-t border-zinc-100 dark:border-zinc-800 bg-zinc-50/70 dark:bg-zinc-950/50 p-4 sm:p-6"
+                      className="overflow-hidden bg-zinc-50/70 dark:bg-zinc-950/50"
                     >
-                      <div className="flex items-center justify-between mb-4">
-                        <h5 className="text-xs font-black uppercase text-zinc-400 tracking-wider flex items-center gap-1.5">
-                          <Clock size={14} />
-                          <span>Historik över pass under vald period ({sessionHistory.length} st)</span>
-                        </h5>
-                        <div className="text-xs text-zinc-500 font-bold">
-                          Deltagit på {totalAttended} av {sessionHistory.length} tillfällen
+                      <div className="px-4 py-3 space-y-3">
+                        <div className="flex flex-wrap gap-2 sm:hidden">
+                          <Badge tone="brand" icon={<Dumbbell size={12} />}>Träning {trainingsAttended}/{totalTrainingsCount} ({trainingPct}%)</Badge>
+                          <Badge tone="success" icon={<Shirt size={12} />}>Match {matchesAttended}/{totalMatchesCount} ({matchPct}%)</Badge>
                         </div>
-                      </div>
-
-                      {sessionHistory.length === 0 ? (
-                        <p className="text-xs text-zinc-400 py-3 text-center">Inga pass registrerade under denna period.</p>
-                      ) : (
-                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5 max-h-72 overflow-y-auto pr-1">
-                          {sessionHistory.map(({ session: s, attended, isMatch }) => {
-                            const dateStr = new Date(s.date).toLocaleDateString('sv-SE', {
-                              weekday: 'short',
-                              day: 'numeric',
-                              month: 'short'
-                            });
-
-                            return (
+                        {sessionHistory.length === 0 ? (
+                          <p className="text-sm text-zinc-500 py-2">Inga pass under perioden.</p>
+                        ) : (
+                          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 max-h-72 overflow-y-auto">
+                            {sessionHistory.map(({ session: s, attended, isMatch }) => (
                               <div
                                 key={s.id}
-                                className={`p-2.5 rounded-xl border text-xs flex items-center justify-between gap-2 ${
-                                  attended 
-                                    ? 'bg-emerald-50/50 dark:bg-emerald-950/20 border-emerald-200/80 dark:border-emerald-900/40 text-zinc-800 dark:text-zinc-200' 
-                                    : 'bg-white dark:bg-zinc-900 border-zinc-200 dark:border-zinc-800 text-zinc-500 dark:text-zinc-400 opacity-80'
+                                className={`p-2.5 rounded-xl border flex items-center gap-2.5 ${
+                                  attended
+                                    ? 'bg-white dark:bg-zinc-900 border-emerald-200 dark:border-emerald-900/50'
+                                    : 'bg-white/60 dark:bg-zinc-900/60 border-zinc-200 dark:border-zinc-800 text-zinc-500'
                                 }`}
                               >
-                                <div className="min-w-0 flex items-center gap-2">
-                                  <span className={`p-1 rounded-lg shrink-0 ${
-                                    isMatch 
-                                      ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300' 
-                                      : 'bg-indigo-100 text-indigo-700 dark:bg-indigo-950 dark:text-indigo-300'
-                                  }`}>
-                                    {isMatch ? <Shirt size={12} /> : <Dumbbell size={12} />}
-                                  </span>
-                                  <div className="truncate">
-                                    <p className="font-bold truncate leading-tight">{s.title || (isMatch ? 'Match' : 'Träning')}</p>
-                                    <p className="text-[10px] text-zinc-400 font-semibold">{dateStr} {s.startTime ? `kl ${s.startTime}` : ''}</p>
-                                  </div>
+                                <span className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${isMatch ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300' : 'bg-indigo-50 text-indigo-700 dark:bg-indigo-950 dark:text-indigo-300'}`}>
+                                  {isMatch ? <Shirt size={14} /> : <Dumbbell size={14} />}
+                                </span>
+                                <div className="min-w-0 flex-1">
+                                  <p className="text-sm font-semibold truncate">{s.title || (isMatch ? 'Match' : 'Träning')}</p>
+                                  <p className="text-xs text-zinc-500">
+                                    {new Date(s.date).toLocaleDateString('sv-SE', { weekday: 'short', day: 'numeric', month: 'short' })}
+                                    {s.startTime ? ` kl ${s.startTime}` : ''}
+                                  </p>
                                 </div>
-
-                                <div className="shrink-0">
-                                  {attended ? (
-                                    <span className="inline-flex items-center gap-1 font-bold text-[10px] text-emerald-600 dark:text-emerald-400 bg-emerald-100/80 dark:bg-emerald-950 px-2 py-0.5 rounded-md">
-                                      <CheckCircle2 size={12} /> Närvarande
-                                    </span>
-                                  ) : (
-                                    <span className="inline-flex items-center gap-1 font-bold text-[10px] text-zinc-400 bg-zinc-100 dark:bg-zinc-800 px-2 py-0.5 rounded-md">
-                                      <XCircle size={12} /> Frånvarande
-                                    </span>
-                                  )}
-                                </div>
+                                {attended
+                                  ? <CheckCircle2 size={18} className="text-emerald-600 dark:text-emerald-400 shrink-0" aria-label="Närvarande" />
+                                  : <XCircle size={18} className="text-zinc-400 shrink-0" aria-label="Frånvarande" />}
                               </div>
-                            );
-                          })}
-                        </div>
-                      )}
+                            ))}
+                          </div>
+                        )}
+                      </div>
                     </motion.div>
                   )}
                 </AnimatePresence>
               </div>
             );
           })}
-        </div>
+        </Card>
       )}
+
+      <Sheet open={showPeriodSheet} onClose={() => setShowPeriodSheet(false)} title="Tidsperiod">
+        <div className="flex flex-col gap-0.5">
+          {periodOptions.map(p => (
+            <MenuItem
+              key={p.id}
+              label={p.label}
+              active={periodPreset === p.id}
+              trailing={periodPreset === p.id ? <Check size={18} className="text-indigo-600" /> : undefined}
+              onClick={() => { setPeriodPreset(p.id); setShowPeriodSheet(false); }}
+            />
+          ))}
+        </div>
+      </Sheet>
+
+      <Sheet open={showSortSheet} onClose={() => setShowSortSheet(false)} title="Sortera">
+        <div className="flex flex-col gap-0.5">
+          {sortOptions.map(s => (
+            <MenuItem
+              key={s.id}
+              label={s.label}
+              description={sortField === s.id ? (sortAsc ? 'Stigande – tryck för fallande' : 'Fallande – tryck för stigande') : undefined}
+              active={sortField === s.id}
+              trailing={sortField === s.id ? <span className="text-indigo-600 font-bold">{sortAsc ? '↑' : '↓'}</span> : undefined}
+              onClick={() => { handleToggleSort(s.id); if (sortField !== s.id) setShowSortSheet(false); }}
+            />
+          ))}
+        </div>
+      </Sheet>
+
+      <Sheet open={showShareSheet} onClose={() => setShowShareSheet(false)} title="Dela närvarorapport">
+        <div className="flex flex-col gap-0.5">
+          <MenuItem
+            icon={<Copy size={18} />}
+            label="Kopiera som text"
+            description="Klistra in i t.ex. ett sms eller WhatsApp"
+            onClick={() => { handleCopyReport(); setShowShareSheet(false); }}
+          />
+          <MenuItem
+            icon={<Download size={18} />}
+            label="Ladda ner som Excel-fil (CSV)"
+            onClick={() => { handleExportCsv(); setShowShareSheet(false); }}
+          />
+        </div>
+      </Sheet>
     </div>
   );
 }
+
+const StatTile = ({ icon, label, value, sub, small }: { icon: React.ReactNode; label: string; value: string; sub?: string; small?: boolean }) => (
+  <Card className="!p-4 min-w-0">
+    <div className="flex items-center justify-between gap-2 text-sm font-semibold text-zinc-500 dark:text-zinc-400">
+      <span className="truncate">{label}</span>
+      {icon}
+    </div>
+    <div className={`mt-2 font-bold text-zinc-900 dark:text-white truncate ${small ? 'text-lg' : 'text-2xl sm:text-3xl'}`}>{value}</div>
+    {sub && <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5 truncate">{sub}</p>}
+  </Card>
+);
+
+const PlayerPhoto = ({ player }: { player: SquadPlayer }) => (
+  <span className="relative shrink-0">
+    <span className="w-10 h-10 rounded-full overflow-hidden bg-indigo-100 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300 font-bold text-sm flex items-center justify-center">
+      {player.photoUrl
+        ? <CachedImage src={player.photoUrl} alt={player.name} className="w-full h-full object-cover" loading="lazy" decoding="async" />
+        : player.name.charAt(0).toUpperCase()}
+    </span>
+    {player.number && (
+      <span className="absolute -bottom-1 -right-1 min-w-[20px] h-5 px-1 rounded-full bg-zinc-900 dark:bg-white text-white dark:text-zinc-900 text-[10px] font-bold leading-5 text-center ring-2 ring-white dark:ring-zinc-900">
+        {player.number}
+      </span>
+    )}
+  </span>
+);
