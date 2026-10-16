@@ -96,7 +96,7 @@ npm run set-password -- e@post.se            # lokalt konto/lösenord
 
 ### Servern (webbhotell med cPanel)
 - `setterho@setterholm.se`, SSH-nyckel `~/.ssh/coachassist`, appmapp `~/coachassist.setterholm.se`.
-- Node 22.23.3 vald i cPanel ("Setup Node.js App"). Passenger startar `app.cjs`.
+- Node 22.23.3 vald i cPanel ("Setup Node.js App"). Passenger startar `app.cjs`. `JWT_SECRET` är satt som miljövariabel där.
   Node-sökvägen står i serverns `.htaccess` (PassengerNodejs) – rör aldrig `.htaccess`.
 - Data i appmappen: `coachassist.db` (SQLite), `uploads/` (bilder), `backups/` (kopior som
   deploy tar). `coachassist_db.json.flyttad-*` = gamla JSON-databasen (sparad orörd).
@@ -120,4 +120,3 @@ npm run set-password -- e@post.se            # lokalt konto/lösenord
 - Vite-HMR via websocket fungerar inte i middleware-läget (ofarligt, sidan laddas om manuellt).
 - Dela upp `server.ts`, `App.tsx`, `LineupBuilder.tsx` gradvis; appen laddas som ett stort JS-paket (3,4 MB).
 - E-post via SMTP (inbjudningar, glömt lösenord) om det behövs senare.
-- Sätt `JWT_SECRET` som miljövariabel i cPanel om det inte redan är gjort.
