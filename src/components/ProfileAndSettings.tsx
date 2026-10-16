@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { User, Phone, Fingerprint, Check, Save, AtSign, Lock, Key, Eye, EyeOff, ShieldCheck, AlertCircle, Landmark, Info, Link2, Unlink, Camera, Upload, Trash2, Loader2, VibrateOff } from 'lucide-react';
+import { User, Phone, Fingerprint, Check, Save, AtSign, Lock, Key, Eye, EyeOff, ShieldCheck, AlertCircle, Landmark, Info, Link2, Unlink, Camera, Upload, Trash2, Loader2 } from 'lucide-react';
 import { UserProfile, Club, ClubMetadata, ClubMember } from '../types';
 import { db, getApiUrl, getAuthHeader, auth, linkGoogleAccount, unlinkGoogleAccount, storage, ref, uploadBytes, getDownloadURL, doc, getDoc, setDoc } from '../lib/firebase';
 import ImageCropper from './ImageCropper';
@@ -19,7 +19,7 @@ export default function ProfileAndSettings({
   onProfileUpdated,
   currentProfile,
   isRootAdmin = false,
-  onOpenShakeModal,
+  onOpenShakeModal: _onOpenShakeModal,
 }: ProfileAndSettingsProps) {
   const [profile, setProfile] = useState<UserProfile>({
     fullName: currentProfile.fullName || '',
@@ -565,16 +565,16 @@ export default function ProfileAndSettings({
   };
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 max-w-6xl mx-auto p-4 sm:p-6" id="profile-settings-page">
+    <div className="grid grid-cols-1 lg:grid-cols-12 gap-6" id="profile-settings-page">
       {/* Profile Form & Password Change (Left Column) */}
-      <div className="lg:col-span-7 space-y-6">
-        <div className="bg-white dark:bg-zinc-900 rounded-3xl border border-zinc-150 dark:border-zinc-800 shadow-xl p-6 sm:p-8">
-          <div className="flex items-center gap-3.5 mb-6">
-            <div className="w-12 h-12 rounded-2xl bg-indigo-55/10 dark:bg-indigo-950/40 flex items-center justify-center text-indigo-600 dark:text-indigo-400">
+      <div className="lg:col-span-7 space-y-6 order-2 lg:order-1">
+        <div className="bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-200/80 dark:border-zinc-800 shadow-[0_1px_2px_rgba(16,24,40,0.04)] p-5 sm:p-6">
+          <div className="flex items-center gap-3 mb-5">
+            <div className="w-10 h-10 rounded-xl bg-indigo-50 dark:bg-indigo-950/40 flex items-center justify-center text-indigo-600 dark:text-indigo-400">
               <User size={24} />
             </div>
             <div>
-              <h2 className="text-xl font-black text-zinc-900 dark:text-white tracking-tight">Mina kontaktuppgifter</h2>
+              <h2 className="text-lg font-bold text-zinc-900 dark:text-white">Mina kontaktuppgifter</h2>
               <p className="text-xs text-zinc-500 dark:text-zinc-400 font-medium">Uppdatera dina personuppgifter och kontaktvägar.</p>
             </div>
           </div>
@@ -609,9 +609,9 @@ export default function ProfileAndSettings({
 
               <div className="flex-1 text-center sm:text-left space-y-2">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
-                  <h3 className="text-sm font-extrabold text-zinc-900 dark:text-white">Profilbild</h3>
-                  <span className="text-[10px] font-bold uppercase tracking-wider text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-950/50 px-2 py-0.5 rounded-md border border-indigo-100 dark:border-indigo-900/30 w-fit mx-auto sm:mx-0">
-                    Synkad med truppen & föreningen
+                  <h3 className="text-sm font-semibold text-zinc-900 dark:text-white">Profilbild</h3>
+                  <span className="text-xs font-semibold text-indigo-600 dark:text-indigo-300 bg-indigo-50 dark:bg-indigo-950/50 px-2 py-0.5 rounded-md w-fit mx-auto sm:mx-0">
+                    Visas i truppen
                   </span>
                 </div>
                 <p className="text-xs text-zinc-500 dark:text-zinc-400 font-medium">
@@ -650,7 +650,7 @@ export default function ProfileAndSettings({
             </div>
 
             <div>
-              <label className="block text-xs font-black text-zinc-650 dark:text-zinc-400 uppercase tracking-wider mb-2">Visningsnamn / Fullständigt namn</label>
+              <label className="block text-sm font-semibold text-zinc-700 dark:text-zinc-300 mb-1.5">Namn</label>
               <div className="relative">
                 <span className="absolute left-4 top-3.5 text-zinc-400">
                   <User size={18} />
@@ -661,14 +661,14 @@ export default function ProfileAndSettings({
                   placeholder="Skriv ditt fullständiga namn..."
                   value={profile.fullName}
                   onChange={e => setProfile(prev => ({ ...prev, fullName: e.target.value }))}
-                  className="w-full pl-11 pr-4 py-3 bg-zinc-50 hover:bg-zinc-100/70 focus:bg-white dark:bg-zinc-950 dark:hover:bg-zinc-950/70 dark:focus:bg-zinc-950 rounded-2xl border border-zinc-200 dark:border-zinc-800 focus:border-indigo-500 focus:outline-none transition-all font-semibold text-zinc-900 dark:text-white text-sm"
+                  className="w-full pl-11 pr-4 py-3 bg-zinc-50 hover:bg-zinc-100/70 focus:bg-white dark:bg-zinc-950 dark:hover:bg-zinc-950/70 dark:focus:bg-zinc-950 rounded-xl border border-zinc-200 dark:border-zinc-800 focus:border-indigo-500 focus:outline-none transition-all font-semibold text-zinc-900 dark:text-white text-sm"
                 />
               </div>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
-                <label className="block text-xs font-black text-zinc-650 dark:text-zinc-400 uppercase tracking-wider mb-2">E-postadress (Inloggning)</label>
+                <label className="block text-sm font-semibold text-zinc-700 dark:text-zinc-300 mb-1.5">E-post</label>
                 <div className="relative">
                   <span className="absolute left-4 top-3.5 text-zinc-400">
                     <User size={18} />
@@ -679,7 +679,7 @@ export default function ProfileAndSettings({
                     value={emailInput}
                     onChange={e => setEmailInput(e.target.value)}
                     placeholder="din.epost@doman.se"
-                    className="w-full pl-11 pr-4 py-3 bg-zinc-50 hover:bg-zinc-100/70 focus:bg-white dark:bg-zinc-950 dark:hover:bg-zinc-950/70 dark:focus:bg-zinc-950 rounded-2xl border border-zinc-200 dark:border-zinc-800 focus:border-indigo-500 focus:outline-none transition-all font-semibold text-zinc-900 dark:text-white text-sm"
+                    className="w-full pl-11 pr-4 py-3 bg-zinc-50 hover:bg-zinc-100/70 focus:bg-white dark:bg-zinc-950 dark:hover:bg-zinc-950/70 dark:focus:bg-zinc-950 rounded-xl border border-zinc-200 dark:border-zinc-800 focus:border-indigo-500 focus:outline-none transition-all font-semibold text-zinc-900 dark:text-white text-sm"
                   />
                 </div>
                 {emailUpdateError && (
@@ -688,7 +688,7 @@ export default function ProfileAndSettings({
               </div>
 
               <div>
-                <label className="block text-xs font-black text-zinc-650 dark:text-zinc-400 uppercase tracking-wider mb-2">Användarnamn (Inloggning)</label>
+                <label className="block text-sm font-semibold text-zinc-700 dark:text-zinc-300 mb-1.5">Användarnamn (valfritt)</label>
                 <div className="relative">
                   <span className="absolute left-4 top-3.5 text-zinc-400">
                     <AtSign size={18} />
@@ -698,7 +698,7 @@ export default function ProfileAndSettings({
                     value={usernameInput}
                     onChange={e => setUsernameInput(e.target.value)}
                     placeholder="valfritt_anvandarnamn"
-                    className="w-full pl-11 pr-4 py-3 bg-zinc-50 hover:bg-zinc-100/70 focus:bg-white dark:bg-zinc-950 dark:hover:bg-zinc-950/70 dark:focus:bg-zinc-950 rounded-2xl border border-zinc-200 dark:border-zinc-800 focus:border-indigo-500 focus:outline-none transition-all font-semibold text-zinc-900 dark:text-white text-sm"
+                    className="w-full pl-11 pr-4 py-3 bg-zinc-50 hover:bg-zinc-100/70 focus:bg-white dark:bg-zinc-950 dark:hover:bg-zinc-950/70 dark:focus:bg-zinc-950 rounded-xl border border-zinc-200 dark:border-zinc-800 focus:border-indigo-500 focus:outline-none transition-all font-semibold text-zinc-900 dark:text-white text-sm"
                   />
                 </div>
                 {usernameError && (
@@ -709,7 +709,7 @@ export default function ProfileAndSettings({
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
-                <label className="block text-xs font-black text-zinc-650 dark:text-zinc-400 uppercase tracking-wider mb-2">Mobilnummer</label>
+                <label className="block text-sm font-semibold text-zinc-700 dark:text-zinc-300 mb-1.5">Mobilnummer</label>
                 <div className="relative">
                   <span className="absolute left-4 top-3.5 text-zinc-400">
                     <Phone size={18} />
@@ -719,14 +719,14 @@ export default function ProfileAndSettings({
                     placeholder="t.ex. 070-123 45 67"
                     value={profile.phone || ''}
                     onChange={e => setProfile(prev => ({ ...prev, phone: e.target.value }))}
-                    className="w-full pl-11 pr-4 py-3 bg-zinc-50 hover:bg-zinc-100/70 focus:bg-white dark:bg-zinc-950 dark:hover:bg-zinc-950/70 dark:focus:bg-zinc-950 rounded-2xl border border-zinc-200 dark:border-zinc-800 focus:border-indigo-500 focus:outline-none transition-all font-semibold text-zinc-900 dark:text-white text-sm"
+                    className="w-full pl-11 pr-4 py-3 bg-zinc-50 hover:bg-zinc-100/70 focus:bg-white dark:bg-zinc-950 dark:hover:bg-zinc-950/70 dark:focus:bg-zinc-950 rounded-xl border border-zinc-200 dark:border-zinc-800 focus:border-indigo-500 focus:outline-none transition-all font-semibold text-zinc-900 dark:text-white text-sm"
                   />
                 </div>
               </div>
 
               <div>
                 <div className="flex items-center justify-between mb-2">
-                  <label className="block text-xs font-black text-zinc-650 dark:text-zinc-400 uppercase tracking-wider">Personnummer (Valfritt)</label>
+                  <label className="block text-sm font-semibold text-zinc-700 dark:text-zinc-300">Personnummer (valfritt)</label>
                   <span className="text-[10px] text-zinc-400 font-bold bg-zinc-100 dark:bg-zinc-800 px-2 py-0.5 rounded-full">Sverige</span>
                 </div>
                 <div className="relative">
@@ -738,7 +738,7 @@ export default function ProfileAndSettings({
                     placeholder="ÅÅÅÅMMDD-XXXX"
                     value={profile.personnummer || ''}
                     onChange={e => setProfile(prev => ({ ...prev, personnummer: e.target.value }))}
-                    className="w-full pl-11 pr-4 py-3 bg-zinc-50 hover:bg-zinc-100/70 focus:bg-white dark:bg-zinc-950 dark:hover:bg-zinc-950/70 dark:focus:bg-zinc-950 rounded-2xl border border-zinc-200 dark:border-zinc-800 focus:border-indigo-500 focus:outline-none transition-all font-semibold text-zinc-900 dark:text-white text-sm"
+                    className="w-full pl-11 pr-4 py-3 bg-zinc-50 hover:bg-zinc-100/70 focus:bg-white dark:bg-zinc-950 dark:hover:bg-zinc-950/70 dark:focus:bg-zinc-950 rounded-xl border border-zinc-200 dark:border-zinc-800 focus:border-indigo-500 focus:outline-none transition-all font-semibold text-zinc-900 dark:text-white text-sm"
                   />
                 </div>
               </div>
@@ -748,7 +748,7 @@ export default function ProfileAndSettings({
               <button
                 type="submit"
                 disabled={saveStatus === 'saving'}
-                className="w-full bg-indigo-600 hover:bg-indigo-700 text-white py-3.5 px-6 rounded-2xl font-extrabold flex items-center justify-center gap-2 transition-all shadow-lg shadow-indigo-100 dark:shadow-none active:scale-95 disabled:opacity-50 cursor-pointer"
+                className="w-full bg-indigo-600 hover:bg-indigo-700 dark:bg-indigo-500 text-white h-12 px-6 rounded-xl font-semibold flex items-center justify-center gap-2 transition-all shadow-lg shadow-indigo-100 dark:shadow-none active:scale-95 disabled:opacity-50 cursor-pointer"
               >
                 {saveStatus === 'saving' ? (
                   <>
@@ -776,13 +776,13 @@ export default function ProfileAndSettings({
         </div>
 
         {/* Change Password Card */}
-        <div className="bg-white dark:bg-zinc-900 rounded-3xl border border-zinc-150 dark:border-zinc-800 shadow-xl p-6 sm:p-8">
-          <div className="flex items-center gap-3.5 mb-6">
-            <div className="w-12 h-12 rounded-2xl bg-amber-500/10 dark:bg-amber-950/40 flex items-center justify-center text-amber-600 dark:text-amber-400">
+        <div className="bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-200/80 dark:border-zinc-800 shadow-[0_1px_2px_rgba(16,24,40,0.04)] p-5 sm:p-6">
+          <div className="flex items-center gap-3 mb-5">
+            <div className="w-10 h-10 rounded-xl bg-amber-500/10 dark:bg-amber-950/40 flex items-center justify-center text-amber-600 dark:text-amber-400">
               <Lock size={24} />
             </div>
             <div>
-              <h2 className="text-xl font-black text-zinc-900 dark:text-white tracking-tight">{!hasPassword && googleLinked ? 'Skapa lösenord' : 'Byt lösenord'}</h2>
+              <h2 className="text-lg font-bold text-zinc-900 dark:text-white">{!hasPassword && googleLinked ? 'Skapa lösenord' : 'Byt lösenord'}</h2>
               <p className="text-xs text-zinc-500 dark:text-zinc-400 font-medium">
                 {!hasPassword && googleLinked
                   ? 'Du loggar för närvarande in med Google. Skapa ett lösenord om du även vill kunna logga in manuellt.'
@@ -793,7 +793,7 @@ export default function ProfileAndSettings({
 
           <form onSubmit={handleChangePassword} className="space-y-4">
             <div>
-              <label className="block text-xs font-black text-zinc-650 dark:text-zinc-400 uppercase tracking-wider mb-2">Nuvarande lösenord (Valfritt om inloggad)</label>
+              <label className="block text-sm font-semibold text-zinc-700 dark:text-zinc-300 mb-1.5">Nuvarande lösenord</label>
               <div className="relative">
                 <span className="absolute left-4 top-3.5 text-zinc-400">
                   <Key size={18} />
@@ -806,7 +806,7 @@ export default function ProfileAndSettings({
                   placeholder="Lämna tomt om du glömt"
                   value={currentPassword}
                   onChange={e => setCurrentPassword(e.target.value)}
-                  className="w-full pl-11 pr-12 py-3 bg-zinc-50 hover:bg-zinc-100/70 focus:bg-white dark:bg-zinc-950 dark:hover:bg-zinc-950/70 dark:focus:bg-zinc-950 rounded-2xl border border-zinc-200 dark:border-zinc-800 focus:border-indigo-500 focus:outline-none transition-all font-semibold text-zinc-900 dark:text-white text-sm"
+                  className="w-full pl-11 pr-12 py-3 bg-zinc-50 hover:bg-zinc-100/70 focus:bg-white dark:bg-zinc-950 dark:hover:bg-zinc-950/70 dark:focus:bg-zinc-950 rounded-xl border border-zinc-200 dark:border-zinc-800 focus:border-indigo-500 focus:outline-none transition-all font-semibold text-zinc-900 dark:text-white text-sm"
                 />
                 <button
                   type="button"
@@ -821,7 +821,7 @@ export default function ProfileAndSettings({
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
-                <label className="block text-xs font-black text-zinc-650 dark:text-zinc-400 uppercase tracking-wider mb-2">Nytt lösenord</label>
+                <label className="block text-sm font-semibold text-zinc-700 dark:text-zinc-300 mb-1.5">Nytt lösenord</label>
                 <div className="relative">
                   <span className="absolute left-4 top-3.5 text-zinc-400">
                     <Lock size={18} />
@@ -836,7 +836,7 @@ export default function ProfileAndSettings({
                     placeholder="Minst 6 tecken"
                     value={newPassword}
                     onChange={e => setNewPassword(e.target.value)}
-                    className="w-full pl-11 pr-12 py-3 bg-zinc-50 hover:bg-zinc-100/70 focus:bg-white dark:bg-zinc-950 dark:hover:bg-zinc-950/70 dark:focus:bg-zinc-950 rounded-2xl border border-zinc-200 dark:border-zinc-800 focus:border-indigo-500 focus:outline-none transition-all font-semibold text-zinc-900 dark:text-white text-sm"
+                    className="w-full pl-11 pr-12 py-3 bg-zinc-50 hover:bg-zinc-100/70 focus:bg-white dark:bg-zinc-950 dark:hover:bg-zinc-950/70 dark:focus:bg-zinc-950 rounded-xl border border-zinc-200 dark:border-zinc-800 focus:border-indigo-500 focus:outline-none transition-all font-semibold text-zinc-900 dark:text-white text-sm"
                   />
                   <button
                     type="button"
@@ -850,7 +850,7 @@ export default function ProfileAndSettings({
               </div>
 
               <div>
-                <label className="block text-xs font-black text-zinc-650 dark:text-zinc-400 uppercase tracking-wider mb-2">Bekräfta nytt lösenord</label>
+                <label className="block text-sm font-semibold text-zinc-700 dark:text-zinc-300 mb-1.5">Bekräfta nytt lösenord</label>
                 <div className="relative">
                   <span className="absolute left-4 top-3.5 text-zinc-400">
                     <Lock size={18} />
@@ -865,7 +865,7 @@ export default function ProfileAndSettings({
                     placeholder="Upprepa nytt lösenord"
                     value={confirmPassword}
                     onChange={e => setConfirmPassword(e.target.value)}
-                    className="w-full pl-11 pr-12 py-3 bg-zinc-50 hover:bg-zinc-100/70 focus:bg-white dark:bg-zinc-950 dark:hover:bg-zinc-950/70 dark:focus:bg-zinc-950 rounded-2xl border border-zinc-200 dark:border-zinc-800 focus:border-indigo-500 focus:outline-none transition-all font-semibold text-zinc-900 dark:text-white text-sm"
+                    className="w-full pl-11 pr-12 py-3 bg-zinc-50 hover:bg-zinc-100/70 focus:bg-white dark:bg-zinc-950 dark:hover:bg-zinc-950/70 dark:focus:bg-zinc-950 rounded-xl border border-zinc-200 dark:border-zinc-800 focus:border-indigo-500 focus:outline-none transition-all font-semibold text-zinc-900 dark:text-white text-sm"
                   />
                   <button
                     type="button"
@@ -894,7 +894,7 @@ export default function ProfileAndSettings({
               <button
                 type="submit"
                 disabled={passwordStatus === 'saving'}
-                className="w-full bg-zinc-900 hover:bg-zinc-800 dark:bg-zinc-100 dark:hover:bg-white text-white dark:text-zinc-900 py-3.5 px-6 rounded-2xl font-extrabold flex items-center justify-center gap-2 transition-all shadow-md active:scale-95 disabled:opacity-50 cursor-pointer text-sm"
+                className="w-full bg-white hover:bg-zinc-50 border border-zinc-200 dark:border-zinc-700 dark:bg-zinc-800 dark:hover:bg-zinc-750 text-zinc-800 dark:text-zinc-100 h-12 px-6 rounded-xl font-semibold flex items-center justify-center gap-2 transition-all shadow-md active:scale-95 disabled:opacity-50 cursor-pointer text-sm"
               >
                 {passwordStatus === 'saving' ? (
                   <>
@@ -913,13 +913,13 @@ export default function ProfileAndSettings({
         </div>
 
         {/* Google Account Linking Card */}
-        <div className="bg-white dark:bg-zinc-900 rounded-3xl border border-zinc-150 dark:border-zinc-800 shadow-xl p-6 sm:p-8">
-          <div className="flex items-center gap-3.5 mb-6">
-            <div className="w-12 h-12 rounded-2xl bg-amber-500/10 dark:bg-amber-950/40 flex items-center justify-center text-amber-600 dark:text-amber-400">
+        <div className="bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-200/80 dark:border-zinc-800 shadow-[0_1px_2px_rgba(16,24,40,0.04)] p-5 sm:p-6">
+          <div className="flex items-center gap-3 mb-5">
+            <div className="w-10 h-10 rounded-xl bg-amber-500/10 dark:bg-amber-950/40 flex items-center justify-center text-amber-600 dark:text-amber-400">
               <Link2 size={24} />
             </div>
             <div>
-              <h2 className="text-xl font-black text-zinc-900 dark:text-white tracking-tight">Kopplade inloggningsmetoder</h2>
+              <h2 className="text-lg font-bold text-zinc-900 dark:text-white">Kopplade inloggningsmetoder</h2>
               <p className="text-xs text-zinc-500 dark:text-zinc-400 font-medium">Logga in snabbt och säkert genom att ansluta ditt Google-konto.</p>
             </div>
           </div>
@@ -1022,15 +1022,15 @@ export default function ProfileAndSettings({
       </div>
 
       {/* Club & Team Switcher (Right Column) */}
-      <div className="lg:col-span-5 space-y-6">
-        <div className="bg-white dark:bg-zinc-900 rounded-3xl border border-zinc-150 dark:border-zinc-800 shadow-xl p-6 sm:p-8">
-          <div className="flex items-center gap-3.5 mb-6">
-            <div className="w-12 h-12 rounded-2xl bg-indigo-55/10 dark:bg-indigo-950/40 flex items-center justify-center text-indigo-600 dark:text-indigo-400">
+      <div className="lg:col-span-5 space-y-6 order-1 lg:order-2">
+        <div className="bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-200/80 dark:border-zinc-800 shadow-[0_1px_2px_rgba(16,24,40,0.04)] p-5 sm:p-6">
+          <div className="flex items-center gap-3 mb-5">
+            <div className="w-10 h-10 rounded-xl bg-indigo-50 dark:bg-indigo-950/40 flex items-center justify-center text-indigo-600 dark:text-indigo-400">
               <Landmark size={24} />
             </div>
             <div>
-              <h2 className="text-xl font-black text-zinc-900 dark:text-white tracking-tight">Klubbanslutning</h2>
-              <p className="text-xs text-zinc-500 dark:text-zinc-400 font-medium">Här hanterar och byter du mellan anslutna klubbar.</p>
+              <h2 className="text-lg font-bold text-zinc-900 dark:text-white">Förening och lag</h2>
+              <p className="text-xs text-zinc-500 dark:text-zinc-400 font-medium">Välj vilket lag appen visar.</p>
             </div>
           </div>
 
@@ -1041,36 +1041,11 @@ export default function ProfileAndSettings({
             </div>
           ) : (
             <div className="space-y-5">
-              {/* Personal Option */}
-              <button
-                onClick={() => handleSelectClubAndTeam(null, null)}
-                className={`w-full text-left p-4 rounded-2xl border transition-all relative flex items-center justify-between cursor-pointer ${
-                  profile.activeClubId === null
-                    ? 'bg-indigo-50/40 border-indigo-500/70 dark:bg-indigo-950/10 dark:border-indigo-500/50 shadow-sm'
-                    : 'bg-zinc-50 hover:bg-zinc-100/60 dark:bg-zinc-950 dark:hover:bg-zinc-950/60 border-zinc-150 dark:border-zinc-800/80'
-                }`}
-              >
-                <div className="flex items-center gap-3.5">
-                  <div className="w-10 h-10 rounded-xl bg-zinc-200 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 flex items-center justify-center">
-                    <User size={20} />
-                  </div>
-                  <div>
-                    <h3 className="font-bold text-sm text-zinc-900 dark:text-white">Personlig Trupp</h3>
-                    <p className="text-[11px] text-zinc-500 dark:text-zinc-400 font-medium mt-0.5">Lokal, privat trupp (Offline-läge)</p>
-                  </div>
-                </div>
-                {profile.activeClubId === null && (
-                  <span className="w-6 h-6 rounded-full bg-indigo-600 flex items-center justify-center text-white">
-                    <Check size={14} />
-                  </span>
-                )}
-              </button>
-
               {/* Memberships List */}
               {memberships.length > 0 ? (
                 <div className="space-y-3">
                   <div className="flex items-center justify-between border-t border-zinc-100 dark:border-zinc-800/80 pt-4 pb-1">
-                    <h4 className="text-[11px] font-black uppercase text-zinc-400 tracking-wider">Mina Klubbar</h4>
+                    <h4 className="text-sm font-semibold text-zinc-500 dark:text-zinc-400">Mina föreningar</h4>
                   </div>
 
                   {memberships.map(({ club, roles, teams, availableTeams }) => {
@@ -1097,7 +1072,7 @@ export default function ProfileAndSettings({
                             }}
                             className="flex items-center gap-3 text-left focus:outline-none flex-1 cursor-pointer"
                           >
-                            <div className="w-10 h-10 rounded-xl bg-indigo-55/10 dark:bg-indigo-950/30 text-indigo-600 dark:text-indigo-450 flex items-center justify-center">
+                            <div className="w-10 h-10 rounded-xl bg-indigo-50 dark:bg-indigo-950/30 text-indigo-600 dark:text-indigo-450 flex items-center justify-center">
                               <Landmark size={20} />
                             </div>
                             <div>
@@ -1106,7 +1081,7 @@ export default function ProfileAndSettings({
                                 {roles.map(r => (
                                   <span
                                     key={r}
-                                    className={`text-[9px] font-bold px-1.5 py-0.5 rounded-md uppercase tracking-wider ${
+                                    className={`text-[11px] font-semibold px-1.5 py-0.5 rounded-md ${
                                       r === 'admin'
                                         ? 'bg-purple-100 text-purple-700 dark:bg-purple-950/40 dark:text-purple-400'
                                         : r === 'coach'
@@ -1133,7 +1108,7 @@ export default function ProfileAndSettings({
                         {/* Team Selector within Active Club */}
                         {isActive && myClubTeams.length > 0 && (
                           <div className="mt-4 border-t border-zinc-200/50 dark:border-zinc-800/80 pt-3.5 space-y-2">
-                            <label className="block text-[10px] font-black text-zinc-550 dark:text-zinc-500 uppercase tracking-wider mb-2">Aktivt lag i klubben</label>
+                            <label className="block text-sm font-semibold text-zinc-600 dark:text-zinc-400 mb-2">Aktivt lag</label>
                             <div className="grid grid-cols-2 gap-2">
                               {myClubTeams.map(t => {
                                 const isTeamActive = profile.activeTeamId === t.id;
@@ -1141,7 +1116,7 @@ export default function ProfileAndSettings({
                                   <button
                                     key={t.id}
                                     onClick={() => handleSelectClubAndTeam(club.id, t.id)}
-                                    className={`py-2 px-3.5 rounded-xl border font-bold text-xs text-center transition-all cursor-pointer ${
+                                    className={`min-h-10 py-2 px-3.5 rounded-xl border font-semibold text-sm text-center transition-all cursor-pointer ${
                                       isTeamActive
                                         ? 'bg-indigo-600 text-white border-indigo-600 shadow-md'
                                         : 'bg-white hover:bg-zinc-50 dark:bg-zinc-900 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300 border-zinc-200 dark:border-zinc-800'
@@ -1172,31 +1147,6 @@ export default function ProfileAndSettings({
           )}
         </div>
 
-        {/* Shake Protection Info Card for Coaches */}
-        {onOpenShakeModal && (
-          <div className="bg-white dark:bg-zinc-900 rounded-3xl border border-zinc-150 dark:border-zinc-800 shadow-xl p-6 sm:p-8">
-            <div className="flex items-center gap-3.5 mb-3">
-              <div className="w-12 h-12 rounded-2xl bg-amber-50 dark:bg-amber-950/40 flex items-center justify-center text-amber-600 dark:text-amber-400">
-                <VibrateOff size={24} />
-              </div>
-              <div>
-                <h2 className="text-xl font-black text-zinc-900 dark:text-white tracking-tight">Skakskydd (iOS)</h2>
-                <p className="text-xs text-zinc-500 dark:text-zinc-400 font-medium">Undvik rutan "Ångra skriven text" på planen.</p>
-              </div>
-            </div>
-            <p className="text-xs text-zinc-600 dark:text-zinc-400 leading-relaxed mb-4">
-              När du rör dig eller springer med telefonen kan iPhone visa Apples systemfunktion "Skaka för att ångra". Se hur du stänger av den i iOS eller nollställer skrivminnet.
-            </p>
-            <button
-              type="button"
-              onClick={onOpenShakeModal}
-              className="w-full py-3 px-4 rounded-xl bg-zinc-900 hover:bg-zinc-800 dark:bg-white dark:hover:bg-zinc-100 text-white dark:text-zinc-900 font-black text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition-all cursor-pointer shadow-sm active:scale-[0.98]"
-            >
-              <VibrateOff size={15} />
-              <span>Öppna guide & verktyg</span>
-            </button>
-          </div>
-        )}
       </div>
 
       {imageToCrop && (

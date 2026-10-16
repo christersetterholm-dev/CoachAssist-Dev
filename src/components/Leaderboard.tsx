@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Trophy, Share2, Crown, Star, ChevronDown, Eye, EyeOff, Plus, Lock, Trash2, Loader2, Edit2, Check, User, Calendar, Play } from 'lucide-react';
+import { Trophy, Share2, Crown, Star, ChevronDown, Eye, EyeOff, Plus, Lock, Trash2, Loader2, Edit2, Check, User, Calendar, Play, MoreHorizontal } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { SquadPlayer, Exercise, Period, PeriodStandings, TrainingSession } from '../types';
 import { db, auth, handleFirestoreError, OperationType, doc, getDoc, setDoc, getApiUrl, getAuthHeader } from '../lib/firebase';
 import { calculateLeaderboard } from '../lib/leaderboardUtils';
+import { Button, IconButton, MenuItem, Sheet } from './ui';
 import { CachedImage } from './CachedImage';
 
 interface LeaderboardProps {
@@ -55,6 +56,7 @@ export default function Leaderboard({
   const [showCloseModal, setShowCloseModal] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [showCreateModal, setShowCreateModal] = useState(false);
+  const [showActionsMenu, setShowActionsMenu] = useState(false);
   const [showRenameModal, setShowRenameModal] = useState(false);
   const [showEditEndDateModal, setShowEditEndDateModal] = useState(false);
   const [newPeriodName, setNewPeriodName] = useState('');
@@ -473,7 +475,7 @@ export default function Leaderboard({
                         const id = e.target.value;
                         setSelectedPeriodId(id);
                       }}
-                      className="w-full bg-transparent border-none text-zinc-900 dark:text-white font-black text-xl sm:text-2xl focus:ring-0 outline-none cursor-pointer hover:text-indigo-600 transition-colors p-0 appearance-none pr-8"
+                      className="w-full bg-transparent border-none text-zinc-900 dark:text-white font-bold text-xl sm:text-2xl focus:ring-0 outline-none cursor-pointer hover:text-indigo-600 transition-colors p-0 appearance-none pr-8"
                     >
                       <option value="current" disabled>Välj tävling...</option>
                       {periods.filter((p, index, self) => index === self.findIndex(t => t.id === p.id)).map(p => (
@@ -512,7 +514,7 @@ export default function Leaderboard({
             {finalStats.some((p: any) => p.history && p.history.length > 0) && (
               <button
                 onClick={toggleAll}
-                className="flex items-center gap-2 bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300 px-3 py-1.5 sm:px-4 sm:py-2 rounded-xl font-bold border border-zinc-200 dark:border-zinc-700 hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-all shadow-sm text-sm flex-shrink-0"
+                className="flex items-center gap-2 h-9 px-3 rounded-xl font-semibold text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-all text-sm flex-shrink-0"
                 title={allExpanded ? 'Dölj underlag' : 'Visa underlag'}
               >
                 {allExpanded ? <EyeOff size={18} /> : <Eye size={18} />}
@@ -522,88 +524,63 @@ export default function Leaderboard({
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
-            {!readOnly && (
-              <>
-                <button
-                  onClick={() => setShowCreateModal(true)}
-                  className="flex items-center gap-2 bg-indigo-600 text-white px-4 py-2 rounded-xl font-bold hover:bg-indigo-700 transition-all shadow-sm text-sm"
-                >
-                  <Plus size={18} />
-                  <span className="hidden xs:inline">Ny tävling</span>
-                  <span className="xs:hidden">Ny</span>
-                </button>
-
-                {selectedPeriodId !== 'current' && 
-                 !periods.find(p => p.id === selectedPeriodId)?.isActive && 
-                 !periods.find(p => p.id === selectedPeriodId)?.endDate && (
-                  <button
-                    onClick={() => onSwitchPeriod(selectedPeriodId)}
-                    className="flex items-center gap-2 bg-green-600 text-white px-4 py-2 rounded-xl font-bold hover:bg-green-700 transition-all shadow-sm text-sm"
-                  >
-                    <Check size={18} />
-                    <span>Aktivera</span>
-                  </button>
-                )}
-
-                {selectedPeriodId !== 'current' && periods.find(p => p.id === selectedPeriodId)?.endDate && (
-                  <button
-                    onClick={() => handleReactivateConfirm(selectedPeriodId)}
-                    className="flex items-center gap-2 bg-green-600 text-white px-4 py-2 rounded-xl font-bold hover:bg-green-700 transition-all shadow-sm text-sm"
-                    title="Aktivera tävlingen igen så att nya tävlingsmoment kan registreras"
-                  >
-                    <Play size={16} fill="currentColor" />
-                    <span>Aktivera igen</span>
-                  </button>
-                )}
-
-                {selectedPeriodId !== 'current' && !periods.find(p => p.id === selectedPeriodId)?.endDate && (
-                  <button
-                    onClick={() => {
-                      const d = new Date();
-                      setCloseDateValue(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`);
-                      setShowCloseModal(true);
-                    }}
-                    className="flex items-center gap-2 bg-zinc-900 dark:bg-white text-white dark:text-zinc-900 px-4 py-2 rounded-xl font-bold hover:bg-zinc-800 dark:hover:bg-zinc-100 transition-all shadow-sm text-sm"
-                  >
-                    <Lock size={18} />
-                    <span>Avsluta</span>
-                  </button>
-                )}
-                {selectedPeriodId !== 'current' && !periods.find(p => p.id === selectedPeriodId)?.endDate && (
-                  <button
-                    onClick={() => {
-                      setBonusData({ playerId: '', points: 1, reason: '' });
-                      setShowBonusModal(true);
-                    }}
-                    className="flex items-center gap-2 bg-amber-500 hover:bg-amber-600 text-white px-4 py-2 rounded-xl font-bold transition-all shadow-sm text-sm"
-                    title="Ge bonuspoäng"
-                  >
-                    <Star size={18} fill="currentColor" />
-                    <span>Bonuspoäng</span>
-                  </button>
-                )}
-                {selectedPeriodId !== 'current' && (
-                  <button
-                    onClick={() => setShowDeleteModal(true)}
-                    className="flex items-center gap-2 bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 px-4 py-2 rounded-xl font-bold border border-red-100 dark:border-red-900/30 hover:bg-red-100 dark:hover:bg-red-900/40 transition-all shadow-sm text-sm"
-                  >
-                    <Trash2 size={18} />
-                    <span>Ta bort</span>
-                  </button>
-                )}
-
-                <div className="w-[1px] h-6 bg-zinc-200 dark:bg-zinc-800 mx-1 hidden sm:block" />
-
-                <button
-                  onClick={handleShare}
-                  disabled={isSharing}
-                  className="flex items-center gap-2 bg-white dark:bg-zinc-900 text-zinc-900 dark:text-white px-4 py-2 rounded-xl font-bold border border-zinc-200 dark:border-zinc-800 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-all shadow-sm text-sm disabled:opacity-50"
-                >
-                  {isSharing ? <Loader2 size={18} className="animate-spin" /> : <Share2 size={18} />}
-                  <span>{isSharing ? 'Skapar...' : 'Dela'}</span>
-                </button>
-              </>
-            )}
+            {!readOnly && (() => {
+              const sel = periods.find(p => p.id === selectedPeriodId);
+              const isOpen = selectedPeriodId !== 'current' && !sel?.endDate;
+              return (
+                <>
+                  {isOpen && (
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      icon={<Star size={16} className="text-amber-500" fill="currentColor" />}
+                      onClick={() => {
+                        setBonusData({ playerId: '', points: 1, reason: '' });
+                        setShowBonusModal(true);
+                      }}
+                    >
+                      Bonuspoäng
+                    </Button>
+                  )}
+                  <Button size="sm" icon={<Plus size={16} />} onClick={() => setShowCreateModal(true)}>
+                    Ny tävling
+                  </Button>
+                  <IconButton label="Fler val" onClick={() => setShowActionsMenu(true)} className="border border-zinc-200 dark:border-zinc-700">
+                    <MoreHorizontal size={20} />
+                  </IconButton>
+                  <Sheet open={showActionsMenu} onClose={() => setShowActionsMenu(false)} title={sel?.name || 'Tävling'}>
+                    {selectedPeriodId !== 'current' && !sel?.isActive && !sel?.endDate && (
+                      <MenuItem icon={<Check size={18} />} label="Gör till aktiv tävling" description="Nya tävlingsmoment räknas hit" onClick={() => { setShowActionsMenu(false); onSwitchPeriod(selectedPeriodId); }} />
+                    )}
+                    {selectedPeriodId !== 'current' && sel?.endDate && (
+                      <MenuItem icon={<Play size={18} />} label="Aktivera igen" description="Öppna tävlingen för nya poäng" onClick={() => { setShowActionsMenu(false); handleReactivateConfirm(selectedPeriodId); }} />
+                    )}
+                    {isOpen && (
+                      <MenuItem
+                        icon={<Lock size={18} />}
+                        label="Avsluta tävlingen"
+                        description="Lås slutställningen"
+                        onClick={() => {
+                          setShowActionsMenu(false);
+                          const d = new Date();
+                          setCloseDateValue(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`);
+                          setShowCloseModal(true);
+                        }}
+                      />
+                    )}
+                    <MenuItem
+                      icon={isSharing ? <Loader2 size={18} className="animate-spin" /> : <Share2 size={18} />}
+                      label={isSharing ? 'Skapar länk…' : 'Dela poänglistan'}
+                      description="Länk som går att öppna utan inloggning"
+                      onClick={() => { setShowActionsMenu(false); handleShare(); }}
+                    />
+                    {selectedPeriodId !== 'current' && (
+                      <MenuItem icon={<Trash2 size={18} />} label="Ta bort tävlingen" tone="danger" onClick={() => { setShowActionsMenu(false); setShowDeleteModal(true); }} />
+                    )}
+                  </Sheet>
+                </>
+              );
+            })()}
           </div>
         </div>
 
@@ -672,7 +649,7 @@ export default function Leaderboard({
               initial={{ opacity: 0, x: -20 }}
               animate={{ opacity: 1, x: 0 }}
               transition={{ delay: index * 0.05 }}
-              className="bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-100 dark:border-zinc-800 shadow-sm overflow-hidden"
+              className="bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-200/80 dark:border-zinc-800 shadow-[0_1px_2px_rgba(16,24,40,0.04)] overflow-hidden"
             >
               <div 
                 className={`p-4 flex items-center justify-between ${hasHistory ? 'cursor-pointer hover:bg-zinc-50 dark:hover:bg-zinc-800/50' : ''} transition-colors`}
@@ -706,7 +683,7 @@ export default function Leaderboard({
                   </div>
                   <div>
                     <div className="flex items-center gap-2">
-                      <span className="font-black text-lg text-zinc-900 dark:text-white line-clamp-1">{player.name}</span>
+                      <span className="font-bold text-base sm:text-lg text-zinc-900 dark:text-white line-clamp-1">{player.name}</span>
                       {player.role === 'leader' && (
                         <span className="text-[10px] bg-amber-100 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300 font-black px-2 py-0.5 rounded-lg border border-amber-200/60 dark:border-amber-800/40 uppercase tracking-wider">
                           Ledare
@@ -720,10 +697,10 @@ export default function Leaderboard({
                 </div>
                 <div className="flex items-center gap-4">
                   <div className="text-right">
-                    <div className="text-3xl font-black text-indigo-600 dark:text-indigo-400">
+                    <div className="text-3xl font-bold tabular-nums text-indigo-600 dark:text-indigo-300 leading-none">
                       {player.totalPoints}
                     </div>
-                    <div className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest">Poäng</div>
+                    <div className="text-xs font-medium text-zinc-500 mt-1">poäng</div>
                   </div>
                   {hasHistory && (
                     <div className={`text-zinc-300 dark:text-zinc-600 transition-transform duration-300 ${isExpanded ? 'rotate-180' : ''}`}>

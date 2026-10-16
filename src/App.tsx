@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
-import { RotateCcw, Trophy, ArrowLeft, Check, Timer as TimerIcon, Edit2, Zap, Rocket, Users, LayoutDashboard, Unlock, LogIn, LogOut, User as UserIcon, Cloud, Calendar, Settings, VibrateOff, Maximize2, MoreVertical } from 'lucide-react';
+import { RotateCcw, Trophy, ArrowLeft, Check, Timer as TimerIcon, Edit2, Zap, Rocket, Users, Unlock, LogIn, LogOut, User as UserIcon, Cloud, Calendar, Settings, VibrateOff, Maximize2, MoreVertical } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { SquadPlayer, Exercise, Team, PointsConfig, Period, PeriodStandings, Lineup, TrainingSession, TrainingSettings, CoachData, BankExercise, SessionMoment, UserProfile, ClubMember, ClubTeam, Club } from './types';
 import { auth, signInWithGoogle, db, handleFirestoreError, OperationType, getApiUrl, doc, onSnapshot, setDoc, getDoc, collection, getDocs, onAuthStateChanged, signOut, User, deleteObject } from './lib/firebase';
@@ -23,7 +23,7 @@ import ProfileAndSettings from './components/ProfileAndSettings';
 import HomeView from './components/HomeView';
 import WelcomeScreen from './components/WelcomeScreen';
 import { AppShell, ShellView } from './components/shell/AppShell';
-import { IconButton, MenuItem, Sheet } from './components/ui';
+import { Avatar, Button, IconButton, MenuItem, Sheet } from './components/ui';
 import ClubAdminDashboard from './components/ClubAdminDashboard';
 import VersionFooter from './components/VersionFooter';
 import { OnboardingModal } from './components/OnboardingModal';
@@ -56,34 +56,6 @@ const INITIAL_DATA: CoachData = {
   exerciseBankCategories: []
 };
 
-const getSessionCategory = (session: TrainingSession): 'match' | 'training' | 'other' => {
-  const title = (session.title || '').trim().toLowerCase();
-  if (!title) {
-    return 'training';
-  }
-  if (
-    title.includes('match') || 
-    title.includes('vs') || 
-    title.includes('mot') || 
-    title.includes('seriematch') || 
-    title.includes('cup') || 
-    title.includes('kval') || 
-    title.includes('träningsmatch')
-  ) {
-    return 'match';
-  }
-  if (
-    title.includes('träning') || 
-    title.includes('pass') || 
-    title.includes('fys') || 
-    title.includes('praktik') || 
-    title.includes('istid') || 
-    title.includes('poolspel')
-  ) {
-    return 'training';
-  }
-  return 'other';
-};
 
 const deduplicateById = <T extends { id: string }>(arr: T[] | undefined | null): T[] => {
   if (!arr || !Array.isArray(arr)) return [];
@@ -3682,15 +3654,6 @@ export default function App() {
     }
   };
 
-  const handleSwitchAccount = async () => {
-    try {
-      // Force account selection
-      await signInWithGoogle(true);
-    } catch (error) {
-      console.error("Switch account failed", error);
-    }
-  };
-
   const clearSharedView = () => {
     setSharedLeaderboardId(null);
     const url = new URL(window.location.href);
@@ -4178,32 +4141,24 @@ export default function App() {
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -20 }}
-              className="max-w-4xl mx-auto p-4 sm:p-8"
+              className="w-full max-w-6xl mx-auto p-4 sm:p-6"
             >
               {user ? (
                 <div className="space-y-6">
-                  {/* Top quick links for admin/clubs */}
-                  <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-white dark:bg-zinc-900 border border-zinc-150 dark:border-zinc-800 p-6 rounded-3xl shadow-md">
-                    <div>
-                      <h2 className="text-xl font-extrabold text-zinc-900 dark:text-white tracking-tight">Konto & inställningar</h2>
-                      <p className="text-sm text-zinc-500 mt-1 font-medium">Hantera ditt konto, anslutna föreningar och lag.</p>
+                  <div className="flex items-center gap-4 bg-white dark:bg-zinc-900 border border-zinc-200/80 dark:border-zinc-800 p-5 rounded-2xl">
+                    <Avatar name={userProfile.fullName || user.displayName || user.email || ''} photoUrl={effectiveUserPhoto} size={56} />
+                    <div className="flex-1 min-w-0">
+                      <div className="text-lg font-bold truncate">{userProfile.fullName || user.displayName || 'Mitt konto'}</div>
+                      <div className="text-sm text-zinc-500 dark:text-zinc-400 truncate">{user.email}</div>
+                      {(roleLabel || activeClubInfo) && (
+                        <div className="mt-1 text-xs font-semibold text-indigo-600 dark:text-indigo-300 truncate">
+                          {[roleLabel, activeClubInfo?.teamName].filter(Boolean).join(' · ')}
+                        </div>
+                      )}
                     </div>
-                    <div className="flex flex-wrap gap-2.5">
-                      <button
-                        onClick={handleSwitchAccount}
-                        className="inline-flex items-center gap-2 bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-zinc-700 dark:text-zinc-200 font-extrabold px-4 py-2.5 rounded-xl transition-all active:scale-95 cursor-pointer text-xs border border-zinc-200 dark:border-zinc-700"
-                      >
-                        <RotateCcw size={14} />
-                        <span>Byt konto</span>
-                      </button>
-                      <button
-                        onClick={handleLogout}
-                        className="inline-flex items-center gap-2 bg-red-50 hover:bg-red-100 dark:bg-red-950/20 dark:hover:bg-red-900/40 text-red-600 dark:text-red-400 font-extrabold px-4 py-2.5 rounded-xl transition-all active:scale-95 cursor-pointer text-xs"
-                      >
-                        <LogOut size={14} />
-                        <span>Logga ut</span>
-                      </button>
-                    </div>
+                    <Button variant="secondary" size="sm" icon={<LogOut size={16} />} onClick={handleLogout} className="!text-red-600 dark:!text-red-400">
+                      <span className="hidden sm:inline">Logga ut</span>
+                    </Button>
                   </div>
 
                   <ProfileAndSettings
@@ -4215,56 +4170,6 @@ export default function App() {
                     onOpenShakeModal={() => setIsShakeInfoModalOpen(true)}
                   />
                   
-                  {/* Stats Grid */}
-                  <div className="bg-white dark:bg-zinc-900 border border-zinc-150 dark:border-zinc-800 p-6 rounded-3xl shadow-xl">
-                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-5 pb-4 border-b border-zinc-100 dark:border-zinc-800/60">
-                      <div className="flex items-center gap-3 text-indigo-600 dark:text-indigo-400">
-                        <LayoutDashboard size={20} />
-                        <h3 className="font-black uppercase tracking-wider text-xs">Aktivitetsstatistik ({userProfile.activeClubId ? 'Aktivt lag' : 'Privat trupp'})</h3>
-                      </div>
-                      {(userRoles.length > 0 || isRootAdmin) && (
-                        <div className="flex flex-wrap gap-1.5 items-center">
-                          <span className="text-[10px] text-zinc-400 dark:text-zinc-500 font-extrabold uppercase tracking-wider">Mina roller:</span>
-                          {isRootAdmin && (
-                            <span className="text-[9px] font-black uppercase tracking-wider bg-red-50 dark:bg-red-950/40 text-red-600 dark:text-red-400 px-2 py-0.5 rounded-md border border-red-100/40 dark:border-red-900/40 animate-pulse">
-                              Root Admin
-                            </span>
-                          )}
-                          {Array.from(new Set(userRoles)).map((role, idx) => (
-                            <span key={`${role}-${idx}`} className="text-[9px] font-black uppercase tracking-wider bg-indigo-50 dark:bg-indigo-950/40 text-indigo-600 dark:text-indigo-400 px-2 py-0.5 rounded-md border border-indigo-100/40 dark:border-indigo-900/40">
-                              {role === 'admin' ? 'Admin' : role === 'coach' ? 'Tränare' : role === 'player' ? 'Spelare' : 'Förälder'}
-                            </span>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                      <div className="bg-zinc-50 dark:bg-zinc-950 p-4 rounded-2xl border border-zinc-100 dark:border-zinc-800">
-                        <span className="text-xs text-zinc-500 uppercase font-bold tracking-wider">Spelare</span>
-                        <div className="text-2xl font-black text-zinc-900 dark:text-white mt-1">
-                          {squad.filter(p => p.role !== 'leader').length}
-                        </div>
-                      </div>
-                      <div className="bg-zinc-50 dark:bg-zinc-950 p-4 rounded-2xl border border-zinc-100 dark:border-zinc-800">
-                        <span className="text-xs text-zinc-500 uppercase font-bold tracking-wider">Tränare/Ledare</span>
-                        <div className="text-2xl font-black text-zinc-900 dark:text-white mt-1">
-                          {squad.filter(p => p.role === 'leader').length}
-                        </div>
-                      </div>
-                      <div className="bg-zinc-50 dark:bg-zinc-950 p-4 rounded-2xl border border-zinc-100 dark:border-zinc-800">
-                        <span className="text-xs text-zinc-500 uppercase font-bold tracking-wider">Träningar</span>
-                        <div className="text-2xl font-black text-zinc-900 dark:text-white mt-1">
-                          {sessions.filter(s => getSessionCategory(s) === 'training').length}
-                        </div>
-                      </div>
-                      <div className="bg-zinc-50 dark:bg-zinc-950 p-4 rounded-2xl border border-zinc-100 dark:border-zinc-800">
-                        <span className="text-xs text-zinc-500 uppercase font-bold tracking-wider">Matcher</span>
-                        <div className="text-2xl font-black text-zinc-900 dark:text-white mt-1">
-                          {sessions.filter(s => getSessionCategory(s) === 'match').length}
-                        </div>
-                      </div>
-                    </div>
-                  </div>
                 </div>
               ) : (
                 <div className="bg-white dark:bg-zinc-900 rounded-3xl border border-zinc-100 dark:border-zinc-800 shadow-xl p-8 text-center max-w-md mx-auto">
