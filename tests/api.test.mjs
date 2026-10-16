@@ -200,3 +200,44 @@ test('uppladdning och radering av filer kräver inloggning', async () => {
   assert.equal((await s.api('POST', '/api/upload', { body: fd })).status, 401);
   assert.equal((await s.api('DELETE', '/api/delete-file?path=test.jpg')).status, 401);
 });
+
+test('inbjudningslänk: tränaren bjuder in, spelaren skapar konto och kan svara', async () => {
+  // Ny spelare i truppen
+  const cur = (await get('clubs/klubb1/teams/lag1/data/squad', coachToken)).json.squad;
+  await post('clubs/klubb1/teams/lag1/data/squad', { squad: [...cur, { id: 'm-inv', name: 'Inbjuden Spelare', role: 'player' }] }, coachToken);
+
+  const create = (token, memberId) => s.api('POST', '/api/invites', { token, body: { clubId: 'klubb1', memberId } });
+  assert.equal((await create(playerToken, 'm-inv')).status, 403, 'spelare kan inte bjuda in');
+  assert.equal((await create(otherToken, 'm-inv')).status, 403, 'tränare i annan förening nekas');
+  const inv = await create(coachToken, 'm-inv');
+  assert.equal(inv.status, 200);
+
+  const info = await s.api('GET', `/api/invites/${inv.json.token}`);
+  assert.equal(info.json.fullName, 'Inbjuden Spelare');
+  assert.deepEqual(info.json.teamNames, ['lag1']);
+
+  // Befintligt konto med samma e-post kräver inloggning först
+  const taken = await s.api('POST', `/api/invites/${inv.json.token}/accept`, { body: { email: 'coach@test.se', password: 'Losenord123' } });
+  assert.equal(taken.status, 409);
+
+  const acc = await s.api('POST', `/api/invites/${inv.json.token}/accept`, { body: { email: 'inbjuden@test.se', password: 'Spelare123' } });
+  assert.equal(acc.status, 200);
+  const invToken = acc.json.token;
+
+  // Länken kan inte användas igen
+  assert.equal((await s.api('POST', `/api/invites/${inv.json.token}/accept`, { body: { email: 'x@test.se', password: 'Spelare123' } })).status, 404);
+
+  // Den nya spelaren ser laget, hittar sig själv och kan svara på kallelser
+  assert.equal((await get('clubs/klubb1/teams/lag1/data/sessions', invToken)).status, 200);
+  const members = await get('clubs/klubb1/teams/club_global/data/members', invToken);
+  const me = members.json.members.find((m) => m.isMe);
+  assert.equal(me.userId, 'm-inv');
+  assert.equal(me.email, 'inbjuden@test.se');
+  const rsvp = await s.api('POST', '/api/rsvp', { token: invToken, body: { clubId: 'klubb1', teamId: 'lag1', sessionId: 's1', memberId: 'm-inv', status: 'partial' } });
+  assert.equal(rsvp.status, 200);
+  const prof = await get(`users/${idOf(invToken)}/data/profile`, invToken);
+  assert.deepEqual([prof.json.activeClubId, prof.json.activeTeamId, prof.json.onboardingCompleted], ['klubb1', 'lag1', true]);
+
+  // Redan kopplad person kan inte bjudas in igen
+  assert.equal((await create(coachToken, 'm-inv')).status, 409);
+});

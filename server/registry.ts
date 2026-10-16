@@ -190,11 +190,12 @@ function contactFields(m: MemberRow, full: boolean) {
 // Kompatibilitet: klubbens medlemslista (clubs/<id>/teams/club_global/data/members)
 // ---------------------------------------------------------------------------
 
-function memberToClubMember(db: Db, m: MemberRow, full: boolean) {
+function memberToClubMember(db: Db, m: MemberRow, full: boolean, isMe = false) {
   const roles = rolesOf(db, m.id);
   return {
     userId: m.id,
-    ...contactFields(m, full),
+    ...contactFields(m, full || isMe),
+    ...(isMe ? { isMe: true } : {}),
     fullName: m.full_name,
     position: m.position || undefined,
     number: m.number || undefined,
@@ -209,7 +210,7 @@ export function getMembersDoc(db: Db, clubId: string, a: ClubAccess) {
   const full = isClubCoach(a);
   const rows: MemberRow[] = db.prepare('SELECT * FROM members WHERE club_id = ? ORDER BY full_name COLLATE NOCASE').all(clubId);
   const updatedAt = rows.reduce((mx, r) => Math.max(mx, r.updated_at), 0);
-  return { members: rows.map((m) => memberToClubMember(db, m, full)), updatedAt };
+  return { members: rows.map((m) => memberToClubMember(db, m, full, a.memberIds.includes(m.id))), updatedAt };
 }
 
 export function saveMembersDoc(db: Db, clubId: string, incoming: any[], a: ClubAccess): { changed: number } {

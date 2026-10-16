@@ -16,6 +16,7 @@ import { fileURLToPath } from 'url';
 import { createRequire } from 'module';
 import { openDatabase } from './server/database.ts';
 import * as registry from './server/registry.ts';
+import * as invites from './server/invites.ts';
 
 const customRequire = typeof require !== 'undefined' ? require : createRequire(import.meta.url);
 
@@ -2468,6 +2469,90 @@ async function startServer() {
       console.error('Error fetching consolidated periods:', e);
       res.status(500).json({ error: 'Failed to fetch consolidated periods' });
     }
+  });
+
+  // --- INBJUDNINGAR ---
+  const inviteUserJson = (u: any) => ({
+    uid: u.id,
+    email: u.email,
+    username: u.username || null,
+    displayName: u.username || String(u.email).split('@')[0],
+    photoURL: u.avatar_url || null,
+  });
+
+  // Tränare/admin skapar en personlig inbjudningslänk för en person i föreningen.
+  app.post('/api/invites', requireAuthUser, async (req, res) => {
+    const user = (req as any).user;
+    const { clubId, memberId } = req.body || {};
+    if (typeof clubId !== 'string' || typeof memberId !== 'string') return res.status(400).json({ error: 'clubId och memberId krävs.' });
+    const member: any = db.prepare('SELECT * FROM members WHERE id = ? AND club_id = ?').get(memberId.replace(/_leader$/, ''), clubId);
+    if (!member) return res.status(404).json({ error: 'Personen finns inte i föreningen.' });
+    const access = registry.getClubAccess(db, user, clubId, await verifyIsRootAdmin(user));
+    const memberTeams: string[] = db.prepare('SELECT DISTINCT team_id FROM team_roles WHERE member_id = ?').all(member.id).map((r: any) => r.team_id);
+    const allowed = access.isClubAdmin || memberTeams.some((t) => t !== registry.CLUB_LEVEL && registry.isTeamCoach(access, t)) ||
+      (memberTeams.every((t) => t === registry.CLUB_LEVEL) && registry.isClubCoach(access));
+    if (!allowed) return res.status(403).json({ error: 'Du kan bara bjuda in personer i lag där du är tränare.' });
+    if (member.user_id) return res.status(409).json({ error: `${member.full_name} har redan ett konto kopplat.` });
+    const inv = invites.createInvite(db, member.id, clubId, user.id);
+    res.json({ success: true, token: inv.token, expiresAt: inv.expiresAt, fullName: member.full_name });
+  });
+
+  // Öppna inbjudningar i föreningen (för att visa "Inbjuden" i listor).
+  app.get('/api/invites', requireAuthUser, async (req, res) => {
+    const user = (req as any).user;
+    const clubId = String(req.query.clubId || '');
+    const access = registry.getClubAccess(db, user, clubId, await verifyIsRootAdmin(user));
+    if (!registry.isClubCoach(access)) return res.status(403).json({ error: 'Åtkomst nekad.' });
+    res.json({ invites: invites.pendingInvites(db, clubId) });
+  });
+
+  // Den inbjudne: visa vem inbjudan gäller.
+  app.get('/api/invites/:token', (req, res) => {
+    const r = invites.lookupInvite(db, req.params.token);
+    if (!r.ok) return res.status(404).json({ valid: false, reason: (r as any).reason });
+    const { info } = r;
+    res.json({ valid: true, clubName: info.clubName, teamNames: info.teamNames, fullName: info.fullName, email: info.email || '', alreadyLinked: info.alreadyLinked });
+  });
+
+  // Den inbjudne: skapa konto (eller använd inloggat konto) och koppla till medlemmen.
+  app.post('/api/invites/:token/accept', registerRateLimiter, async (req, res) => {
+    const r = invites.lookupInvite(db, req.params.token);
+    if (!r.ok) return res.status(404).json({ error: (r as any).reason === 'used' ? 'Inbjudan har redan använts.' : (r as any).reason === 'expired' ? 'Inbjudan har gått ut. Be din tränare om en ny länk.' : 'Ogiltig inbjudan.' });
+    const { info, tokenHash } = r;
+
+    let userRow: any = null;
+    const loggedIn = extractAuthUser(req);
+    if (loggedIn) {
+      userRow = db.prepare('SELECT * FROM users WHERE id = ?').get(loggedIn.id);
+      if (!userRow) return res.status(401).json({ error: 'Inloggningen är inte giltig. Logga in igen.' });
+    } else {
+      const email = String(req.body?.email || '').trim().toLowerCase();
+      const password = String(req.body?.password || '');
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return res.status(400).json({ error: 'Ange en giltig e-postadress.' });
+      if (password.length < 8) return res.status(400).json({ error: 'Lösenordet måste vara minst 8 tecken.' });
+      if (isReservedAdminEmail(email)) return res.status(400).json({ error: 'Denna e-postadress är reserverad.' });
+      const existing: any = db.prepare('SELECT * FROM users WHERE LOWER(email) = ?').get(email);
+      if (existing && isAccountClaimed(existing)) {
+        return res.status(409).json({ error: 'Det finns redan ett konto med den e-postadressen. Logga in först och öppna sedan länken igen.', code: 'account_exists' });
+      }
+      const hash = await bcrypt.hash(password, 10);
+      // Återanvänd ett oanvänt konto som skapats åt personen tidigare (samma id eller e-post)
+      const placeholder: any = existing || db.prepare('SELECT * FROM users WHERE id = ?').get(info.memberId);
+      if (placeholder && !isAccountClaimed(placeholder)) {
+        db.prepare('UPDATE users SET email = ?, password_hash = ?, has_logged_in = 1, temp_password = NULL WHERE id = ?').run(email, hash, placeholder.id);
+        userRow = db.prepare('SELECT * FROM users WHERE id = ?').get(placeholder.id);
+      } else {
+        const id = crypto.randomUUID();
+        db.prepare('INSERT INTO users (id, email, username, password_hash, created_at, has_logged_in) VALUES (?, ?, NULL, ?, ?, 1)').run(id, email, hash, Date.now());
+        userRow = db.prepare('SELECT * FROM users WHERE id = ?').get(id);
+      }
+    }
+
+    const result = invites.acceptInvite(db, tokenHash, info, { id: userRow.id, email: userRow.email });
+    if (result.error) return res.status(409).json({ error: result.error });
+    registry.linkMembersToUser(db, userRow);
+    const token = jwt.sign({ id: userRow.id, email: userRow.email, username: userRow.username }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
+    res.json({ success: true, token, user: inviteUserJson(userRow) });
   });
 
   // --- SVAR PÅ KALLELSER ---

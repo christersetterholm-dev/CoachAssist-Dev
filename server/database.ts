@@ -179,6 +179,20 @@ export const SCHEMA = `
     updated_by TEXT,
     PRIMARY KEY (club_id, team_id, session_id, member_id)
   );
+
+  -- Inbjudningar: personlig länk som kopplar ett konto till en medlem. Bara en
+  -- hash av koden sparas, så en databaskopia avslöjar inga giltiga länkar.
+  CREATE TABLE IF NOT EXISTS invites (
+    token_hash TEXT PRIMARY KEY,
+    member_id TEXT NOT NULL,
+    club_id TEXT NOT NULL,
+    created_by TEXT,
+    created_at INTEGER NOT NULL,
+    expires_at INTEGER NOT NULL,
+    used_at INTEGER,
+    used_by TEXT
+  );
+  CREATE INDEX IF NOT EXISTS idx_invites_member ON invites(member_id);
 `;
 
 const USER_COLUMNS = [
