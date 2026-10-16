@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { Landmark, Trash2, Edit3, Users, Shield, ShieldAlert, Check, PlusCircle, Search, Mail, Phone, Fingerprint, Settings, ArrowRight, UserPlus, Save, Smartphone, X, Database, HardDrive, RefreshCw, Download, Upload, Globe, CheckCircle2, AlertTriangle, AlertCircle, Calendar, Link, Copy, ExternalLink, FileSpreadsheet, FileText, Camera, Loader2, Key, UserCheck, Sparkles, Filter, ArrowUpDown, RotateCcw } from 'lucide-react';
+import { Landmark, Trash2, Edit3, Users, Shield, ShieldAlert, Check, PlusCircle, Search, Mail, Phone, Fingerprint, Settings, UserPlus, Save, Smartphone, X, Database, HardDrive, RefreshCw, Download, Upload, Globe, CheckCircle2, AlertTriangle, AlertCircle, Calendar, Link, Copy, ExternalLink, FileSpreadsheet, FileText, Camera, Loader2, Key, UserCheck, Sparkles, Filter, ArrowUpDown, RotateCcw } from 'lucide-react';
 import { Club, ClubMetadata, ClubTeam, ClubMember, SquadPlayer, TrainingSettings, TrainingSession } from '../types';
 import { db, storage, getApiUrl, getAuthHeader, ref, uploadBytes, getDownloadURL, doc, getDoc, setDoc } from '../lib/firebase';
 import PwaIconGenerator from './PwaIconGenerator';
 import ImageCropper from './ImageCropper';
+import { Badge, Button } from './ui';
 import { CachedImage } from './CachedImage';
 import { syncTeamCalendar } from '../utils/calendarSync';
 import { deduplicateClubMembers, deduplicateSquad } from '../lib/clubUtils';
@@ -65,7 +66,7 @@ export default function ClubAdminDashboard({
         <div className="w-16 h-16 rounded-2xl bg-red-100 dark:bg-red-950/60 text-red-600 dark:text-red-400 flex items-center justify-center mx-auto shadow-inner">
           <ShieldAlert size={32} />
         </div>
-        <h2 className="text-xl font-black text-zinc-900 dark:text-white tracking-tight">Åtkomst nekad</h2>
+        <h2 className="text-xl font-bold text-zinc-900 dark:text-white">Åtkomst nekad</h2>
         <p className="text-sm text-zinc-600 dark:text-zinc-400 font-medium leading-relaxed">
           Du har inte behörighet att se eller ändra förenings- och laginställningar. Denna vy är endast tillgänglig för godkända tränare och administratörer.
         </p>
@@ -1863,179 +1864,73 @@ export default function ClubAdminDashboard({
   }, [members, memberSearchQuery, memberRoleFilter, memberTeamFilter, memberSortBy]);
 
   return (
-    <div className="w-full max-w-6xl mx-auto p-1.5 sm:p-6 min-w-0 overflow-x-hidden" id="club-admin-dashboard">
-      {/* Upper Navigation & Club Select Panel */}
-      <div className="bg-white dark:bg-zinc-900 rounded-2xl sm:rounded-3xl border border-zinc-150 dark:border-zinc-800 shadow-xl p-3.5 sm:p-7 mb-6 w-full min-w-0">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-5 sm:pb-6 border-b border-zinc-100 dark:border-zinc-800 w-full min-w-0">
-          <div className="flex items-center gap-3 sm:gap-3.5 min-w-0 flex-1">
-            {onBack && (
-              <button
-                onClick={onBack}
-                className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl border border-zinc-200 dark:border-zinc-800 hover:bg-zinc-50 dark:hover:bg-zinc-800 flex items-center justify-center text-zinc-600 dark:text-zinc-400 cursor-pointer active:scale-95 transition-all shrink-0"
-                title="Tillbaka till profil"
-              >
-                <ArrowRight size={18} className="rotate-180" />
-              </button>
+    <div className="w-full min-w-0 overflow-x-hidden" id="club-admin-dashboard">
+      {/* Förening och flikar */}
+      <div className="mb-5 space-y-3 w-full min-w-0">
+        {(isRootAdmin || clubs.length > 1) && (
+          <div className="flex items-center gap-2 w-full min-w-0">
+            <Landmark size={18} className="text-zinc-400 shrink-0" />
+            <select
+              aria-label="Välj förening"
+              value={selectedClub?.id || ''}
+              onChange={(e) => {
+                const found = clubs.find(c => c.id === e.target.value);
+                if (found) handleSelectClub(found);
+              }}
+              className="flex-1 sm:flex-none sm:min-w-[240px] h-10 px-3 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 text-zinc-800 dark:text-zinc-100 rounded-xl font-semibold text-sm focus:outline-none focus:border-indigo-500 cursor-pointer min-w-0 truncate"
+            >
+              {clubs.map(c => (
+                <option key={c.id} value={c.id}>{c.name}</option>
+              ))}
+              {clubs.length === 0 && <option value="">Inga föreningar skapade</option>}
+            </select>
+            {selectedClub && (
+              selectedClub.id === activeClubId ? (
+                <span className="h-10 px-3 text-xs font-semibold bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 rounded-xl flex items-center gap-1.5 shrink-0">
+                  <Check size={14} />
+                  <span className="hidden sm:inline">Aktiv förening</span>
+                </span>
+              ) : (
+                <Button size="sm" onClick={() => handleSelectClub(selectedClub)}>Välj som aktiv</Button>
+              )
             )}
-            <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-2xl bg-indigo-50/50 dark:bg-indigo-950/40 flex items-center justify-center text-indigo-600 dark:text-indigo-400 shrink-0">
-              <Shield size={22} />
-            </div>
-            <div className="min-w-0 flex-1">
-              <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
-                <h1 className="text-lg sm:text-2xl font-black text-zinc-900 dark:text-white tracking-tight break-words">Klubb- och lagadministration</h1>
-                {isRootAdmin && (
-                  <span className="text-[10px] font-black uppercase tracking-wider bg-red-50 dark:bg-red-950/40 text-red-600 dark:text-red-400 px-2 py-0.5 rounded-md border border-red-100/40 dark:border-red-900/40 animate-pulse">
-                    Root Admin
-                  </span>
-                )}
-              </div>
-              <p className="text-[11px] sm:text-xs text-zinc-500 dark:text-zinc-400 font-medium truncate">Skala din verksamhet, hantera medlemsroller och skapa nya lag.</p>
-            </div>
+            {isRootAdmin && <Badge tone="danger" className="ml-auto hidden sm:inline-flex">Huvudadministratör</Badge>}
           </div>
+        )}
 
-          {/* Club Dropdown */}
-          <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3 w-full sm:w-auto min-w-0">
-            <label className="text-[11px] sm:text-xs font-black uppercase text-zinc-400 shrink-0">Välj förening:</label>
-            <div className="flex items-center gap-2 w-full sm:w-auto min-w-0">
-              <select
-                value={selectedClub?.id || ''}
-                onChange={(e) => {
-                  const found = clubs.find(c => c.id === e.target.value);
-                  if (found) handleSelectClub(found);
-                }}
-                className="w-full sm:w-auto px-3.5 py-2 sm:py-2.5 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 text-zinc-800 dark:text-zinc-200 rounded-xl font-bold text-xs sm:text-sm focus:outline-none focus:border-indigo-500 cursor-pointer min-w-0 truncate"
+        <nav aria-label="Administrationsavsnitt" className="flex gap-1.5 overflow-x-auto no-scrollbar -mx-1 px-1 pb-1">
+          {([
+            ...(isRootAdmin ? [{ id: 'clubs', label: 'Föreningar', icon: <Landmark size={16} /> }] : []),
+            { id: 'teams', label: `Lag (${clubMetadata?.teams?.length || 0})`, icon: <Settings size={16} />, needsClub: true },
+            { id: 'members', label: `Medlemmar (${members.length})`, icon: <Users size={16} />, needsClub: true },
+            { id: 'user_accounts', label: 'Konton', icon: <Key size={16} />, needsClub: true },
+            { id: 'calendar_sync', label: 'Kalender & webb', icon: <Calendar size={16} /> },
+            { id: 'pwa_icons', label: 'Appikon', icon: <Smartphone size={16} /> },
+            ...(isRootAdmin ? [
+              { id: 'database_env', label: 'Databas', icon: <Database size={16} /> },
+              { id: 'root_admins', label: `Systemadmins (${rootAdminsList.length || 2})`, icon: <Shield size={16} /> },
+            ] : []),
+          ] as { id: typeof activeTab; label: string; icon: React.ReactNode; needsClub?: boolean }[]).map(t => {
+            const selected = activeTab === t.id;
+            return (
+              <button
+                key={t.id}
+                type="button"
+                disabled={t.needsClub && !selectedClub}
+                onClick={() => setActiveTab(t.id)}
+                aria-current={selected ? 'page' : undefined}
+                className={`shrink-0 inline-flex items-center gap-2 h-10 px-3.5 rounded-xl text-sm font-semibold whitespace-nowrap transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed ${
+                  selected
+                    ? 'bg-indigo-600 text-white dark:bg-indigo-500'
+                    : 'bg-white dark:bg-zinc-900 text-zinc-600 dark:text-zinc-300 border border-zinc-200 dark:border-zinc-800 hover:bg-zinc-50 dark:hover:bg-zinc-800'
+                }`}
               >
-                {clubs.map(c => (
-                  <option key={c.id} value={c.id}>{c.name}</option>
-                ))}
-                {clubs.length === 0 && <option value="">Inga föreningar skapade</option>}
-              </select>
-
-              {selectedClub && (
-                selectedClub.id === activeClubId ? (
-                  <span className="px-2.5 py-1.5 text-[11px] sm:text-xs font-extrabold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 rounded-xl flex items-center gap-1.5 shrink-0">
-                    <Check size={14} />
-                    <span className="hidden sm:inline">Aktiv förening</span>
-                  </span>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => handleSelectClub(selectedClub)}
-                    className="px-3 py-1.5 text-[11px] sm:text-xs font-black bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl shadow-sm cursor-pointer shrink-0 transition-all flex items-center gap-1"
-                  >
-                    <span>Välj som aktiv</span>
-                  </button>
-                )
-              )}
-            </div>
-          </div>
-        </div>
-
-        {/* Tab Selection */}
-        <div className="flex flex-wrap items-center gap-2 mt-3.5 sm:mt-5 w-full min-w-0">
-          {isRootAdmin && (
-            <button
-              onClick={() => setActiveTab('clubs')}
-              className={`flex items-center gap-2 px-3.5 sm:px-4 py-2 sm:py-2.5 rounded-xl font-extrabold text-xs sm:text-sm transition-all cursor-pointer ${
-                activeTab === 'clubs'
-                  ? 'bg-indigo-600 text-white shadow-md shadow-indigo-100 dark:shadow-none'
-                  : 'bg-zinc-50 hover:bg-zinc-100 dark:bg-zinc-950 dark:hover:bg-zinc-800 text-zinc-600 dark:text-zinc-400 border border-zinc-200/60 dark:border-zinc-800/80'
-              }`}
-            >
-              <Landmark size={16} />
-              <span>Skapa förening</span>
-            </button>
-          )}
-          
-          <button
-            disabled={!selectedClub}
-            onClick={() => setActiveTab('teams')}
-            className={`flex items-center gap-2 px-3.5 sm:px-4 py-2 sm:py-2.5 rounded-xl font-extrabold text-xs sm:text-sm transition-all disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer ${
-              activeTab === 'teams'
-                ? 'bg-indigo-600 text-white shadow-md shadow-indigo-100 dark:shadow-none'
-                : 'bg-zinc-50 hover:bg-zinc-100 dark:bg-zinc-950 dark:hover:bg-zinc-800 text-zinc-600 dark:text-zinc-400 border border-zinc-200/60 dark:border-zinc-800/80'
-            }`}
-          >
-            <Settings size={16} />
-            <span>Hantera lag ({clubMetadata?.teams?.length || 0})</span>
-          </button>
-
-          <button
-            disabled={!selectedClub}
-            onClick={() => setActiveTab('members')}
-            className={`flex items-center gap-2 px-3.5 sm:px-4 py-2 sm:py-2.5 rounded-xl font-extrabold text-xs sm:text-sm transition-all disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer ${
-              activeTab === 'members'
-                ? 'bg-indigo-600 text-white shadow-md shadow-indigo-100 dark:shadow-none'
-                : 'bg-zinc-50 hover:bg-zinc-100 dark:bg-zinc-950 dark:hover:bg-zinc-800 text-zinc-600 dark:text-zinc-400 border border-zinc-200/60 dark:border-zinc-800/80'
-            }`}
-          >
-            <Users size={16} />
-            <span>Medlemmar och roller ({members.length})</span>
-          </button>
-
-          <button
-            disabled={!selectedClub}
-            onClick={() => setActiveTab('user_accounts')}
-            className={`flex items-center gap-2 px-3.5 sm:px-4 py-2 sm:py-2.5 rounded-xl font-extrabold text-xs sm:text-sm transition-all disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer ${
-              activeTab === 'user_accounts'
-                ? 'bg-indigo-600 text-white shadow-md shadow-indigo-100 dark:shadow-none'
-                : 'bg-zinc-50 hover:bg-zinc-100 dark:bg-zinc-950 dark:hover:bg-zinc-800 text-zinc-600 dark:text-zinc-400 border border-zinc-200/60 dark:border-zinc-800/80'
-            }`}
-          >
-            <Key size={16} />
-            <span>Konto och lösenord ({allMemberAccounts.length})</span>
-          </button>
-
-          <button
-            onClick={() => setActiveTab('calendar_sync')}
-            className={`flex items-center gap-2 px-3.5 sm:px-4 py-2 sm:py-2.5 rounded-xl font-extrabold text-xs sm:text-sm transition-all cursor-pointer ${
-              activeTab === 'calendar_sync'
-                ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-100 dark:shadow-none'
-                : 'bg-zinc-50 hover:bg-zinc-100 dark:bg-zinc-950 dark:hover:bg-zinc-800 text-zinc-600 dark:text-zinc-400 border border-zinc-200/60 dark:border-zinc-800/80'
-            }`}
-          >
-            <Calendar size={16} />
-            <span>Kalender och webb</span>
-          </button>
-
-          <button
-            onClick={() => setActiveTab('pwa_icons')}
-            className={`flex items-center gap-2 px-3.5 sm:px-4 py-2 sm:py-2.5 rounded-xl font-extrabold text-xs sm:text-sm transition-all cursor-pointer ${
-              activeTab === 'pwa_icons'
-                ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-100 dark:shadow-none'
-                : 'bg-zinc-50 hover:bg-zinc-100 dark:bg-zinc-950 dark:hover:bg-zinc-800 text-zinc-600 dark:text-zinc-400 border border-zinc-200/60 dark:border-zinc-800/80'
-            }`}
-          >
-            <Smartphone size={16} />
-            <span>PWA-ikonpaket</span>
-          </button>
-
-          <button
-            onClick={() => setActiveTab('database_env')}
-            className={`flex items-center gap-2 px-3.5 sm:px-4 py-2 sm:py-2.5 rounded-xl font-extrabold text-xs sm:text-sm transition-all cursor-pointer ${
-              activeTab === 'database_env'
-                ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-100 dark:shadow-none'
-                : 'bg-zinc-50 hover:bg-zinc-100 dark:bg-zinc-950 dark:hover:bg-zinc-800 text-zinc-600 dark:text-zinc-400 border border-zinc-200/60 dark:border-zinc-800/80'
-            }`}
-          >
-            <Database size={16} />
-            <span>Databas och molnsynk</span>
-          </button>
-
-          {isRootAdmin && (
-            <button
-              onClick={() => setActiveTab('root_admins')}
-              className={`flex items-center gap-2 px-3.5 sm:px-4 py-2 sm:py-2.5 rounded-xl font-extrabold text-xs sm:text-sm transition-all cursor-pointer ${
-                activeTab === 'root_admins'
-                  ? 'bg-red-600 text-white shadow-lg shadow-red-100 dark:shadow-none'
-                  : 'bg-zinc-50 hover:bg-zinc-100 dark:bg-zinc-950 dark:hover:bg-zinc-800 text-zinc-600 dark:text-zinc-400 border border-zinc-200/60 dark:border-zinc-800/80'
-              }`}
-            >
-              <Shield size={16} />
-              <span>System-admins ({rootAdminsList.length || 2})</span>
-            </button>
-          )}
-        </div>
+                {t.icon}
+                <span>{t.label}</span>
+              </button>
+            );
+          })}
+        </nav>
       </div>
 
       {/* ACTION ALERTS */}
@@ -2055,13 +1950,13 @@ export default function ClubAdminDashboard({
       {/* CLUBS TAB */}
       {activeTab === 'clubs' && (
         <div className="grid grid-cols-1 md:grid-cols-12 gap-6">
-          <div className="md:col-span-5 bg-white dark:bg-zinc-900 rounded-3xl border border-zinc-150 dark:border-zinc-800 shadow-xl p-6">
-            <h2 className="text-lg font-black text-zinc-900 dark:text-white tracking-tight mb-2">Ny förening</h2>
+          <div className="md:col-span-5 bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-200/80 dark:border-zinc-800 shadow-[0_1px_2px_rgba(16,24,40,0.04)] p-6">
+            <h2 className="text-lg font-bold text-zinc-900 dark:text-white mb-2">Ny förening</h2>
             <p className="text-xs text-zinc-500 mb-5 font-medium leading-relaxed">Lägg till en ny fristående klubb i systemet för att börja lägga upp trupper och lag.</p>
             
             <form onSubmit={handleCreateClub} className="space-y-4">
               <div>
-                <label className="block text-xs font-black text-zinc-400 uppercase tracking-wider mb-2">Föreningens Namn</label>
+                <label className="block text-xs font-bold text-zinc-400 mb-2">Föreningens Namn</label>
                 <input
                   type="text"
                   required
@@ -2075,7 +1970,7 @@ export default function ClubAdminDashboard({
               <button
                 type="submit"
                 disabled={actionStatus.status === 'loading'}
-                className="w-full bg-indigo-600 hover:bg-indigo-700 text-white py-3 px-5 rounded-xl font-extrabold text-sm flex items-center justify-center gap-2 active:scale-95 disabled:opacity-50 cursor-pointer"
+                className="w-full bg-indigo-600 hover:bg-indigo-700 text-white py-3 px-5 rounded-xl font-semibold text-sm flex items-center justify-center gap-2 active:scale-95 disabled:opacity-50 cursor-pointer"
               >
                 <PlusCircle size={16} />
                 <span>Registrera Förening</span>
@@ -2083,8 +1978,8 @@ export default function ClubAdminDashboard({
             </form>
           </div>
 
-          <div className="md:col-span-7 bg-white dark:bg-zinc-900 rounded-3xl border border-zinc-150 dark:border-zinc-800 shadow-xl p-6">
-            <h2 className="text-lg font-black text-zinc-900 dark:text-white tracking-tight mb-5">Registrerade Föreningar</h2>
+          <div className="md:col-span-7 bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-200/80 dark:border-zinc-800 shadow-[0_1px_2px_rgba(16,24,40,0.04)] p-6">
+            <h2 className="text-lg font-bold text-zinc-900 dark:text-white mb-5">Registrerade Föreningar</h2>
             {clubs.length > 0 ? (
               <div className="space-y-3">
                 {clubs.map(c => {
@@ -2101,17 +1996,17 @@ export default function ClubAdminDashboard({
                       }`}
                     >
                       <div className="flex items-center gap-3.5">
-                        <div className="w-10 h-10 rounded-xl bg-indigo-55/10 dark:bg-indigo-950/20 text-indigo-600 dark:text-indigo-400 flex items-center justify-center">
+                        <div className="w-10 h-10 rounded-xl bg-indigo-50 dark:bg-indigo-950/20 text-indigo-600 dark:text-indigo-400 flex items-center justify-center">
                           <Landmark size={20} />
                         </div>
                         <div>
-                          <h3 className="font-extrabold text-sm text-zinc-900 dark:text-white">{c.name}</h3>
-                          <p className="text-[10px] text-zinc-400 font-bold uppercase tracking-wider mt-0.5">ID: {c.id}</p>
+                          <h3 className="font-semibold text-sm text-zinc-900 dark:text-white">{c.name}</h3>
+                          <p className="text-xs text-zinc-400 font-bold mt-0.5">ID: {c.id}</p>
                         </div>
                       </div>
                       <div className="flex items-center gap-2">
                         {isActive ? (
-                          <span className="text-emerald-600 dark:text-emerald-400 font-extrabold text-xs flex items-center gap-1.5 bg-emerald-50 dark:bg-emerald-950/40 px-3 py-1 rounded-full border border-emerald-100 dark:border-emerald-950/40">
+                          <span className="text-emerald-600 dark:text-emerald-400 font-semibold text-xs flex items-center gap-1.5 bg-emerald-50 dark:bg-emerald-950/40 px-3 py-1 rounded-full border border-emerald-100 dark:border-emerald-950/40">
                             <Check size={12} />
                             <span>Aktiv förening</span>
                           </span>
@@ -2145,13 +2040,13 @@ export default function ClubAdminDashboard({
       {/* TEAMS TAB */}
       {activeTab === 'teams' && selectedClub && (
         <div className="grid grid-cols-1 md:grid-cols-12 gap-6">
-          <div className="md:col-span-5 bg-white dark:bg-zinc-900 rounded-3xl border border-zinc-150 dark:border-zinc-800 shadow-xl p-6">
-            <h2 className="text-lg font-black text-zinc-900 dark:text-white tracking-tight mb-2">Nytt lag i {selectedClub.name}</h2>
+          <div className="md:col-span-5 bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-200/80 dark:border-zinc-800 shadow-[0_1px_2px_rgba(16,24,40,0.04)] p-6">
+            <h2 className="text-lg font-bold text-zinc-900 dark:text-white mb-2">Nytt lag i {selectedClub.name}</h2>
             <p className="text-xs text-zinc-500 mb-5 font-medium leading-relaxed">Varje förening kan rymma flera olika åldersgrupper eller representationslag.</p>
 
             <form onSubmit={handleAddTeam} className="space-y-4">
               <div>
-                <label className="block text-xs font-black text-zinc-400 uppercase tracking-wider mb-2">Lagets Namn</label>
+                <label className="block text-xs font-bold text-zinc-400 mb-2">Lagets Namn</label>
                 <input
                   type="text"
                   required
@@ -2164,7 +2059,7 @@ export default function ClubAdminDashboard({
 
               <button
                 type="submit"
-                className="w-full bg-indigo-600 hover:bg-indigo-700 text-white py-3 px-5 rounded-xl font-extrabold text-sm flex items-center justify-center gap-2 active:scale-95 cursor-pointer"
+                className="w-full bg-indigo-600 hover:bg-indigo-700 text-white py-3 px-5 rounded-xl font-semibold text-sm flex items-center justify-center gap-2 active:scale-95 cursor-pointer"
               >
                 <PlusCircle size={16} />
                 <span>Lägg till lag</span>
@@ -2172,8 +2067,8 @@ export default function ClubAdminDashboard({
             </form>
           </div>
 
-          <div className="md:col-span-7 bg-white dark:bg-zinc-900 rounded-3xl border border-zinc-150 dark:border-zinc-800 shadow-xl p-6">
-            <h2 className="text-lg font-black text-zinc-900 dark:text-white tracking-tight mb-5">Aktiva Lag ({clubMetadata?.teams?.length || 0})</h2>
+          <div className="md:col-span-7 bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-200/80 dark:border-zinc-800 shadow-[0_1px_2px_rgba(16,24,40,0.04)] p-6">
+            <h2 className="text-lg font-bold text-zinc-900 dark:text-white mb-5">Aktiva Lag ({clubMetadata?.teams?.length || 0})</h2>
             {clubMetadata?.teams && clubMetadata.teams.length > 0 ? (
               <div className="space-y-3">
                 {clubMetadata.teams.map(team => (
@@ -2186,13 +2081,13 @@ export default function ClubAdminDashboard({
                         <Settings size={18} />
                       </div>
                       <div className="min-w-0 flex-1">
-                        <h3 className="font-extrabold text-sm text-zinc-900 dark:text-white truncate">{team.name}</h3>
-                        <p className="text-[10px] text-zinc-400 font-bold uppercase tracking-wider mt-0.5 truncate">ID: {team.id}</p>
+                        <h3 className="font-semibold text-sm text-zinc-900 dark:text-white truncate">{team.name}</h3>
+                        <p className="text-xs text-zinc-400 font-bold mt-0.5 truncate">ID: {team.id}</p>
                       </div>
                     </div>
                     <div className="flex items-center justify-between sm:justify-end gap-2 w-full sm:w-auto shrink-0 border-t sm:border-t-0 pt-2 sm:pt-0 border-zinc-100 dark:border-zinc-800/60">
                       {selectedClub.id === activeClubId && team.id === activeTeamId ? (
-                        <span className="text-emerald-600 dark:text-emerald-400 text-xs font-black bg-emerald-50 dark:bg-emerald-950/40 px-3 py-1.5 rounded-xl border border-emerald-200 dark:border-emerald-800 flex items-center gap-1.5">
+                        <span className="text-emerald-600 dark:text-emerald-400 text-xs font-bold bg-emerald-50 dark:bg-emerald-950/40 px-3 py-1.5 rounded-xl border border-emerald-200 dark:border-emerald-800 flex items-center gap-1.5">
                           <Check size={14} />
                           <span>Aktivt lag</span>
                         </span>
@@ -2232,7 +2127,7 @@ export default function ClubAdminDashboard({
       {activeTab === 'members' && selectedClub && (
         <div className="space-y-6">
           {/* Members search, filter & sort controls */}
-          <div className="bg-white dark:bg-zinc-900 rounded-2xl sm:rounded-3xl border border-zinc-150 dark:border-zinc-800 shadow-xl p-3.5 sm:p-6 w-full min-w-0 space-y-4">
+          <div className="bg-white dark:bg-zinc-900 rounded-2xl sm:rounded-2xl border border-zinc-200/80 dark:border-zinc-800 shadow-[0_1px_2px_rgba(16,24,40,0.04)] p-3.5 sm:p-6 w-full min-w-0 space-y-4">
             {/* Search input & Main Action Buttons */}
             <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 sm:gap-4 w-full min-w-0">
               <div className="relative flex-1 w-full min-w-0">
@@ -2264,7 +2159,7 @@ export default function ClubAdminDashboard({
                     setParsedImportMembers([]);
                     setShowImportModal(true);
                   }}
-                  className="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2.5 sm:py-3 rounded-xl sm:rounded-2xl font-extrabold text-xs sm:text-sm flex items-center justify-center gap-2 active:scale-95 transition-all cursor-pointer shadow-md shadow-emerald-100 dark:shadow-none w-full sm:w-auto flex-1 sm:flex-none"
+                  className="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2.5 sm:py-3 rounded-xl sm:rounded-2xl font-semibold text-xs sm:text-sm flex items-center justify-center gap-2 active:scale-95 transition-all cursor-pointer shadow-md shadow-emerald-100 dark:shadow-none w-full sm:w-auto flex-1 sm:flex-none"
                 >
                   <Upload size={16} />
                   <span>Importera trupp / medlemmar</span>
@@ -2272,7 +2167,7 @@ export default function ClubAdminDashboard({
 
                 <button
                   onClick={() => openMemberForm(null)}
-                  className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2.5 sm:py-3 rounded-xl sm:rounded-2xl font-extrabold text-xs sm:text-sm flex items-center justify-center gap-2 active:scale-95 transition-all cursor-pointer shadow-md shadow-indigo-100 dark:shadow-none w-full sm:w-auto flex-1 sm:flex-none"
+                  className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2.5 sm:py-3 rounded-xl sm:rounded-2xl font-semibold text-xs sm:text-sm flex items-center justify-center gap-2 active:scale-95 transition-all cursor-pointer shadow-md shadow-indigo-100 dark:shadow-none w-full sm:w-auto flex-1 sm:flex-none"
                 >
                   <UserPlus size={16} />
                   <span>Lägg till medlem</span>
@@ -2285,7 +2180,7 @@ export default function ClubAdminDashboard({
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 flex-1">
                 {/* Role Filter */}
                 <div>
-                  <label className="block text-[10px] font-black uppercase tracking-wider text-zinc-400 mb-1 flex items-center gap-1">
+                  <label className="block text-xs font-bold text-zinc-400 mb-1 flex items-center gap-1">
                     <Filter size={11} className="text-indigo-500" />
                     <span>Roll</span>
                   </label>
@@ -2304,7 +2199,7 @@ export default function ClubAdminDashboard({
 
                 {/* Team Filter */}
                 <div>
-                  <label className="block text-[10px] font-black uppercase tracking-wider text-zinc-400 mb-1 flex items-center gap-1">
+                  <label className="block text-xs font-bold text-zinc-400 mb-1 flex items-center gap-1">
                     <Shield size={11} className="text-indigo-500" />
                     <span>Lagtillhörighet</span>
                   </label>
@@ -2323,7 +2218,7 @@ export default function ClubAdminDashboard({
 
                 {/* Sort By */}
                 <div>
-                  <label className="block text-[10px] font-black uppercase tracking-wider text-zinc-400 mb-1 flex items-center gap-1">
+                  <label className="block text-xs font-bold text-zinc-400 mb-1 flex items-center gap-1">
                     <ArrowUpDown size={11} className="text-indigo-500" />
                     <span>Sortera efter</span>
                   </label>
@@ -2438,7 +2333,7 @@ export default function ClubAdminDashboard({
                 onClick={(e) => e.stopPropagation()}
               >
                 <div className="flex items-center justify-between mb-5 border-b border-zinc-100 dark:border-zinc-800 pb-4">
-                  <h3 className="text-base sm:text-lg font-black text-zinc-900 dark:text-white">
+                  <h3 className="text-base sm:text-lg font-bold text-zinc-900 dark:text-white">
                     {editingMember ? 'Redigera medlemsuppgifter' : 'Lägg till ny medlem i föreningen'}
                   </h3>
                   <button
@@ -2467,7 +2362,7 @@ export default function ClubAdminDashboard({
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>
-                      <label className="block text-xs font-black text-zinc-650 dark:text-zinc-400 uppercase tracking-wider mb-2">Medlemmens fullständiga namn</label>
+                      <label className="block text-xs font-bold text-zinc-650 dark:text-zinc-400 mb-2">Medlemmens fullständiga namn</label>
                       <input
                         type="text"
                         required
@@ -2479,7 +2374,7 @@ export default function ClubAdminDashboard({
                     </div>
 
                     <div>
-                      <label className="block text-xs font-black text-zinc-650 dark:text-zinc-400 uppercase tracking-wider mb-2">E-postadress (Valfritt om inloggning ej används ännu)</label>
+                      <label className="block text-xs font-bold text-zinc-650 dark:text-zinc-400 mb-2">E-postadress (Valfritt om inloggning ej används ännu)</label>
                       <div className="relative">
                         <span className="absolute left-3.5 top-3 text-zinc-400">
                           <Mail size={16} />
@@ -2497,7 +2392,7 @@ export default function ClubAdminDashboard({
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>
-                      <label className="block text-xs font-black text-zinc-650 dark:text-zinc-400 uppercase tracking-wider mb-2">Mobilnummer (Valfritt)</label>
+                      <label className="block text-xs font-bold text-zinc-650 dark:text-zinc-400 mb-2">Mobilnummer (Valfritt)</label>
                       <div className="relative">
                         <span className="absolute left-3.5 top-3 text-zinc-400">
                           <Phone size={16} />
@@ -2513,7 +2408,7 @@ export default function ClubAdminDashboard({
                     </div>
 
                     <div>
-                      <label className="block text-xs font-black text-zinc-650 dark:text-zinc-400 uppercase tracking-wider mb-2">Personnummer (Valfritt)</label>
+                      <label className="block text-xs font-bold text-zinc-650 dark:text-zinc-400 mb-2">Personnummer (Valfritt)</label>
                       <div className="relative">
                         <span className="absolute left-3.5 top-3 text-zinc-400">
                           <Fingerprint size={16} />
@@ -2531,7 +2426,7 @@ export default function ClubAdminDashboard({
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>
-                      <label className="block text-xs font-black text-zinc-650 dark:text-zinc-400 uppercase tracking-wider mb-2">Position / Roll (Valfritt)</label>
+                      <label className="block text-xs font-bold text-zinc-650 dark:text-zinc-400 mb-2">Position / Roll (Valfritt)</label>
                       <input
                         type="text"
                         placeholder="t.ex. MV, MB, Forward eller Tränare"
@@ -2542,7 +2437,7 @@ export default function ClubAdminDashboard({
                     </div>
 
                     <div>
-                      <label className="block text-xs font-black text-zinc-650 dark:text-zinc-400 uppercase tracking-wider mb-2">Tröjnummer (Valfritt)</label>
+                      <label className="block text-xs font-bold text-zinc-650 dark:text-zinc-400 mb-2">Tröjnummer (Valfritt)</label>
                       <input
                         type="text"
                         placeholder="t.ex. 10"
@@ -2554,7 +2449,7 @@ export default function ClubAdminDashboard({
                   </div>
 
                   <div>
-                    <label className="block text-xs font-black text-zinc-650 dark:text-zinc-400 uppercase tracking-wider mb-2">Profilbild</label>
+                    <label className="block text-xs font-bold text-zinc-650 dark:text-zinc-400 mb-2">Profilbild</label>
                     <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4 p-3.5 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-2xl">
                       <div className="w-16 h-16 rounded-2xl bg-zinc-200 dark:bg-zinc-800 text-zinc-500 flex items-center justify-center shrink-0 overflow-hidden relative shadow-inner">
                         {isUploadingPhoto ? (
@@ -2567,7 +2462,7 @@ export default function ClubAdminDashboard({
                       </div>
                       <div className="flex-1 min-w-0 w-full space-y-2">
                         <div className="flex flex-wrap items-center gap-2">
-                          <label className="bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold text-xs px-3.5 py-2 rounded-xl flex items-center gap-1.5 cursor-pointer transition-all shadow-sm">
+                          <label className="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-xs px-3.5 py-2 rounded-xl flex items-center gap-1.5 cursor-pointer transition-all shadow-sm">
                             <Camera size={14} />
                             <span>Ladda upp bild</span>
                             <input type="file" className="hidden" accept="image/*" onChange={handleMemberPhotoUpload} />
@@ -2595,7 +2490,7 @@ export default function ClubAdminDashboard({
 
                   {/* Role Toggles */}
                   <div className="border-t border-zinc-100 dark:border-zinc-800 pt-4">
-                    <label className="block text-xs font-black text-zinc-650 dark:text-zinc-400 uppercase tracking-wider mb-1">Roll(er) i föreningen</label>
+                    <label className="block text-xs font-bold text-zinc-650 dark:text-zinc-400 mb-1">Roll(er) i föreningen</label>
                     <p className="text-[11px] text-zinc-500 dark:text-zinc-400 mb-3 font-medium">Bocka i alla roller som gäller för personen (t.ex. både Spelare och Tränare, eller Tränare och Admin).</p>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                       {[
@@ -2620,7 +2515,7 @@ export default function ClubAdminDashboard({
                             }`}
                           >
                             <div className="flex items-center justify-between mb-1">
-                              <span className="font-extrabold text-xs sm:text-sm text-zinc-900 dark:text-white flex items-center gap-1.5">
+                              <span className="font-semibold text-xs sm:text-sm text-zinc-900 dark:text-white flex items-center gap-1.5">
                                 <span>{r.label}</span>
                               </span>
                               <div className={`w-5 h-5 rounded-md border flex items-center justify-center transition-all ${
@@ -2629,7 +2524,7 @@ export default function ClubAdminDashboard({
                                 {active && <Check size={12} strokeWidth={3} />}
                               </div>
                             </div>
-                            <p className="text-[10px] text-zinc-500 dark:text-zinc-400 font-medium leading-tight">{r.desc}</p>
+                            <p className="text-xs text-zinc-500 dark:text-zinc-400 font-medium leading-tight">{r.desc}</p>
                           </button>
                         );
                       })}
@@ -2639,7 +2534,7 @@ export default function ClubAdminDashboard({
                   {/* Team Assignments */}
                   {clubMetadata?.teams && clubMetadata.teams.length > 0 && (
                     <div className="border-t border-zinc-100 dark:border-zinc-800 pt-4">
-                      <label className="block text-xs font-black text-zinc-650 dark:text-zinc-400 uppercase tracking-wider mb-2">Koppla medlemmen till lag</label>
+                      <label className="block text-xs font-bold text-zinc-650 dark:text-zinc-400 mb-2">Koppla medlemmen till lag</label>
                       <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                         {clubMetadata.teams.map(t => {
                           const active = memberTeams.includes(t.id);
@@ -2666,14 +2561,14 @@ export default function ClubAdminDashboard({
                     <button
                       type="button"
                       onClick={() => setShowMemberForm(false)}
-                      className="w-full sm:w-auto px-5 py-3 rounded-xl border border-zinc-200 hover:bg-zinc-50 dark:border-zinc-800 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300 font-extrabold text-xs cursor-pointer text-center"
+                      className="w-full sm:w-auto px-5 py-3 rounded-xl border border-zinc-200 hover:bg-zinc-50 dark:border-zinc-800 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300 font-semibold text-xs cursor-pointer text-center"
                     >
                       Avbryt
                     </button>
                     <button
                       type="submit"
                       disabled={actionStatus.status === 'loading'}
-                      className="w-full sm:w-auto px-6 py-3 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white rounded-xl font-extrabold text-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-md shadow-indigo-100 dark:shadow-none"
+                      className="w-full sm:w-auto px-6 py-3 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white rounded-xl font-semibold text-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-md shadow-indigo-100 dark:shadow-none"
                     >
                       {actionStatus.status === 'loading' ? (
                         <>
@@ -2694,10 +2589,10 @@ export default function ClubAdminDashboard({
           )}
 
           {/* Members Table / List */}
-          <div className="bg-white dark:bg-zinc-900 rounded-3xl border border-zinc-150 dark:border-zinc-800 shadow-xl overflow-hidden">
+          <div className="bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-200/80 dark:border-zinc-800 shadow-[0_1px_2px_rgba(16,24,40,0.04)] overflow-hidden">
             <div className="p-4 sm:p-6 border-b border-zinc-100 dark:border-zinc-800 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
               <div>
-                <h2 className="text-base sm:text-lg font-black text-zinc-900 dark:text-white tracking-tight">
+                <h2 className="text-base sm:text-lg font-bold text-zinc-900 dark:text-white">
                   Medlemslista ({filteredMembers.length} av {members.length})
                 </h2>
                 <p className="text-[11px] text-zinc-500 font-medium">
@@ -2726,7 +2621,7 @@ export default function ClubAdminDashboard({
                         )}
                       </div>
                       <div className="min-w-0 flex-1">
-                        <h4 className="font-extrabold text-sm text-zinc-900 dark:text-white leading-tight truncate">{member.fullName}</h4>
+                        <h4 className="font-semibold text-sm text-zinc-900 dark:text-white leading-tight truncate">{member.fullName}</h4>
                         <div className="flex flex-wrap items-center gap-2 mt-1 text-[11px] text-zinc-500 dark:text-zinc-400 font-bold min-w-0">
                           <span className="flex items-center gap-1.5 min-w-0 max-w-full">
                             <Mail size={12} className="shrink-0" />
@@ -2739,18 +2634,18 @@ export default function ClubAdminDashboard({
                             </span>
                           )}
                           {member.personnummer && (
-                            <span className="flex items-center gap-1.5 shrink-0 bg-zinc-100 dark:bg-zinc-800 px-1.5 py-0.5 rounded text-[10px] font-semibold">
+                            <span className="flex items-center gap-1.5 shrink-0 bg-zinc-100 dark:bg-zinc-800 px-1.5 py-0.5 rounded text-xs font-semibold">
                               <Fingerprint size={10} />
                               <span>{member.personnummer}</span>
                             </span>
                           )}
                           {member.position && (
-                            <span className="flex items-center gap-1 shrink-0 bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300 px-1.5 py-0.5 rounded text-[10px] font-bold">
+                            <span className="flex items-center gap-1 shrink-0 bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300 px-1.5 py-0.5 rounded text-xs font-bold">
                               <span>{member.position}</span>
                             </span>
                           )}
                           {member.number && (
-                            <span className="flex items-center gap-1 shrink-0 bg-zinc-100 dark:bg-zinc-800 text-zinc-800 dark:text-zinc-200 px-1.5 py-0.5 rounded text-[10px] font-black">
+                            <span className="flex items-center gap-1 shrink-0 bg-zinc-100 dark:bg-zinc-800 text-zinc-800 dark:text-zinc-200 px-1.5 py-0.5 rounded text-xs font-bold">
                               <span>#{member.number}</span>
                             </span>
                           )}
@@ -2759,11 +2654,11 @@ export default function ClubAdminDashboard({
                         {/* Display member teams */}
                         {clubMetadata?.teams && member.teams && member.teams.length > 0 && (
                           <div className="flex flex-wrap gap-1 mt-2 min-w-0">
-                            <span className="text-[10px] text-zinc-400 font-bold uppercase tracking-wider mr-1 mt-0.5">Lag:</span>
+                            <span className="text-xs text-zinc-400 font-bold mr-1 mt-0.5">Lag:</span>
                             {member.teams.map(tid => {
                               const t = clubMetadata.teams.find(team => team.id === tid);
                               return t ? (
-                                <span key={tid} className="text-[10px] font-bold bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 px-2 py-0.5 rounded truncate max-w-[120px]">
+                                <span key={tid} className="text-xs font-bold bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 px-2 py-0.5 rounded truncate max-w-[120px]">
                                   {t.name}
                                 </span>
                               ) : null;
@@ -2779,7 +2674,7 @@ export default function ClubAdminDashboard({
                         {member.roles.map(r => (
                           <span
                             key={r}
-                            className={`text-[9px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider ${
+                            className={`text-[11px] font-bold px-2 py-0.5 rounded-full ${
                               r === 'admin'
                                 ? 'bg-purple-100 text-purple-700 dark:bg-purple-950/40 dark:text-purple-400'
                                 : r === 'coach'
@@ -2818,7 +2713,7 @@ export default function ClubAdminDashboard({
             ) : (
               <div className="text-center py-16 px-4 text-zinc-400 dark:text-zinc-500">
                 <Users size={40} className="mx-auto mb-3 opacity-60" />
-                <p className="text-sm font-extrabold text-zinc-700 dark:text-zinc-300">Inga medlemmar hittades</p>
+                <p className="text-sm font-semibold text-zinc-700 dark:text-zinc-300">Inga medlemmar hittades</p>
                 <p className="text-xs font-medium text-zinc-500 dark:text-zinc-400 mt-1 max-w-sm mx-auto">
                   Det finns inga medlemmar som matchar din valda sökning eller filtrering.
                 </p>
@@ -2830,7 +2725,7 @@ export default function ClubAdminDashboard({
                       setMemberTeamFilter('all');
                       setMemberSortBy('name-asc');
                     }}
-                    className="mt-4 inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-indigo-50 dark:bg-indigo-950/40 text-indigo-600 dark:text-indigo-400 font-extrabold text-xs hover:bg-indigo-100 dark:hover:bg-indigo-900/50 transition-all cursor-pointer"
+                    className="mt-4 inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-indigo-50 dark:bg-indigo-950/40 text-indigo-600 dark:text-indigo-400 font-semibold text-xs hover:bg-indigo-100 dark:hover:bg-indigo-900/50 transition-all cursor-pointer"
                   >
                     <RotateCcw size={13} />
                     <span>Rensa filter och visa alla</span>
@@ -2852,7 +2747,7 @@ export default function ClubAdminDashboard({
               >
                 <div className="flex items-center justify-between mb-5 border-b border-zinc-100 dark:border-zinc-800 pb-4">
                   <div>
-                    <h3 className="text-base sm:text-lg font-black text-zinc-900 dark:text-white flex items-center gap-2">
+                    <h3 className="text-base sm:text-lg font-bold text-zinc-900 dark:text-white flex items-center gap-2">
                       <Upload size={20} className="text-emerald-600 dark:text-emerald-400" />
                       <span>Importera spelare & ledare till {selectedClub.name}</span>
                     </h3>
@@ -2874,7 +2769,7 @@ export default function ClubAdminDashboard({
                     <button
                       type="button"
                       onClick={() => setImportSourceTab('file')}
-                      className={`flex-1 py-2.5 px-4 rounded-xl text-xs font-black transition-all flex items-center justify-center gap-2 cursor-pointer ${
+                      className={`flex-1 py-2.5 px-4 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 cursor-pointer ${
                         importSourceTab === 'file'
                           ? 'bg-white dark:bg-zinc-900 text-zinc-900 dark:text-white shadow-sm'
                           : 'text-zinc-500 hover:text-zinc-900 dark:hover:text-white'
@@ -2886,7 +2781,7 @@ export default function ClubAdminDashboard({
                     <button
                       type="button"
                       onClick={() => setImportSourceTab('paste')}
-                      className={`flex-1 py-2.5 px-4 rounded-xl text-xs font-black transition-all flex items-center justify-center gap-2 cursor-pointer ${
+                      className={`flex-1 py-2.5 px-4 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 cursor-pointer ${
                         importSourceTab === 'paste'
                           ? 'bg-white dark:bg-zinc-900 text-zinc-900 dark:text-white shadow-sm'
                           : 'text-zinc-500 hover:text-zinc-900 dark:hover:text-white'
@@ -2900,13 +2795,13 @@ export default function ClubAdminDashboard({
                   {/* Input Controls */}
                   {importSourceTab === 'file' ? (
                     <div>
-                      <label className="block text-xs font-black text-zinc-650 dark:text-zinc-400 uppercase tracking-wider mb-2">Välj Excel- (.xlsx, .xls) eller CSV-fil</label>
+                      <label className="block text-xs font-bold text-zinc-650 dark:text-zinc-400 mb-2">Välj Excel- (.xlsx, .xls) eller CSV-fil</label>
                       <div 
                         onClick={() => fileInputRef.current?.click()}
                         className="border-2 border-dashed border-zinc-200 dark:border-zinc-800 hover:border-emerald-500 dark:hover:border-emerald-500 bg-zinc-50 dark:bg-zinc-950 hover:bg-emerald-50/20 dark:hover:bg-emerald-950/10 p-8 rounded-2xl text-center cursor-pointer transition-all"
                       >
                         <FileSpreadsheet size={40} className="mx-auto mb-3 text-emerald-600 dark:text-emerald-400" />
-                        <p className="text-sm font-extrabold text-zinc-900 dark:text-white">Klicka för att bläddra eller släpp filen här</p>
+                        <p className="text-sm font-semibold text-zinc-900 dark:text-white">Klicka för att bläddra eller släpp filen här</p>
                         <p className="text-xs text-zinc-400 font-medium mt-1">Stödjer kolumner för Namn, E-post, Telefon, Personnummer, Roll/Position, Tröjnummer</p>
                         <input
                           ref={fileInputRef}
@@ -2919,7 +2814,7 @@ export default function ClubAdminDashboard({
                     </div>
                   ) : (
                     <div>
-                      <label className="block text-xs font-black text-zinc-650 dark:text-zinc-400 uppercase tracking-wider mb-2">Klistra in rader (från Excel / Google Sheets / Text)</label>
+                      <label className="block text-xs font-bold text-zinc-650 dark:text-zinc-400 mb-2">Klistra in rader (från Excel / Google Sheets / Text)</label>
                       <textarea
                         rows={5}
                         placeholder={"Kalle Nilsson\tkalle@exempel.se\t0701234567\tSpelare\nAnna Svensson\tanna@exempel.se\tTränare"}
@@ -2936,7 +2831,7 @@ export default function ClubAdminDashboard({
                   {/* Team Assignments */}
                   {clubMetadata?.teams && clubMetadata.teams.length > 0 && (
                     <div className="border-t border-zinc-100 dark:border-zinc-800 pt-4">
-                      <label className="block text-xs font-black text-zinc-650 dark:text-zinc-400 uppercase tracking-wider mb-2">
+                      <label className="block text-xs font-bold text-zinc-650 dark:text-zinc-400 mb-2">
                         Välj vilka lag de importerade medlemmarna ska kopplas till
                       </label>
                       <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
@@ -2969,7 +2864,7 @@ export default function ClubAdminDashboard({
 
                   {/* Role Detection Mode */}
                   <div className="border-t border-zinc-100 dark:border-zinc-800 pt-4">
-                    <label className="block text-xs font-black text-zinc-650 dark:text-zinc-400 uppercase tracking-wider mb-2">Rolltilldelning</label>
+                    <label className="block text-xs font-bold text-zinc-650 dark:text-zinc-400 mb-2">Rolltilldelning</label>
                     <div className="grid grid-cols-3 gap-2">
                       {[
                         { id: 'auto', label: 'Automatisk (Tränare/Spelare)' },
@@ -3002,7 +2897,7 @@ export default function ClubAdminDashboard({
 
                   {/* Duplicate Strategy Option */}
                   <div className="border-t border-zinc-100 dark:border-zinc-800 pt-4">
-                    <label className="block text-xs font-black text-zinc-650 dark:text-zinc-400 uppercase tracking-wider mb-2">
+                    <label className="block text-xs font-bold text-zinc-650 dark:text-zinc-400 mb-2">
                       Hantering av befintliga medlemmar (Dubbletter)
                     </label>
                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
@@ -3021,8 +2916,8 @@ export default function ClubAdminDashboard({
                               : 'bg-zinc-50 border-zinc-200 text-zinc-600 dark:bg-zinc-950 dark:border-zinc-800 dark:text-zinc-400'
                           }`}
                         >
-                          <div className="font-extrabold text-xs">{opt.label}</div>
-                          <div className="text-[10px] text-zinc-500 dark:text-zinc-400 mt-0.5">{opt.desc}</div>
+                          <div className="font-semibold text-xs">{opt.label}</div>
+                          <div className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">{opt.desc}</div>
                         </button>
                       ))}
                     </div>
@@ -3032,7 +2927,7 @@ export default function ClubAdminDashboard({
                   {parsedImportMembers.length > 0 && (
                     <div className="border-t border-zinc-100 dark:border-zinc-800 pt-4">
                       <div className="flex items-center justify-between mb-3">
-                        <span className="text-xs font-black text-zinc-900 dark:text-white uppercase tracking-wider">
+                        <span className="text-xs font-bold text-zinc-900 dark:text-white">
                           Förhandsgranskning ({parsedImportMembers.length} personer hittades)
                         </span>
                         <span className="text-xs text-emerald-600 dark:text-emerald-400 font-bold">
@@ -3054,9 +2949,9 @@ export default function ClubAdminDashboard({
                           <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
                             {parsedImportMembers.map((m, idx) => (
                               <tr key={idx} className="hover:bg-zinc-50 dark:hover:bg-zinc-950/50">
-                                <td className="p-3 font-extrabold text-zinc-900 dark:text-white">{m.fullName}</td>
+                                <td className="p-3 font-semibold text-zinc-900 dark:text-white">{m.fullName}</td>
                                 <td className="p-3">
-                                  <span className={`px-2 py-0.5 rounded-md text-[10px] font-black uppercase ${
+                                  <span className={`px-2 py-0.5 rounded-md text-xs font-bold uppercase ${
                                     m.role === 'coach'
                                       ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
                                       : 'bg-sky-100 text-sky-800 dark:bg-sky-950 dark:text-sky-300'
@@ -3088,7 +2983,7 @@ export default function ClubAdminDashboard({
                       type="button"
                       disabled={parsedImportMembers.length === 0 || importSelectedTeamIds.length === 0 || isProcessingImport}
                       onClick={handleExecuteImport}
-                      className="bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-black px-6 py-3 rounded-xl text-xs flex items-center gap-2 active:scale-95 transition-all cursor-pointer shadow-md shadow-emerald-100 dark:shadow-none"
+                      className="bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-bold px-6 py-3 rounded-xl text-xs flex items-center gap-2 active:scale-95 transition-all cursor-pointer shadow-md shadow-emerald-100 dark:shadow-none"
                     >
                       {isProcessingImport ? (
                         <RefreshCw size={16} className="animate-spin" />
@@ -3109,10 +3004,10 @@ export default function ClubAdminDashboard({
       {activeTab === 'user_accounts' && selectedClub && (
         <div className="space-y-6">
           {/* Header Card */}
-          <div className="bg-white dark:bg-zinc-900 rounded-3xl border border-zinc-150 dark:border-zinc-800 shadow-xl p-5 sm:p-6">
+          <div className="bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-200/80 dark:border-zinc-800 shadow-[0_1px_2px_rgba(16,24,40,0.04)] p-5 sm:p-6">
             <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
               <div>
-                <h2 className="text-xl font-black text-zinc-900 dark:text-white tracking-tight flex items-center gap-2.5">
+                <h2 className="text-xl font-bold text-zinc-900 dark:text-white flex items-center gap-2.5">
                   <Key size={22} className="text-indigo-600 dark:text-indigo-400" />
                   <span>Konto- & Lösenordshantering</span>
                 </h2>
@@ -3125,14 +3020,14 @@ export default function ClubAdminDashboard({
                 <button
                   disabled={isBulkGenerating}
                   onClick={() => handleBulkGenerateCredentials(userTeamFilter)}
-                  className="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white font-extrabold text-xs rounded-xl flex items-center gap-2 transition-all cursor-pointer shadow-md shadow-indigo-100 dark:shadow-none"
+                  className="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white font-semibold text-xs rounded-xl flex items-center gap-2 transition-all cursor-pointer shadow-md shadow-indigo-100 dark:shadow-none"
                 >
                   {isBulkGenerating ? <Loader2 size={15} className="animate-spin" /> : <Sparkles size={15} />}
                   <span>Generera användarnamn & lösenord för alla</span>
                 </button>
                 <button
                   onClick={() => exportAccountsToExcel(filteredMemberAccounts)}
-                  className="px-3.5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs rounded-xl flex items-center gap-2 transition-all cursor-pointer shadow-md shadow-emerald-100 dark:shadow-none"
+                  className="px-3.5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-xs rounded-xl flex items-center gap-2 transition-all cursor-pointer shadow-md shadow-emerald-100 dark:shadow-none"
                 >
                   <FileSpreadsheet size={15} />
                   <span>Excel (.xlsx)</span>
@@ -3158,17 +3053,17 @@ export default function ClubAdminDashboard({
           {/* Quick Stats Grid */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4">
             <div className="bg-white dark:bg-zinc-900 p-4 sm:p-5 rounded-2xl border border-zinc-150 dark:border-zinc-800 shadow-sm">
-              <span className="text-[10px] font-black uppercase tracking-wider text-zinc-400 block mb-1">Totalt Medlemmar</span>
+              <span className="text-xs font-bold text-zinc-400 block mb-1">Totalt Medlemmar</span>
               <div className="flex items-baseline justify-between">
-                <span className="text-2xl font-black text-zinc-900 dark:text-white">{allMemberAccounts.length}</span>
+                <span className="text-2xl font-bold text-zinc-900 dark:text-white">{allMemberAccounts.length}</span>
                 <Users size={18} className="text-zinc-400" />
               </div>
             </div>
 
             <div className="bg-white dark:bg-zinc-900 p-4 sm:p-5 rounded-2xl border border-zinc-150 dark:border-zinc-800 shadow-sm">
-              <span className="text-[10px] font-black uppercase tracking-wider text-indigo-600 dark:text-indigo-400 block mb-1">Med Användarnamn</span>
+              <span className="text-xs font-bold text-indigo-600 dark:text-indigo-400 block mb-1">Med Användarnamn</span>
               <div className="flex items-baseline justify-between">
-                <span className="text-2xl font-black text-indigo-600 dark:text-indigo-400">
+                <span className="text-2xl font-bold text-indigo-600 dark:text-indigo-400">
                   {allMemberAccounts.filter(a => !!a.username).length}
                 </span>
                 <Fingerprint size={18} className="text-indigo-400" />
@@ -3176,9 +3071,9 @@ export default function ClubAdminDashboard({
             </div>
 
             <div className="bg-white dark:bg-zinc-900 p-4 sm:p-5 rounded-2xl border border-zinc-150 dark:border-zinc-800 shadow-sm">
-              <span className="text-[10px] font-black uppercase tracking-wider text-green-600 dark:text-green-400 block mb-1">Inloggade Konton</span>
+              <span className="text-xs font-bold text-green-600 dark:text-green-400 block mb-1">Inloggade Konton</span>
               <div className="flex items-baseline justify-between">
-                <span className="text-2xl font-black text-green-600 dark:text-green-400">
+                <span className="text-2xl font-bold text-green-600 dark:text-green-400">
                   {allMemberAccounts.filter(a => a.hasLoggedIn).length}
                 </span>
                 <UserCheck size={18} className="text-green-500" />
@@ -3186,9 +3081,9 @@ export default function ClubAdminDashboard({
             </div>
 
             <div className="bg-white dark:bg-zinc-900 p-4 sm:p-5 rounded-2xl border border-zinc-150 dark:border-zinc-800 shadow-sm">
-              <span className="text-[10px] font-black uppercase tracking-wider text-amber-600 dark:text-amber-400 block mb-1">Tillfälliga Lösenord</span>
+              <span className="text-xs font-bold text-amber-600 dark:text-amber-400 block mb-1">Tillfälliga Lösenord</span>
               <div className="flex items-baseline justify-between">
-                <span className="text-2xl font-black text-amber-600 dark:text-amber-400">
+                <span className="text-2xl font-bold text-amber-600 dark:text-amber-400">
                   {allMemberAccounts.filter(a => !a.hasLoggedIn).length}
                 </span>
                 <Key size={18} className="text-amber-500" />
@@ -3197,7 +3092,7 @@ export default function ClubAdminDashboard({
           </div>
 
           {/* Controls Bar */}
-          <div className="bg-white dark:bg-zinc-900 rounded-3xl border border-zinc-150 dark:border-zinc-800 shadow-xl p-4 sm:p-5">
+          <div className="bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-200/80 dark:border-zinc-800 shadow-[0_1px_2px_rgba(16,24,40,0.04)] p-4 sm:p-5">
             <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
               <div className="flex flex-col sm:flex-row items-center gap-3 w-full sm:w-auto flex-1">
                 {/* Search */}
@@ -3235,9 +3130,9 @@ export default function ClubAdminDashboard({
           </div>
 
           {/* Accounts List (Responsive Cards) */}
-          <div className="bg-white dark:bg-zinc-900 rounded-3xl border border-zinc-150 dark:border-zinc-800 shadow-xl overflow-hidden">
+          <div className="bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-200/80 dark:border-zinc-800 shadow-[0_1px_2px_rgba(16,24,40,0.04)] overflow-hidden">
             <div className="p-4 sm:p-5 border-b border-zinc-100 dark:border-zinc-800 flex items-center justify-between">
-              <h3 className="font-black text-base text-zinc-900 dark:text-white flex items-center gap-2">
+              <h3 className="font-bold text-base text-zinc-900 dark:text-white flex items-center gap-2">
                 <Users size={18} className="text-zinc-500" />
                 <span>Kontoöversikt ({filteredMemberAccounts.length})</span>
               </h3>
@@ -3258,16 +3153,16 @@ export default function ClubAdminDashboard({
                     {/* Upper row: Member basic info & status badges */}
                     <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                       <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-2xl bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 font-black text-sm flex items-center justify-center shrink-0 border border-indigo-100 dark:border-indigo-900/40">
+                        <div className="w-10 h-10 rounded-2xl bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 font-bold text-sm flex items-center justify-center shrink-0 border border-indigo-100 dark:border-indigo-900/40">
                           {acc.name.charAt(0).toUpperCase()}
                         </div>
                         <div>
                           <div className="flex items-center gap-2 flex-wrap">
-                            <h4 className="font-extrabold text-sm sm:text-base text-zinc-900 dark:text-white">{acc.name}</h4>
-                            <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-md bg-indigo-50 dark:bg-indigo-950/80 text-indigo-600 dark:text-indigo-400 border border-indigo-100 dark:border-indigo-900/40">
+                            <h4 className="font-semibold text-sm sm:text-base text-zinc-900 dark:text-white">{acc.name}</h4>
+                            <span className="text-xs font-semibold px-2 py-0.5 rounded-md bg-indigo-50 dark:bg-indigo-950/80 text-indigo-600 dark:text-indigo-400 border border-indigo-100 dark:border-indigo-900/40">
                               {acc.role}
                             </span>
-                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400">
+                            <span className="text-xs font-bold px-2 py-0.5 rounded-md bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400">
                               {acc.teamName}
                             </span>
                           </div>
@@ -3276,17 +3171,17 @@ export default function ClubAdminDashboard({
                               <Mail size={12} className="text-zinc-400" />
                               {acc.email}
                             </span>
-                            <div className="flex items-center gap-1 text-[10px] font-mono text-zinc-400">
+                            <div className="flex items-center gap-1 text-xs font-mono text-zinc-400">
                               <span className="font-sans font-bold">UUID:</span>
                               <button
                                 onClick={() => copyToClipboard(acc.id, `uuid-${acc.id}`)}
-                                className="hover:text-indigo-600 transition-colors cursor-pointer text-[10px] underline decoration-dotted"
+                                className="hover:text-indigo-600 transition-colors cursor-pointer text-xs underline decoration-dotted"
                                 title="Klicka för att kopiera UUID"
                               >
                                 {acc.id.substring(0, 16)}...
                               </button>
                               {copiedUserKey === `uuid-${acc.id}` && (
-                                <span className="text-[9px] text-emerald-600 font-bold">Kopierat!</span>
+                                <span className="text-[11px] text-emerald-600 font-bold">Kopierat!</span>
                               )}
                             </div>
                           </div>
@@ -3296,12 +3191,12 @@ export default function ClubAdminDashboard({
                       {/* Login status badge */}
                       <div className="shrink-0">
                         {acc.hasLoggedIn ? (
-                          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-200 dark:border-emerald-800/60 text-emerald-700 dark:text-emerald-300 font-black text-xs">
+                          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-200 dark:border-emerald-800/60 text-emerald-700 dark:text-emerald-300 font-bold text-xs">
                             <CheckCircle2 size={13} />
                             <span>Inloggad konto</span>
                           </span>
                         ) : acc.tempPassword ? (
-                          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-50 dark:bg-amber-950/50 border border-amber-200 dark:border-amber-800/60 text-amber-700 dark:text-amber-300 font-black text-xs">
+                          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-50 dark:bg-amber-950/50 border border-amber-200 dark:border-amber-800/60 text-amber-700 dark:text-amber-300 font-bold text-xs">
                             <Key size={13} />
                             <span>Ej inloggad ännu</span>
                           </span>
@@ -3319,7 +3214,7 @@ export default function ClubAdminDashboard({
                       <div className="flex items-center justify-between gap-2">
                         <span className="text-xs font-bold text-zinc-500 dark:text-zinc-400">Användarnamn:</span>
                         {acc.username ? (
-                          <span className="text-xs font-mono font-black text-indigo-700 dark:text-indigo-300 bg-indigo-50 dark:bg-indigo-950/80 px-2.5 py-1 rounded-lg border border-indigo-100 dark:border-indigo-900/40">
+                          <span className="text-xs font-mono font-bold text-indigo-700 dark:text-indigo-300 bg-indigo-50 dark:bg-indigo-950/80 px-2.5 py-1 rounded-lg border border-indigo-100 dark:border-indigo-900/40">
                             @{acc.username}
                           </span>
                         ) : (
@@ -3342,7 +3237,7 @@ export default function ClubAdminDashboard({
                           </span>
                         ) : acc.tempPassword ? (
                           <div className="flex items-center gap-1.5 bg-amber-100 dark:bg-amber-950/80 border border-amber-200 dark:border-amber-800/60 px-2.5 py-1 rounded-lg">
-                            <span className="text-xs font-mono font-black text-amber-900 dark:text-amber-200">
+                            <span className="text-xs font-mono font-bold text-amber-900 dark:text-amber-200">
                               {acc.tempPassword}
                             </span>
                             <button
@@ -3363,7 +3258,7 @@ export default function ClubAdminDashboard({
                     <div className="flex items-center justify-end gap-2 pt-1">
                       <button
                         onClick={() => handleQuickResetPassword(acc)}
-                        className="px-3 py-2 bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/40 dark:hover:bg-amber-900/60 text-amber-800 dark:text-amber-200 font-extrabold text-xs rounded-xl flex items-center gap-1.5 transition-all cursor-pointer border border-amber-200 dark:border-amber-800/50"
+                        className="px-3 py-2 bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/40 dark:hover:bg-amber-900/60 text-amber-800 dark:text-amber-200 font-semibold text-xs rounded-xl flex items-center gap-1.5 transition-all cursor-pointer border border-amber-200 dark:border-amber-800/50"
                         title="Skapa ett nytt tillfälligt lösenord för användaren"
                       >
                         <Sparkles size={13} />
@@ -3378,7 +3273,7 @@ export default function ClubAdminDashboard({
                           setAccountPasswordInput('');
                           setUserAccountError('');
                         }}
-                        className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold text-xs rounded-xl flex items-center gap-1.5 transition-all cursor-pointer shadow-sm shadow-indigo-100 dark:shadow-none"
+                        className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-xs rounded-xl flex items-center gap-1.5 transition-all cursor-pointer shadow-sm shadow-indigo-100 dark:shadow-none"
                       >
                         <Edit3 size={13} />
                         <span>Ändra konto</span>
@@ -3409,7 +3304,7 @@ export default function ClubAdminDashboard({
           >
             <div className="flex items-center justify-between mb-6 border-b border-zinc-100 dark:border-zinc-800 pb-4">
               <div>
-                <h3 className="text-lg font-black text-zinc-900 dark:text-white flex items-center gap-2">
+                <h3 className="text-lg font-bold text-zinc-900 dark:text-white flex items-center gap-2">
                   <Key size={20} className="text-indigo-600 dark:text-indigo-400" />
                   <span>Hantera Inloggningsuppgifter</span>
                 </h3>
@@ -3434,7 +3329,7 @@ export default function ClubAdminDashboard({
 
               {/* UUID */}
               <div>
-                <label className="block text-xs font-black text-zinc-600 dark:text-zinc-400 uppercase tracking-wider mb-1">
+                <label className="block text-xs font-bold text-zinc-600 dark:text-zinc-400 mb-1">
                   UUID (Användar-ID)
                 </label>
                 <input
@@ -3447,7 +3342,7 @@ export default function ClubAdminDashboard({
 
               {/* Email */}
               <div>
-                <label className="block text-xs font-black text-zinc-600 dark:text-zinc-400 uppercase tracking-wider mb-1">
+                <label className="block text-xs font-bold text-zinc-600 dark:text-zinc-400 mb-1">
                   E-postadress *
                 </label>
                 <input
@@ -3461,7 +3356,7 @@ export default function ClubAdminDashboard({
 
               {/* Username */}
               <div>
-                <label className="block text-xs font-black text-zinc-600 dark:text-zinc-400 uppercase tracking-wider mb-1">
+                <label className="block text-xs font-bold text-zinc-600 dark:text-zinc-400 mb-1">
                   Användarnamn
                 </label>
                 <input
@@ -3476,7 +3371,7 @@ export default function ClubAdminDashboard({
               {/* Password */}
               <div>
                 <div className="flex items-center justify-between mb-1">
-                  <label className="block text-xs font-black text-zinc-600 dark:text-zinc-400 uppercase tracking-wider">
+                  <label className="block text-xs font-bold text-zinc-600 dark:text-zinc-400">
                     Nytt Lösenord / Byte
                   </label>
                   <button
@@ -3500,7 +3395,7 @@ export default function ClubAdminDashboard({
                   onChange={(e) => setAccountPasswordInput(e.target.value)}
                   className="w-full px-3.5 py-2.5 bg-white dark:bg-zinc-900 text-zinc-900 dark:text-white border border-zinc-200 dark:border-zinc-800 rounded-xl focus:outline-none focus:border-indigo-500 font-mono text-xs font-bold"
                 />
-                <p className="text-[10px] text-zinc-400 font-medium mt-1">
+                <p className="text-xs text-zinc-400 font-medium mt-1">
                   Om du byter lösenord kommer det tillfälliga lösenordet att visas i listan tills medlemmen loggat in på nytt.
                 </p>
               </div>
@@ -3510,14 +3405,14 @@ export default function ClubAdminDashboard({
                 <button
                   type="button"
                   onClick={() => setEditingUserAccount(null)}
-                  className="px-5 py-2.5 rounded-xl border border-zinc-200 dark:border-zinc-800 text-zinc-700 dark:text-zinc-300 font-extrabold text-xs hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-all cursor-pointer"
+                  className="px-5 py-2.5 rounded-xl border border-zinc-200 dark:border-zinc-800 text-zinc-700 dark:text-zinc-300 font-semibold text-xs hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-all cursor-pointer"
                 >
                   Avbryt
                 </button>
                 <button
                   type="submit"
                   disabled={isSavingUserAccount}
-                  className="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold text-xs rounded-xl flex items-center gap-2 transition-all cursor-pointer shadow-md shadow-indigo-100 dark:shadow-none disabled:opacity-50"
+                  className="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-xs rounded-xl flex items-center gap-2 transition-all cursor-pointer shadow-md shadow-indigo-100 dark:shadow-none disabled:opacity-50"
                 >
                   {isSavingUserAccount ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
                   <span>Spara ändringar</span>
@@ -3530,15 +3425,15 @@ export default function ClubAdminDashboard({
 
       {activeTab === 'root_admins' && isRootAdmin && (
         <div className="grid grid-cols-1 md:grid-cols-12 gap-6">
-          <div className="md:col-span-5 bg-white dark:bg-zinc-900 rounded-3xl border border-zinc-150 dark:border-zinc-800 shadow-xl p-6">
-            <h2 className="text-lg font-black text-zinc-900 dark:text-white tracking-tight mb-2">Skapa Root-Admin</h2>
+          <div className="md:col-span-5 bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-200/80 dark:border-zinc-800 shadow-[0_1px_2px_rgba(16,24,40,0.04)] p-6">
+            <h2 className="text-lg font-bold text-zinc-900 dark:text-white mb-2">Skapa Root-Admin</h2>
             <p className="text-xs text-zinc-500 mb-5 font-medium leading-relaxed">
               Lägg till en ny root-administratör. Dessa konton har full systemomfattande administrativ behörighet till samtliga föreningar, lag, och systeminställningar.
             </p>
             
             <form onSubmit={handleAddRootAdmin} className="space-y-4">
               <div>
-                <label className="block text-xs font-black text-zinc-400 uppercase tracking-wider mb-2">E-postadress</label>
+                <label className="block text-xs font-bold text-zinc-400 mb-2">E-postadress</label>
                 <div className="relative">
                   <span className="absolute inset-y-0 left-0 pl-3.5 flex items-center text-zinc-400">
                     <Mail size={16} />
@@ -3563,7 +3458,7 @@ export default function ClubAdminDashboard({
               <button
                 type="submit"
                 disabled={rootAdminActionLoading}
-                className="w-full inline-flex items-center justify-center gap-2 bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white font-extrabold px-5 py-3 rounded-xl transition-all active:scale-95 cursor-pointer text-xs uppercase tracking-wider"
+                className="w-full inline-flex items-center justify-center gap-2 bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white font-semibold px-5 py-3 rounded-xl transition-all active:scale-95 cursor-pointer text-xs"
               >
                 <UserPlus size={15} />
                 <span>{rootAdminActionLoading ? 'Lägger till...' : 'Skapa Root Admin'}</span>
@@ -3571,8 +3466,8 @@ export default function ClubAdminDashboard({
             </form>
           </div>
 
-          <div className="md:col-span-7 bg-white dark:bg-zinc-900 rounded-3xl border border-zinc-150 dark:border-zinc-800 shadow-xl p-6">
-            <h2 className="text-lg font-black text-zinc-900 dark:text-white tracking-tight mb-5">Systemets Root-Administratörer ({rootAdminsList.length})</h2>
+          <div className="md:col-span-7 bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-200/80 dark:border-zinc-800 shadow-[0_1px_2px_rgba(16,24,40,0.04)] p-6">
+            <h2 className="text-lg font-bold text-zinc-900 dark:text-white mb-5">Systemets Root-Administratörer ({rootAdminsList.length})</h2>
             
             <div className="space-y-3 max-h-[500px] overflow-y-auto pr-1">
               {rootAdminsList.map((adm) => {
@@ -3590,12 +3485,12 @@ export default function ClubAdminDashboard({
                         <div className="flex items-center gap-1.5 flex-wrap">
                           <span className="text-sm font-bold text-zinc-850 dark:text-zinc-100">{adm.email}</span>
                           {isHardcoded && (
-                            <span className="text-[8px] font-black uppercase tracking-widest bg-amber-50 dark:bg-amber-950/40 text-amber-600 dark:text-amber-400 px-1.5 py-0.5 rounded border border-amber-150 dark:border-amber-900/30">
+                            <span className="text-[8px] font-bold bg-amber-50 dark:bg-amber-950/40 text-amber-600 dark:text-amber-400 px-1.5 py-0.5 rounded border border-amber-150 dark:border-amber-900/30">
                               Systemägare
                             </span>
                           )}
                         </div>
-                        <span className="text-[10px] text-zinc-400 font-semibold block mt-0.5">
+                        <span className="text-xs text-zinc-400 font-semibold block mt-0.5">
                           Skapad: {new Date(adm.assignedAt || Date.now()).toLocaleDateString('sv-SE', { year: 'numeric', month: 'long', day: 'numeric' })}
                         </span>
                       </div>
@@ -3620,14 +3515,14 @@ export default function ClubAdminDashboard({
       {activeTab === 'database_env' && isRootAdmin && (
         <div className="space-y-8">
           {/* Status Bar / Header */}
-          <div className="bg-white dark:bg-zinc-900 rounded-3xl border border-zinc-150 dark:border-zinc-800 shadow-xl p-6 sm:p-8">
+          <div className="bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-200/80 dark:border-zinc-800 shadow-[0_1px_2px_rgba(16,24,40,0.04)] p-6 sm:p-8">
             <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-6 pb-6 border-b border-zinc-100 dark:border-zinc-800">
               <div className="flex items-center gap-4">
                 <div className="p-3.5 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-400 rounded-2xl">
                   <Database size={28} />
                 </div>
                 <div>
-                  <h2 className="text-xl font-black text-zinc-900 dark:text-white tracking-tight">Databas & säkerhetskopior</h2>
+                  <h2 className="text-xl font-bold text-zinc-900 dark:text-white">Databas & säkerhetskopior</h2>
                   <p className="text-xs text-zinc-500 font-medium mt-1">
                     Status för appens databas samt export och import av säkerhetskopior.
                   </p>
@@ -3663,11 +3558,11 @@ export default function ClubAdminDashboard({
               <div className="p-4 bg-zinc-50 dark:bg-zinc-950 rounded-2xl border border-zinc-150 dark:border-zinc-850">
                 <div className="flex items-center gap-2 text-zinc-400 mb-1">
                   <HardDrive size={14} />
-                  <span className="text-[10px] uppercase tracking-wider font-black">
+                  <span className="text-xs font-bold">
                     Databas (SQLite)
                   </span>
                 </div>
-                <div className="text-sm font-black text-zinc-900 dark:text-white">
+                <div className="text-sm font-bold text-zinc-900 dark:text-white">
                   {dbConfig.dbSize ? `${(dbConfig.dbSize / 1024).toFixed(1)} KB` : '0 KB'}
                 </div>
               </div>
@@ -3675,9 +3570,9 @@ export default function ClubAdminDashboard({
               <div className="p-4 bg-zinc-50 dark:bg-zinc-950 rounded-2xl border border-zinc-150 dark:border-zinc-850">
                 <div className="flex items-center gap-2 text-zinc-400 mb-1">
                   <Globe size={14} />
-                  <span className="text-[10px] uppercase tracking-wider font-black">Servermiljö</span>
+                  <span className="text-xs font-bold">Servermiljö</span>
                 </div>
-                <div className="text-sm font-black text-zinc-900 dark:text-white">
+                <div className="text-sm font-bold text-zinc-900 dark:text-white">
                   {dbConfig.isProduction ? 'Produktion / Webbhotell' : 'Utveckling / Lokal'}
                 </div>
               </div>
@@ -3687,8 +3582,8 @@ export default function ClubAdminDashboard({
           {/* Backup & Import */}
           <div className="grid grid-cols-1 gap-6">
             {/* Export & Import Backup */}
-            <div className="bg-white dark:bg-zinc-900 rounded-3xl border border-zinc-150 dark:border-zinc-800 shadow-xl p-6 sm:p-8">
-              <h3 className="text-base font-black text-zinc-900 dark:text-white mb-1 flex items-center gap-2">
+            <div className="bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-200/80 dark:border-zinc-800 shadow-[0_1px_2px_rgba(16,24,40,0.04)] p-6 sm:p-8">
+              <h3 className="text-base font-bold text-zinc-900 dark:text-white mb-1 flex items-center gap-2">
                 <Download size={18} className="text-indigo-500" />
                 <span>Flytta Data mellan Miljöer</span>
               </h3>
@@ -3704,7 +3599,7 @@ export default function ClubAdminDashboard({
                   </div>
                   <button
                     onClick={handleExportBackup}
-                    className="inline-flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold px-4 py-2.5 rounded-xl text-xs transition-all cursor-pointer shrink-0"
+                    className="inline-flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold px-4 py-2.5 rounded-xl text-xs transition-all cursor-pointer shrink-0"
                   >
                     <Download size={14} />
                     <span>Ladda ner JSON</span>
@@ -3737,7 +3632,7 @@ export default function ClubAdminDashboard({
                       <button
                         type="submit"
                         disabled={isImporting}
-                        className="w-full inline-flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold px-4 py-2.5 rounded-xl text-xs transition-all cursor-pointer disabled:opacity-50"
+                        className="w-full inline-flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold px-4 py-2.5 rounded-xl text-xs transition-all cursor-pointer disabled:opacity-50"
                       >
                         <Upload size={14} />
                         <span>{isImporting ? 'Importerar data...' : 'Verkställ Import'}</span>
@@ -3755,10 +3650,10 @@ export default function ClubAdminDashboard({
       {activeTab === 'calendar_sync' && (
         <div className="space-y-6">
           {/* Central Kalendersynkronisering för Laget */}
-          <div className="bg-white dark:bg-zinc-900 rounded-3xl border border-zinc-150 dark:border-zinc-800 shadow-xl p-6 sm:p-8">
+          <div className="bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-200/80 dark:border-zinc-800 shadow-[0_1px_2px_rgba(16,24,40,0.04)] p-6 sm:p-8">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6 pb-4 border-b border-zinc-100 dark:border-zinc-800">
               <div>
-                <h2 className="text-lg font-black text-zinc-900 dark:text-white tracking-tight flex items-center gap-2">
+                <h2 className="text-lg font-bold text-zinc-900 dark:text-white flex items-center gap-2">
                   <Calendar className="text-indigo-600 dark:text-indigo-400" size={20} />
                   <span>Lagets Kalendersynkronisering (Svenskalag / Laget.se / SportAdmin)</span>
                 </h2>
@@ -3789,7 +3684,7 @@ export default function ClubAdminDashboard({
 
             <div className="space-y-4">
               <div>
-                <label className="block text-xs font-black text-zinc-500 dark:text-zinc-400 uppercase tracking-wider mb-2">
+                <label className="block text-xs font-bold text-zinc-500 dark:text-zinc-400 mb-2">
                   Lagets Webcal / ICS Kalenderlänk
                 </label>
                 <div className="flex flex-col sm:flex-row gap-2">
@@ -3867,7 +3762,7 @@ export default function ClubAdminDashboard({
                   type="button"
                   onClick={handleSyncTeamCalendar}
                   disabled={isSyncingCalendar || !tempIcsUrl.trim()}
-                  className="w-full sm:w-auto inline-flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white font-black px-6 py-3 rounded-xl text-xs transition-all cursor-pointer shadow-md shadow-indigo-100 dark:shadow-none active:scale-95 uppercase tracking-wider shrink-0"
+                  className="w-full sm:w-auto inline-flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white font-bold px-6 py-3 rounded-xl text-xs transition-all cursor-pointer shadow-md shadow-indigo-100 dark:shadow-none active:scale-95 shrink-0"
                 >
                   <RefreshCw size={16} className={isSyncingCalendar ? 'animate-spin' : ''} />
                   <span>{isSyncingCalendar ? 'Hämtar kalender...' : 'Synka Lagets Kalender Nu'}</span>
@@ -3876,10 +3771,10 @@ export default function ClubAdminDashboard({
             </div>
           </div>
 
-          <div className="bg-white dark:bg-zinc-900 rounded-3xl border border-zinc-150 dark:border-zinc-800 shadow-xl p-6 sm:p-8">
+          <div className="bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-200/80 dark:border-zinc-800 shadow-[0_1px_2px_rgba(16,24,40,0.04)] p-6 sm:p-8">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6 pb-4 border-b border-zinc-100 dark:border-zinc-800">
               <div>
-                <h2 className="text-lg font-black text-zinc-900 dark:text-white tracking-tight flex items-center gap-2">
+                <h2 className="text-lg font-bold text-zinc-900 dark:text-white flex items-center gap-2">
                   <Globe className="text-indigo-600 dark:text-indigo-400" size={20} />
                   <span>Externa Webb- & Adminlänkar</span>
                 </h2>
@@ -3897,7 +3792,7 @@ export default function ClubAdminDashboard({
 
             <div className="space-y-4">
               <div>
-                <label className="block text-xs font-black text-zinc-500 dark:text-zinc-400 uppercase tracking-wider mb-2">
+                <label className="block text-xs font-bold text-zinc-500 dark:text-zinc-400 mb-2">
                   Lagsida (Laget.se / Svenskalag.se)
                 </label>
                 <div className="flex gap-2">
@@ -3926,7 +3821,7 @@ export default function ClubAdminDashboard({
               </div>
 
               <div>
-                <label className="block text-xs font-black text-zinc-500 dark:text-zinc-400 uppercase tracking-wider mb-2">
+                <label className="block text-xs font-bold text-zinc-500 dark:text-zinc-400 mb-2">
                   Adminsida (Svenskalag / Laget Admin)
                 </label>
                 <div className="flex gap-2">
@@ -3955,7 +3850,7 @@ export default function ClubAdminDashboard({
               </div>
 
               <div>
-                <label className="block text-xs font-black text-zinc-500 dark:text-zinc-400 uppercase tracking-wider mb-2">
+                <label className="block text-xs font-bold text-zinc-500 dark:text-zinc-400 mb-2">
                   Serie & Tabell (MinFotboll / Fogis)
                 </label>
                 <div className="flex gap-2">
@@ -3993,7 +3888,7 @@ export default function ClubAdminDashboard({
                     setCalSyncSaved(true);
                     setTimeout(() => setCalSyncSaved(false), 3000);
                   }}
-                  className="inline-flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white font-black px-6 py-3 rounded-xl text-xs transition-all cursor-pointer shadow-md shadow-indigo-100 dark:shadow-none active:scale-95 uppercase tracking-wider"
+                  className="inline-flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold px-6 py-3 rounded-xl text-xs transition-all cursor-pointer shadow-md shadow-indigo-100 dark:shadow-none active:scale-95"
                 >
                   <Save size={16} />
                   <span>Spara Externa Länkar</span>
@@ -4003,8 +3898,8 @@ export default function ClubAdminDashboard({
           </div>
 
           {/* Kalendersynk / iCal integration */}
-          <div className="bg-white dark:bg-zinc-900 rounded-3xl border border-zinc-150 dark:border-zinc-800 shadow-xl p-6 sm:p-8">
-            <h2 className="text-lg font-black text-zinc-900 dark:text-white tracking-tight flex items-center gap-2 mb-2">
+          <div className="bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-200/80 dark:border-zinc-800 shadow-[0_1px_2px_rgba(16,24,40,0.04)] p-6 sm:p-8">
+            <h2 className="text-lg font-bold text-zinc-900 dark:text-white flex items-center gap-2 mb-2">
               <Calendar className="text-indigo-600 dark:text-indigo-400" size={20} />
               <span>Kalendersynkronisering (iCal / Webcal)</span>
             </h2>
@@ -4024,11 +3919,11 @@ export default function ClubAdminDashboard({
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                     <div>
                       <div className="flex items-center gap-2">
-                        <span className="text-[10px] font-black uppercase text-indigo-500 tracking-wider">
+                        <span className="text-xs font-bold uppercase text-indigo-500 tracking-wider">
                           Unik iCal Prenumerationslänk
                         </span>
                         {selectedClub && (
-                          <span className="px-2 py-0.5 rounded-md bg-indigo-100 dark:bg-indigo-900/50 text-indigo-700 dark:text-indigo-300 text-[10px] font-extrabold">
+                          <span className="px-2 py-0.5 rounded-md bg-indigo-100 dark:bg-indigo-900/50 text-indigo-700 dark:text-indigo-300 text-xs font-semibold">
                             {selectedClub.name}
                           </span>
                         )}

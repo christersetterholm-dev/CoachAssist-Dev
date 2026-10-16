@@ -4198,7 +4198,7 @@ export default function App() {
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -20 }}
-              className="w-full max-w-6xl mx-auto px-1.5 sm:px-6 py-2 sm:py-6 min-w-0 overflow-x-hidden"
+              className="w-full max-w-6xl mx-auto px-4 sm:px-6 py-4 sm:py-6 min-w-0 shrink-0"
             >
               <ClubAdminDashboard
                 userId={user.uid}

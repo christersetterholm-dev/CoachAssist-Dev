@@ -140,7 +140,8 @@ npm run set-password -- e@post.se            # lokalt konto/lösenord
 - Dela upp `server.ts`, `App.tsx`, `LineupBuilder.tsx` gradvis; appen laddas som ett stort JS-paket (3,4 MB).
 - Gränssnittet, kvar att göra i nya stilen: Uppställning/taktik (iPad: plan + sidopanel),
   Truppen, Passplanering och kallelser (SessionEditor/SessionRsvpView), Tävlingsmoment-listan
-  och GameSetup, Administration. (Profil och Poängliga är klara.)
+  och GameSetup. (Profil, Poängliga och Administrationens ram/flikar är klara; flikarnas
+  innehåll i Administration har bara fått lugnare typografi.)
 - E-post via SMTP (inbjudningar, glömt lösenord) om det behövs senare.
 - iOS-app och notiser (pausat, utrett okt 2026): steg 1 webbnotiser (Web Push/PWA, egen server,
   ingen Firebase); steg 2 Capacitor-skal runt befintliga appen för riktiga notiser via APNs och
