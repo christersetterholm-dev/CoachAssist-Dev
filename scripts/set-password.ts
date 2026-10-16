@@ -2,8 +2,10 @@
  * Skapar ett konto eller sätter ett nytt lösenord direkt i databasen.
  * Kräver åtkomst till serverns filer, så det kan bara köras av den som äger servern.
  *
- * Användning:
- *   npx tsx scripts/set-password.ts din@epost.se
+ * Användning lokalt:
+ *   npm run set-password -- din@epost.se
+ * På servern (via SSH, se server-set-password.sh):
+ *   node dist/set-password.cjs din@epost.se
  *
  * Databasen väljs som i server.ts: DATABASE_PATH, annars DATA_DIR/coachassist.db,
  * annars coachassist.db i projektmappen.
@@ -84,7 +86,9 @@ function askHidden(question: string): Promise<string> {
     process.exit(1);
   }
 
-  const db = openDatabase({ dbPath, dataDir, require: createRequire(import.meta.url) });
+  // I det byggda skriptet (CommonJS) finns require; i utvecklingsläge (ESM) skapas den.
+  const req = typeof require !== 'undefined' ? require : createRequire(import.meta.url);
+  const db = openDatabase({ dbPath, dataDir, require: req });
   const hash = await bcrypt.hash(pw1, 10);
   const existing: any = db.prepare('SELECT id FROM users WHERE LOWER(email) = ?').get(email);
 

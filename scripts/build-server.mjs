@@ -16,3 +16,17 @@ await build({
   logOverride: { 'empty-import-meta': 'silent' },
 });
 console.log('✓ dist/server.cjs byggd');
+
+// Verktyg för att sätta lösenord direkt i databasen på servern
+await build({
+  entryPoints: ['scripts/set-password.ts'],
+  outfile: 'dist/set-password.cjs',
+  bundle: true,
+  platform: 'node',
+  format: 'cjs',
+  target: 'node22',
+  packages: 'external',
+  logLevel: 'warning',
+  logOverride: { 'empty-import-meta': 'silent' },
+});
+console.log('✓ dist/set-password.cjs byggd');
