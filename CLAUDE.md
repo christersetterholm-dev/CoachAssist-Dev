@@ -92,7 +92,8 @@ npm run set-password -- e@post.se            # lokalt konto/lösenord
   `npm run dev` igång på Macen. Använd `http://127.0.0.1:3000` för en andra, separat
   inloggning (t.ex. som spelare). Lösenord får Claude inte skriva in – be Christer logga in.
 - Christer måste själv starta om `npm run dev` i Terminal om den inte redan går i watch-läge.
-- `git push` måste Christer köra själv från Macen.
+- Christer committar och pushar själv med GitHub Desktop. Ge inga git-kommandon för commit/push;
+  föreslå i stället ett commit-meddelande (på svenska) som han kan klistra in.
 
 ### Servern (webbhotell med cPanel)
 - `setterho@setterholm.se`, SSH-nyckel `~/.ssh/coachassist`, appmapp `~/coachassist.setterholm.se`.
