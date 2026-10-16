@@ -30,18 +30,42 @@ if (!fs.existsSync(dbPath)) {
 
 function askHidden(question: string): Promise<string> {
   return new Promise((resolve) => {
-    const rl = readline.createInterface({ input: process.stdin, output: process.stdout, terminal: true });
-    const out = process.stdout as any;
-    const write = out.write.bind(out);
-    let muted = false;
-    out.write = (chunk: any, ...rest: any[]) => (muted ? true : write(chunk, ...rest));
-    rl.question(question, (answer) => {
-      out.write = write;
-      write('\n');
-      rl.close();
-      resolve(answer);
-    });
-    muted = true;
+    const stdin = process.stdin;
+    process.stdout.write(question);
+    let input = '';
+
+    // Utan terminal (t.ex. inskickad text): läs en rad som den är.
+    if (!stdin.isTTY) {
+      const rl = readline.createInterface({ input: stdin });
+      rl.once('line', (line) => { rl.close(); process.stdout.write('\n'); resolve(line); });
+      return;
+    }
+
+    stdin.setRawMode(true);
+    stdin.resume();
+    stdin.setEncoding('utf8');
+
+    const onData = (chunk: string) => {
+      for (const ch of chunk) {
+        if (ch === '\r' || ch === '\n') {
+          stdin.setRawMode(false);
+          stdin.pause();
+          stdin.removeListener('data', onData);
+          process.stdout.write('\n');
+          resolve(input);
+          return;
+        } else if (ch === '\u0003') { // Ctrl+C
+          stdin.setRawMode(false);
+          process.stdout.write('\n');
+          process.exit(1);
+        } else if (ch === '\u007f' || ch === '\b') { // Backsteg
+          input = input.slice(0, -1);
+        } else if (ch >= ' ') {
+          input += ch;
+        }
+      }
+    };
+    stdin.on('data', onData);
   });
 }
 
