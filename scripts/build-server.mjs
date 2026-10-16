@@ -8,7 +8,7 @@ await build({
   bundle: true,
   platform: 'node',
   format: 'cjs',
-  target: 'node20',
+  target: 'node22',
   packages: 'external',
   sourcemap: true,
   logLevel: 'warning',

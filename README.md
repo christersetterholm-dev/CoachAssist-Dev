@@ -5,7 +5,7 @@ trupp och medlemsregister, kalender, laguppställningar och taktiktavla.
 
 ## Kom igång lokalt
 
-Kräver Node.js 20 eller senare.
+Kräver Node.js 22.13 eller senare (för inbyggd SQLite).
 
 ```bash
 npm install          # en gång, och när package.json ändrats

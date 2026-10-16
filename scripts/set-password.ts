@@ -8,7 +8,8 @@
  * Databasen väljs som i server.ts: DATABASE_PATH, annars DATA_DIR/coachassist.db,
  * annars coachassist.db i projektmappen.
  */
-import Database from 'better-sqlite3';
+import { createRequire } from 'module';
+import { openDatabase } from '../server/database.ts';
 import bcrypt from 'bcryptjs';
 import crypto from 'crypto';
 import path from 'path';
@@ -83,7 +84,7 @@ function askHidden(question: string): Promise<string> {
     process.exit(1);
   }
 
-  const db = new Database(dbPath);
+  const db = openDatabase({ dbPath, dataDir, require: createRequire(import.meta.url) });
   const hash = await bcrypt.hash(pw1, 10);
   const existing: any = db.prepare('SELECT id FROM users WHERE LOWER(email) = ?').get(email);
 

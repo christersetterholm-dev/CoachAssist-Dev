@@ -15,8 +15,9 @@ export const ROOT_PASSWORD = 'RootLosen123';
 let ipCounter = 1;
 const nextIp = () => `10.99.${Math.floor(ipCounter / 250)}.${(ipCounter++ % 250) + 1}`;
 
-export async function startServer() {
+export async function startServer({ seedJson } = {}) {
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'coachassist-test-'));
+  if (seedJson) fs.writeFileSync(path.join(dataDir, 'coachassist_db.json'), JSON.stringify(seedJson));
   const port = 4100 + Math.floor(Math.random() * 800);
   const env = {
     ...process.env,

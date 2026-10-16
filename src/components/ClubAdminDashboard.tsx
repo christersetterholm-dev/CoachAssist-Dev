@@ -224,7 +224,7 @@ export default function ClubAdminDashboard({
   const [dbConfig, setDbConfig] = useState<{
     dbPath?: string;
     dbSize?: number;
-    dbEngine?: 'sqlite' | 'json_store';
+    dbEngine?: string;
     isProduction?: boolean;
   }>({});
   const [dbConfigLoading, setDbConfigLoading] = useState(false);
@@ -3673,7 +3673,7 @@ export default function ClubAdminDashboard({
                 <div className="flex items-center gap-2 text-zinc-400 mb-1">
                   <HardDrive size={14} />
                   <span className="text-[10px] uppercase tracking-wider font-black">
-                    {dbConfig.dbEngine === 'json_store' ? 'Lokal Databas (JSON)' : 'Lokal Databas (SQLite)'}
+                    Databas (SQLite)
                   </span>
                 </div>
                 <div className="text-sm font-black text-zinc-900 dark:text-white">
