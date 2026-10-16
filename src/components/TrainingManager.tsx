@@ -8,6 +8,7 @@ import GameList from './GameList';
 import TeamOverviewModal from './TeamOverviewModal';
 import MobileCalendarView from './MobileCalendarView';
 import ExerciseBankView from './ExerciseBankView';
+import { SegmentedTabs } from './ui';
 
 interface TrainingManagerProps {
   exercises: Exercise[];
@@ -943,52 +944,18 @@ export default function TrainingManager({
         )}
       </AnimatePresence>
  
-      {/* Tab Switcher */}
-      <div className="flex p-0.5 bg-zinc-150/70 dark:bg-zinc-900 rounded-none sm:rounded-xl mb-3.5 sm:mb-6 mx-0 sm:mx-0 overflow-x-auto scrollbar-none whitespace-nowrap border-b border-t-0 border-x-0 sm:border border-zinc-200/50 dark:border-zinc-800/70">
-        <button
-          onClick={() => onTabChange('calendar_view')}
-          className={`flex-1 min-w-[70px] flex items-center justify-center gap-1 py-1.5 sm:py-2.5 px-1 rounded-none sm:rounded-lg text-[10px] sm:text-xs font-bold transition-all shrink-0 ${
-            activeTab === 'calendar_view'
-              ? 'bg-white dark:bg-zinc-805 text-indigo-650 dark:text-indigo-400 shadow-sm font-black'
-              : 'text-zinc-500 dark:text-zinc-550 hover:text-zinc-700 dark:hover:text-zinc-350'
-          }`}
-        >
-          <CalendarDays size={13} className="hidden sm:block" />
-          <span>Aktiviteter</span>
-        </button>
-        <button
-          onClick={() => onTabChange('completed')}
-          className={`flex-1 min-w-[70px] flex items-center justify-center gap-1 py-1.5 sm:py-2.5 px-1 rounded-none sm:rounded-lg text-[10px] sm:text-xs font-bold transition-all shrink-0 ${
-            activeTab === 'completed'
-              ? 'bg-white dark:bg-zinc-805 text-indigo-650 dark:text-indigo-400 shadow-sm font-black'
-              : 'text-zinc-500 dark:text-zinc-550 hover:text-zinc-700 dark:hover:text-zinc-350'
-          }`}
-        >
-          <History size={13} className="hidden sm:block" />
-          <span>Genomförda</span>
-        </button>
-        <button
-          onClick={() => onTabChange('exercises')}
-          className={`flex-1 min-w-[70px] flex items-center justify-center gap-1 py-1.5 sm:py-2.5 px-1 rounded-none sm:rounded-lg text-[10px] sm:text-xs font-bold transition-all shrink-0 ${
-            activeTab === 'exercises'
-              ? 'bg-white dark:bg-zinc-805 text-indigo-650 dark:text-indigo-400 shadow-sm font-black'
-              : 'text-zinc-500 dark:text-zinc-550 hover:text-zinc-700 dark:hover:text-zinc-350'
-          }`}
-        >
-          <Trophy size={13} className="hidden sm:block" />
-          <span>Tävlingar</span>
-        </button>
-        <button
-          onClick={() => onTabChange('bank')}
-          className={`flex-1 min-w-[70px] flex items-center justify-center gap-1 py-1.5 sm:py-2.5 px-1 rounded-none sm:rounded-lg text-[10px] sm:text-xs font-bold transition-all shrink-0 ${
-            activeTab === 'bank'
-              ? 'bg-white dark:bg-zinc-805 text-indigo-650 dark:text-indigo-400 shadow-sm font-black'
-              : 'text-zinc-500 dark:text-zinc-550 hover:text-zinc-700 dark:hover:text-zinc-350'
-          }`}
-        >
-          <Library size={13} className="hidden sm:block" />
-          <span>Övningsbank</span>
-        </button>
+      {/* Flikar */}
+      <div className="px-4 sm:px-0 pt-3 sm:pt-0 mb-4">
+        <SegmentedTabs
+          value={activeTab}
+          onChange={onTabChange}
+          tabs={[
+            { id: 'calendar_view', label: 'Aktiviteter', icon: <CalendarDays size={15} className="hidden sm:block" /> },
+            { id: 'completed', label: 'Genomförda', icon: <History size={15} className="hidden sm:block" /> },
+            { id: 'exercises', label: 'Tävlingar', icon: <Trophy size={15} className="hidden sm:block" /> },
+            ...(isCoachOrAdmin ? [{ id: 'bank' as const, label: 'Övningar', icon: <Library size={15} className="hidden sm:block" /> }] : []),
+          ]}
+        />
       </div>
 
       {activeTab === 'exercises' ? (

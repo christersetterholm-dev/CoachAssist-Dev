@@ -34,6 +34,10 @@ Läs den här filen först i varje nytt samtal. Håll den uppdaterad när något
 | Inbjudningslänkar | `server/invites.ts` |
 | Startfil på webbhotellet (Passenger) | `app.cjs` → `dist/server.cjs` |
 | React-appen | `src/` (`App.tsx` och `LineupBuilder.tsx` är mycket stora) |
+| Appens skal (sidomeny, bottenmeny, toppfält, kontomeny) | `src/components/shell/AppShell.tsx` |
+| Gemensamma byggklossar (Button, IconButton, Card, SegmentedTabs, Badge, EmptyState, Avatar, Sheet, MenuItem) | `src/components/ui/index.tsx` |
+| Startsidan Översikt (nästa aktivitet, svar på kallelse, snabbval, poängtopp) | `src/components/HomeView.tsx` |
+| Välkomstsida för utloggade | `src/components/WelcomeScreen.tsx` |
 | Tester | `tests/*.test.mjs` (node:test, startar servern mot tom temp-databas) |
 
 ### Dokumentlagringen (`/api/docs?path=...`)
@@ -105,6 +109,20 @@ npm run set-password -- e@post.se            # lokalt konto/lösenord
 - Ikonfilerna i approten skrivs av appens PWA-ikonfunktion och ska vara kvar.
 - `deploy.sh` vägrar köra om servern har Node äldre än 22.13.
 
+## Gränssnittet (ombyggt okt 2026, gren `ux-ombyggnad`)
+
+- Navigering: bottenmeny på mobil (Översikt, Kalender, Truppen, Taktik, Poäng), sidomeny från
+  768 px bredd (iPad/dator). Lagsida, Administration, profil, tema, "Hämta senaste" och
+  Logga ut ligger i kontomenyn (avataren) och i sidomenyn.
+- Startvy är `home` (Översikt). Poängräkning (`exercise`) och skapa tävlingsmoment (`setup`)
+  är "fokusvyer" utan meny, med eget sidhuvud och tillbakaknapp (`handleFocusBack`).
+- Storskärmsläge (`isPresenting` i App.tsx): knappen "Visa på storskärm" på Uppställning och
+  Poängliga döljer menyer, försöker helskärm och skickar `presentationMode` till
+  `LineupBuilder` (bara planen, skalad) och `Leaderboard` (två kolumner, inga knappar).
+- Ny kod ska använda byggklossarna i `src/components/ui` i stället för egna knappklasser.
+  Stil: meningsversaler (inte VERSALER), `font-semibold`/`font-bold`, tryckytor minst 40 px.
+- Spelare ser inte Övningsbanken eller tävlingsknapparna i poänglistan (`canManage`).
+
 ## Konventioner
 
 - Arbeta på en egen git-gren per uppgift; slå ihop till `main` när tester och typkontroll går
@@ -120,6 +138,9 @@ npm run set-password -- e@post.se            # lokalt konto/lösenord
 - Rate-limit litar på `X-Forwarded-For` (kan förfalskas).
 - Vite-HMR via websocket fungerar inte i middleware-läget (ofarligt, sidan laddas om manuellt).
 - Dela upp `server.ts`, `App.tsx`, `LineupBuilder.tsx` gradvis; appen laddas som ett stort JS-paket (3,4 MB).
+- Gränssnittet, kvar att göra i nya stilen: Uppställning/taktik (iPad: plan + sidopanel),
+  Truppen, Passplanering och kallelser (SessionEditor/SessionRsvpView), Tävlingsmoment-listan
+  och GameSetup, Poänglistans kort, Administration och Profil.
 - E-post via SMTP (inbjudningar, glömt lösenord) om det behövs senare.
 - iOS-app och notiser (pausat, utrett okt 2026): steg 1 webbnotiser (Web Push/PWA, egen server,
   ingen Firebase); steg 2 Capacitor-skal runt befintliga appen för riktiga notiser via APNs och

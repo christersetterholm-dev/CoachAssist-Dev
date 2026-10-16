@@ -40,6 +40,8 @@ interface LineupBuilderProps {
   onManualSync?: () => Promise<void> | void;
   onManualPush?: () => Promise<void> | void;
   onMaximizedChange?: (isMaximized: boolean) => void;
+  /** Storskärmsläge: visa bara planen, så stor som skärmen tillåter. */
+  presentationMode?: boolean;
 }
 
 interface DelaunayPoint {
@@ -496,7 +498,8 @@ export default function LineupBuilder({
   isCoachOrAdmin = true,
   onManualSync,
   onManualPush,
-  onMaximizedChange
+  onMaximizedChange,
+  presentationMode = false
 }: LineupBuilderProps) {
   const SoccerBallIcon = ({ size = 20, className = "" }: { size?: number, className?: string }) => (
     <svg 
@@ -681,6 +684,35 @@ export default function LineupBuilder({
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [dragPos, setDragPos] = useState<{ x: number, y: number } | null>(null);
   const [isMaximized, setIsMaximized] = useState(false);
+
+  // Storskärmsläge: skala planen så att den fyller skärmen.
+  const presentRef = useRef<HTMLDivElement>(null);
+  const [presentZoom, setPresentZoom] = useState(1);
+  React.useLayoutEffect(() => {
+    if (!presentationMode) {
+      setPresentZoom(1);
+      return;
+    }
+    const fit = () => {
+      const el = presentRef.current;
+      if (!el) return;
+      const prev = el.style.zoom;
+      el.style.zoom = '1';
+      const w = el.offsetWidth;
+      const h = el.offsetHeight;
+      el.style.zoom = prev;
+      if (!w || !h) return;
+      const z = Math.min((window.innerWidth - 32) / w, (window.innerHeight - 32) / h);
+      setPresentZoom(Math.max(0.3, Math.min(z, 3)));
+    };
+    fit();
+    const t = setTimeout(fit, 350);
+    window.addEventListener('resize', fit);
+    return () => {
+      clearTimeout(t);
+      window.removeEventListener('resize', fit);
+    };
+  }, [presentationMode]);
 
   useEffect(() => {
     onMaximizedChange?.(isMaximized);
@@ -4596,7 +4628,7 @@ export default function LineupBuilder({
 
   return (
     <div 
-      className={`mx-auto transition-all duration-500 w-full px-0 sm:px-6 ${isMaximized ? 'fixed inset-0 z-50 bg-zinc-50 dark:bg-zinc-955 text-zinc-900 dark:text-zinc-100 p-1 xs:p-2 md:p-3 pt-safe overflow-hidden flex flex-col items-center justify-center' : 'max-w-[1600px] pt-safe sm:pt-4 pb-16'}`}
+      className={`mx-auto transition-all duration-500 w-full px-0 sm:px-6 ${isMaximized ? 'fixed inset-0 z-50 bg-zinc-50 dark:bg-zinc-955 text-zinc-900 dark:text-zinc-100 p-1 xs:p-2 md:p-3 pt-safe overflow-hidden flex flex-col items-center justify-center' : presentationMode ? 'flex-1 min-h-0 flex items-center justify-center overflow-hidden' : 'max-w-[1600px] pt-safe sm:pt-4 pb-16'}`}
     >
       {isMaximized && (
         <>
@@ -5609,13 +5641,20 @@ export default function LineupBuilder({
 
 
 
-      <div className={isMaximized ? "w-full h-full flex items-center justify-center overflow-hidden" : "w-full rounded-3xl"}>
-        <div className={isMaximized ? "w-full h-full flex items-center justify-center overflow-hidden transition-all duration-300" : "transition-all duration-300"} style={{ zoom: isMaximized ? fullScreenZoom : undefined }}>
+      <div className={isMaximized ? "w-full h-full flex items-center justify-center overflow-hidden" : presentationMode ? "flex items-center justify-center" : "w-full rounded-3xl"}>
+        <div
+          ref={presentRef}
+          className={isMaximized ? "w-full h-full flex items-center justify-center overflow-hidden transition-all duration-300" : "transition-all duration-300"}
+          style={{
+            zoom: isMaximized ? fullScreenZoom : presentationMode ? presentZoom : undefined,
+            width: presentationMode && !isMaximized ? (orientation === 'landscape' ? 1100 : 640) : undefined,
+          }}
+        >
           {renderLineupContent(false)}
         </div>
       </div>
 
-        {!isMaximized && (
+        {!isMaximized && !presentationMode && (
           <>
             <div className="flex flex-col items-center gap-2 mt-3 pb-8 px-2 transition-all">
             {/* Consolidated Player Controls */}

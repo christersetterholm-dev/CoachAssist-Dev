@@ -253,7 +253,15 @@ export default function MobileCalendarView({
   const stats = useMemo(() => {
     const now = new Date();
     const todayMidday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 12, 0, 0).getTime();
-    const activeList = sessions.filter(s => !s.isIgnored && (showPast ? s.date < todayMidday : s.date >= todayMidday));
+    // Månadsvyn räknar månadens aktiviteter, listvyn kommande eller tidigare.
+    const activeList = sessions.filter(s => {
+      if (s.isIgnored) return false;
+      if (viewMode === 'month') {
+        const d = new Date(s.date);
+        return d.getFullYear() === currentMonth.getFullYear() && d.getMonth() === currentMonth.getMonth();
+      }
+      return showPast ? s.date < todayMidday : s.date >= todayMidday;
+    });
 
     return {
       all: activeList.length,
@@ -261,7 +269,7 @@ export default function MobileCalendarView({
       training: activeList.filter(s => categorizeSession(s) === 'training').length,
       other: activeList.filter(s => categorizeSession(s) === 'other').length,
     };
-  }, [sessions, showPast]);
+  }, [sessions, showPast, viewMode, currentMonth]);
 
   // Generate all calendar days for the current month view
   const calendarDays = useMemo(() => {
@@ -316,6 +324,16 @@ export default function MobileCalendarView({
     return days;
   }, [currentMonth, sessions, searchQuery, activeFilter]);
 
+  // Månadsvyn: rulla fram till dagens datum när månaden visas.
+  useEffect(() => {
+    if (viewMode !== 'month') return;
+    const t = setTimeout(() => {
+      const el = document.querySelector('[data-cal-today="true"]') as HTMLElement | null;
+      el?.scrollIntoView({ block: 'center', behavior: 'auto' });
+    }, 50);
+    return () => clearTimeout(t);
+  }, [viewMode, currentMonth]);
+
   const toggleExpand = (id: string) => {
     setExpandedSessionId(prev => (prev === id ? null : id));
   };
@@ -329,16 +347,16 @@ export default function MobileCalendarView({
           <div className="flex items-center gap-1.5 min-w-0">
             {viewMode === 'list' ? (
               /* Slim Timeline Segment list style */
-              <div className="flex bg-zinc-100 dark:bg-zinc-800 p-0.5 rounded-xl border border-zinc-205 dark:border-zinc-800 text-[10px] font-bold">
+              <div className="flex h-10 items-center bg-zinc-100 dark:bg-zinc-900 p-1 rounded-xl border border-zinc-200/70 dark:border-zinc-800 text-sm font-semibold">
                 <button
                   type="button"
                   onClick={() => {
                     setShowPast(false);
                     setExpandedSessionId(null);
                   }}
-                  className={`px-3 py-1.5 rounded-lg transition-all cursor-pointer ${
+                  className={`h-8 px-3 rounded-lg transition-all cursor-pointer ${
                     !showPast
-                      ? 'bg-white dark:bg-zinc-700 text-zinc-950 dark:text-white shadow-sm font-black'
+                      ? 'bg-white dark:bg-zinc-800 text-zinc-950 dark:text-white shadow-sm'
                       : 'text-zinc-500 hover:text-zinc-850 dark:hover:text-zinc-300'
                   }`}
                 >
@@ -350,9 +368,9 @@ export default function MobileCalendarView({
                     setShowPast(true);
                     setExpandedSessionId(null);
                   }}
-                  className={`px-3 py-1.5 rounded-lg transition-all cursor-pointer ${
+                  className={`h-8 px-3 rounded-lg transition-all cursor-pointer ${
                     showPast
-                      ? 'bg-white dark:bg-zinc-700 text-zinc-950 dark:text-white shadow-sm font-black'
+                      ? 'bg-white dark:bg-zinc-800 text-zinc-950 dark:text-white shadow-sm'
                       : 'text-zinc-500 hover:text-zinc-850 dark:hover:text-zinc-300'
                   }`}
                 >
@@ -362,31 +380,34 @@ export default function MobileCalendarView({
             ) : (
               /* Sleek Month Navigator in Month Calendar View */
               <div className="flex items-center gap-1.5">
-                <div className="flex bg-zinc-100 dark:bg-zinc-800 p-0.5 rounded-xl border border-zinc-150 dark:border-zinc-800 text-[10px] font-bold">
+                <div className="flex items-center h-10 bg-white dark:bg-zinc-900 rounded-xl border border-zinc-200 dark:border-zinc-800">
                   <button
                     type="button"
                     onClick={handlePrevMonth}
-                    className="p-1 px-1.5 text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white transition-all active:scale-95 cursor-pointer"
+                    className="h-10 w-9 flex items-center justify-center text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white transition-all active:scale-95 cursor-pointer"
                     title="Föregående månad"
+                    aria-label="Föregående månad"
                   >
-                    <ChevronLeft size={14} strokeWidth={2.5} />
+                    <ChevronLeft size={18} />
                   </button>
-                  <span className="flex items-center px-1 text-[10px] font-black uppercase text-zinc-800 dark:text-zinc-200 tracking-wider">
-                    {SWEDISH_MONTHS[currentMonth.getMonth()].substring(0, 3)} {currentMonth.getFullYear()}
+                  <span className="flex items-center justify-center min-w-[72px] sm:min-w-[120px] text-sm font-semibold text-zinc-800 dark:text-zinc-100">
+                    <span className="sm:hidden">{SWEDISH_MONTHS[currentMonth.getMonth()].substring(0, 3)} {currentMonth.getFullYear()}</span>
+                    <span className="hidden sm:inline">{SWEDISH_MONTHS[currentMonth.getMonth()]} {currentMonth.getFullYear()}</span>
                   </span>
                   <button
                     type="button"
                     onClick={handleNextMonth}
-                    className="p-1 px-1.5 text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white transition-all active:scale-95 cursor-pointer"
+                    className="h-10 w-9 flex items-center justify-center text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white transition-all active:scale-95 cursor-pointer"
                     title="Nästa månad"
+                    aria-label="Nästa månad"
                   >
-                    <ChevronRight size={14} strokeWidth={2.5} />
+                    <ChevronRight size={18} />
                   </button>
                 </div>
                 <button
                   type="button"
                   onClick={handleResetToToday}
-                  className="text-[9px] font-black uppercase px-2 py-1.5 bg-zinc-100 border border-zinc-200 dark:bg-zinc-800 dark:border-zinc-750 hover:bg-zinc-200 dark:hover:bg-zinc-700 rounded-xl text-zinc-500 dark:text-zinc-300 transition-all cursor-pointer"
+                  className="h-10 px-3 text-sm font-semibold bg-white border border-zinc-200 dark:bg-zinc-900 dark:border-zinc-800 hover:bg-zinc-50 dark:hover:bg-zinc-800 rounded-xl text-zinc-700 dark:text-zinc-200 transition-all cursor-pointer"
                 >
                   Idag
                 </button>
@@ -405,10 +426,11 @@ export default function MobileCalendarView({
                     e.stopPropagation();
                     setShowPlanMenu(prev => !prev);
                   }}
-                  className="w-8 h-8 flex items-center justify-center bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold transition-all shadow-md active:scale-95 cursor-pointer"
+                  className="h-10 px-3 sm:px-4 inline-flex items-center justify-center gap-1.5 bg-indigo-600 hover:bg-indigo-700 dark:bg-indigo-500 text-white rounded-xl text-sm font-semibold transition-all shadow-sm active:scale-95 cursor-pointer"
                   title="Planera ny aktivitet (enstaka eller serie)"
                 >
-                  <Plus size={16} strokeWidth={2.5} />
+                  <Plus size={18} strokeWidth={2.5} />
+                  <span className="hidden sm:inline">Ny</span>
                 </button>
 
                 <AnimatePresence>
@@ -460,14 +482,14 @@ export default function MobileCalendarView({
                 setIsSearchOpen(p => !p);
                 if (isSearchOpen) setSearchQuery('');
               }}
-              className={`p-2 rounded-xl border transition-all cursor-pointer flex items-center justify-center shadow-sm ${
+              className={`w-10 h-10 rounded-xl border transition-all cursor-pointer flex items-center justify-center ${
                 isSearchOpen || searchQuery
                   ? 'bg-indigo-50 border-indigo-200 text-indigo-650 dark:bg-indigo-950/45 dark:border-indigo-900/50 dark:text-indigo-400'
                   : 'bg-white dark:bg-zinc-900 border-zinc-200 dark:border-zinc-800 text-zinc-500 hover:text-zinc-800 dark:text-zinc-400 dark:hover:text-zinc-200'
               }`}
               title="Sök i kalendern"
             >
-              <Search size={14} strokeWidth={2.5} />
+              <Search size={18} />
             </button>
 
             {/* View Mode Switcher (Grid/Month vs List) */}
@@ -478,26 +500,26 @@ export default function MobileCalendarView({
                 setExpandedEventId(null);
                 setExpandedSessionId(null);
               }}
-              className="p-2 rounded-xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 text-zinc-500 hover:text-zinc-800 dark:text-zinc-400 dark:hover:text-zinc-100 transition-all cursor-pointer flex items-center justify-center shadow-sm"
+              className="h-10 min-w-10 px-2.5 rounded-xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 text-zinc-600 hover:text-zinc-900 dark:text-zinc-300 dark:hover:text-zinc-100 transition-all cursor-pointer flex items-center justify-center"
               title={viewMode === 'month' ? 'Visa som lista' : 'Visa månadsvy'}
             >
               {viewMode === 'month' ? (
                 /* Show List Icon */
-                <span className="flex items-center gap-1 font-black text-[10px] py-px px-1 font-sans">
-                  <FileText size={14} />
-                  <span className="text-[9px] font-black uppercase hidden sm:inline">Lista</span>
+                <span className="flex items-center gap-1.5 text-sm font-semibold">
+                  <FileText size={18} />
+                  <span className="hidden sm:inline">Lista</span>
                 </span>
               ) : (
                 /* Show Month Calendar Grid Icon */
-                <span className="flex items-center gap-1 font-black text-[10px] py-px px-1 font-sans">
-                  <Calendar size={14} />
-                  <span className="text-[9px] font-black uppercase hidden sm:inline">Månad</span>
+                <span className="flex items-center gap-1.5 text-sm font-semibold">
+                  <Calendar size={18} />
+                  <span className="hidden sm:inline">Månad</span>
                 </span>
               )}
             </button>
 
             {/* Sync trigger button if sync URL exists */}
-            {onSync && hasSyncUrl && (
+            {onSync && hasSyncUrl && isCoachOrAdmin && (
               <button
                 type="button"
                 onClick={(e) => {
@@ -505,7 +527,7 @@ export default function MobileCalendarView({
                   onSync();
                 }}
                 disabled={isSyncing}
-                className={`p-2 rounded-xl border transition-all cursor-pointer flex items-center justify-center shadow-sm disabled:opacity-50 ${
+                className={`w-10 h-10 rounded-xl border transition-all cursor-pointer flex items-center justify-center disabled:opacity-50 ${
                   isSyncing
                     ? 'bg-indigo-50 border-indigo-300 text-indigo-600 dark:bg-indigo-950/50 dark:border-indigo-800'
                     : 'bg-white dark:bg-zinc-900 border-zinc-200 dark:border-zinc-800 text-zinc-500 hover:text-indigo-600 dark:text-zinc-400 dark:hover:text-indigo-400'
@@ -516,7 +538,7 @@ export default function MobileCalendarView({
                     : 'Hämta senaste händelserna från laget.se'
                 }
               >
-                <RefreshCw size={14} className={isSyncing ? 'animate-spin text-indigo-600 dark:text-indigo-400' : ''} />
+                <RefreshCw size={18} className={isSyncing ? 'animate-spin text-indigo-600 dark:text-indigo-400' : ''} />
               </button>
             )}
           </div>
@@ -611,53 +633,53 @@ export default function MobileCalendarView({
       <div className="flex gap-1.5 px-4 sm:px-0 overflow-x-auto pb-4 scrollbar-none">
         <button
           onClick={() => setActiveFilter('all')}
-          className={`flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-black transition-all shadow-sm shrink-0 border uppercase tracking-wider ${
+          className={`flex items-center gap-1.5 h-8 px-3 rounded-full text-xs font-semibold transition-all shrink-0 border cursor-pointer ${
             activeFilter === 'all'
               ? 'bg-zinc-900 dark:bg-white text-white dark:text-zinc-950 border-zinc-900 dark:border-white'
               : 'bg-white dark:bg-zinc-900 text-zinc-650 dark:text-zinc-400 border-zinc-200 dark:border-zinc-800 hover:bg-zinc-50'
           }`}
         >
           <span>Alla</span>
-          <span className={`text-[9px] px-1.5 py-0.5 rounded-full ${activeFilter === 'all' ? 'bg-white/20 dark:bg-black/10 text-white dark:text-zinc-900' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-500'}`}>{stats.all}</span>
+          <span className={`text-[11px] font-bold min-w-[20px] px-1.5 rounded-full ${activeFilter === 'all' ? 'bg-white/20 dark:bg-black/10 text-white dark:text-zinc-900' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-500'}`}>{stats.all}</span>
         </button>
 
         <button
           onClick={() => setActiveFilter('match')}
-          className={`flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-black transition-all shadow-sm shrink-0 border uppercase tracking-wider ${
+          className={`flex items-center gap-1.5 h-8 px-3 rounded-full text-xs font-semibold transition-all shrink-0 border cursor-pointer ${
             activeFilter === 'match'
               ? 'bg-rose-600 border-rose-500 text-white'
               : 'bg-white dark:bg-zinc-900 text-zinc-650 dark:text-zinc-400 border-zinc-200 dark:border-zinc-800 hover:bg-zinc-50'
           }`}
         >
-          <Trophy size={11} className={activeFilter === 'match' ? 'text-white' : 'text-rose-505'} />
+          <Trophy size={13} className={activeFilter === 'match' ? 'text-white' : 'text-rose-505'} />
           <span>Matcher</span>
-          <span className={`text-[9px] px-1.5 py-0.5 rounded-full ${activeFilter === 'match' ? 'bg-white/20 text-white' : 'bg-rose-50 dark:bg-rose-950/30 text-rose-650'}`}>{stats.match}</span>
+          <span className={`text-[11px] font-bold min-w-[20px] px-1.5 rounded-full ${activeFilter === 'match' ? 'bg-white/20 text-white' : 'bg-rose-50 dark:bg-rose-950/30 text-rose-650'}`}>{stats.match}</span>
         </button>
 
         <button
           onClick={() => setActiveFilter('training')}
-          className={`flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-black transition-all shadow-sm shrink-0 border uppercase tracking-wider ${
+          className={`flex items-center gap-1.5 h-8 px-3 rounded-full text-xs font-semibold transition-all shrink-0 border cursor-pointer ${
             activeFilter === 'training'
               ? 'bg-emerald-600 border-emerald-500 text-white'
               : 'bg-white dark:bg-zinc-900 text-zinc-650 dark:text-zinc-400 border-zinc-200 dark:border-zinc-800 hover:bg-zinc-50'
           }`}
         >
-          <Clock size={11} className={activeFilter === 'training' ? 'text-white' : 'text-emerald-500'} />
+          <Clock size={13} className={activeFilter === 'training' ? 'text-white' : 'text-emerald-500'} />
           <span>Träningar</span>
-          <span className={`text-[9px] px-1.5 py-0.5 rounded-full ${activeFilter === 'training' ? 'bg-white/20 text-white' : 'bg-emerald-50 dark:bg-emerald-950/30 text-emerald-650'}`}>{stats.training}</span>
+          <span className={`text-[11px] font-bold min-w-[20px] px-1.5 rounded-full ${activeFilter === 'training' ? 'bg-white/20 text-white' : 'bg-emerald-50 dark:bg-emerald-950/30 text-emerald-650'}`}>{stats.training}</span>
         </button>
 
         <button
           onClick={() => setActiveFilter('other')}
-          className={`flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-black transition-all shadow-sm shrink-0 border uppercase tracking-wider ${
+          className={`flex items-center gap-1.5 h-8 px-3 rounded-full text-xs font-semibold transition-all shrink-0 border cursor-pointer ${
             activeFilter === 'other'
               ? 'bg-amber-600 border-amber-500 text-white'
               : 'bg-white dark:bg-zinc-900 text-zinc-650 dark:text-zinc-400 border-zinc-200 dark:border-zinc-800 hover:bg-zinc-50'
           }`}
         >
-          <HelpCircle size={11} className={activeFilter === 'other' ? 'text-white' : 'text-amber-505'} />
+          <HelpCircle size={13} className={activeFilter === 'other' ? 'text-white' : 'text-amber-505'} />
           <span>Övrigt</span>
-          <span className={`text-[9px] px-1.5 py-0.5 rounded-full ${activeFilter === 'other' ? 'bg-white/20 text-white' : 'bg-amber-50 dark:bg-amber-950/30 text-amber-600'}`}>{stats.other}</span>
+          <span className={`text-[11px] font-bold min-w-[20px] px-1.5 rounded-full ${activeFilter === 'other' ? 'bg-white/20 text-white' : 'bg-amber-50 dark:bg-amber-950/30 text-amber-600'}`}>{stats.other}</span>
         </button>
       </div>
 
@@ -686,9 +708,10 @@ export default function MobileCalendarView({
                   return (
                     <div 
                       key={`empty-${day.dayNumber}`}
+                      data-cal-today={day.isToday ? 'true' : undefined}
                       className={`flex items-center min-h-[44px] px-2.5 sm:px-4 py-2 border-l-4 transition-colors gap-1 sm:gap-2 ${
                         isWeekend 
-                          ? 'bg-zinc-200/65 dark:bg-zinc-50/15 border-l-transparent' 
+                          ? 'bg-zinc-50 dark:bg-zinc-950/60 border-l-transparent' 
                           : day.isToday
                             ? 'bg-indigo-50/70 dark:bg-indigo-950/40 border-l-indigo-600 dark:border-l-indigo-500'
                             : 'bg-white dark:bg-zinc-900 border-l-transparent'
@@ -769,12 +792,13 @@ export default function MobileCalendarView({
                   return (
                     <React.Fragment key={`${day.dayNumber}-event-${session.id}`}>
                       <div 
+                        data-cal-today={day.isToday && idx === 0 ? 'true' : undefined}
                         onClick={() => setExpandedEventId(prev => prev === session.id ? null : session.id)}
                         className={`flex items-center justify-between min-h-[44px] px-2.5 sm:px-4 py-2 gap-1.5 sm:gap-2 border-l-4 transition-all cursor-pointer select-none ${
                           category === 'match' ? 'border-l-rose-500' : category === 'training' ? 'border-l-emerald-500' : 'border-l-amber-500'
                         } ${
                           isWeekend 
-                            ? 'bg-zinc-200/65 dark:bg-zinc-50/15 hover:bg-zinc-200/85 dark:hover:bg-zinc-50/25' 
+                            ? 'bg-zinc-50 dark:bg-zinc-950/60 hover:bg-zinc-100 dark:hover:bg-zinc-800/60' 
                             : isExpanded
                               ? 'bg-zinc-50 dark:bg-zinc-800'
                               : day.isToday
@@ -1078,19 +1102,19 @@ export default function MobileCalendarView({
                       borderClass: 'border-l-4 border-emerald-500',
                       badgeClass: 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-650 dark:text-emerald-400 border-emerald-150',
                       label: 'Match',
-                      icon: <Trophy size={11} strokeWidth={2.5} />
+                      icon: <Trophy size={13} strokeWidth={2.5} />
                     },
                     training: {
                       borderClass: 'border-l-4 border-indigo-500',
                       badgeClass: 'bg-indigo-50 dark:bg-indigo-950/40 text-indigo-650 dark:text-indigo-400 border-indigo-150',
                       label: 'Träning',
-                      icon: <Clock size={11} strokeWidth={2.5} />
+                      icon: <Clock size={13} strokeWidth={2.5} />
                     },
                     other: {
                       borderClass: 'border-l-4 border-amber-500',
                       badgeClass: 'bg-amber-50 dark:bg-amber-950/40 text-amber-650 dark:text-amber-400 border-amber-150',
                       label: 'Övrigt',
-                      icon: <HelpCircle size={11} strokeWidth={2.5} />
+                      icon: <HelpCircle size={13} strokeWidth={2.5} />
                     }
                   }[category];
 

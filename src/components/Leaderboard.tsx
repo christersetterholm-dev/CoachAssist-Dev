@@ -22,6 +22,10 @@ interface LeaderboardProps {
   onUpdatePeriod: (id: string, updates: Partial<Period>) => void;
   sharedId?: string | null;
   userUid?: string | null;
+  /** Får hantera tävlingar (tränare/admin). Spelare ser bara listan. */
+  canManage?: boolean;
+  /** Storskärmsläge: bara listan, utan knappar. */
+  presentationMode?: boolean;
   key?: React.Key;
 }
 
@@ -40,8 +44,11 @@ export default function Leaderboard({
   onRenamePeriod,
   onUpdatePeriod,
   sharedId,
-  userUid
+  userUid,
+  canManage = true,
+  presentationMode = false
 }: LeaderboardProps) {
+  const readOnly = !!sharedId || presentationMode || !canManage;
   const [expandedPlayers, setExpandedPlayers] = useState<Set<string>>(new Set());
   const [allExpanded, setAllExpanded] = useState(false);
   const [selectedPeriodId, setSelectedPeriodId] = useState<string | 'current'>(currentPeriodId || 'current');
@@ -453,7 +460,7 @@ export default function Leaderboard({
   ).length;
 
   return (
-    <div className="max-w-4xl lg:max-w-5xl xl:max-w-6xl 2xl:max-w-7xl mx-auto p-4 sm:p-6 pb-16">
+    <div className={presentationMode ? 'w-full max-w-[1600px] mx-auto px-6 sm:px-10 pt-16 pb-10' : 'max-w-4xl lg:max-w-5xl xl:max-w-6xl 2xl:max-w-7xl mx-auto p-4 sm:p-6 pb-16'}>
       <div className="flex flex-col mb-8 gap-4">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div className="flex items-center gap-3">
@@ -479,7 +486,7 @@ export default function Leaderboard({
                       <ChevronDown size={20} />
                     </div>
                   </div>
-                  {selectedPeriodId !== 'current' && !periods.find(p => p.id === selectedPeriodId)?.endDate && (
+                  {!readOnly && selectedPeriodId !== 'current' && !periods.find(p => p.id === selectedPeriodId)?.endDate && (
                     <button 
                       type="button"
                       onClick={() => {
@@ -515,7 +522,7 @@ export default function Leaderboard({
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
-            {!sharedId && (
+            {!readOnly && (
               <>
                 <button
                   onClick={() => setShowCreateModal(true)}
@@ -612,7 +619,7 @@ export default function Leaderboard({
                     {new Date(selectedPeriod.endDate).toLocaleDateString('sv-SE', { day: 'numeric', month: 'short', year: 'numeric' })}
                   </span>
                 </div>
-                {!sharedId && (
+                {!readOnly && (
                   <div className="flex items-center gap-1.5 ml-1">
                     <button
                       type="button"
@@ -654,7 +661,7 @@ export default function Leaderboard({
         )}
       </div>
 
-      <div className="space-y-4">
+      <div className={presentationMode ? 'grid gap-4 lg:grid-cols-2 lg:grid-flow-col' : 'space-y-4'} style={presentationMode ? { gridTemplateRows: `repeat(${Math.ceil(finalStats.length / 2)}, auto)` } : undefined}>
         {finalStats.map((player: any, index: number) => {
           const isExpanded = expandedPlayers.has(player.id);
           const hasHistory = player.history && player.history.length > 0;
@@ -761,7 +768,7 @@ export default function Leaderboard({
                                   </span>
                                 </div>
                               </div>
-                              {h.isBonus && !sharedId && !selectedPeriod?.endDate && (
+                              {h.isBonus && !readOnly && !selectedPeriod?.endDate && (
                                 <button
                                   onClick={(e) => {
                                     e.stopPropagation();

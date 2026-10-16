@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
-import { RotateCcw, Trophy, ArrowLeft, Check, Sun, Moon, Timer as TimerIcon, Edit2, Zap, Rocket, Users, LayoutDashboard, Unlock, LogIn, LogOut, User as UserIcon, ShieldCheck, Cloud, Globe, Calendar, Settings, RefreshCw, Bell, Building2, Shirt, VibrateOff } from 'lucide-react';
+import { RotateCcw, Trophy, ArrowLeft, Check, Timer as TimerIcon, Edit2, Zap, Rocket, Users, LayoutDashboard, Unlock, LogIn, LogOut, User as UserIcon, Cloud, Calendar, Settings, VibrateOff, Maximize2, MoreVertical } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { SquadPlayer, Exercise, Team, PointsConfig, Period, PeriodStandings, Lineup, TrainingSession, TrainingSettings, CoachData, BankExercise, SessionMoment, UserProfile, ClubMember, ClubTeam, Club } from './types';
 import { auth, signInWithGoogle, db, handleFirestoreError, OperationType, getApiUrl, doc, onSnapshot, setDoc, getDoc, collection, getDocs, onAuthStateChanged, signOut, User, deleteObject } from './lib/firebase';
@@ -20,13 +20,17 @@ import SessionEditor from './components/SessionEditor';
 import TeamOverviewModal from './components/TeamOverviewModal';
 
 import ProfileAndSettings from './components/ProfileAndSettings';
+import HomeView from './components/HomeView';
+import WelcomeScreen from './components/WelcomeScreen';
+import { AppShell, ShellView } from './components/shell/AppShell';
+import { IconButton, MenuItem, Sheet } from './components/ui';
 import ClubAdminDashboard from './components/ClubAdminDashboard';
 import VersionFooter from './components/VersionFooter';
 import { OnboardingModal } from './components/OnboardingModal';
 import { PendingRequestsModal } from './components/PendingRequestsModal';
 import { ShakeProtectionModal, QuickShakeModal } from './components/ShakeProtectionModal';
 
-type View = 'training' | 'setup' | 'exercise' | 'squad' | 'leaderboard' | 'profile' | 'lineup' | 'teampage' | 'clubadmin';
+type View = 'home' | 'training' | 'setup' | 'exercise' | 'squad' | 'leaderboard' | 'profile' | 'lineup' | 'teampage' | 'clubadmin';
 
 const INITIAL_DATA: CoachData = {
   squad: [],
@@ -768,10 +772,10 @@ export default function App() {
     // If sharing, priority is leaderboard (already handled by useEffect but setting here for initial sync too)
     if (shareId) return 'leaderboard';
     
-    if (v === 'squad' || v === 'training' || v === 'leaderboard' || v === 'profile' || v === 'lineup' || v === 'teampage' || v === 'exercise') {
+    if (v === 'home' || v === 'squad' || v === 'training' || v === 'leaderboard' || v === 'profile' || v === 'lineup' || v === 'teampage' || v === 'exercise') {
       return v as View;
     }
-    return 'training';
+    return 'home';
   });
 
   const setView = (newView: View | ((prev: View) => View)) => {
@@ -827,6 +831,37 @@ export default function App() {
 
   const [openTrainingSettings, setOpenTrainingSettings] = useState(false);
   const [isLineupMaximized, setIsLineupMaximized] = useState(false);
+  // Storskärmsläge: döljer meny och toppfält och försöker visa sidan i helskärm.
+  const [isPresenting, setIsPresenting] = useState(false);
+  const [isExerciseMenuOpen, setIsExerciseMenuOpen] = useState(false);
+  const startPresenting = () => {
+    setIsPresenting(true);
+    try {
+      const el = document.documentElement as any;
+      const req = el.requestFullscreen || el.webkitRequestFullscreen;
+      if (req && !document.fullscreenElement) req.call(el).catch?.(() => {});
+    } catch (e) {}
+  };
+  const stopPresenting = () => {
+    setIsPresenting(false);
+    try {
+      const d = document as any;
+      if (d.fullscreenElement || d.webkitFullscreenElement) (d.exitFullscreen || d.webkitExitFullscreen)?.call(d);
+    } catch (e) {}
+  };
+  useEffect(() => {
+    // Lämnar användaren helskärm (t.ex. med Esc) avslutas också storskärmsläget.
+    const onChange = () => {
+      const d = document as any;
+      if (!d.fullscreenElement && !d.webkitFullscreenElement) setIsPresenting(false);
+    };
+    document.addEventListener('fullscreenchange', onChange);
+    document.addEventListener('webkitfullscreenchange', onChange);
+    return () => {
+      document.removeEventListener('fullscreenchange', onChange);
+      document.removeEventListener('webkitfullscreenchange', onChange);
+    };
+  }, []);
 
   useEffect(() => {
     if (view !== 'lineup') {
@@ -3708,306 +3743,176 @@ export default function App() {
     );
   }
 
-  return (
-    <div className={`fixed inset-0 flex flex-col bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100 font-sans selection:bg-indigo-100 transition-colors duration-500 overflow-hidden ${view === 'exercise' || view === 'teampage' ? 'select-none' : ''}`}>
-      {view !== 'lineup' && (
-        <header className={`bg-white dark:bg-zinc-900 border-b border-zinc-200 dark:border-zinc-800 z-30 transition-all duration-300 ease-in-out shrink-0 ${
-          view === 'exercise' ? 'sticky top-0' : ''
-        } ${
-          view === 'exercise' && isTimerRunning 
-            ? '-mt-14 sm:-mt-16 opacity-0 pointer-events-none overflow-hidden border-b-0' 
-            : 'mt-0 opacity-100'
-        }`}>
-          <div className="max-w-4xl lg:max-w-5xl xl:max-w-6xl 2xl:max-w-7xl mx-auto px-4 h-14 sm:h-16 flex items-center justify-between">
-            <div 
-              className={`flex items-center gap-3 cursor-pointer group min-w-0 ${((view as any) === 'lineup') ? 'hover:opacity-70' : ''}`}
-              onClick={() => { 
-                if (sharedLeaderboardId) {
-                  clearSharedView();
-                } else if (view === 'setup' && isEditingActiveExercise) {
-                  // If editing an exercise, go back to where we started editing
-                  if (editReturnView) {
-                    setView(editReturnView);
-                    setEditReturnView(null);
-                  } else if (activeExerciseId) {
-                    handleSelectExercise(activeExerciseId);
-                  } else {
-                    setView('training');
-                  }
-                  setIsEditingActiveExercise(false);
-                } else if (view === 'exercise' || view === 'setup') {
-                  setView('training'); 
-                  setData(prev => ({ ...prev, activeExerciseId: null }));
-                  setSessionActionCount(prev => prev + 1);
-                  setIsEditingActiveExercise(false);
-                  try {
-                    const url = new URL(window.location.href);
-                    url.searchParams.delete('view');
-                    url.searchParams.delete('ex');
-                    window.history.replaceState({}, '', url.toString());
-                  } catch (e) {}
-                  // If we have an active session, let it stay active
-                } else if (((view as any) === 'lineup')) {
-                  // No action on header click for lineup view
-                }
-              }}
-            >
-              {(view === 'exercise' || view === 'setup') && (
-                <div className="w-10 h-10 bg-indigo-600 rounded-xl flex items-center justify-center text-white shadow-lg shadow-indigo-200 dark:shadow-none group-hover:scale-110 transition-transform shrink-0">
-                  <ArrowLeft size={20} strokeWidth={3} />
-                </div>
-              )}
-              {view !== 'exercise' && (
-                <div className="flex flex-col min-w-0">
-                  <span className="font-black text-xl tracking-tight dark:text-white truncate">
-                    {(() => {
-                      if (view === 'setup') return isEditingActiveExercise ? 'Redigera tävlingsmoment' : 'Skapa tävlingsmoment';
-                      if (view === 'training') return 'Kalender';
-                      if (view === 'squad') return 'Truppen';
-                      if (view === 'leaderboard') return 'Poängliga';
-                      if (view === 'profile') return 'Profil';
-                      if (((view as any) === 'lineup')) return 'Laguppställning';
-                      if (view === 'teampage') return 'Lagsidan';
-                      if (view === 'clubadmin') return 'Administration';
-                      if (sharedLeaderboardId) return 'Delad Poängliga';
-                      return 'Kalender';
-                    })()}
-                  </span>
+  const openLineupForSession = (sess: TrainingSession) => {
+    // Check if lineup exists for this session
+    let targetLineup = lineups.find(l => l.sessionId === sess.id);
+    if (!targetLineup && sess.lineupId) {
+      targetLineup = lineups.find(l => l.id === sess.lineupId);
+    }
 
-                  {(view === 'squad' || view === 'leaderboard' || view === 'teampage' || view === 'training' || view === 'clubadmin') && (
-                    <span className="hidden sm:block text-[10px] font-black text-zinc-400 uppercase tracking-widest mt-[-2px]">
-                      {view === 'squad' ? 'Hantera spelare & ledare' : view === 'leaderboard' ? 'Statistik & poäng' : view === 'training' ? 'Översikt & Planering' : view === 'clubadmin' ? 'Föreningar, lag, databas & kalender' : 'Webb & Kalender'}
-                    </span>
-                  )}
-                </div>
-              )}
-            </div>
-            
-            <div className="flex items-center gap-2">
-              {(isSyncing || (user && sessionActionCount > 0 && view !== 'exercise')) && (
-                <motion.div 
-                  initial={{ opacity: 0, scale: 0.8 }}
-                  animate={{ opacity: 1, scale: 1 }}
-                  className={`hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-full border transition-all ${
-                    isSyncing 
-                      ? 'bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 border-indigo-100 dark:border-indigo-800 animate-pulse' 
-                      : 'bg-amber-50 dark:bg-amber-900/20 text-amber-600 dark:text-amber-400 border-amber-100 dark:border-amber-900/30'
-                  }`}
-                >
-                  {isSyncing ? (
-                    <>
-                      <Cloud size={14} className="animate-bounce" />
-                      <span className="text-[10px] font-black uppercase tracking-widest leading-none">Synkar</span>
-                    </>
-                  ) : (
-                    <button 
-                      onClick={handleManualPush}
-                      className="flex items-center gap-2 cursor-pointer hover:opacity-80 active:scale-95 transition-all"
-                      title="Spara ändringar till molnet nu"
-                    >
-                      <TimerIcon size={14} className="animate-spin-slow" />
-                      <span className="text-[10px] font-black uppercase tracking-widest leading-none">Väntar...</span>
-                      <div className="w-px h-3 bg-amber-200 dark:bg-amber-800 mx-1" />
-                      <span className="text-[10px] font-black uppercase tracking-widest leading-none underline decoration-amber-400">Spara nu</span>
-                    </button>
-                  )}
-                </motion.div>
-              )}
-              {!sharedLeaderboardId && (
-                <>
-                  {view === 'exercise' ? (
-                    <button
-                      type="button"
-                      onClick={() => setIsQuickShakeModalOpen(true)}
-                      className={`relative w-10 h-10 flex items-center justify-center rounded-xl transition-all border shadow-sm active:scale-95 cursor-pointer ${
-                        hasTypedInSession
-                          ? 'bg-amber-50 dark:bg-amber-950/40 text-amber-600 dark:text-amber-400 hover:bg-amber-100 dark:hover:bg-amber-900/50 border-amber-300 dark:border-amber-700/60 animate-pulse'
-                          : 'bg-emerald-50 dark:bg-emerald-950/30 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-100 dark:hover:bg-emerald-900/40 border-emerald-200/80 dark:border-emerald-800/60'
-                      }`}
-                      title={hasTypedInSession ? "Varning: Text har skrivits. Klicka för att rensa skakminnet." : "Rensa skakminnet (iOS)"}
-                    >
-                      <VibrateOff size={19} />
-                      {hasTypedInSession && (
-                        <span className="absolute -top-1 -right-1 flex h-3 w-3">
-                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
-                          <span className="relative inline-flex rounded-full h-3 w-3 bg-amber-500 border-2 border-white dark:border-zinc-900"></span>
-                        </span>
-                      )}
-                    </button>
-                  ) : (
-                    user && isInitialSyncDone && (
-                      <button
-                        type="button"
-                        onClick={pullLatestData}
-                        disabled={isSyncing}
-                        className="w-10 h-10 flex items-center justify-center rounded-xl bg-indigo-50 dark:bg-indigo-950/30 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-100 dark:hover:bg-indigo-900/40 transition-all border border-indigo-100 dark:border-indigo-900/30 disabled:opacity-50"
-                        title="Hämta senaste data från molnet (Uppdatera)"
-                      >
-                        <RefreshCw size={18} className={`${isSyncing ? 'animate-spin' : ''}`} />
-                      </button>
-                    )
-                  )}
-                  {view === 'exercise' ? (
-                    <button
-                      type="button"
-                      onClick={() => setShowTeamOverview(true)}
-                      className="w-10 h-10 flex items-center justify-center rounded-xl bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-100 dark:hover:bg-indigo-900/40 transition-all border border-indigo-100 dark:border-indigo-900/30"
-                      title="Visa lagöversikt"
-                    >
-                      <Users size={20} />
-                    </button>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={toggleTheme}
-                      className="w-10 h-10 flex items-center justify-center rounded-xl bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-all cursor-pointer border border-zinc-200 dark:border-zinc-700"
-                      title={theme === 'light' ? 'Mörkt läge' : 'Ljust läge'}
-                    >
-                      {theme === 'light' ? <Moon size={20} /> : <Sun size={20} />}
-                    </button>
-                  )}
+    if (targetLineup) {
+      setData(prev => ({
+        ...prev,
+        activeLineupId: targetLineup!.id
+      }));
+    } else {
+      // Auto-create linked lineup with all attending players on bench
+      const attendingIds = sess.attendance || [];
+      const initialPlayers = attendingIds.map((playerId, idx) => ({
+        id: `player_${Date.now()}_${idx}_${Math.random().toString(36).substring(7)}`,
+        playerId,
+        x: 50,
+        y: 50,
+        isSubstitute: true,
+      }));
 
-                  {/* Kalenderinställningar Cogwheel in top-right Nav */}
-                  {view === 'training' && isCoachOrAdmin && (
-                    <button
-                      type="button"
-                      onClick={() => setOpenTrainingSettings(true)}
-                      className="w-10 h-10 flex items-center justify-center rounded-xl bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400 hover:bg-zinc-205 dark:hover:bg-zinc-700 hover:text-indigo-650 dark:hover:text-indigo-400 transition-all cursor-pointer border border-zinc-200 dark:border-zinc-700"
-                      title="Kalenderinställningar"
-                    >
-                      <Settings size={20} />
-                    </button>
-                  )}
+      const newLineup: Lineup = {
+        id: `lineup_${Date.now()}_${Math.random().toString(36).substring(7)}`,
+        teamName: activeClubInfo?.teamName || '',
+        matchTitle: sess.title || 'Match',
+        date: sess.date || Date.now(),
+        formation: '4-3-3',
+        players: initialPlayers,
+        sessionId: sess.id,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      };
 
-                  {/* Admin Icon Button */}
-                  {isAuthReady && view !== 'exercise' && user && isCoachOrAdmin && (
-                    <button
-                      type="button"
-                      onClick={() => setView('clubadmin')}
-                      className={`w-10 h-10 flex items-center justify-center rounded-xl transition-all border cursor-pointer ${
-                        view === 'clubadmin'
-                          ? 'bg-indigo-600 text-white border-indigo-600 shadow-md scale-105'
-                          : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300 hover:bg-indigo-50 dark:hover:bg-indigo-950/40 hover:text-indigo-600 dark:hover:text-indigo-400 border-zinc-200 dark:border-zinc-700'
-                      }`}
-                      title="Administration (Föreningar, Lag, Spelare, Databas, PWA, Kalender)"
-                    >
-                      <ShieldCheck size={20} />
-                    </button>
-                  )}
+      setData(prev => {
+        const updatedLineups = [newLineup, ...prev.lineups];
+        try {
+          setPrefixedItem('football_lineups', JSON.stringify(updatedLineups), user);
+          setPrefixedItem('active_lineup_id', newLineup.id, user);
+        } catch (e) {}
+        return {
+          ...prev,
+          lineups: updatedLineups,
+          activeLineupId: newLineup.id
+        };
+      });
 
-                  {isAuthReady && view !== 'exercise' && (
-                    user ? (
-                      <button
-                        onClick={() => setView('profile')}
-                        className={`w-10 h-10 flex items-center justify-center rounded-xl overflow-hidden border-2 transition-all cursor-pointer ${view === 'profile' ? 'border-indigo-600 dark:border-indigo-400 scale-110' : 'border-zinc-200 dark:border-zinc-700 hover:border-indigo-400'}`}
-                        title={`Profil: ${userProfile.fullName || user.displayName || user.email}`}
-                      >
-                        {effectiveUserPhoto ? (
-                          <img src={effectiveUserPhoto} alt={userProfile.fullName || user.displayName || ''} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
-                        ) : (
-                          <div className="w-full h-full bg-indigo-100 dark:bg-indigo-900/30 flex items-center justify-center text-indigo-600 dark:text-indigo-400 font-bold text-xs uppercase">
-                            {(userProfile.fullName || user.displayName || user.email || 'U').charAt(0)}
-                          </div>
-                        )}
-                      </button>
-                    ) : (
-                      <button
-                        onClick={handleLogin}
-                        className="w-10 h-10 flex items-center justify-center rounded-xl bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-100 dark:hover:bg-indigo-900/40 transition-all border border-indigo-100 dark:border-indigo-900/30"
-                        title="Logga in"
-                      >
-                        <LogIn size={20} />
-                      </button>
-                    )
-                  )}
-                </>
-              )}
-              {view === 'exercise' && activeExercise && (
-                <>
-                  <button
-                    onClick={toggleTimerVisibility}
-                    className={`p-2 rounded-lg transition-all ${activeExercise.showTimer ? 'text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-900/30' : 'text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800'}`}
-                    title={activeExercise.showTimer ? "Dölj timer" : "Visa timer"}
-                  >
-                    <TimerIcon size={20} />
-                  </button>
-                  {isCoachOrAdmin && (
-                    <>
-                      <button
-                        onClick={() => {
-                          setPreviousActiveExerciseId(activeExerciseId);
-                          setEditReturnView('exercise');
-                          setIsEditingActiveExercise(true);
-                          setView('setup');
-                        }}
-                        className="p-2 text-zinc-500 dark:text-zinc-400 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-lg transition-all cursor-pointer"
-                        title="Redigera tävlingsmoment"
-                      >
-                        <Edit2 size={20} />
-                      </button>
-                      <button
-                        onClick={() => setShowResetConfirm(true)}
-                        className="p-2 text-zinc-500 dark:text-zinc-400 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-lg transition-all cursor-pointer"
-                        title="Nollställ poäng"
-                        disabled={activeExercise.isFinished}
-                      >
-                        <RotateCcw size={20} />
-                      </button>
-                      {!activeExercise.isFinished && (
-                        <button
-                          onClick={() => {
-                            setFinishTargetPeriodId(activeExercise.periodId || currentPeriodId);
-                            setShowFinishConfirm(true);
-                          }}
-                          className="ml-2 bg-green-600 text-white px-4 py-2 rounded-xl font-bold hover:bg-green-700 transition-all shadow-lg shadow-green-200 dark:shadow-none flex items-center gap-2 cursor-pointer"
-                        >
-                          <Check size={18} strokeWidth={3} />
-                          <span className="hidden sm:inline">Avsluta</span>
-                        </button>
-                      )}
-                      {activeExercise.isFinished && (
-                        <button
-                          onClick={unlockExercise}
-                          className="p-2 text-zinc-500 dark:text-zinc-400 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-lg transition-all cursor-pointer"
-                          title="Lås upp för redigering"
-                        >
-                          <Unlock size={20} />
-                        </button>
-                      )}
-                    </>
-                  )}
-                </>
-              )}
-            </div>
-          </div>
-        </header>
+      onUpdateSession({
+        ...sess,
+        lineupId: newLineup.id,
+        updatedAt: Date.now()
+      });
+    }
+
+    setActiveSessionId(null);
+    setView('lineup');
+    setSessionActionCount(prev => prev + 1);
+  };
+
+  const shellTitles: Record<string, string> = {
+    home: 'Översikt',
+    training: 'Kalender',
+    squad: 'Truppen',
+    lineup: 'Uppställning & taktik',
+    leaderboard: 'Poängliga',
+    teampage: 'Lagsida',
+    clubadmin: 'Administration',
+    profile: 'Min profil',
+  };
+  const shellTitle = shellTitles[view] || 'CoachAssist';
+
+  const roleLabel = isRootAdmin
+    ? 'Huvudadministratör'
+    : userRoles.includes('admin')
+    ? 'Administratör'
+    : userRoles.includes('coach')
+    ? 'Tränare'
+    : userRoles.includes('player')
+    ? 'Spelare'
+    : userRoles.includes('parent')
+    ? 'Förälder'
+    : undefined;
+
+  const shellActions = (
+    <>
+      {view === 'training' && isCoachOrAdmin && user && (
+        <IconButton label="Kalenderinställningar" onClick={() => setOpenTrainingSettings(true)}>
+          <Settings size={20} />
+        </IconButton>
       )}
-
-      {(isRootAdmin || userRoles.includes('admin') || userRoles.includes('coach')) && pendingRequestsCount > 0 && (
-        <div className="bg-indigo-600 text-white px-4 py-2.5 text-center text-xs font-bold leading-normal flex items-center justify-center gap-2 relative z-50 animate-fade-in print:hidden border-b border-indigo-700 shadow-lg">
-          <Bell size={16} className="shrink-0 animate-bounce" />
-          <span>
-            {pendingRequestsCount === 1 
-              ? '1 ny medlemsansökan väntar på godkännande!'
-              : `${pendingRequestsCount} nya medlemsansökningar väntar på godkännande!`}
-          </span>
-          <button
-            onClick={() => setIsPendingRequestsModalOpen(true)}
-            className="ml-2 px-3 py-1 bg-white text-indigo-700 hover:bg-indigo-50 font-black rounded-lg text-[11px] uppercase tracking-wider transition-all shadow-sm cursor-pointer"
-          >
-            Granska ansökningar
-          </button>
-        </div>
+      {(view === 'lineup' || view === 'leaderboard') && (
+        <IconButton label="Visa på storskärm" onClick={startPresenting}>
+          <Maximize2 size={20} />
+        </IconButton>
       )}
+    </>
+  );
 
-      <main className={`flex-1 flex flex-col min-h-0 w-full max-w-full overflow-x-hidden ${
-        view === 'exercise' || view === 'teampage' || (view === 'lineup' && isLineupMaximized)
-          ? 'overflow-hidden' 
-          : view === 'lineup' 
-          ? 'overflow-y-auto pb-28 sm:pb-24' 
-          : 'overflow-y-auto pb-20 sm:pb-24'
-      }`}>
+  const handleFocusBack = () => {
+    if (view === 'setup') {
+      if (editReturnView) {
+        setView(editReturnView);
+        setEditReturnView(null);
+      } else if (isEditingActiveExercise && activeExerciseId) {
+        handleSelectExercise(activeExerciseId);
+      } else {
+        setView('training');
+      }
+      if (!isEditingActiveExercise && previousActiveExerciseId !== undefined) {
+        setData(prev => ({ ...prev, activeExerciseId: previousActiveExerciseId }));
+        setPreviousActiveExerciseId(undefined);
+      }
+      setIsEditingActiveExercise(false);
+      setPrefilledName(null);
+      setLinkToMomentId(null);
+      return;
+    }
+    // Lämnar poängräkningen; ett öppet pass (activeSessionId) visas igen.
+    setView('training');
+    setData(prev => ({ ...prev, activeExerciseId: null }));
+    setSessionActionCount(prev => prev + 1);
+    setIsEditingActiveExercise(false);
+    try {
+      const url = new URL(window.location.href);
+      url.searchParams.delete('view');
+      url.searchParams.delete('ex');
+      window.history.replaceState({}, '', url.toString());
+    } catch (e) {}
+  };
+
+  const isFocusView = view === 'exercise' || view === 'setup';
+
+  const mainContent = (
+    <div className={`flex-1 flex flex-col min-h-0 w-full max-w-full overflow-x-hidden ${
+      view === 'exercise' || view === 'teampage' || view === 'home' || (view === 'lineup' && (isLineupMaximized || isPresenting))
+        ? 'overflow-hidden'
+        : 'overflow-y-auto'
+    } ${view === 'exercise' ? 'select-none' : ''}`}>
         <AnimatePresence mode="wait">
+          {view === 'home' && (
+            <HomeView
+              key="home"
+              user={user}
+              userProfile={userProfile}
+              isCoachOrAdmin={isCoachOrAdmin}
+              canViewLineup={canViewLineup}
+              squad={squad}
+              sessions={sessions}
+              exercises={exercises}
+              periods={periods}
+              pendingRequests={pendingRequestsCount}
+              onOpenPendingRequests={() => setIsPendingRequestsModalOpen(true)}
+              onOpenSession={(id, tab) => {
+                setActiveSessionId(id);
+                setSessionEditorTab(tab || 'schema');
+              }}
+              onOpenLineupForSession={openLineupForSession}
+              onNavigate={(v) => setView(v)}
+              onNewSession={onNewSession}
+              onNewExercise={() => {
+                setPreviousActiveExerciseId(activeExerciseId);
+                setEditReturnView('home');
+                setIsEditingActiveExercise(false);
+                setView('setup');
+              }}
+              onUpdateSession={onUpdateSession}
+            />
+          )}
+
           {view === 'training' && (
             sharedLeaderboardId ? (
               <motion.div
@@ -4443,6 +4348,8 @@ export default function App() {
               onUpdatePeriod={updatePeriod}
               sharedId={sharedLeaderboardId}
               userUid={user?.uid}
+              canManage={isCoachOrAdmin}
+              presentationMode={isPresenting}
             />
           )}
 
@@ -4516,6 +4423,7 @@ export default function App() {
               onManualSync={pullLatestData}
               onManualPush={handleManualPush}
               onMaximizedChange={setIsLineupMaximized}
+              presentationMode={isPresenting}
             />
           )}
 
@@ -4599,15 +4507,11 @@ export default function App() {
                     {/* Tävlingsmomentets namn i väldigt liten tunn stil precis under toppmenyn (döljs när timern är igång så bara timer & poäng syns) */}
                     {!isTimerRunning && (
                       <div className="text-center px-4 -mt-0.5 mb-0.5 select-none transition-opacity duration-300 flex items-center justify-center gap-1.5 flex-nowrap overflow-hidden text-ellipsis whitespace-nowrap">
-                        <span className="text-[11px] sm:text-xs font-semibold tracking-wide text-zinc-700 dark:text-zinc-200 truncate">
-                          {activeExercise.name}
-                        </span>
                         {momentSchedule && (
                           <span 
                             className="text-[10px] sm:text-[11px] font-medium tracking-wide text-zinc-600 dark:text-zinc-300 shrink-0 inline-flex items-center gap-1.5"
                             title={`Pass: ${momentSchedule.sessionTitle || 'Träningspass'}${momentSchedule.duration ? ` • Längd: ${momentSchedule.duration} min` : ''}${momentSchedule.timeRange ? ` • Tid: ${momentSchedule.timeRange}` : ''}`}
                           >
-                            <span className="text-zinc-400 dark:text-zinc-500 select-none">•</span>
                             {momentSchedule.duration > 0 && (
                               <span className="font-semibold text-zinc-800 dark:text-zinc-100">{momentSchedule.duration} min</span>
                             )}
@@ -4782,150 +4686,16 @@ export default function App() {
           )}
         </AnimatePresence>
 
-        {view !== 'exercise' && view !== 'teampage' && !(view === 'lineup' && isLineupMaximized) && (
-          <div className="mt-8 mb-2 flex flex-col items-center justify-center gap-2">
-            {activeClubInfo && (
-              isCoachOrAdmin ? (
-                <button
-                  type="button"
-                  onClick={() => setView('clubadmin')}
-                  className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/60 dark:hover:bg-indigo-900/60 border border-indigo-200/60 dark:border-indigo-800/60 text-indigo-700 dark:text-indigo-300 transition-all text-xs font-extrabold cursor-pointer active:scale-95 shadow-2xs"
-                  title="Klicka för att hantera eller byta Förening & Lag"
-                >
-                  <Building2 size={13} className="text-indigo-600 dark:text-indigo-400 shrink-0" />
-                  <span>{activeClubInfo.clubName}</span>
-                  <span className="text-indigo-300 dark:text-indigo-600">•</span>
-                  <Users size={13} className="text-indigo-600 dark:text-indigo-400 shrink-0" />
-                  <span>{activeClubInfo.teamName}</span>
-                </button>
-              ) : (
-                <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-zinc-100 dark:bg-zinc-800/60 border border-zinc-200 dark:border-zinc-700 text-zinc-600 dark:text-zinc-400 text-xs font-bold shadow-2xs">
-                  <Building2 size={13} className="text-zinc-500 shrink-0" />
-                  <span>{activeClubInfo.clubName}</span>
-                  <span className="text-zinc-400">•</span>
-                  <Users size={13} className="text-zinc-500 shrink-0" />
-                  <span>{activeClubInfo.teamName}</span>
-                </div>
-              )
-            )}
+        {view !== 'exercise' && view !== 'teampage' && view !== 'home' && view !== 'setup' && !(view === 'lineup' && (isLineupMaximized || isPresenting)) && !isPresenting && (
+          <div className="mt-8 mb-4 flex justify-center">
             <VersionFooter />
           </div>
         )}
-      </main>
+    </div>
+  );
 
-      {/* Bottom Navigation */}
-      {view !== 'exercise' && !(view === 'lineup' && isLineupMaximized) && (
-        <nav className={`fixed bottom-0 left-0 right-0 z-40 transition-all duration-200 ${
-          view === 'teampage'
-            ? 'bg-white dark:bg-zinc-900 border-t border-zinc-200 dark:border-zinc-800 px-2 sm:px-4 py-1 pb-[env(safe-area-inset-bottom,0px)] shadow-xs'
-            : 'liquid-glass border-t border-zinc-200/60 dark:border-zinc-800/60 px-2 sm:px-6 pt-1.5 pb-1.5 pb-safe'
-        }`}>
-          {view === 'teampage' ? (
-            /* Minimal bottom list for Lagsida to eliminate tall black border and maximize embedded webpage view */
-            <div className="max-w-md mx-auto flex items-center justify-between gap-1">
-              <button
-                onClick={() => setView('training')}
-                className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-zinc-500 hover:text-zinc-900 dark:hover:text-white transition-all text-xs font-bold active:scale-95 cursor-pointer"
-                title="Kalender"
-              >
-                <Calendar size={15} />
-                <span className="text-[11px] font-bold">Kalender</span>
-              </button>
-              <button
-                onClick={() => setView('leaderboard')}
-                className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-zinc-500 hover:text-zinc-900 dark:hover:text-white transition-all text-xs font-bold active:scale-95 cursor-pointer"
-                title="Poängliga"
-              >
-                <LayoutDashboard size={15} />
-                <span className="text-[11px] font-bold">Poängliga</span>
-              </button>
-              <button
-                onClick={() => setView('squad')}
-                className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-zinc-500 hover:text-zinc-900 dark:hover:text-white transition-all text-xs font-bold active:scale-95 cursor-pointer"
-                title="Truppen"
-              >
-                <Users size={15} />
-                <span className="text-[11px] font-bold">Truppen</span>
-              </button>
-              {canViewLineup && (
-                <button
-                  onClick={() => setView('lineup')}
-                  className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-zinc-500 hover:text-zinc-900 dark:hover:text-white transition-all text-xs font-bold active:scale-95 cursor-pointer"
-                  title="Laguppställning"
-                >
-                  <Shirt size={15} />
-                  <span className="text-[11px] font-bold">Laguppst.</span>
-                </button>
-              )}
-              <button
-                onClick={() => setView('teampage')}
-                className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-indigo-600 dark:text-indigo-400 liquid-glass-pill font-extrabold shadow-2xs text-xs active:scale-95 cursor-pointer"
-                title="Lagsida"
-              >
-                <Globe size={15} />
-                <span className="text-[11px] font-extrabold">Lagsida</span>
-              </button>
-            </div>
-          ) : (
-            <div className="max-w-xl mx-auto flex items-center justify-between gap-1">
-              <button
-                onClick={() => setView('training')}
-                className={`flex-1 flex flex-col items-center justify-center py-1 px-1 rounded-xl transition-all duration-200 relative ${
-                  view === 'training'
-                    ? 'text-indigo-600 dark:text-indigo-400 liquid-glass-pill font-bold shadow-xs'
-                    : 'text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200'
-                }`}
-              >
-                <Calendar size={22} className="transition-transform active:scale-90" />
-                <span className="text-[10px] font-bold uppercase tracking-wider mt-0.5 leading-none">Kalender</span>
-              </button>
-              <button
-                onClick={() => setView('leaderboard')}
-                className={`flex-1 flex flex-col items-center justify-center py-1 px-1 rounded-xl transition-all duration-200 relative ${
-                  view === 'leaderboard'
-                    ? 'text-indigo-600 dark:text-indigo-400 liquid-glass-pill font-bold shadow-xs'
-                    : 'text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200'
-                }`}
-              >
-                <LayoutDashboard size={22} className="transition-transform active:scale-90" />
-                <span className="text-[10px] font-bold uppercase tracking-wider mt-0.5 leading-none text-center">Poängliga</span>
-              </button>
-              <button
-                onClick={() => setView('squad')}
-                className={`flex-1 flex flex-col items-center justify-center py-1 px-1 rounded-xl transition-all duration-200 relative ${
-                  view === 'squad'
-                    ? 'text-indigo-600 dark:text-indigo-400 liquid-glass-pill font-bold shadow-xs'
-                    : 'text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200'
-                }`}
-              >
-                <Users size={22} className="transition-transform active:scale-90" />
-                <span className="text-[10px] font-bold uppercase tracking-wider mt-0.5 leading-none text-center">Truppen</span>
-              </button>
-              {canViewLineup && (
-                <button
-                  onClick={() => setView('lineup')}
-                  className={`flex-1 flex flex-col items-center justify-center py-1 px-1 rounded-xl transition-all duration-200 relative ${
-                    view === 'lineup'
-                      ? 'text-indigo-600 dark:text-indigo-400 liquid-glass-pill font-bold shadow-xs'
-                      : 'text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200'
-                  }`}
-                >
-                  <Shirt size={22} className="transition-transform active:scale-90" />
-                  <span className="text-[10px] font-bold uppercase tracking-wider mt-0.5 leading-none text-center">Laguppst.</span>
-                </button>
-              )}
-              <button
-                onClick={() => setView('teampage')}
-                className="flex-1 flex flex-col items-center justify-center py-1 px-1 rounded-xl transition-all duration-200 relative text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200"
-              >
-                <Globe size={22} className="transition-transform active:scale-90" />
-                <span className="text-[10px] font-bold uppercase tracking-wider mt-0.5 leading-none text-center">Lagsida</span>
-              </button>
-            </div>
-          )}
-        </nav>
-      )}
-
+  const overlays = (
+    <>
       <AnimatePresence>
         {showTeamOverview && activeExercise && (
           <TeamOverviewModal
@@ -5035,65 +4805,7 @@ export default function App() {
               setSessionActionCount(prev => prev + 1);
             }}
             onDeleteExercise={deleteExercise}
-            onOpenLineup={(sess) => {
-              // Check if lineup exists for this session
-              let targetLineup = lineups.find(l => l.sessionId === sess.id);
-              if (!targetLineup && sess.lineupId) {
-                targetLineup = lineups.find(l => l.id === sess.lineupId);
-              }
-
-              if (targetLineup) {
-                setData(prev => ({
-                  ...prev,
-                  activeLineupId: targetLineup!.id
-                }));
-              } else {
-                // Auto-create linked lineup with all attending players on bench
-                const attendingIds = sess.attendance || [];
-                const initialPlayers = attendingIds.map((playerId, idx) => ({
-                  id: `player_${Date.now()}_${idx}_${Math.random().toString(36).substring(7)}`,
-                  playerId,
-                  x: 50,
-                  y: 50,
-                  isSubstitute: true,
-                }));
-
-                const newLineup: Lineup = {
-                  id: `lineup_${Date.now()}_${Math.random().toString(36).substring(7)}`,
-                  teamName: activeClubInfo?.teamName || '',
-                  matchTitle: sess.title || 'Match',
-                  date: sess.date || Date.now(),
-                  formation: '4-3-3',
-                  players: initialPlayers,
-                  sessionId: sess.id,
-                  createdAt: Date.now(),
-                  updatedAt: Date.now(),
-                };
-
-                setData(prev => {
-                  const updatedLineups = [newLineup, ...prev.lineups];
-                  try {
-                    setPrefixedItem('football_lineups', JSON.stringify(updatedLineups), user);
-                    setPrefixedItem('active_lineup_id', newLineup.id, user);
-                  } catch (e) {}
-                  return {
-                    ...prev,
-                    lineups: updatedLineups,
-                    activeLineupId: newLineup.id
-                  };
-                });
-
-                onUpdateSession({
-                  ...sess,
-                  lineupId: newLineup.id,
-                  updatedAt: Date.now()
-                });
-              }
-
-              setActiveSessionId(null);
-              setView('lineup');
-              setSessionActionCount(prev => prev + 1);
-            }}
+            onOpenLineup={openLineupForSession}
           />
         )}
       </AnimatePresence>
@@ -5233,6 +4945,211 @@ export default function App() {
         onSafeReload={handleSafeShakeReload}
         hasTypedInSession={hasTypedInSession}
       />
-    </div>
+    </>
+  );
+
+  if (sharedLeaderboardId) {
+    // Delad poängliga (öppnad via länk) – visas utan appens meny.
+    return (
+      <div className="fixed inset-0 flex flex-col bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100 font-sans overflow-hidden">
+        <header className="shrink-0 bg-white dark:bg-zinc-900 border-b border-zinc-200/80 dark:border-zinc-800 pt-safe">
+          <div className="h-14 px-4 sm:px-6 flex items-center justify-between gap-3 max-w-5xl mx-auto w-full">
+            <h1 className="text-lg font-bold">Poängliga</h1>
+            <button
+              type="button"
+              onClick={clearSharedView}
+              className="h-9 px-3 rounded-xl bg-indigo-600 text-white text-sm font-semibold cursor-pointer"
+            >
+              {user ? 'Till appen' : 'Logga in'}
+            </button>
+          </div>
+        </header>
+        {mainContent}
+        {overlays}
+        <Sheet open={isExerciseMenuOpen} onClose={() => setIsExerciseMenuOpen(false)} title="Tävlingsmoment">
+          <MenuItem
+            icon={<Edit2 size={18} />}
+            label="Redigera tävlingsmoment"
+            description="Lag, poängregler och timer"
+            onClick={() => {
+              setIsExerciseMenuOpen(false);
+              setPreviousActiveExerciseId(activeExerciseId);
+              setEditReturnView('exercise');
+              setIsEditingActiveExercise(true);
+              setView('setup');
+            }}
+          />
+          {activeExercise && !activeExercise.isFinished && (
+            <MenuItem
+              icon={<RotateCcw size={18} />}
+              label="Nollställ poäng"
+              tone="danger"
+              onClick={() => {
+                setIsExerciseMenuOpen(false);
+                setShowResetConfirm(true);
+              }}
+            />
+          )}
+        </Sheet>
+      </div>
+    );
+  }
+
+  if (isAuthReady && !user) {
+    return <WelcomeScreen onLogin={handleLogin} clubName={activeClubInfo?.clubName} />;
+  }
+
+  if (isFocusView) {
+    return (
+      <div className={`fixed inset-0 flex flex-col bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100 font-sans selection:bg-indigo-100 overflow-hidden ${view === 'exercise' ? 'select-none' : ''}`}>
+        <header className={`shrink-0 bg-white/95 dark:bg-zinc-900/95 backdrop-blur-md border-b border-zinc-200/80 dark:border-zinc-800 pt-safe z-30 transition-all duration-300 ${
+          view === 'exercise' && isTimerRunning ? '-mt-14 sm:-mt-16 opacity-0 pointer-events-none overflow-hidden border-b-0' : ''
+        }`}>
+          <div className="max-w-7xl mx-auto px-2 sm:px-4 h-14 sm:h-16 flex items-center gap-1 sm:gap-2">
+            <IconButton label="Tillbaka" onClick={handleFocusBack}>
+              <ArrowLeft size={22} />
+            </IconButton>
+            <h1 className="min-w-0 flex-1 text-base sm:text-lg font-bold truncate">
+              {view === 'setup'
+                ? (isEditingActiveExercise ? 'Redigera tävlingsmoment' : 'Nytt tävlingsmoment')
+                : (activeExercise?.name || 'Tävlingsmoment')}
+            </h1>
+            {view === 'exercise' && (
+              <>
+                <IconButton
+                  label={hasTypedInSession ? 'Text har skrivits – tryck för att skaksäkra' : 'Skakskydd (iPhone)'}
+                  onClick={() => setIsQuickShakeModalOpen(true)}
+                  className={hasTypedInSession ? '!text-amber-600 !bg-amber-50 dark:!bg-amber-950/40' : ''}
+                  badge={hasTypedInSession}
+                >
+                  <VibrateOff size={19} />
+                </IconButton>
+                <IconButton label="Lagindelning" onClick={() => setShowTeamOverview(true)}>
+                  <Users size={20} />
+                </IconButton>
+                {activeExercise && (
+                  <IconButton
+                    label={activeExercise.showTimer ? 'Dölj timer' : 'Visa timer'}
+                    active={!!activeExercise.showTimer}
+                    onClick={toggleTimerVisibility}
+                  >
+                    <TimerIcon size={20} />
+                  </IconButton>
+                )}
+                {activeExercise && isCoachOrAdmin && (
+                  <>
+                    <span className="hidden sm:contents">
+                      <IconButton
+                        label="Redigera tävlingsmoment"
+                        onClick={() => {
+                          setPreviousActiveExerciseId(activeExerciseId);
+                          setEditReturnView('exercise');
+                          setIsEditingActiveExercise(true);
+                          setView('setup');
+                        }}
+                      >
+                        <Edit2 size={19} />
+                      </IconButton>
+                      {!activeExercise.isFinished && (
+                        <IconButton label="Nollställ poäng" onClick={() => setShowResetConfirm(true)}>
+                          <RotateCcw size={19} />
+                        </IconButton>
+                      )}
+                    </span>
+                    <span className="sm:hidden contents">
+                      <IconButton label="Fler val" onClick={() => setIsExerciseMenuOpen(true)}>
+                        <MoreVertical size={20} />
+                      </IconButton>
+                    </span>
+                    {activeExercise.isFinished ? (
+                      <IconButton label="Lås upp för redigering" onClick={unlockExercise}>
+                        <Unlock size={20} />
+                      </IconButton>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setFinishTargetPeriodId(activeExercise.periodId || currentPeriodId);
+                          setShowFinishConfirm(true);
+                        }}
+                        className="ml-1 h-10 px-3 sm:px-4 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold inline-flex items-center gap-1.5 cursor-pointer shadow-sm active:scale-95 transition-all"
+                      >
+                        <Check size={18} strokeWidth={3} />
+                        <span>Avsluta</span>
+                      </button>
+                    )}
+                  </>
+                )}
+              </>
+            )}
+          </div>
+        </header>
+        {mainContent}
+        {overlays}
+        <Sheet open={isExerciseMenuOpen} onClose={() => setIsExerciseMenuOpen(false)} title="Tävlingsmoment">
+          <MenuItem
+            icon={<Edit2 size={18} />}
+            label="Redigera tävlingsmoment"
+            description="Lag, poängregler och timer"
+            onClick={() => {
+              setIsExerciseMenuOpen(false);
+              setPreviousActiveExerciseId(activeExerciseId);
+              setEditReturnView('exercise');
+              setIsEditingActiveExercise(true);
+              setView('setup');
+            }}
+          />
+          {activeExercise && !activeExercise.isFinished && (
+            <MenuItem
+              icon={<RotateCcw size={18} />}
+              label="Nollställ poäng"
+              tone="danger"
+              onClick={() => {
+                setIsExerciseMenuOpen(false);
+                setShowResetConfirm(true);
+              }}
+            />
+          )}
+        </Sheet>
+      </div>
+    );
+  }
+
+  return (
+    <>
+      <AppShell
+        view={view as ShellView}
+        onNavigate={(v) => { setIsPresenting(false); setView(v); }}
+        canViewLineup={canViewLineup}
+        isCoachOrAdmin={isCoachOrAdmin}
+        title={shellTitle}
+        actions={shellActions}
+        clubName={activeClubInfo?.clubName}
+        teamName={activeClubInfo?.teamName}
+        account={user ? {
+          name: userProfile.fullName || user.displayName || user.email || 'Konto',
+          email: user.email || '',
+          photoUrl: effectiveUserPhoto,
+          roleLabel: roleLabel,
+        } : null}
+        pendingRequests={isCoachOrAdmin ? pendingRequestsCount : 0}
+        syncState={syncError ? 'error' : isSyncing ? 'saving' : (user && sessionActionCount > 0) ? 'pending' : 'idle'}
+        onSaveNow={handleManualPush}
+        onRefresh={pullLatestData}
+        theme={theme}
+        onToggleTheme={toggleTheme}
+        onLogout={handleLogout}
+        onLogin={handleLogin}
+        onOpenShakeInfo={() => setIsShakeInfoModalOpen(true)}
+        onOpenPendingRequests={() => setIsPendingRequestsModalOpen(true)}
+        chromeHidden={isPresenting || (view === 'lineup' && isLineupMaximized)}
+        hideTopBar={view === 'teampage'}
+        presenting={isPresenting}
+        onExitPresenting={stopPresenting}
+      >
+        {mainContent}
+      </AppShell>
+      {overlays}
+    </>
   );
 }
