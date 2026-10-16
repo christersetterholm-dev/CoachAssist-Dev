@@ -209,8 +209,12 @@ export function importJsonStore(db: Db, jsonPath: string): { imported: number } 
   let imported = 0;
   db.transaction(() => {
     for (const [table, cols] of Object.entries(TABLE_COLUMNS)) {
-      const rows = store[table] ? Object.values(store[table]) as any[] : [];
-      const stmt = db.prepare(`INSERT OR REPLACE INTO ${table} (${cols.join(', ')}) VALUES (${cols.map(() => '?').join(', ')})`);
+      let rows = store[table] ? Object.values(store[table]) as any[] : [];
+      // JSON-databasen saknade unikhetskontroll på e-post. Behåll det konto som använts
+      // (inloggat) först; dubbletter hoppas över i stället för att skriva över.
+      if (table === 'users') rows = rows.sort((x, y) => (Number(y?.has_logged_in) || 0) - (Number(x?.has_logged_in) || 0));
+      const verb = table === 'users' ? 'INSERT OR IGNORE' : 'INSERT OR REPLACE';
+      const stmt = db.prepare(`${verb} INTO ${table} (${cols.join(', ')}) VALUES (${cols.map(() => '?').join(', ')})`);
       for (const row of rows) {
         if (!row || typeof row !== 'object') continue;
         const values = cols.map((c) => {
@@ -223,7 +227,11 @@ export function importJsonStore(db: Db, jsonPath: string): { imported: number } 
           if (c === 'data' && typeof v !== 'string') return JSON.stringify(v);
           return v;
         });
-        try { stmt.run(...values); imported++; } catch (e: any) {
+        try {
+          const r = stmt.run(...values);
+          if (Number(r.changes) > 0) imported++;
+          else console.warn(`[Databas] Hoppade över dubblett i ${table}: ${row.email || row.id || ''}`);
+        } catch (e: any) {
           console.warn(`[Databas] Kunde inte flytta en rad i ${table}:`, e?.message || e);
         }
       }

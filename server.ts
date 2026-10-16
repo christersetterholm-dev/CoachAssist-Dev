@@ -15,6 +15,7 @@ import net from 'net';
 import { fileURLToPath } from 'url';
 import { createRequire } from 'module';
 import { openDatabase } from './server/database.ts';
+import * as registry from './server/registry.ts';
 
 const customRequire = typeof require !== 'undefined' ? require : createRequire(import.meta.url);
 
@@ -53,6 +54,7 @@ try {
 }
 
 const db = openDatabase({ dbPath: DB_PATH, dataDir: DATA_DIR, require: customRequire });
+registry.migrateRegistry(db);
 
 // --- SECURE JWT INITIALIZATION & CONSTANTS ---
 // Block all previously leaked repository secrets using SHA-256 hashes to prevent scanners from detecting raw strings
@@ -221,82 +223,25 @@ export interface MemberScope {
   emails: Set<string>;
 }
 
-// Samlar alla medlemmar i de klubbar där användaren är admin eller tränare.
+// Samlar alla medlemmar (id, kopplade konton och e-post) i de klubbar där användaren är admin eller tränare.
 export function getManagedMemberScope(user: any): MemberScope {
   const scope: MemberScope = { userIds: new Set(), emails: new Set() };
-  if (!user) return scope;
-  const callerId = String(user.id || '');
-  const callerEmail = String(user.email || '').trim().toLowerCase();
-
-  let rows: any[] = [];
-  try {
-    rows = db.prepare("SELECT clubId, data FROM clubs_data WHERE teamId = 'club_global' AND segment = 'members'").all();
-  } catch (_) {
-    return scope;
-  }
-
-  for (const row of rows) {
-    let parsed: any = null;
-    try { parsed = typeof row.data === 'string' ? JSON.parse(row.data) : row.data; } catch (_) { continue; }
-    const members: any[] = Array.isArray(parsed) ? parsed : (Array.isArray(parsed?.members) ? parsed.members : []);
-    const isManager = members.some((m: any) => {
-      if (!m) return false;
-      const sameUser = (callerId && m.userId === callerId) ||
-        (callerEmail && typeof m.email === 'string' && m.email.trim().toLowerCase() === callerEmail);
-      const roles: string[] = Array.isArray(m.roles) ? m.roles : [];
-      return sameUser && (roles.includes('admin') || roles.includes('coach'));
-    });
-    if (!isManager) continue;
-    for (const m of members) {
-      if (!m) continue;
-      if (m.userId) scope.userIds.add(String(m.userId));
-      if (typeof m.email === 'string' && m.email.trim()) scope.emails.add(m.email.trim().toLowerCase());
+  for (const clubId of registry.getManagedClubIds(db, user)) {
+    const rows: any[] = db.prepare('SELECT id, user_id, email FROM members WHERE club_id = ?').all(clubId);
+    for (const m of rows) {
+      scope.userIds.add(String(m.id));
+      if (m.user_id) scope.userIds.add(String(m.user_id));
+      if (m.email) scope.emails.add(String(m.email).trim().toLowerCase());
     }
   }
   return scope;
-}
-
-function readClubMembers(clubId: string): any[] {
-  try {
-    const row: any = db.prepare("SELECT data FROM clubs_data WHERE clubId = ? AND teamId = 'club_global' AND segment = 'members'").get(clubId);
-    if (!row) return [];
-    const parsed = typeof row.data === 'string' ? JSON.parse(row.data) : row.data;
-    return Array.isArray(parsed) ? parsed : (Array.isArray(parsed?.members) ? parsed.members : []);
-  } catch (_) {
-    return [];
-  }
-}
-
-function memberMatchesUser(m: any, user: any): boolean {
-  if (!m || !user) return false;
-  const email = String(user.email || '').trim().toLowerCase();
-  return (!!user.id && m.userId === user.id) || (!!email && typeof m.email === 'string' && m.email.trim().toLowerCase() === email);
 }
 
 // Är användaren admin eller tränare i klubben (eller root-admin)?
 export function isClubManager(user: any, clubId: string): boolean {
   if (!user) return false;
   if (isRootAdminEmail(user.email)) return true;
-  return readClubMembers(clubId).some((m: any) => memberMatchesUser(m, user) &&
-    Array.isArray(m.roles) && (m.roles.includes('admin') || m.roles.includes('coach')));
-}
-
-// Alla lag (och klubbens gemensamma del) där användaren är medlem.
-export function getUserClubTeams(user: any): { clubId: string; teamId: string }[] {
-  const result: { clubId: string; teamId: string }[] = [];
-  let rows: any[] = [];
-  try {
-    rows = db.prepare("SELECT clubId FROM clubs_data WHERE teamId = 'club_global' AND segment = 'members'").all();
-  } catch (_) {
-    return result;
-  }
-  for (const r of rows) {
-    const me = readClubMembers(r.clubId).find((m: any) => memberMatchesUser(m, user));
-    if (!me) continue;
-    result.push({ clubId: r.clubId, teamId: 'club_global' });
-    for (const t of Array.isArray(me.teams) ? me.teams : []) result.push({ clubId: r.clubId, teamId: String(t) });
-  }
-  return result;
+  return registry.getManagedClubIds(db, user).includes(clubId);
 }
 
 export function isAccountClaimed(userRow: any): boolean {
@@ -750,7 +695,7 @@ async function ensureTeamAndClubIntegrity() {
       }
     }
 
-    for (const [clubId, { teams, metadata, members }] of clubMap.entries()) {
+    for (const [clubId, { teams, metadata }] of clubMap.entries()) {
       let metaUpdated = false;
       let curMeta = metadata || { id: clubId, name: 'Klubb', teams: [] };
       if (!Array.isArray(curMeta.teams)) curMeta.teams = [];
@@ -781,46 +726,6 @@ async function ensureTeamAndClubIntegrity() {
         console.log(`[Integrity] Auto-repaired metadata.teams for club ${clubId} with ${curMeta.teams.length} teams`);
       }
 
-      let membersUpdated = false;
-      let curMembers = members || { members: [] };
-      if (!Array.isArray(curMembers.members)) curMembers.members = [];
-
-      const rootEmails = ['christer@setterholm.se', 'christer.setterholm@gmail.com'];
-      const teamIds = Array.from(teams);
-
-      for (const re of rootEmails) {
-        const existing = curMembers.members.find((m: any) => m && m.email && m.email.toLowerCase() === re);
-        if (existing) {
-          if (!existing.teams || existing.teams.length === 0) {
-            existing.teams = teamIds;
-            membersUpdated = true;
-          }
-          if (!existing.roles || existing.roles.length === 0) {
-            existing.roles = ['admin', 'coach'];
-            membersUpdated = true;
-          }
-        } else {
-          curMembers.members.push({
-            userId: re === 'christer@setterholm.se' ? 'a7a4c8a1-096d-4d15-a9c8-ff3df6880ae6' : 'user_christer_gmail',
-            email: re,
-            fullName: 'Christer Setterholm',
-            roles: ['admin', 'coach'],
-            teams: teamIds,
-            photoUrl: '/uploads/photo_1790894131733-182448117.png'
-          });
-          membersUpdated = true;
-        }
-      }
-
-      if (membersUpdated) {
-        const rawMembers = JSON.stringify(curMembers);
-        db.prepare(`
-          INSERT INTO clubs_data (clubId, teamId, segment, data, updatedAt)
-          VALUES (?, 'club_global', 'members', ?, ?)
-          ON CONFLICT(clubId, teamId, segment) DO UPDATE SET data = excluded.data, updatedAt = excluded.updatedAt
-        `).run(clubId, rawMembers, Date.now());
-        console.log(`[Integrity] Auto-repaired members list for club ${clubId}`);
-      }
     }
   } catch (err) {
     console.warn('[Integrity] Error during team/club auto-integrity check:', err);
@@ -1339,6 +1244,7 @@ async function startServer() {
         createdAt
       );
 
+      registry.linkMembersToUser(db, { id: userId, email: trimmedEmail });
       const token = jwt.sign({ id: userId, email: trimmedEmail, username: trimmedUsername }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
       res.json({
         token,
@@ -1407,6 +1313,7 @@ async function startServer() {
         }
       }
 
+      registry.linkMembersToUser(db, userRow);
       const token = jwt.sign({ id: userRow.id, email: userRow.email, username: userRow.username }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
       res.json({
         token,
@@ -1596,6 +1503,7 @@ async function startServer() {
       );
 
       // Issue fresh authentication JWT token
+      registry.linkMembersToUser(db, userRow);
       const token = jwt.sign({ id: userRow.id, email: userRow.email }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
 
       res.json({
@@ -1753,6 +1661,7 @@ async function startServer() {
         };
       }
 
+      registry.linkMembersToUser(db, userRow);
       const token = jwt.sign({ id: userRow.id, email: userRow.email, username: userRow.username }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
 
       res.json({
@@ -1898,6 +1807,8 @@ async function startServer() {
       if (!userRow) {
         return res.status(404).json({ error: 'Användaren hittades inte' });
       }
+
+      registry.linkMembersToUser(db, { id: userRow.id, email: userRow.email });
 
       res.json({
         uid: userRow.id,
@@ -2087,6 +1998,7 @@ async function startServer() {
       db.prepare('UPDATE users SET email = ? WHERE id = ?').run(cleanNewEmail, userId);
 
       // Issue updated token
+      registry.linkMembersToUser(db, { id: userId, email: cleanNewEmail });
       const newToken = jwt.sign({ id: userId, email: cleanNewEmail }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
 
       res.json({
@@ -2550,12 +2462,47 @@ async function startServer() {
   app.get('/api/periods/all', requireAuthUser, (req, res) => {
     try {
       const user = (req as any).user;
-      const result = getConsolidatedPeriods({ userId: user.id, clubTeams: getUserClubTeams(user) });
+      const result = getConsolidatedPeriods({ userId: user.id, clubTeams: registry.getUserClubTeams(db, user) });
       res.json({ success: true, ...result });
     } catch (e: any) {
       console.error('Error fetching consolidated periods:', e);
       res.status(500).json({ error: 'Failed to fetch consolidated periods' });
     }
+  });
+
+  // --- SVAR PÅ KALLELSER ---
+  // En spelare (eller förälder/tränare) svarar för en person på en aktivitet. Varje svar
+  // sparas som egen rad så att samtidiga svar inte skriver över varandra.
+  app.post('/api/rsvp', requireAuthUser, async (req, res) => {
+    const user = (req as any).user;
+    const { clubId, teamId, sessionId, memberId, status, comment } = req.body || {};
+    if (![clubId, teamId, sessionId, memberId].every((v) => typeof v === 'string' && v)) {
+      return res.status(400).json({ error: 'clubId, teamId, sessionId och memberId krävs.' });
+    }
+    if (status !== null && !registry.RSVP_STATUSES.includes(status)) {
+      return res.status(400).json({ error: 'Ogiltigt svar.' });
+    }
+    const access = registry.getClubAccess(db, user, clubId, await verifyIsRootAdmin(user));
+    const isOwn = access.memberIds.includes(memberId);
+    if (!registry.isTeamCoach(access, teamId) && !(isOwn && registry.isTeamMember(access, teamId))) {
+      return res.status(403).json({ error: 'Du kan bara svara för dig själv.' });
+    }
+    const inTeam = db.prepare(`SELECT 1 FROM team_roles WHERE member_id = ? AND club_id = ? AND team_id = ?`).get(memberId, clubId, teamId);
+    if (!inTeam) return res.status(404).json({ error: 'Personen finns inte i laget.' });
+    const sessRow: any = db.prepare(`SELECT data FROM clubs_data WHERE clubId = ? AND teamId = ? AND segment = 'sessions'`).get(clubId, teamId);
+    const sessDoc = sessRow ? JSON.parse(sessRow.data) : null;
+    const sessions: any[] = Array.isArray(sessDoc) ? sessDoc : (sessDoc?.sessions || []);
+    if (!sessions.some((s) => s && s.id === sessionId)) return res.status(404).json({ error: 'Aktiviteten finns inte.' });
+
+    if (status === null) {
+      db.prepare('DELETE FROM rsvps WHERE club_id = ? AND team_id = ? AND session_id = ? AND member_id = ?').run(clubId, teamId, sessionId, memberId);
+      return res.json({ success: true, rsvp: null });
+    }
+    const me: any = access.memberIds.length ? db.prepare('SELECT full_name FROM members WHERE id = ?').get(access.memberIds[0]) : null;
+    const updatedBy = isOwn ? (me?.full_name || user.email) : `Tränare (${me?.full_name || user.email})`;
+    const updatedAt = Date.now();
+    registry.upsertRsvp(db, { clubId, teamId, sessionId, memberId, status, comment: typeof comment === 'string' ? comment.slice(0, 500) : null, updatedAt, updatedBy });
+    res.json({ success: true, rsvp: { status, ...(comment ? { comment } : {}), updatedAt, updatedBy } });
   });
 
   // --- DOCUMENT STORE ENDPOINTS ---
@@ -2564,6 +2511,11 @@ async function startServer() {
   app.get('/api/docs', async (req, res) => {
     const pathStr = req.query.path as string;
     if (!pathStr) return res.status(400).send('Path is required');
+
+    if (pathStr === 'shared_leaderboards/all_clubs') {
+      // Lista över föreningar och lag (för val vid registrering). Räknas fram ur föreningarnas metadata.
+      return res.json({ clubs: registry.listClubs(db) });
+    }
 
     if (pathStr.startsWith('shared_leaderboards/')) {
       const id = pathStr.split('/')[1];
@@ -2635,6 +2587,15 @@ async function startServer() {
         return res.json(null);
       }
     } else if (pathStr.startsWith('clubs/') && pathStr.includes('/pending_requests')) {
+      // Medlemsförfrågningar: tränare/admin i föreningen ser alla, övriga bara sin egen
+      const prUser = extractAuthUser(req);
+      if (!prUser) return res.status(401).json({ error: 'Inloggning krävs.' });
+      {
+        const p = pathStr.split('/');
+        const ownDoc = p.length === 4 && p[3] === prUser.id;
+        const prAccess = registry.getClubAccess(db, prUser, p[1], await verifyIsRootAdmin(prUser));
+        if (!ownDoc && !registry.isClubCoach(prAccess)) return res.status(403).json({ error: 'Åtkomst nekad.' });
+      }
       try {
         const parts = pathStr.split('/');
         const isCollection = parts.length === 3; // ['clubs', clubId, 'pending_requests']
@@ -2708,8 +2669,21 @@ async function startServer() {
         const teamId = parts[3] || 'club_global';
         const segment = parts[5] || parts[3] || 'data';
 
+        const access = registry.getClubAccess(db, clubReqUser, clubId, await verifyIsRootAdmin(clubReqUser));
+        if (!registry.canReadClubDoc(access, teamId, segment)) {
+          return res.status(403).json({ error: 'Du har inte behörighet till det här laget.' });
+        }
+        if (teamId === registry.CLUB_LEVEL && segment === 'members') {
+          const doc = registry.getMembersDoc(db, clubId, access);
+          return res.json(doc.members.length > 0 ? doc : null);
+        }
+        if (teamId !== registry.CLUB_LEVEL && segment === 'squad') {
+          const doc = registry.getSquadDoc(db, clubId, teamId, access);
+          return res.json(doc.squad.length > 0 ? doc : null);
+        }
+
         if (segment === 'periods') {
-          const consolidated = getConsolidatedPeriods({ clubTeams: [{ clubId, teamId }], userId: isClubManager(clubReqUser, clubId) ? clubReqUser.id : undefined });
+          const consolidated = getConsolidatedPeriods({ clubTeams: [{ clubId, teamId }], userId: registry.isTeamCoach(access, teamId) ? clubReqUser.id : undefined });
           try {
             db.prepare(`
               INSERT INTO clubs_data (clubId, teamId, segment, data, updatedAt)
@@ -2724,7 +2698,8 @@ async function startServer() {
         if (!row) {
           return res.json(null);
         }
-        res.json(typeof row.data === 'string' ? JSON.parse(row.data) : row.data);
+        const parsedDoc = typeof row.data === 'string' ? JSON.parse(row.data) : row.data;
+        res.json(segment === 'sessions' ? registry.overlayRsvps(db, clubId, teamId, parsedDoc) : parsedDoc);
       } catch (e: any) {
         if (e.name === 'JsonWebTokenError' || e.name === 'TokenExpiredError' || e.message === 'Invalid token' || e.message === 'No token provided') {
           return res.status(401).json({ error: 'Unauthorized', message: 'Session expired, please log in again.' });
@@ -2744,6 +2719,11 @@ async function startServer() {
         res.status(500).json({ error: 'Failed to fetch admin doc' });
       }
     } else if (pathStr === 'pending_user_requests' || pathStr.startsWith('pending_user_requests/')) {
+      const purUser = extractAuthUser(req);
+      if (!purUser) return res.status(401).json({ error: 'Inloggning krävs.' });
+      if (pathStr !== `pending_user_requests/${purUser.id}` && !(await verifyIsRootAdmin(purUser)) && registry.getManagedClubIds(db, purUser).length === 0) {
+        return res.status(403).json({ error: 'Åtkomst nekad.' });
+      }
       try {
         const isValidRequest = (item: any) => {
           return item && typeof item === 'object' &&
@@ -2785,12 +2765,27 @@ async function startServer() {
     const { data } = req.body;
     if (!pathStr) return res.status(400).send('Path is required');
 
+    if (pathStr === 'shared_leaderboards/all_clubs') {
+      // Föreningslistan räknas fram ur metadata (se GET); inget att spara.
+      return res.json({ success: true });
+    }
+
     if (pathStr.startsWith('shared_leaderboards/')) {
       const id = pathStr.split('/')[1];
+      const lbUser = extractAuthUser(req);
+      if (!lbUser) return res.status(401).json({ error: 'Inloggning krävs.' });
+      const existingLb: any = db.prepare('SELECT coachUid FROM shared_leaderboards WHERE id = ?').get(id);
+      if (existingLb && existingLb.coachUid && existingLb.coachUid !== lbUser.id && !(await verifyIsRootAdmin(lbUser))) {
+        // Tränare i samma förening som den som skapade listan får också uppdatera den
+        const owner: any = db.prepare('SELECT id, email FROM users WHERE id = ?').get(existingLb.coachUid) || { id: existingLb.coachUid };
+        const ownerClubs = registry.getManagedClubIds(db, owner);
+        const sharesClub = registry.getManagedClubIds(db, lbUser).some((c) => ownerClubs.includes(c));
+        if (!sharesClub) return res.status(403).json({ error: 'Poänglistan tillhör en annan förening.' });
+      }
       try {
         const cleanObj = (data && data.data && (data.data.standings || data.data.name)) ? data.data : data;
         const serializedData = typeof cleanObj === 'string' ? cleanObj : JSON.stringify(cleanObj);
-        const coachUid = cleanObj?.coachUid || data?.coachUid || null;
+        const coachUid = existingLb?.coachUid || lbUser.id;
         
         db.prepare(`
           INSERT INTO shared_leaderboards (id, data, updatedAt, coachUid)
@@ -2907,9 +2902,29 @@ async function startServer() {
         const teamId = parts[3] || 'club_global';
         const segment = parts[5] || parts[3] || 'data';
 
+        const isRootReq = await verifyIsRootAdmin(clubReqUser);
+        const access = registry.getClubAccess(db, clubReqUser, clubId, isRootReq);
+        const creatingClub = teamId === registry.CLUB_LEVEL && !registry.clubExists(db, clubId);
+        if (creatingClub ? !isRootReq : !registry.canWriteClubDoc(access, teamId, segment)) {
+          return res.status(403).json({ error: creatingClub ? 'Endast administratörer kan skapa nya föreningar.' : 'Du har inte behörighet att ändra i det här laget.' });
+        }
+        if (teamId === registry.CLUB_LEVEL && segment === 'members') {
+          const list = Array.isArray(data) ? data : (data?.members || []);
+          registry.saveMembersDoc(db, clubId, list, creatingClub ? { ...access, isClubAdmin: true } : access);
+          return res.json({ success: true, updatedAt: Date.now() });
+        }
+        if (teamId !== registry.CLUB_LEVEL && segment === 'squad') {
+          registry.saveSquadDoc(db, clubId, teamId, Array.isArray(data) ? data : (data?.squad || []));
+          return res.json({ success: true, updatedAt: Date.now() });
+        }
+
         let finalDataToSave = data;
+        if (segment === 'sessions') {
+          // Svar på kallelser lagras i egen tabell så att samtidiga svar inte skriver över varandra
+          finalDataToSave = registry.extractRsvps(db, clubId, teamId, data, clubReqUser.email);
+        }
         if (segment === 'periods') {
-          const consolidated = getConsolidatedPeriods({ clubTeams: [{ clubId, teamId }], userId: isClubManager(clubReqUser, clubId) ? clubReqUser.id : undefined });
+          const consolidated = getConsolidatedPeriods({ clubTeams: [{ clubId, teamId }], userId: registry.isTeamCoach(access, teamId) ? clubReqUser.id : undefined });
           const map = new Map<string, any>();
           (consolidated.periods || []).forEach((p: any) => { if (p && p.id) map.set(p.id, p); });
           const incomingList = Array.isArray(data?.periods) ? data.periods : (Array.isArray(data) ? data : []);
