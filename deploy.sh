@@ -50,7 +50,7 @@ $SSH "$SERVER" "test -d ~/$REMOTE_DIR" || { echo "❌ Hittar inte ~/$REMOTE_DIR 
 # Den Node-version Passenger använder står i serverns .htaccess (PassengerNodejs)
 NODE_BIN=$($SSH "$SERVER" "grep -m1 '^PassengerNodejs' ~/$REMOTE_DIR/.htaccess | sed -E 's/^PassengerNodejs[[:space:]]+\"?([^\"]+)\"?.*/\\1/'" 2>/dev/null || true)
 [[ -n "$NODE_BIN" ]] || { echo "❌ Hittar inte PassengerNodejs i ~/$REMOTE_DIR/.htaccess"; exit 1; }
-ACTIVATE="export PATH=\"$(dirname "$NODE_BIN"):\$PATH\""
+ACTIVATE="source \"$(dirname "$NODE_BIN")/activate\""   # cPanels Node-miljö (samma som 'Run NPM Install')
 NODE_VERSION=$($SSH "$SERVER" "$NODE_BIN -v" 2>/dev/null || echo "okänd")
 echo "  Node på servern: $NODE_VERSION"
 if [[ ! "$NODE_VERSION" =~ ^v(2[3-9]|[3-9][0-9])\. && ! "$NODE_VERSION" =~ ^v22\.(1[3-9]|[2-9][0-9]) ]]; then
