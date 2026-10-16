@@ -35,7 +35,6 @@ interface LineupBuilderProps {
   user: FirebaseUser | null;
   isSyncing?: boolean;
   sessionActionCount?: number;
-  isQuotaExceeded?: boolean;
   syncError?: string | null;
   isCoachOrAdmin?: boolean;
   onManualSync?: () => Promise<void> | void;
@@ -493,7 +492,6 @@ export default function LineupBuilder({
   user,
   isSyncing = false,
   sessionActionCount = 0,
-  isQuotaExceeded = false,
   syncError = null,
   isCoachOrAdmin = true,
   onManualSync,
@@ -3191,7 +3189,7 @@ export default function LineupBuilder({
 
                   {!isSimplified && (
                     <AnimatePresence>
-                      {(hasUnsavedChanges || (user && sessionActionCount > 0) || isSyncing || isQuotaExceeded || syncError) && (
+                      {(hasUnsavedChanges || (user && sessionActionCount > 0) || isSyncing || syncError) && (
                         <motion.button
                           type="button"
                           initial={{ opacity: 0, scale: 0.8 }}
@@ -3249,28 +3247,21 @@ export default function LineupBuilder({
                           }}
                           disabled={isSyncing}
                           title={
-                            isQuotaExceeded 
-                              ? "Molngränsen nådd" 
-                              : syncError 
-                                ? `Synkfel: ${syncError}. Klicka för att försöka spara igen.` 
-                                : isSyncing 
-                                  ? "Synkroniserar till molnet..." 
-                                  : "Ändringar väntar. Klicka för att spara till molnet direkt."
+                            syncError
+                              ? `Synkfel: ${syncError}. Klicka för att försöka spara igen.`
+                              : isSyncing
+                                ? "Sparar..."
+                                : "Ändringar väntar. Klicka för att spara direkt."
                           }
                           className={`inline-flex items-center gap-1.5 ml-1 text-[9px] font-black px-2 py-0.5 rounded-full border transition-all duration-300 ${
-                            isQuotaExceeded || syncError
+                            syncError
                               ? 'bg-red-500/10 text-red-500 border-red-500/20 dark:bg-red-500/20 cursor-pointer hover:bg-red-500/20 active:scale-95'
                               : isSyncing
                                 ? 'bg-indigo-500/10 text-indigo-500 border-indigo-500/30 dark:bg-indigo-500/20 animate-pulse cursor-wait'
                                 : 'bg-amber-500/10 text-amber-500 border-amber-500/20 dark:bg-amber-500/20 cursor-pointer hover:bg-amber-500/20 active:scale-95'
                           }`}
                         >
-                          {isQuotaExceeded ? (
-                            <>
-                              <CloudOff size={10} className="shrink-0" />
-                              <span>Molngräns nådd</span>
-                            </>
-                          ) : syncError ? (
+                          {syncError ? (
                             <>
                               <CloudOff size={10} className="shrink-0 text-red-500" />
                               <span className="max-w-[120px] truncate" title={syncError}>Synkfel</span>

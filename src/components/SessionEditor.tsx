@@ -257,7 +257,7 @@ function MomentItem({
       console.error("Setup error", error);
       setUploadProgress(null);
       if (error?.code === 'storage/unauthorized') {
-        alert("Behörighet saknas i Firebase Storage. Se instruktioner i chatten för att fixa detta!");
+        alert("Bilden kunde inte laddas upp eftersom du saknar behörighet. Logga ut och in igen och försök på nytt.");
       } else {
         alert("Kunde inte ladda upp en eller flera bilder.");
       }

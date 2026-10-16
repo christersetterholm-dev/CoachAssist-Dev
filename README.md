@@ -1,55 +1,56 @@
 # CoachAssist ⚽️
 
-**CoachAssist** är ett komplett och kraftfullt digitalt verktyg för fotbollscoacher som underlättar planering, lagbygge, taktikgenomgångar och träningsstatistik. Det är designat för att vara snabbt, intuitivt och fullt responsivt på både mobil och dator.
+Digitalt verktyg för fotbollstränare: träningsplanering med tävlingsmoment och poängliga,
+trupp och medlemsregister, kalender, laguppställningar och taktiktavla.
 
----
+## Kom igång lokalt
 
-## 🌟 Huvudfunktioner
+Kräver Node.js 20 eller senare.
 
-- **Taktiktavla (Whiteboard)**: Rita spelsystem, övningar och taktiska rörelser med ritverktyg (penna, pilar, linjer, cirklar och fyrkanter). Flytta spelare och bollar fritt för att visualisera spelmönster.
-- **Laguppställningar (Lineup Builder)**: Bygg startelvor och formationer (t.ex. 4-4-2, 4-3-3, 3-5-2) med drag-and-drop. Spara och organisera uppställningar inför matcher och träningar.
-- **Spelartrupp (Squad Management)**: Hantera hela träningsgruppen med bilder, positioner, tröjnummer och kontaktinformation.
-- **Tävlingsmoment & Poängräkning**: Planera träningspass med interna tävlingsmoment. Fördela poäng till spelarna för att automatiskt bygga och hålla liv i en spännande poängliga över tid.
-- **Kalender & Planering**: Strukturera kommande träningar, matcher och lagaktiviteter direkt i appen.
+```bash
+npm install          # en gång, och när package.json ändrats
+npm run dev          # startar appen på http://localhost:3000
+```
 
----
+Första gången: skapa ett konto direkt i den lokala databasen (t.ex. för en root-admin):
 
-## 🚀 Köra appen lokalt
+```bash
+npm run set-password -- din@epost.se
+```
 
-Följ dessa steg för att köra **CoachAssist** på din egen dator:
+## Vanliga kommandon
 
-### Förutsättningar
-- [Node.js](https://nodejs.org/) (version 18 eller senare rekommenderas)
-- [npm](https://www.npmjs.com/) (följer med Node.js)
+| Kommando | Vad det gör |
+| --- | --- |
+| `npm run dev` | Startar servern och appen i utvecklingsläge |
+| `npm test` | Kör API-testerna (behörigheter, datalagring) mot en tillfällig databas |
+| `npm run typecheck` | Typkontroll av både app och server |
+| `npm run build` | Bygger appen (`dist/`) och servern (`dist/server.cjs`) |
+| `npm run deploy` | Testar, bygger och laddar upp till webbhotellet (se nedan) |
 
-### Installationssteg
+## Driftsättning
 
-1. **Klona eller ladda ner källkoden** till din dator.
-2. **Installera beroenden**:
-   ```bash
-   npm install
-   ```
-3. **Starta utvecklingsservern**:
-   ```bash
-   npm run dev
-   ```
-4. **Öppna appen**:
-   Öppna din webbläsare och gå till [http://localhost:3000](http://localhost:3000) (eller den port som visas i terminalen).
+```bash
+npm run deploy
+```
 
----
+Skriptet `deploy.sh` kör typkontroll och tester, bygger appen, säkerhetskopierar databasen
+på servern (`backups/`), laddar upp `dist/`, `app.cjs` och `package.json` via rsync/SSH och
+startar om appen. Databasen och uppladdade bilder på servern rörs aldrig.
+Kräver SSH-nyckeln `~/.ssh/coachassist`.
 
-## 🛠️ Teknikstack
+## Struktur
 
-- **Frontend**: React (TypeScript), Vite, Tailwind CSS, Motion (f.d. Framer Motion)
-- **Backend/Server**: Express (TypeScript)
-- **Ikoner**: Lucide React
-- **Databas & Synk**: Firebase Firestore & Firebase Authentication (stödjer automatisk molnsparning för sparad data)
+| Sökväg | Innehåll |
+| --- | --- |
+| `server.ts` | Express-server: inloggning, behörigheter, dokumentlagring i SQLite, filuppladdning, kalenderflöde |
+| `app.cjs` | Startfil för cPanel/Passenger, startar `dist/server.cjs` |
+| `src/` | React-appen |
+| `src/lib/firebase.ts` | Klientens API-lager mot servern (har kvar Firestore-liknande funktionsnamn) |
+| `scripts/` | Byggskript och verktyg (t.ex. `set-password.ts`) |
+| `tests/` | API-tester (`node:test`) |
 
----
+## Miljövariabler
 
-## 💡 Bra att veta om Gemini API
-Den automatiska texten på GitHub kan nämna `GEMINI_API_KEY`. **CoachAssist** fokuserar helt på att erbjuda kraftfulla taktiska och administrativa verktyg för coacher och använder för närvarande **inte** Gemini AI API. Du behöver därför **inte** konfigurera någon AI-nyckel i din `.env.local` för att köra appen.
-
----
-
-Utvecklad med passion för fotboll och smidig lagledning! ⚽️🏃‍♂️
+Se `.env.example`. Lokalt läses en `.env`-fil i projektmappen; på webbhotellet sätts
+variablerna i cPanels Node.js-vy. Viktigast är `JWT_SECRET`.

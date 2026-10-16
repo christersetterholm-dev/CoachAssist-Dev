@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { Trophy, Share2, Crown, Star, ChevronDown, Eye, EyeOff, Plus, Lock, Trash2, Loader2, Edit2, Check, User, Calendar, Play } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { SquadPlayer, Exercise, Period, PeriodStandings, TrainingSession } from '../types';
-import { db, auth, handleFirestoreError, OperationType, doc, getDoc, setDoc, getApiUrl } from '../lib/firebase';
+import { db, auth, handleFirestoreError, OperationType, doc, getDoc, setDoc, getApiUrl, getAuthHeader } from '../lib/firebase';
 import { calculateLeaderboard } from '../lib/leaderboardUtils';
 import { CachedImage } from './CachedImage';
 
@@ -115,7 +115,7 @@ export default function Leaderboard({
   // Auto-recover missing archived periods from server if list only has current
   useEffect(() => {
     if (!sharedId && periods.filter(p => p.endDate || !p.isActive).length === 0) {
-      fetch(getApiUrl('/api/periods/all'))
+      fetch(getApiUrl('/api/periods/all'), { headers: getAuthHeader() })
         .then(r => r.json())
         .then(data => {
           if (data && data.success && Array.isArray(data.periods) && data.periods.length > 0) {

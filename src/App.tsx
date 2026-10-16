@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
-import { RotateCcw, Trophy, ArrowLeft, Check, Sun, Moon, Timer as TimerIcon, Edit2, Zap, Rocket, Users, LayoutDashboard, Unlock, LogIn, LogOut, User as UserIcon, ShieldCheck, Cloud, Globe, AlertTriangle, Calendar, Settings, RefreshCw, Bell, Building2, Shirt, VibrateOff } from 'lucide-react';
+import { RotateCcw, Trophy, ArrowLeft, Check, Sun, Moon, Timer as TimerIcon, Edit2, Zap, Rocket, Users, LayoutDashboard, Unlock, LogIn, LogOut, User as UserIcon, ShieldCheck, Cloud, Globe, Calendar, Settings, RefreshCw, Bell, Building2, Shirt, VibrateOff } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { SquadPlayer, Exercise, Team, PointsConfig, Period, PeriodStandings, Lineup, TrainingSession, TrainingSettings, CoachData, BankExercise, SessionMoment, UserProfile, ClubMember, ClubTeam, Club } from './types';
 import { auth, signInWithGoogle, db, handleFirestoreError, OperationType, getApiUrl, doc, onSnapshot, setDoc, getDoc, collection, getDocs, onAuthStateChanged, signOut, User, deleteObject } from './lib/firebase';
@@ -79,17 +79,6 @@ const getSessionCategory = (session: TrainingSession): 'match' | 'training' | 'o
     return 'training';
   }
   return 'other';
-};
-
-const isQuotaError = (error: any): boolean => {
-  if (!error) return false;
-  const errMsg = (error.message || String(error)).toLowerCase();
-  return (
-    error.code === 'resource-exhausted' ||
-    errMsg.includes('quota') ||
-    errMsg.includes('exhausted') ||
-    errMsg.includes('billing')
-  );
 };
 
 const deduplicateById = <T extends { id: string }>(arr: T[] | undefined | null): T[] => {
@@ -930,7 +919,6 @@ export default function App() {
       });
     }
   }, [sessionActionCount]);
-  const [isQuotaExceeded, setIsQuotaExceeded] = useState(false);
   const [syncError, setSyncError] = useState<string | null>(null);
   const sessionIdRef = useRef<string>(Math.random().toString(36).substring(7));
   const syncUserIdRef = useRef<string | null>(null);
@@ -1747,7 +1735,6 @@ export default function App() {
     };
     setSessionActionCount(0);
     setPrefixedItem('last_local_sync_at', now.toString(), user);
-    setIsQuotaExceeded(false);
     setSyncError(null);
     console.log("App: Push successful for segments:", writePromises.length);
   };
@@ -1862,7 +1849,6 @@ export default function App() {
       lastCloudDataRef.current = updatedState;
       syncUserIdRef.current = user.uid;
       setSessionActionCount(0);
-      setIsQuotaExceeded(false);
       setSyncError(null);
 
       try {
@@ -1892,11 +1878,7 @@ export default function App() {
       console.log("App: Segmented manual sync successful!");
     } catch (err) {
       console.error("App: Segmented manual sync failed", err);
-      if (isQuotaError(err)) {
-        setIsQuotaExceeded(true);
-      } else {
-        setSyncError((err as Error)?.message || 'Kunde inte hämta data');
-      }
+      setSyncError((err as Error)?.message || 'Kunde inte hämta data');
       handleFirestoreError(err, OperationType.GET, `users/${user.uid}/data/*`);
     } finally {
       setSyncingStatus(false);
@@ -2338,17 +2320,11 @@ export default function App() {
             });
           }, (error) => {
             console.error("App: Lineup snapshot error:", error);
-            if (isQuotaError(error)) {
-              setIsQuotaExceeded(true);
-            }
             handleFirestoreError(error, OperationType.GET, `users/${user.uid}/data/lineups`);
           });
         }
       } catch (error) {
         console.error("App: Segmented loader initialization failed:", error);
-        if (isQuotaError(error)) {
-          setIsQuotaExceeded(true);
-        }
         if (isSubscribed) {
           syncUserIdRef.current = user.uid;
           setHasPulledFromCloud(true);
@@ -2375,7 +2351,7 @@ export default function App() {
       return;
     }
 
-    if (user && isAuthReady && isProfileLoaded && isInitialSyncDone && hasPulledFromCloud && sessionActionCount > 0 && !isSyncing && !isQuotaExceeded) {
+    if (user && isAuthReady && isProfileLoaded && isInitialSyncDone && hasPulledFromCloud && sessionActionCount > 0 && !isSyncing) {
       if (syncUserIdRef.current && syncUserIdRef.current !== user.uid) return;
       syncUserIdRef.current = user.uid;
 
@@ -2391,12 +2367,7 @@ export default function App() {
           await pushDirtySegments();
         } catch (error) {
           console.error("App: Auto-sync push failed", error);
-          if (isQuotaError(error)) {
-            setIsQuotaExceeded(true);
-            setSessionActionCount(0);
-          } else {
-            setSyncError((error as Error)?.message || 'Okänt synkfel');
-          }
+          setSyncError((error as Error)?.message || 'Okänt synkfel');
           handleFirestoreError(error, OperationType.WRITE, `users/${user.uid}/data/*`);
         } finally {
           setSyncingStatus(false);
@@ -2406,7 +2377,7 @@ export default function App() {
       const timeout = setTimeout(syncData, debounceDelay);
       return () => clearTimeout(timeout);
     }
-  }, [squad, exercises, sessions, deletedSessions, lineups, activeLineupId, periods, currentPeriodId, activeExerciseId, teamUrl, adminUrl, seriesUrl, customFormations, pinnedFormationIds, trainingSettings, exerciseBank, exerciseBankCategories, sessionActionCount, user?.uid, isAuthReady, isProfileLoaded, isInitialSyncDone, hasPulledFromCloud, isSyncing, isQuotaExceeded, view]);
+  }, [squad, exercises, sessions, deletedSessions, lineups, activeLineupId, periods, currentPeriodId, activeExerciseId, teamUrl, adminUrl, seriesUrl, customFormations, pinnedFormationIds, trainingSettings, exerciseBank, exerciseBankCategories, sessionActionCount, user?.uid, isAuthReady, isProfileLoaded, isInitialSyncDone, hasPulledFromCloud, isSyncing, view]);
 
   // Sync shared leaderboards globally with optimized, less aggressive debouncing
   useEffect(() => {
@@ -2414,7 +2385,7 @@ export default function App() {
       // Skip publishing/sharing leaderboard updates while actively in a competition/exercise view.
       return;
     }
-    if (user && isAuthReady && isInitialSyncDone && !isQuotaExceeded) {
+    if (user && isAuthReady && isInitialSyncDone) {
       const syncSharedLeaderboards = async () => {
         const sharedPeriods = periods.filter(p => p.shareId);
         if (sharedPeriods.length === 0) return;
@@ -2458,9 +2429,6 @@ export default function App() {
           }
         } catch (error) {
           console.error("Error syncing shared leaderboards globally:", error);
-          if (isQuotaError(error)) {
-            setIsQuotaExceeded(true);
-          }
           handleFirestoreError(error, OperationType.WRITE, `shared_leaderboards/*`);
         }
       };
@@ -2481,7 +2449,7 @@ export default function App() {
       const timeoutId = setTimeout(syncSharedLeaderboards, debounceDelay);
       return () => clearTimeout(timeoutId);
     }
-  }, [squad, exercises, periods, user, isAuthReady, isInitialSyncDone, isQuotaExceeded, activeExerciseId]);
+  }, [squad, exercises, periods, user, isAuthReady, isInitialSyncDone, activeExerciseId]);
 
   // Update localStorage for guests
   useEffect(() => {
@@ -3688,11 +3656,7 @@ export default function App() {
       console.log("App: Manual push completed successfully");
     } catch (error: any) {
       console.error("App: Manual push failed", error);
-      if (isQuotaError(error)) {
-        setIsQuotaExceeded(true);
-      } else {
-        setSyncError(error?.message || "Synkronisering misslyckades");
-      }
+      setSyncError(error?.message || "Synkronisering misslyckades");
       handleFirestoreError(error, OperationType.WRITE, `users/${user.uid}/data/*`);
     } finally {
       setSyncingStatus(false);
@@ -4037,34 +4001,6 @@ export default function App() {
             </div>
           </div>
         </header>
-      )}
-
-      {isQuotaExceeded && (
-        <div className="bg-amber-600 text-white px-4 py-3 text-center text-xs font-semibold leading-normal flex flex-wrap items-center justify-center gap-2 relative z-50 animate-fade-in print:hidden border-b border-amber-700 shadow-md">
-          <AlertTriangle size={16} className="shrink-0 text-amber-200 animate-pulse" />
-          <span>
-            <strong>Obs:</strong> Molndatabasens dagliga gratiskvot i Firebase (50 000 anrop) har nåtts för idag. <strong>All din data, alla lag och konton är säkert sparade i Firebase</strong> och inte raderade! Kvoten nollställs automatiskt nästa dygn.
-          </span>
-          <div className="flex items-center gap-2 ml-1">
-            <a
-              href="https://console.firebase.google.com/project/tuned-life-pmvz5/firestore/databases/ai-studio-remixcoachassist-3ac8f9c7-729f-4797-87b6-4c498370756c/data?openUpgradeDialog=true"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="px-2.5 py-1 bg-white text-amber-900 hover:bg-amber-50 font-bold rounded text-[11px] uppercase tracking-wide transition-all shadow-sm"
-            >
-              Uppgradera i Firebase &rarr;
-            </a>
-            <button
-              onClick={() => {
-                setIsQuotaExceeded(false);
-                setSessionActionCount(1);
-              }}
-              className="underline hover:no-underline font-medium cursor-pointer px-2 py-0.5 bg-black/20 hover:bg-black/30 rounded transition-all text-white text-[11px]"
-            >
-              Försök igen
-            </button>
-          </div>
-        </div>
       )}
 
       {(isRootAdmin || userRoles.includes('admin') || userRoles.includes('coach')) && pendingRequestsCount > 0 && (
@@ -4595,7 +4531,6 @@ export default function App() {
               user={user}
               isSyncing={isSyncing}
               sessionActionCount={sessionActionCount}
-              isQuotaExceeded={isQuotaExceeded}
               syncError={syncError}
               isCoachOrAdmin={isCoachOrAdmin}
               onManualSync={pullLatestData}

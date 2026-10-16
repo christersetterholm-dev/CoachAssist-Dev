@@ -40,7 +40,7 @@ test('reserverade admin-adresser kan inte registreras', async () => {
 });
 
 test('systemfunktioner kräver root-admin', async () => {
-  for (const [method, url] of [['GET', '/api/system/db-export'], ['GET', '/api/system/db-config'], ['POST', '/api/system/db-import'], ['POST', '/api/deploy-to-ssh'], ['POST', '/api/pwa-icons']]) {
+  for (const [method, url] of [['GET', '/api/system/db-export'], ['GET', '/api/system/db-config'], ['POST', '/api/system/db-import'], ['POST', '/api/pwa-icons']]) {
     const body = method === 'GET' ? undefined : {};
     assert.equal((await s.api(method, url, { body })).status, 401, `${url} utan inloggning`);
     assert.equal((await s.api(method, url, { token: coachToken, body })).status, 403, `${url} som vanlig användare`);
@@ -119,4 +119,17 @@ test('uppladdning och radering av filer kräver inloggning', async () => {
   fd.append('file', new Blob([Buffer.from('test')], { type: 'image/jpeg' }), 'test.jpg');
   assert.equal((await s.api('POST', '/api/upload', { body: fd })).status, 401);
   assert.equal((await s.api('DELETE', '/api/delete-file?path=test.jpg')).status, 401);
+});
+
+test('poängligor hålls isär mellan lag', async () => {
+  const p = (id) => ({ periods: [{ id, name: id, startDate: 1, isActive: true, standings: [] }], currentPeriodId: id });
+  assert.equal((await s.api('POST', '/api/docs?path=clubs/klubb1/teams/lag1/data/periods', { token: coachToken, body: { data: p('liga-lag1') } })).status, 200);
+  assert.equal((await s.api('POST', '/api/docs?path=clubs/klubb2/teams/lagX/data/periods', { token: otherToken, body: { data: p('liga-lagX') } })).status, 200);
+  const r1 = await s.api('GET', '/api/docs?path=clubs/klubb1/teams/lag1/data/periods', { token: coachToken });
+  assert.deepEqual(r1.json.periods.map((x) => x.id), ['liga-lag1']);
+  const r2 = await s.api('GET', '/api/docs?path=clubs/klubb2/teams/lagX/data/periods', { token: otherToken });
+  assert.deepEqual(r2.json.periods.map((x) => x.id), ['liga-lagX']);
+  assert.equal((await s.api('GET', '/api/periods/all')).status, 401);
+  const all = await s.api('GET', '/api/periods/all', { token: coachToken });
+  assert.ok(!all.json.periods.some((x) => x.id === 'liga-lagX'));
 });

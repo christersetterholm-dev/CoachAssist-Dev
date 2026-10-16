@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { Landmark, Trash2, Edit3, Users, Shield, ShieldAlert, Check, PlusCircle, Search, Mail, Phone, Fingerprint, Settings, ArrowRight, UserPlus, Save, Smartphone, X, Database, Server, HardDrive, Cloud, RefreshCw, Download, Upload, Globe, Cpu, CheckCircle2, AlertTriangle, AlertCircle, Calendar, Link, Copy, ExternalLink, FileSpreadsheet, FileText, Camera, Loader2, Key, UserCheck, Sparkles, Filter, ArrowUpDown, RotateCcw } from 'lucide-react';
+import { Landmark, Trash2, Edit3, Users, Shield, ShieldAlert, Check, PlusCircle, Search, Mail, Phone, Fingerprint, Settings, ArrowRight, UserPlus, Save, Smartphone, X, Database, HardDrive, RefreshCw, Download, Upload, Globe, CheckCircle2, AlertTriangle, AlertCircle, Calendar, Link, Copy, ExternalLink, FileSpreadsheet, FileText, Camera, Loader2, Key, UserCheck, Sparkles, Filter, ArrowUpDown, RotateCcw } from 'lucide-react';
 import { Club, ClubMetadata, ClubTeam, ClubMember, SquadPlayer, TrainingSettings, TrainingSession } from '../types';
 import { db, storage, getApiUrl, getAuthHeader, ref, uploadBytes, getDownloadURL, doc, getDoc, setDoc } from '../lib/firebase';
 import PwaIconGenerator from './PwaIconGenerator';
@@ -222,49 +222,16 @@ export default function ClubAdminDashboard({
   };
 
   const [dbConfig, setDbConfig] = useState<{
-    mode: 'hybrid' | 'local_sqlite' | 'firestore_only';
     dbPath?: string;
     dbSize?: number;
     dbEngine?: 'sqlite' | 'json_store';
     isProduction?: boolean;
-    firestoreConfigured?: boolean;
-    firestoreProjectId?: string | null;
-    firestoreDatabaseId?: string | null;
-    firestoreUrl?: string | null;
-    customFirestoreProjectId?: string;
-    customFirestoreApiKey?: string;
-    customRemoteUrl?: string;
-    updatedAt?: number;
-    updatedBy?: string;
-  }>({
-    mode: typeof window !== 'undefined' && localStorage.getItem('coachassist_preferred_db_mode')
-      ? (localStorage.getItem('coachassist_preferred_db_mode') as any)
-      : 'local_sqlite'
-  });
+  }>({});
   const [dbConfigLoading, setDbConfigLoading] = useState(false);
   const [dbConfigMessage, setDbConfigMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [importFile, setImportFile] = useState<File | null>(null);
   const [importWipeBeforeRestore, setImportWipeBeforeRestore] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
-  const [isSyncingNow, setIsSyncingNow] = useState(false);
-
-  // SSH Direct Deployment States
-  const [sshHost, setSshHost] = useState('coachassist.setterholm.se');
-  const [sshPort, setSshPort] = useState(22);
-  const [sshUser, setSshUser] = useState('setterho');
-  const [sshPassword, setSshPassword] = useState('');
-  const [sshPrivateKey, setSshPrivateKey] = useState('');
-  const [sshAuthType, setSshAuthType] = useState<'password' | 'key'>('password');
-  const [sshRemotePath, setSshRemotePath] = useState('/home/setterho/coachassist.setterholm.se');
-  const [hasSavedSshPassword, setHasSavedSshPassword] = useState(false);
-  const [hasSavedSshKey, setHasSavedSshKey] = useState(false);
-  const [isDeployingSsh, setIsDeployingSsh] = useState(false);
-  const [sshDeployLogs, setSshDeployLogs] = useState<string[]>([]);
-  const [sshDeployStatus, setSshDeployStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
-  const [sshDeployMessage, setSshDeployMessage] = useState('');
-  const [copiedOneLiner, setCopiedOneLiner] = useState(false);
-  const [showSshPasswordInput, setShowSshPasswordInput] = useState(false);
-  
   // Loading & Action states
   const [isLoading, setIsLoading] = useState(false);
   const [actionStatus, setActionStatus] = useState<{ type: 'save' | 'delete' | 'create'; status: 'idle' | 'loading' | 'success' | 'error'; message?: string }>({ type: 'create', status: 'idle' });
@@ -807,7 +774,7 @@ export default function ClubAdminDashboard({
       });
       if (res.ok) {
         const data = await res.json();
-        if (data && typeof data === 'object' && data.mode) {
+        if (data && typeof data === 'object' && 'dbPath' in data) {
           setDbConfig(prev => ({ ...prev, ...data }));
         }
       }
@@ -818,140 +785,11 @@ export default function ClubAdminDashboard({
     }
   };
 
-  const fetchSshConfig = async () => {
-    try {
-      const res = await fetch(getApiUrl('/api/deploy-ssh-config'), {
-        headers: getAuthHeaders()
-      });
-      if (res.ok) {
-        const data = await res.json();
-        if (data.host) setSshHost(data.host);
-        if (data.port) setSshPort(data.port);
-        if (data.username) setSshUser(data.username);
-        if (data.remotePath) setSshRemotePath(data.remotePath);
-        if (data.authType) setSshAuthType(data.authType);
-        setHasSavedSshPassword(!!data.hasSavedPassword);
-        setHasSavedSshKey(!!data.hasSavedKey);
-      }
-    } catch (e) {
-      console.error('Error fetching SSH config:', e);
-    }
-  };
-
   useEffect(() => {
     if (isRootAdmin && activeTab === 'database_env') {
       fetchDbConfig();
-      fetchSshConfig();
     }
   }, [isRootAdmin, activeTab]);
-
-  const handleDeploySsh = async (action: 'full_deploy' | 'restart_only') => {
-    const hasAuth = (sshAuthType === 'key' && (sshPrivateKey || hasSavedSshKey)) ||
-                    (sshAuthType === 'password' && (sshPassword || hasSavedSshPassword));
-
-    if (!hasAuth) {
-      alert(sshAuthType === 'key' ? 'Vänligen klistra in din privata SSH-nyckel.' : 'Vänligen fyll i ditt SSH-lösenord för att ansluta till webbhotellet.');
-      return;
-    }
-
-    setIsDeployingSsh(true);
-    setSshDeployStatus('loading');
-    setSshDeployMessage(action === 'restart_only' ? 'Startar om servern via SSH...' : 'Kopplar upp och överför produktionspaket via SSH/SFTP...');
-    setSshDeployLogs([]);
-
-    try {
-      const res = await fetch(getApiUrl('/api/deploy-to-ssh'), {
-        method: 'POST',
-        headers: getAuthHeaders(),
-        body: JSON.stringify({
-          host: sshHost,
-          port: Number(sshPort),
-          username: sshUser,
-          password: sshAuthType === 'password' ? (sshPassword || undefined) : undefined,
-          privateKey: sshAuthType === 'key' ? (sshPrivateKey || undefined) : undefined,
-          authType: sshAuthType,
-          remotePath: sshRemotePath,
-          action,
-          saveConfig: true
-        })
-      });
-
-      const data = await res.json();
-      if (data.logs && Array.isArray(data.logs)) {
-        setSshDeployLogs(data.logs);
-      }
-
-      if (res.ok && data.success) {
-        setSshDeployStatus('success');
-        setSshDeployMessage(data.message || (action === 'restart_only' ? 'Servern har startats om!' : 'Deploy slutförd och servern omstartad!'));
-        if (sshAuthType === 'password' && sshPassword) setHasSavedSshPassword(true);
-        if (sshAuthType === 'key' && sshPrivateKey) setHasSavedSshKey(true);
-        setSshPassword('');
-        setSshPrivateKey('');
-      } else {
-        setSshDeployStatus('error');
-        setSshDeployMessage(data.error || 'Deploy misslyckades.');
-      }
-    } catch (err: any) {
-      setSshDeployStatus('error');
-      setSshDeployMessage(err?.message || 'Nätverksfel vid anslutning till deploy-tjänsten.');
-    } finally {
-      setIsDeployingSsh(false);
-    }
-  };
-
-  const handleSaveDbConfig = async (newMode: 'hybrid' | 'local_sqlite' | 'firestore_only') => {
-    setDbConfigLoading(true);
-    setDbConfigMessage(null);
-    try {
-      const res = await fetch(getApiUrl('/api/system/db-config'), {
-        method: 'POST',
-        headers: getAuthHeaders(),
-        body: JSON.stringify({
-          mode: newMode,
-          customFirestoreProjectId: dbConfig.customFirestoreProjectId || '',
-          customFirestoreApiKey: dbConfig.customFirestoreApiKey || '',
-          customRemoteUrl: dbConfig.customRemoteUrl || ''
-        })
-      });
-      const data = await res.json();
-      if (res.ok) {
-        try { localStorage.setItem('coachassist_preferred_db_mode', newMode); } catch (_) {}
-        setDbConfig(prev => ({ ...prev, mode: newMode }));
-        setDbConfigMessage({
-          type: 'success',
-          text: `Databasläget ändrades till "${newMode === 'local_sqlite' ? 'Fristående Lokal SQLite' : newMode === 'hybrid' ? 'Hybrid (SQLite + Cloud-synk)' : 'Endast Cloud Firestore'}".`
-        });
-      } else {
-        setDbConfigMessage({ type: 'error', text: data.error || 'Kunde inte spara inställningarna.' });
-      }
-    } catch (err) {
-      setDbConfigMessage({ type: 'error', text: 'Nätverksfel vid sparning.' });
-    } finally {
-      setDbConfigLoading(false);
-    }
-  };
-
-  const handleSyncNow = async () => {
-    setIsSyncingNow(true);
-    setDbConfigMessage(null);
-    try {
-      const res = await fetch(getApiUrl('/api/system/db-sync-now'), {
-        method: 'POST',
-        headers: getAuthHeaders()
-      });
-      const data = await res.json();
-      if (res.ok) {
-        setDbConfigMessage({ type: 'success', text: data.message || 'Synkronisering slutförd!' });
-      } else {
-        setDbConfigMessage({ type: 'error', text: data.error || 'Synkronisering misslyckades.' });
-      }
-    } catch (err) {
-      setDbConfigMessage({ type: 'error', text: 'Nätverksfel vid synkronisering.' });
-    } finally {
-      setIsSyncingNow(false);
-    }
-  };
 
   const handleExportBackup = async () => {
     try {
@@ -3798,9 +3636,9 @@ export default function ClubAdminDashboard({
                   <Database size={28} />
                 </div>
                 <div>
-                  <h2 className="text-xl font-black text-zinc-900 dark:text-white tracking-tight">Databas & Miljökonfiguration</h2>
+                  <h2 className="text-xl font-black text-zinc-900 dark:text-white tracking-tight">Databas & säkerhetskopior</h2>
                   <p className="text-xs text-zinc-500 font-medium mt-1">
-                    Hantera aktiv databas, miljöinställningar och synkronisering för denna installation (Cloud Run vs Webbhotell / Lokal miljö).
+                    Status för appens databas samt export och import av säkerhetskopior.
                   </p>
                 </div>
               </div>
@@ -3830,17 +3668,7 @@ export default function ClubAdminDashboard({
             )}
 
             {/* System Info Badges */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mt-6">
-              <div className="p-4 bg-zinc-50 dark:bg-zinc-950 rounded-2xl border border-zinc-150 dark:border-zinc-850">
-                <div className="flex items-center gap-2 text-zinc-400 mb-1">
-                  <Cpu size={14} />
-                  <span className="text-[10px] uppercase tracking-wider font-black">Aktivt Databasläge</span>
-                </div>
-                <div className="text-sm font-black text-zinc-900 dark:text-white">
-                  {dbConfig.mode === 'local_sqlite' ? 'Fristående Lokal SQLite' : dbConfig.mode === 'hybrid' ? 'Hybrid (SQLite + Cloud)' : 'Endast Firestore'}
-                </div>
-              </div>
-
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-6">
               <div className="p-4 bg-zinc-50 dark:bg-zinc-950 rounded-2xl border border-zinc-150 dark:border-zinc-850">
                 <div className="flex items-center gap-2 text-zinc-400 mb-1">
                   <HardDrive size={14} />
@@ -3850,33 +3678,6 @@ export default function ClubAdminDashboard({
                 </div>
                 <div className="text-sm font-black text-zinc-900 dark:text-white">
                   {dbConfig.dbSize ? `${(dbConfig.dbSize / 1024).toFixed(1)} KB` : '0 KB'}
-                </div>
-              </div>
-
-              <div className="p-4 bg-zinc-50 dark:bg-zinc-950 rounded-2xl border border-zinc-150 dark:border-zinc-850">
-                <div className="flex items-center gap-2 text-zinc-400 mb-1">
-                  <Cloud size={14} />
-                  <span className="text-[10px] uppercase tracking-wider font-black">Firestore Status</span>
-                </div>
-                <div className="flex items-center justify-between gap-1">
-                  <div className="flex items-center gap-1.5">
-                    <span className={`w-2 h-2 rounded-full ${dbConfig.firestoreConfigured && dbConfig.mode !== 'local_sqlite' ? 'bg-emerald-500' : 'bg-amber-500'}`} />
-                    <span className="text-sm font-black text-zinc-900 dark:text-white">
-                      {dbConfig.mode === 'local_sqlite' ? 'Inaktiverad (Lokal)' : dbConfig.firestoreConfigured ? 'Konfigurerad' : 'Ej ansluten'}
-                    </span>
-                  </div>
-                  {dbConfig.firestoreUrl && dbConfig.mode !== 'local_sqlite' && (
-                    <a
-                      href={dbConfig.firestoreUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="inline-flex items-center gap-1 text-[11px] font-bold text-amber-600 hover:text-amber-700 dark:text-amber-400 dark:hover:text-amber-300 transition-colors"
-                      title="Öppna databasen i Google Firebase Console"
-                    >
-                      <ExternalLink size={12} />
-                      <span className="hidden sm:inline">Console</span>
-                    </a>
-                  )}
                 </div>
               </div>
 
@@ -3892,401 +3693,8 @@ export default function ClubAdminDashboard({
             </div>
           </div>
 
-          {/* Database Mode Selector Cards */}
-          <div className="bg-white dark:bg-zinc-900 rounded-3xl border border-zinc-150 dark:border-zinc-800 shadow-xl p-6 sm:p-8">
-            <h3 className="text-base font-black text-zinc-900 dark:text-white mb-2">Välj Databas- och Lagringsstrategi för denna miljö</h3>
-            <p className="text-xs text-zinc-500 mb-6 font-medium">
-              Du kan ändra hur denna installation hanterar databasen. För ditt lokala webbhotell väljer du "Fristående Lokal SQLite", medan "Hybrid" rekommenderas för Google Cloud Run.
-            </p>
-
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
-              {/* Option 1: Hybrid */}
-              <div
-                onClick={() => handleSaveDbConfig('hybrid')}
-                className={`p-6 rounded-2xl border-2 transition-all cursor-pointer relative ${
-                  dbConfig.mode === 'hybrid'
-                    ? 'border-emerald-500 bg-emerald-50/20 dark:bg-emerald-950/20 shadow-lg'
-                    : 'border-zinc-200 dark:border-zinc-800 hover:border-zinc-300 dark:hover:border-zinc-700 bg-zinc-50/50 dark:bg-zinc-950/50'
-                }`}
-              >
-                {dbConfig.mode === 'hybrid' && (
-                  <span className="absolute top-3 right-3 bg-emerald-500 text-white p-1 rounded-full text-xs">
-                    <Check size={12} />
-                  </span>
-                )}
-                <div className="p-3 bg-emerald-100 dark:bg-emerald-900/40 text-emerald-600 dark:text-emerald-400 rounded-xl w-fit mb-4">
-                  <Server size={22} />
-                </div>
-                <h4 className="text-sm font-extrabold text-zinc-900 dark:text-white mb-1">Hybrid (SQLite + Cloud-synk)</h4>
-                <p className="text-xs text-zinc-500 dark:text-zinc-400 font-medium leading-relaxed mb-4">
-                  Blixtsnabb prestanda med lokal SQLite. Speglar automatiskt alla ändringar i Google Cloud Firestore så att ingen data försvinner om servern startar om (t.ex. på Cloud Run).
-                </p>
-                <span className="inline-block text-[10px] font-black uppercase tracking-wider text-emerald-600 dark:text-emerald-400 bg-emerald-100/60 dark:bg-emerald-950/60 px-2 py-1 rounded-md">
-                  Rekommenderad för Cloud Run
-                </span>
-              </div>
-
-              {/* Option 2: Local SQLite */}
-              <div
-                onClick={() => handleSaveDbConfig('local_sqlite')}
-                className={`p-6 rounded-2xl border-2 transition-all cursor-pointer relative ${
-                  dbConfig.mode === 'local_sqlite'
-                    ? 'border-blue-500 bg-blue-50/20 dark:bg-blue-950/20 shadow-lg'
-                    : 'border-zinc-200 dark:border-zinc-800 hover:border-zinc-300 dark:hover:border-zinc-700 bg-zinc-50/50 dark:bg-zinc-950/50'
-                }`}
-              >
-                {dbConfig.mode === 'local_sqlite' && (
-                  <span className="absolute top-3 right-3 bg-blue-500 text-white p-1 rounded-full text-xs">
-                    <Check size={12} />
-                  </span>
-                )}
-                <div className="p-3 bg-blue-100 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400 rounded-xl w-fit mb-4">
-                  <HardDrive size={22} />
-                </div>
-                <h4 className="text-sm font-extrabold text-zinc-900 dark:text-white mb-1">Fristående Lokal SQLite</h4>
-                <p className="text-xs text-zinc-500 dark:text-zinc-400 font-medium leading-relaxed mb-4">
-                  Använder enbart den lokala filbaserade SQLite-databasen (<code className="text-[11px] bg-zinc-200 dark:bg-zinc-800 px-1 py-0.5 rounded">coachassist.db</code>). Ingen koppling mot Google Cloud krävs.
-                </p>
-                <span className="inline-block text-[10px] font-black uppercase tracking-wider text-blue-600 dark:text-blue-400 bg-blue-100/60 dark:bg-blue-950/60 px-2 py-1 rounded-md">
-                  Perfekt för webbhotell & lokal test
-                </span>
-              </div>
-
-              {/* Option 3: Firestore Only */}
-              <div
-                onClick={() => handleSaveDbConfig('firestore_only')}
-                className={`p-6 rounded-2xl border-2 transition-all cursor-pointer relative ${
-                  dbConfig.mode === 'firestore_only'
-                    ? 'border-amber-500 bg-amber-50/20 dark:bg-amber-950/20 shadow-lg'
-                    : 'border-zinc-200 dark:border-zinc-800 hover:border-zinc-300 dark:hover:border-zinc-700 bg-zinc-50/50 dark:bg-zinc-950/50'
-                }`}
-              >
-                {dbConfig.mode === 'firestore_only' && (
-                  <span className="absolute top-3 right-3 bg-amber-500 text-white p-1 rounded-full text-xs">
-                    <Check size={12} />
-                  </span>
-                )}
-                <div className="p-3 bg-amber-100 dark:bg-amber-900/40 text-amber-600 dark:text-amber-400 rounded-xl w-fit mb-4">
-                  <Cloud size={22} />
-                </div>
-                <h4 className="text-sm font-extrabold text-zinc-900 dark:text-white mb-1">Endast Cloud Firestore</h4>
-                <p className="text-xs text-zinc-500 dark:text-zinc-400 font-medium leading-relaxed mb-4">
-                  Alla förfrågningar och ändringar görs direkt mot Google Cloud Firestore i molnet.
-                </p>
-                <div className="flex items-center justify-between gap-2 flex-wrap pt-1">
-                  <span className="inline-block text-[10px] font-black uppercase tracking-wider text-amber-600 dark:text-amber-400 bg-amber-100/60 dark:bg-amber-950/60 px-2 py-1 rounded-md">
-                    Endast Moln
-                  </span>
-                  {dbConfig.firestoreUrl && (
-                    <a
-                      href={dbConfig.firestoreUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      onClick={(e) => e.stopPropagation()}
-                      className="inline-flex items-center gap-1 text-[11px] font-bold text-amber-600 hover:text-amber-700 dark:text-amber-400 dark:hover:text-amber-300 underline underline-offset-2 transition-colors"
-                    >
-                      <ExternalLink size={12} />
-                      <span>Öppna i Console</span>
-                    </a>
-                  )}
-                </div>
-              </div>
-            </div>
-
-            {/* Active Cloud Firestore Database Banner */}
-            {dbConfig.mode !== 'local_sqlite' && dbConfig.firestoreUrl && (
-              <div className="mt-6 p-5 bg-gradient-to-r from-amber-50/90 to-amber-100/50 dark:from-amber-950/40 dark:to-amber-900/20 border border-amber-200 dark:border-amber-800/60 rounded-2xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 shadow-sm">
-                <div className="flex items-start gap-3.5">
-                  <div className="p-3 bg-amber-100 dark:bg-amber-900/60 text-amber-600 dark:text-amber-400 rounded-xl shrink-0 mt-0.5 sm:mt-0">
-                    <Cloud size={22} />
-                  </div>
-                  <div>
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <h4 className="text-xs font-black text-amber-950 dark:text-amber-100 uppercase tracking-wide">
-                        Aktiv Cloud Firestore-databas
-                      </h4>
-                      <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-amber-200/80 dark:bg-amber-900/80 text-amber-900 dark:text-amber-200">
-                        {dbConfig.mode === 'firestore_only' ? 'Endast Cloud Firestore' : 'Hybrid (SQLite + Cloud)'}
-                      </span>
-                    </div>
-                    <p className="text-xs text-amber-900/80 dark:text-amber-200/80 font-medium mt-1 flex flex-wrap items-center gap-2">
-                      <span>Projekt: <code className="font-bold bg-amber-100/80 dark:bg-amber-900/80 px-1.5 py-0.5 rounded text-[11px] text-amber-950 dark:text-amber-100">{dbConfig.firestoreProjectId || 'Standard'}</code></span>
-                      {dbConfig.firestoreDatabaseId && dbConfig.firestoreDatabaseId !== '(default)' && (
-                        <span>Databas: <code className="font-bold bg-amber-100/80 dark:bg-amber-900/80 px-1.5 py-0.5 rounded text-[11px] text-amber-950 dark:text-amber-100">{dbConfig.firestoreDatabaseId}</code></span>
-                      )}
-                    </p>
-                  </div>
-                </div>
-                <a
-                  href={dbConfig.firestoreUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center justify-center gap-2 bg-amber-500 hover:bg-amber-600 text-zinc-950 font-extrabold px-4 py-2.5 rounded-xl text-xs transition-all active:scale-95 shadow-md shadow-amber-500/20 shrink-0 cursor-pointer"
-                >
-                  <ExternalLink size={14} />
-                  <span>Öppna i Firebase Console</span>
-                </a>
-              </div>
-            )}
-          </div>
-
-          {/* SSH Direct Deploy & Remote Automation Section */}
-          <div className="bg-white dark:bg-zinc-900 rounded-3xl border border-zinc-150 dark:border-zinc-800 shadow-xl p-6 sm:p-8 space-y-6">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-5 border-b border-zinc-100 dark:border-zinc-800">
-              <div className="flex items-center gap-3.5">
-                <div className="w-12 h-12 rounded-2xl bg-indigo-50 dark:bg-indigo-950/50 text-indigo-600 dark:text-indigo-400 flex items-center justify-center shrink-0">
-                  <Server size={24} />
-                </div>
-                <div>
-                  <h3 className="text-lg sm:text-xl font-black text-zinc-900 dark:text-white tracking-tight">
-                    Direktdeploy till Webbhotellet via SSH
-                  </h3>
-                  <p className="text-xs text-zinc-500 dark:text-zinc-400 font-medium mt-0.5">
-                    Skicka uppdateringar och starta om servern direkt härifrån med ett enda klick, utan att behöva ladda ner/upp filer manuellt.
-                  </p>
-                </div>
-              </div>
-            </div>
-
-            {/* SSH Deploy Status / Messages */}
-            {sshDeployMessage && (
-              <div className={`p-4 rounded-2xl border text-xs font-bold flex items-center gap-2.5 ${
-                sshDeployStatus === 'success'
-                  ? 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-800 dark:text-emerald-200 border-emerald-200 dark:border-emerald-800'
-                  : sshDeployStatus === 'error'
-                  ? 'bg-red-50 dark:bg-red-950/40 text-red-800 dark:text-red-200 border-red-200 dark:border-red-800'
-                  : 'bg-indigo-50 dark:bg-indigo-950/40 text-indigo-800 dark:text-indigo-200 border-indigo-200 dark:border-indigo-800'
-              }`}>
-                {sshDeployStatus === 'loading' && <Loader2 size={16} className="animate-spin text-indigo-600 dark:text-indigo-400 shrink-0" />}
-                {sshDeployStatus === 'success' && <CheckCircle2 size={16} className="text-emerald-600 dark:text-emerald-400 shrink-0" />}
-                {sshDeployStatus === 'error' && <AlertTriangle size={16} className="text-red-600 dark:text-red-400 shrink-0" />}
-                <span>{sshDeployMessage}</span>
-              </div>
-            )}
-
-            {/* SSH Configuration Form */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-              <div>
-                <label className="block text-[11px] font-black uppercase tracking-wider text-zinc-500 dark:text-zinc-400 mb-1.5">
-                  SSH Server / Värd
-                </label>
-                <input
-                  type="text"
-                  value={sshHost}
-                  onChange={(e) => setSshHost(e.target.value)}
-                  placeholder="coachassist.setterholm.se"
-                  className="w-full px-3.5 py-2.5 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl text-xs font-bold text-zinc-900 dark:text-white focus:outline-none focus:border-indigo-500"
-                />
-              </div>
-
-              <div>
-                <label className="block text-[11px] font-black uppercase tracking-wider text-zinc-500 dark:text-zinc-400 mb-1.5">
-                  SSH Port
-                </label>
-                <input
-                  type="number"
-                  value={sshPort}
-                  onChange={(e) => setSshPort(Number(e.target.value))}
-                  placeholder="22"
-                  className="w-full px-3.5 py-2.5 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl text-xs font-bold text-zinc-900 dark:text-white focus:outline-none focus:border-indigo-500"
-                />
-              </div>
-
-              <div>
-                <label className="block text-[11px] font-black uppercase tracking-wider text-zinc-500 dark:text-zinc-400 mb-1.5">
-                  SSH Användarnamn
-                </label>
-                <input
-                  type="text"
-                  value={sshUser}
-                  onChange={(e) => setSshUser(e.target.value)}
-                  placeholder="setterho"
-                  className="w-full px-3.5 py-2.5 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl text-xs font-bold text-zinc-900 dark:text-white focus:outline-none focus:border-indigo-500"
-                />
-              </div>
-
-              <div>
-                <div className="flex items-center justify-between mb-1.5">
-                  <div className="flex items-center gap-1.5">
-                    <button
-                      type="button"
-                      onClick={() => setSshAuthType('password')}
-                      className={`text-[10px] font-black uppercase px-2 py-0.5 rounded-md cursor-pointer transition-colors ${
-                        sshAuthType === 'password'
-                          ? 'bg-indigo-600 text-white'
-                          : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-500 hover:text-zinc-700'
-                      }`}
-                    >
-                      Lösenord
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setSshAuthType('key')}
-                      className={`text-[10px] font-black uppercase px-2 py-0.5 rounded-md cursor-pointer transition-colors ${
-                        sshAuthType === 'key'
-                          ? 'bg-indigo-600 text-white'
-                          : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-500 hover:text-zinc-700'
-                      }`}
-                    >
-                      SSH-Nyckel
-                    </button>
-                  </div>
-                  {((sshAuthType === 'password' && hasSavedSshPassword) || (sshAuthType === 'key' && hasSavedSshKey)) && (
-                    <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-extrabold flex items-center gap-1">
-                      <Check size={10} /> Sparad
-                    </span>
-                  )}
-                </div>
-
-                {sshAuthType === 'password' ? (
-                  <div className="relative">
-                    <input
-                      type={showSshPasswordInput ? 'text' : 'password'}
-                      value={sshPassword}
-                      onChange={(e) => setSshPassword(e.target.value)}
-                      placeholder={hasSavedSshPassword ? '•••••••••••• (Sparat)' : 'Ange SSH-lösenord'}
-                      className="w-full px-3.5 py-2.5 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl text-xs font-bold text-zinc-900 dark:text-white focus:outline-none focus:border-indigo-500 pr-10"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setShowSshPasswordInput(!showSshPasswordInput)}
-                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-zinc-600 text-[10px] font-bold cursor-pointer"
-                    >
-                      {showSshPasswordInput ? 'Dölj' : 'Visa'}
-                    </button>
-                  </div>
-                ) : (
-                  <div className="relative">
-                    <textarea
-                      rows={1}
-                      value={sshPrivateKey}
-                      onChange={(e) => setSshPrivateKey(e.target.value)}
-                      placeholder={hasSavedSshKey ? '-----BEGIN RSA/OPENSSH PRIVATE KEY----- (Sparad)' : 'Klistra in innehållet från ~/.ssh/coachassist'}
-                      className="w-full px-3.5 py-2.5 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl text-xs font-mono font-bold text-zinc-900 dark:text-white focus:outline-none focus:border-indigo-500 resize-y"
-                    />
-                  </div>
-                )}
-              </div>
-
-              <div className="sm:col-span-2 lg:col-span-4">
-                <label className="block text-[11px] font-black uppercase tracking-wider text-zinc-500 dark:text-zinc-400 mb-1.5">
-                  Målmapp på servern (Remote Path)
-                </label>
-                <input
-                  type="text"
-                  value={sshRemotePath}
-                  onChange={(e) => setSshRemotePath(e.target.value)}
-                  placeholder="/home/setterho/coachassist.setterholm.se"
-                  className="w-full px-3.5 py-2.5 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl text-xs font-mono font-bold text-zinc-900 dark:text-white focus:outline-none focus:border-indigo-500"
-                />
-              </div>
-            </div>
-
-            {/* Action Buttons */}
-            <div className="flex flex-wrap items-center gap-3 pt-2">
-              <button
-                type="button"
-                onClick={() => handleDeploySsh('full_deploy')}
-                disabled={isDeployingSsh}
-                className="px-6 py-3.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white font-extrabold text-xs rounded-2xl flex items-center gap-2.5 transition-all shadow-md shadow-indigo-500/20 active:scale-95 cursor-pointer"
-              >
-                {isDeployingSsh ? <Loader2 size={16} className="animate-spin" /> : <Upload size={16} />}
-                <span>🚀 Deploya allt direkt till servern</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => handleDeploySsh('restart_only')}
-                disabled={isDeployingSsh}
-                className="px-5 py-3.5 bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 disabled:opacity-50 text-zinc-800 dark:text-zinc-200 font-extrabold text-xs rounded-2xl flex items-center gap-2 transition-all cursor-pointer"
-              >
-                <RefreshCw size={14} className={isDeployingSsh ? 'animate-spin' : ''} />
-                <span>Endast starta om servern (touch restart.txt)</span>
-              </button>
-            </div>
-
-            {/* SSH Logs console */}
-            {sshDeployLogs.length > 0 && (
-              <div className="mt-4 p-4 bg-zinc-950 text-zinc-300 font-mono text-[11px] rounded-2xl border border-zinc-800 space-y-1 max-h-48 overflow-y-auto">
-                <div className="text-zinc-500 text-[10px] font-bold uppercase pb-1 border-b border-zinc-900 flex items-center justify-between">
-                  <span>SSH Logg</span>
-                  <span>{sshDeployLogs.length} rader</span>
-                </div>
-                {sshDeployLogs.map((logLine, idx) => (
-                  <div key={idx} className="leading-relaxed">
-                    {logLine.startsWith('✅') ? (
-                      <span className="text-emerald-400 font-bold">{logLine}</span>
-                    ) : logLine.startsWith('❌') || logLine.includes('fel') || logLine.includes('error') ? (
-                      <span className="text-red-400 font-bold">{logLine}</span>
-                    ) : (
-                      <span>{logLine}</span>
-                    )}
-                  </div>
-                ))}
-              </div>
-            )}
-
-            {/* 1-Line Server Command Fallback Box */}
-            <div className="p-4 rounded-2xl bg-zinc-50 dark:bg-zinc-950/60 border border-zinc-200 dark:border-zinc-850 space-y-2.5">
-              <div className="flex items-center justify-between">
-                <span className="text-[11px] font-black uppercase tracking-wider text-zinc-600 dark:text-zinc-300 flex items-center gap-1.5">
-                  <Cpu size={14} className="text-indigo-500" />
-                  <span>Alternativ: Kör snabb-deploy i serverns SSH-terminal (1-radare)</span>
-                </span>
-                <button
-                  type="button"
-                  onClick={() => {
-                    const token = localStorage.getItem('token') || localStorage.getItem('coachassist_jwt_token') || localStorage.getItem('jwt_token') || '';
-                    const tokenParam = token ? `?token=${encodeURIComponent(token)}` : '';
-                    const cmd = `curl -sSL "https://ais-dev-5rinf7gvwaklikkeip3eut-372119737616.europe-west3.run.app/api/download-production-bundle${tokenParam}" -o bundle.zip && unzip -qo bundle.zip -d ~/coachassist.setterholm.se && mkdir -p ~/coachassist.setterholm.se/tmp && touch ~/coachassist.setterholm.se/tmp/restart.txt && rm -f bundle.zip && echo "✅ Klar! CoachAssist är uppdaterad och omstartad."`;
-                    navigator.clipboard.writeText(cmd);
-                    setCopiedOneLiner(true);
-                    setTimeout(() => setCopiedOneLiner(false), 2500);
-                  }}
-                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 font-bold text-[11px] hover:bg-indigo-100 transition-colors cursor-pointer"
-                >
-                  {copiedOneLiner ? <Check size={12} /> : <Copy size={12} />}
-                  <span>{copiedOneLiner ? 'Kopierat!' : 'Kopiera kommando'}</span>
-                </button>
-              </div>
-              <pre className="p-3 bg-zinc-900 text-emerald-400 text-[11px] font-mono rounded-xl overflow-x-auto whitespace-pre-wrap select-all">
-{`curl -sSL "https://ais-dev-5rinf7gvwaklikkeip3eut-372119737616.europe-west3.run.app/api/download-production-bundle?token=..." -o bundle.zip && unzip -qo bundle.zip -d ~/coachassist.setterholm.se && mkdir -p ~/coachassist.setterholm.se/tmp && touch ~/coachassist.setterholm.se/tmp/restart.txt && rm -f bundle.zip && echo "✅ Klar! CoachAssist är uppdaterad och omstartad."`}
-              </pre>
-            </div>
-          </div>
-
-          {/* Production Bundle & Export / Import Grid */}
-          <div className="bg-gradient-to-br from-indigo-900 to-slate-900 text-white rounded-3xl border border-indigo-700/50 shadow-xl p-6 sm:p-8 relative overflow-hidden">
-            <div className="relative z-10 flex flex-col md:flex-row items-start md:items-center justify-between gap-6">
-              <div className="space-y-2 max-w-2xl">
-                <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-indigo-500/20 border border-indigo-400/30 text-indigo-300 text-[11px] font-black uppercase tracking-wider">
-                  <Server size={13} />
-                  <span>Färdigbyggt Webbhotellspaket</span>
-                </div>
-                <h3 className="text-lg sm:text-xl font-black tracking-tight text-white">
-                  Ladda ner färdigt installationspaket (coachassist-production-bundle.zip)
-                </h3>
-                <p className="text-xs sm:text-sm text-indigo-200/90 leading-relaxed font-medium">
-                  Innehåller de färdigkompilerade produktionsfilerna (<code className="text-white font-mono bg-white/10 px-1 py-0.5 rounded text-xs">dist/server.cjs</code>, <code className="text-white font-mono bg-white/10 px-1 py-0.5 rounded text-xs">dist/index.html</code>, <code className="text-white font-mono bg-white/10 px-1 py-0.5 rounded text-xs">app.cjs</code>, <code className="text-white font-mono bg-white/10 px-1 py-0.5 rounded text-xs">.htaccess</code> och alla optimerade assets). Packa upp direkt i cPanel utan att behöva köra något bygge på webbhotellet.
-                </p>
-              </div>
-
-              <button
-                type="button"
-                onClick={() => {
-                  const token = localStorage.getItem('token') || localStorage.getItem('coachassist_jwt_token') || localStorage.getItem('jwt_token') || '';
-                  window.location.href = getApiUrl(`/api/download-production-bundle?token=${encodeURIComponent(token)}`);
-                }}
-                className="inline-flex items-center justify-center gap-2.5 bg-emerald-500 hover:bg-emerald-400 text-zinc-950 font-black px-6 py-3.5 rounded-2xl text-xs sm:text-sm transition-all shadow-lg shadow-emerald-500/30 active:scale-95 shrink-0 cursor-pointer"
-              >
-                <Download size={18} />
-                <span>Ladda ner ZIP-paket (~20 MB)</span>
-              </button>
-            </div>
-          </div>
-
-          {/* Backup & Import & Manual Sync Section */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          {/* Backup & Import */}
+          <div className="grid grid-cols-1 gap-6">
             {/* Export & Import Backup */}
             <div className="bg-white dark:bg-zinc-900 rounded-3xl border border-zinc-150 dark:border-zinc-800 shadow-xl p-6 sm:p-8">
               <h3 className="text-base font-black text-zinc-900 dark:text-white mb-1 flex items-center gap-2">
@@ -4349,31 +3757,6 @@ export default function ClubAdminDashboard({
               </div>
             </div>
 
-            {/* Manual Sync Card */}
-            <div className="bg-white dark:bg-zinc-900 rounded-3xl border border-zinc-150 dark:border-zinc-800 shadow-xl p-6 sm:p-8 flex flex-col justify-between">
-              <div>
-                <h3 className="text-base font-black text-zinc-900 dark:text-white mb-1 flex items-center gap-2">
-                  <RefreshCw size={18} className="text-emerald-500" />
-                  <span>Manuell Molnsynkronisering</span>
-                </h3>
-                <p className="text-xs text-zinc-500 mb-6 font-medium">
-                  Trigg en manuell fullständig synkronisering mellan den lokala SQLite-databasen och Google Cloud Firestore.
-                </p>
-
-                <div className="p-4 bg-emerald-50/50 dark:bg-emerald-950/20 rounded-2xl border border-emerald-100 dark:border-emerald-900/30 text-xs text-emerald-800 dark:text-emerald-300 font-medium leading-relaxed mb-6">
-                  Detta skickar alla uppdaterade poster i din lokala databas direkt till molnet så att alla klienter ser den senaste datan omedelbart.
-                </div>
-              </div>
-
-              <button
-                onClick={handleSyncNow}
-                disabled={isSyncingNow || dbConfig.mode === 'local_sqlite'}
-                className="w-full inline-flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 text-white font-extrabold px-5 py-3 rounded-xl transition-all active:scale-95 cursor-pointer text-xs uppercase tracking-wider"
-              >
-                <RefreshCw size={16} className={isSyncingNow ? 'animate-spin' : ''} />
-                <span>{isSyncingNow ? 'Synkroniserar poster...' : 'Synka till Firestore nu'}</span>
-              </button>
-            </div>
           </div>
         </div>
       )}

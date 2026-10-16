@@ -1,3 +1,4 @@
+import 'dotenv/config';
 import express from 'express';
 import axios from 'axios';
 import path from 'path';
@@ -853,6 +854,49 @@ export function getManagedMemberScope(user: any): MemberScope {
   return scope;
 }
 
+function readClubMembers(clubId: string): any[] {
+  try {
+    const row: any = db.prepare("SELECT data FROM clubs_data WHERE clubId = ? AND teamId = 'club_global' AND segment = 'members'").get(clubId);
+    if (!row) return [];
+    const parsed = typeof row.data === 'string' ? JSON.parse(row.data) : row.data;
+    return Array.isArray(parsed) ? parsed : (Array.isArray(parsed?.members) ? parsed.members : []);
+  } catch (_) {
+    return [];
+  }
+}
+
+function memberMatchesUser(m: any, user: any): boolean {
+  if (!m || !user) return false;
+  const email = String(user.email || '').trim().toLowerCase();
+  return (!!user.id && m.userId === user.id) || (!!email && typeof m.email === 'string' && m.email.trim().toLowerCase() === email);
+}
+
+// Är användaren admin eller tränare i klubben (eller root-admin)?
+export function isClubManager(user: any, clubId: string): boolean {
+  if (!user) return false;
+  if (isRootAdminEmail(user.email)) return true;
+  return readClubMembers(clubId).some((m: any) => memberMatchesUser(m, user) &&
+    Array.isArray(m.roles) && (m.roles.includes('admin') || m.roles.includes('coach')));
+}
+
+// Alla lag (och klubbens gemensamma del) där användaren är medlem.
+export function getUserClubTeams(user: any): { clubId: string; teamId: string }[] {
+  const result: { clubId: string; teamId: string }[] = [];
+  let rows: any[] = [];
+  try {
+    rows = db.prepare("SELECT clubId FROM clubs_data WHERE teamId = 'club_global' AND segment = 'members'").all();
+  } catch (_) {
+    return result;
+  }
+  for (const r of rows) {
+    const me = readClubMembers(r.clubId).find((m: any) => memberMatchesUser(m, user));
+    if (!me) continue;
+    result.push({ clubId: r.clubId, teamId: 'club_global' });
+    for (const t of Array.isArray(me.teams) ? me.teams : []) result.push({ clubId: r.clubId, teamId: String(t) });
+  }
+  return result;
+}
+
 export function isAccountClaimed(userRow: any): boolean {
   if (!userRow) return false;
   return userRow.has_logged_in === 1 ||
@@ -1096,12 +1140,14 @@ let customPwaIcons: {
 } | null = null;
 
 function applyCustomPwaIconsToDisk(iconsObj: { appName?: string; themeColor?: string; updatedAt?: number; files: Record<string, string>; logoSrc?: string }) {
+  // I utvecklingsläge serveras egna ikoner direkt från minnet (se middleware i startServer),
+  // så källkodsfilerna (index.html, public/) lämnas orörda. I produktion skrivs filerna till
+  // disk eftersom webbservern (Apache/LiteSpeed) kan servera statiska filer innan Node anropas.
+  if (!isProduction) return;
   const rootDir = process.cwd();
-  const publicDir = path.join(rootDir, 'public');
   const distDir = path.join(rootDir, 'dist');
-  const deployDir = path.join(rootDir, 'deploy');
 
-  const targetDirs = [publicDir, distDir, rootDir, deployDir];
+  const targetDirs = [distDir, rootDir];
 
   // 1. Write individual icon files to all relevant target directories
   for (const [fileName, dataUrl] of Object.entries(iconsObj.files)) {
@@ -1229,9 +1275,7 @@ function applyCustomPwaIconsToDisk(iconsObj: { appName?: string; themeColor?: st
   };
 
   updateHtmlFile(path.join(rootDir, 'index.html'));
-  updateHtmlFile(path.join(publicDir, 'index.html'));
   updateHtmlFile(path.join(distDir, 'index.html'));
-  updateHtmlFile(path.join(deployDir, 'index.html'));
   console.log('[PWA Icons] Successfully applied custom icons and manifest across all disk locations.');
 }
 
@@ -2959,7 +3003,12 @@ async function startServer() {
   });
 
   // --- PERIODS & LEADERBOARDS CONSOLIDATION HELPER ---
-  function getConsolidatedPeriods(clubId?: string, teamId?: string, userId?: string): { periods: any[]; currentPeriodId: string | null } {
+  // Samlar poängligor (perioder) för ETT lag och/eller EN användare, ur deras egna dokument,
+  // delade poängligor och övningar. Tidigare samlades perioder från hela databasen, vilket
+  // gjorde att lag kunde se och få in varandras poängligor.
+  function getConsolidatedPeriods(scope: { userId?: string; clubTeams?: { clubId: string; teamId: string }[] }): { periods: any[]; currentPeriodId: string | null } {
+    const clubTeams = scope.clubTeams || [];
+    const userId = scope.userId;
     const periodMap = new Map<string, any>();
     let activePeriodId: string | null = null;
 
@@ -3011,23 +3060,30 @@ async function startServer() {
       } catch (_) {}
     };
 
-    // 1. Ingest all records from clubs_data WHERE segment = 'periods'
-    try {
-      const clubRows: any[] = db.prepare("SELECT data FROM clubs_data WHERE segment = 'periods'").all();
-      clubRows.forEach(r => parseAndIngest(r.data));
-    } catch (_) {}
+    // 1. Lagens egna perioder
+    for (const ct of clubTeams) {
+      try {
+        const row: any = db.prepare("SELECT data FROM clubs_data WHERE clubId = ? AND teamId = ? AND segment = 'periods'").get(ct.clubId, ct.teamId);
+        if (row) parseAndIngest(row.data);
+      } catch (_) {}
+    }
 
-    // 2. Ingest all records from users_data WHERE segment = 'periods'
-    try {
-      const userRows: any[] = db.prepare("SELECT data FROM users_data WHERE segment = 'periods'").all();
-      userRows.forEach(r => parseAndIngest(r.data));
-    } catch (_) {}
+    // 2. Användarens egna perioder
+    if (userId) {
+      try {
+        const row: any = db.prepare("SELECT data FROM users_data WHERE userId = ? AND segment = 'periods'").get(userId);
+        if (row) parseAndIngest(row.data);
+      } catch (_) {}
+    }
 
-    // 3. Ingest all shared_leaderboards
+    // 3. Delade poängligor som hör till dessa perioder eller till användaren
     try {
+      const shareIds = new Set<string>();
+      periodMap.forEach((p: any) => { if (p && p.shareId) shareIds.add(String(p.shareId)); });
       const sharedRows: any[] = db.prepare("SELECT id, data, updatedAt, coachUid FROM shared_leaderboards").all();
       for (const sr of sharedRows) {
         if (!sr) continue;
+        if (!shareIds.has(String(sr.id)) && !(userId && sr.coachUid === userId)) continue;
         try {
           const parsed = typeof sr.data === 'string' ? JSON.parse(sr.data) : sr.data;
           if (parsed) {
@@ -3052,15 +3108,17 @@ async function startServer() {
       }
     } catch (_) {}
 
-    // 4. Ingest system_docs matching period/leaderboard
+    // 4. Övningar som pekar på perioder som saknas (återställning)
     try {
-      const sysRows: any[] = db.prepare("SELECT data FROM system_docs WHERE path LIKE '%period%' OR path LIKE '%leaderboard%'").all();
-      sysRows.forEach(r => parseAndIngest(r.data));
-    } catch (_) {}
-
-    // 5. Ingest exercises to recover missing periods
-    try {
-      const exerciseRows: any[] = db.prepare("SELECT data FROM clubs_data WHERE segment = 'exercises' UNION ALL SELECT data FROM users_data WHERE segment = 'exercises'").all();
+      const exerciseRows: any[] = [];
+      for (const ct of clubTeams) {
+        const row: any = db.prepare("SELECT data FROM clubs_data WHERE clubId = ? AND teamId = ? AND segment = 'exercises'").get(ct.clubId, ct.teamId);
+        if (row) exerciseRows.push(row);
+      }
+      if (userId) {
+        const row: any = db.prepare("SELECT data FROM users_data WHERE userId = ? AND segment = 'exercises'").get(userId);
+        if (row) exerciseRows.push(row);
+      }
       for (const er of exerciseRows) {
         try {
           const parsed = typeof er.data === 'string' ? JSON.parse(er.data) : er.data;
@@ -3099,9 +3157,10 @@ async function startServer() {
   }
 
   // GET all periods endpoint for reliable recovery across clubs and local state
-  app.get('/api/periods/all', (_req, res) => {
+  app.get('/api/periods/all', requireAuthUser, (req, res) => {
     try {
-      const result = getConsolidatedPeriods();
+      const user = (req as any).user;
+      const result = getConsolidatedPeriods({ userId: user.id, clubTeams: getUserClubTeams(user) });
       res.json({ success: true, ...result });
     } catch (e: any) {
       console.error('Error fetching consolidated periods:', e);
@@ -3164,7 +3223,7 @@ async function startServer() {
       }
 
       if (segment === 'periods') {
-        const consolidated = getConsolidatedPeriods(undefined, undefined, userId);
+        const consolidated = getConsolidatedPeriods({ userId });
         try {
           db.prepare(`
             INSERT INTO users_data (userId, segment, data, updatedAt)
@@ -3253,14 +3312,14 @@ async function startServer() {
         const partsAuth = authStr.split(' ');
         const token = partsAuth.length > 1 ? partsAuth[1] : partsAuth[0];
 
-        verifyJwtToken(token);
+        const clubReqUser: any = verifyJwtToken(token);
         const parts = pathStr.split('/');
         const clubId = parts[1];
         const teamId = parts[3] || 'club_global';
         const segment = parts[5] || parts[3] || 'data';
 
         if (segment === 'periods') {
-          const consolidated = getConsolidatedPeriods(clubId, teamId);
+          const consolidated = getConsolidatedPeriods({ clubTeams: [{ clubId, teamId }], userId: isClubManager(clubReqUser, clubId) ? clubReqUser.id : undefined });
           try {
             db.prepare(`
               INSERT INTO clubs_data (clubId, teamId, segment, data, updatedAt)
@@ -3385,7 +3444,7 @@ async function startServer() {
 
         let finalDataToSave = data;
         if (segment === 'periods') {
-          const consolidated = getConsolidatedPeriods(undefined, undefined, userId);
+          const consolidated = getConsolidatedPeriods({ userId });
           const map = new Map<string, any>();
           (consolidated.periods || []).forEach((p: any) => { if (p && p.id) map.set(p.id, p); });
           const incomingList = Array.isArray(data?.periods) ? data.periods : (Array.isArray(data) ? data : []);
@@ -3452,7 +3511,7 @@ async function startServer() {
         const partsAuth = authStr.split(' ');
         const token = partsAuth.length > 1 ? partsAuth[1] : partsAuth[0];
 
-        verifyJwtToken(token);
+        const clubReqUser: any = verifyJwtToken(token);
         const parts = pathStr.split('/');
         const clubId = parts[1];
         const teamId = parts[3] || 'club_global';
@@ -3460,7 +3519,7 @@ async function startServer() {
 
         let finalDataToSave = data;
         if (segment === 'periods') {
-          const consolidated = getConsolidatedPeriods(clubId, teamId);
+          const consolidated = getConsolidatedPeriods({ clubTeams: [{ clubId, teamId }], userId: isClubManager(clubReqUser, clubId) ? clubReqUser.id : undefined });
           const map = new Map<string, any>();
           (consolidated.periods || []).forEach((p: any) => { if (p && p.id) map.set(p.id, p); });
           const incomingList = Array.isArray(data?.periods) ? data.periods : (Array.isArray(data) ? data : []);
@@ -4119,243 +4178,6 @@ async function startServer() {
   app.get('/api/calendar/events.ics', handleIcsFeed);
   app.get('/api/calendar/:clubId/:teamId/events.ics', handleIcsFeed);
   app.get('/api/calendar/:clubId/events.ics', handleIcsFeed);
-
-  // Direct download route for the pre-built production zip bundle (Requires Root Admin)
-  app.get('/api/download-production-bundle', requireRootAdmin, (_req, res) => {
-    const zipPath = path.resolve(process.cwd(), 'coachassist-production-bundle.zip');
-    if (fs.existsSync(zipPath)) {
-      res.setHeader('Content-Type', 'application/zip');
-      res.setHeader('Content-Disposition', 'attachment; filename="coachassist-production-bundle.zip"');
-      return fs.createReadStream(zipPath).pipe(res);
-    }
-    return res.status(404).send('Bundle not found');
-  });
-
-  // Direct download route for compiled server.cjs (Requires Root Admin)
-  app.get('/api/download-server-cjs', requireRootAdmin, (_req, res) => {
-    const serverPath = path.resolve(process.cwd(), 'dist', 'server.cjs');
-    if (fs.existsSync(serverPath)) {
-      res.setHeader('Content-Type', 'application/javascript');
-      res.setHeader('Content-Disposition', 'attachment; filename="server.cjs"');
-      return fs.createReadStream(serverPath).pipe(res);
-    }
-    return res.status(404).send('server.cjs not found');
-  });
-
-  // Helper functions for persistent system configurations
-  function dbGetSystemDoc(docPath: string): { data: string; updatedAt: number } | null {
-    try {
-      const row: any = db.prepare('SELECT data, updatedAt FROM system_docs WHERE path = ?').get(docPath);
-      return row || null;
-    } catch {
-      return null;
-    }
-  }
-
-  function dbSetSystemDoc(docPath: string, data: any): void {
-    try {
-      const serialized = typeof data === 'string' ? data : JSON.stringify(data);
-      const now = Date.now();
-      db.prepare(`
-        INSERT INTO system_docs (path, data, updatedAt)
-        VALUES (?, ?, ?)
-        ON CONFLICT(path) DO UPDATE SET data = excluded.data, updatedAt = excluded.updatedAt
-      `).run(docPath, serialized, now);
-    } catch (e) {
-      console.warn(`[SystemDoc] Could not save ${docPath}:`, e);
-    }
-  }
-
-  // SSH Direct Deploy Endpoints for 1-Click Deployment from AI Studio (Requires Root Admin)
-  app.get('/api/deploy-ssh-config', requireRootAdmin, (_req, res) => {
-    try {
-      const row = dbGetSystemDoc('system/ssh_deploy_config');
-      if (row && row.data) {
-        const parsed = JSON.parse(row.data);
-        // Do not return password or full key over the wire, just status
-        return res.json({
-          host: parsed.host || 'coachassist.setterholm.se',
-          port: parsed.port || 22,
-          username: parsed.username || 'setterho',
-          remotePath: parsed.remotePath || '/home/setterho/coachassist.setterholm.se',
-          hasSavedPassword: !!parsed.password,
-          hasSavedKey: !!parsed.privateKey,
-          authType: parsed.authType || (parsed.privateKey ? 'key' : 'password')
-        });
-      }
-      return res.json({
-        host: 'coachassist.setterholm.se',
-        port: 22,
-        username: 'setterho',
-        remotePath: '/home/setterho/coachassist.setterholm.se',
-        hasSavedPassword: false,
-        hasSavedKey: false,
-        authType: 'password'
-      });
-    } catch (e: any) {
-      return res.status(500).json({ error: e.message });
-    }
-  });
-
-  app.post('/api/deploy-to-ssh', requireRootAdmin, async (req, res) => {
-    const {
-      host = 'coachassist.setterholm.se',
-      port = 22,
-      username = 'setterho',
-      password,
-      privateKey,
-      authType = 'password',
-      remotePath = '/home/setterho/coachassist.setterholm.se',
-      action = 'full_deploy', // 'full_deploy' | 'restart_only'
-      saveConfig = true
-    } = req.body;
-
-    let finalPassword = password;
-    let finalKey = privateKey;
-
-    if (!finalPassword && !finalKey) {
-      try {
-        const row = dbGetSystemDoc('system/ssh_deploy_config');
-        if (row && row.data) {
-          const parsed = JSON.parse(row.data);
-          finalPassword = parsed.password;
-          finalKey = parsed.privateKey;
-        }
-      } catch (_) {}
-    }
-
-    if (!finalPassword && !finalKey) {
-      return res.status(400).json({ success: false, error: 'Inget SSH-lösenord eller SSH-nyckel angiven.' });
-    }
-
-    if (saveConfig) {
-      try {
-        dbSetSystemDoc('system/ssh_deploy_config', {
-          host,
-          port: Number(port),
-          username,
-          password: finalPassword || '',
-          privateKey: finalKey || '',
-          authType,
-          remotePath,
-          updatedAt: new Date().toISOString()
-        });
-      } catch (e) {
-        console.warn('Could not save SSH config:', e);
-      }
-    }
-
-    let SshClient: any;
-    try {
-      SshClient = require('ssh2').Client;
-    } catch (e: any) {
-      return res.status(500).json({ success: false, error: 'ssh2 modulen är inte tillgänglig: ' + e.message });
-    }
-
-    const logs: string[] = [];
-    const log = (msg: string) => {
-      console.log('[SSH Deploy]', msg);
-      logs.push(msg);
-    };
-
-    const conn = new SshClient();
-
-    conn.on('ready', () => {
-      log(`Ansluten via SSH till ${username}@${host}:${port}`);
-
-      if (action === 'restart_only') {
-        log('Kör omstartskommando (touch tmp/restart.txt)...');
-        const cmd = `mkdir -p "${remotePath}/tmp" && touch "${remotePath}/tmp/restart.txt"`;
-        conn.exec(cmd, (execErr: any, stream: any) => {
-          if (execErr) {
-            conn.end();
-            return res.status(500).json({ success: false, error: execErr.message, logs });
-          }
-          stream.on('close', (code: number) => {
-            conn.end();
-            if (code === 0) {
-              log('✅ Omstartstrigger skickad! Appen startar om på servern.');
-              return res.json({ success: true, message: 'Servern startades om framgångsrikt!', logs });
-            } else {
-              return res.status(500).json({ success: false, error: `Kommandot avslutades med kod ${code}`, logs });
-            }
-          });
-        });
-        return;
-      }
-
-      // Full deploy: upload bundle and unpack
-      const zipPath = path.resolve(process.cwd(), 'coachassist-production-bundle.zip');
-      if (!fs.existsSync(zipPath)) {
-        conn.end();
-        return res.status(500).json({ success: false, error: 'coachassist-production-bundle.zip hittades inte i AI Studio', logs });
-      }
-
-      log('Initierar SFTP för filöverföring...');
-      conn.sftp((err: any, sftp: any) => {
-        if (err) {
-          conn.end();
-          return res.status(500).json({ success: false, error: 'SFTP fel: ' + err.message, logs });
-        }
-
-        const remoteZip = path.posix.join(remotePath, 'coachassist-update.zip');
-        log(`Laddar upp produktionspaketet (${(fs.statSync(zipPath).size / (1024 * 1024)).toFixed(2)} MB)...`);
-
-        sftp.fastPut(zipPath, remoteZip, (uploadErr: any) => {
-          if (uploadErr) {
-            conn.end();
-            return res.status(500).json({ success: false, error: 'Överföringsfel: ' + uploadErr.message, logs });
-          }
-
-          log('Överföring slutförd! Packar upp filer på servern...');
-          const cmd = `unzip -qo "${remoteZip}" -d "${remotePath}" && rm -f "${remoteZip}" && mkdir -p "${remotePath}/tmp" && touch "${remotePath}/tmp/restart.txt"`;
-
-          conn.exec(cmd, (execErr: any, stream: any) => {
-            if (execErr) {
-              conn.end();
-              return res.status(500).json({ success: false, error: 'Körningsfel: ' + execErr.message, logs });
-            }
-
-            stream.on('close', (code: number) => {
-              conn.end();
-              if (code === 0) {
-                log('✅ [DEPLOY SUCCESSFUL] Alla filer uppackade och servern startades om!');
-                return res.json({
-                  success: true,
-                  message: 'Deploy slutförd! Applikationen är uppdaterad och omstartad på webbhotellet.',
-                  logs
-                });
-              } else {
-                return res.status(500).json({ success: false, error: `Unzip/restart avslutades med kod ${code}`, logs });
-              }
-            }).on('data', (data: any) => {
-              log(data.toString().trim());
-            }).stderr.on('data', (data: any) => {
-              log('[stderr] ' + data.toString().trim());
-            });
-          });
-        });
-      });
-    }).on('error', (err: any) => {
-      console.error('[SSH Deploy Error]', err);
-      return res.status(500).json({ success: false, error: 'SSH-anslutningen misslyckades: ' + err.message, logs });
-    });
-
-    const connOpts: any = {
-      host,
-      port: Number(port),
-      username,
-      readyTimeout: 30000
-    };
-
-    if (finalKey && (authType === 'key' || !finalPassword)) {
-      connOpts.privateKey = finalKey;
-    } else if (finalPassword) {
-      connOpts.password = finalPassword;
-    }
-
-    conn.connect(connOpts);
-  });
 
   // --- VITE AND SPA SERVING ---
 
