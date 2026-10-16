@@ -1901,6 +1901,9 @@ async function startServer() {
       segments.length === 0 ||
       ext !== '' ||
       pathPart.includes('.') ||
+      // Vites interna utvecklingssökvägar (/@vite/client, /@react-refresh, /@fs/...) och källkod
+      segments[0].startsWith('@') ||
+      ['src', 'node_modules'].includes(segments[0]) ||
       ['api', 'assets', 'uploads', 'rebuild', 'favicon.ico'].includes(segments[0])
     ) {
       return next();
