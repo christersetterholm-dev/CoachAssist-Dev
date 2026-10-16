@@ -24,6 +24,9 @@ export default defineConfig(({mode}) => {
       },
     },
     optimizeDeps: {
+      // Skanna bara appens riktiga startfil. Annars hittar Vite gamla färdigbyggda
+      // filer (deploy/index.html -> assets/*.js) och kräver paket som inte används.
+      entries: ['index.html'],
       exclude: ['firebase', 'firebase/app', 'firebase/auth', 'firebase/firestore', 'firebase/storage'],
     },
     server: {
