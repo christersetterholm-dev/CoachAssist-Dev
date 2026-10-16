@@ -4,7 +4,7 @@
   "version": "1.9.1",
   "type": "module",
   "scripts": {
-    "dev": "tsx server.ts",
+    "dev": "tsx watch --clear-screen=false --exclude \"./tests/**\" server.ts",
     "build": "vite build && node scripts/build-server.mjs",
     "start": "node app.cjs",
     "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.server.json",

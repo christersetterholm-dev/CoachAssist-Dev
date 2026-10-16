@@ -22,7 +22,7 @@ npm run set-password -- din@epost.se
 
 | Kommando | Vad det gör |
 | --- | --- |
-| `npm run dev` | Startar servern och appen i utvecklingsläge |
+| `npm run dev` | Startar servern och appen i utvecklingsläge (startar om automatiskt när serverkoden ändras) |
 | `npm test` | Kör API-testerna (behörigheter, datalagring) mot en tillfällig databas |
 | `npm run typecheck` | Typkontroll av både app och server |
 | `npm run build` | Bygger appen (`dist/`) och servern (`dist/server.cjs`) |
