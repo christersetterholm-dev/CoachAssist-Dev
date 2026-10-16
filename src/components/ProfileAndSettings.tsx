@@ -44,6 +44,15 @@ export default function ProfileAndSettings({
   const [emailUpdateError, setEmailUpdateError] = useState<string>('');
   const [usernameError, setUsernameError] = useState<string>('');
 
+  const isSameUserEmail = (e1?: string | null, e2?: string | null): boolean => {
+    const a = (e1 || '').trim().toLowerCase();
+    const b = (e2 || '').trim().toLowerCase();
+    if (!a || !b) return false;
+    if (a === b) return true;
+    const rootGroup = ['christer.setterholm@gmail.com', 'christer@setterholm.se'];
+    return rootGroup.includes(a) && rootGroup.includes(b);
+  };
+
   // Google Account Linking State
   const [googleLinked, setGoogleLinked] = useState<boolean>(auth.currentUser?.googleLinked ?? false);
   const [googleEmail, setGoogleEmail] = useState<string>(auth.currentUser?.googleEmail || '');
@@ -127,7 +136,7 @@ export default function ProfileAndSettings({
             const members: ClubMember[] = membersSnap.exists() ? (membersSnap.data().members || []) : [];
             const metadata: ClubMetadata | null = metadataSnap.exists() ? metadataSnap.data() as ClubMetadata : null;
 
-            const myMemberRecord = members.find(m => m.userId === userId || m.email.trim().toLowerCase() === userEmail.trim().toLowerCase());
+            const myMemberRecord = members.find(m => m.userId === userId || isSameUserEmail(m.email, userEmail));
 
             if (myMemberRecord) {
               // If current photoUrl is empty and member has a photo, sync it
@@ -259,7 +268,7 @@ export default function ProfileAndSettings({
         getDoc(doc(db, 'clubs', profile.activeClubId, 'teams', 'club_global', 'data', 'members')).then(membersSnap => {
           if (membersSnap.exists()) {
             const members: ClubMember[] = membersSnap.data().members || [];
-            const index = members.findIndex(m => m.userId === userId || m.email.trim().toLowerCase() === userEmail.trim().toLowerCase());
+            const index = members.findIndex(m => m.userId === userId || isSameUserEmail(m.email, userEmail));
             if (index !== -1) {
               members[index] = {
                 ...members[index],
@@ -308,7 +317,7 @@ export default function ProfileAndSettings({
       getDoc(doc(db, 'clubs', profile.activeClubId, 'teams', 'club_global', 'data', 'members')).then(membersSnap => {
         if (membersSnap.exists()) {
           const members: ClubMember[] = membersSnap.data().members || [];
-          const index = members.findIndex(m => m.userId === userId || m.email.trim().toLowerCase() === userEmail.trim().toLowerCase());
+          const index = members.findIndex(m => m.userId === userId || isSameUserEmail(m.email, userEmail));
           if (index !== -1) {
             members[index] = {
               ...members[index],
@@ -421,7 +430,7 @@ export default function ProfileAndSettings({
           const membersSnap = await getDoc(doc(db, 'clubs', profile.activeClubId, 'teams', 'club_global', 'data', 'members'));
           if (membersSnap.exists()) {
             const members: ClubMember[] = membersSnap.data().members || [];
-            const index = members.findIndex(m => m.userId === userId || m.email.trim().toLowerCase() === userEmail.trim().toLowerCase());
+            const index = members.findIndex(m => m.userId === userId || isSameUserEmail(m.email, userEmail));
             if (index !== -1) {
               members[index] = {
                 ...members[index],

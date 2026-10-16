@@ -256,7 +256,19 @@ function createFallbackDatabase(dataDir) {
             return Object.values(store.uploaded_files);
           }
           if (cleanSql.includes("FROM users")) {
-            return Object.values(store.users);
+            const allUsers = Object.values(store.users);
+            if (cleanSql.includes("OR LOWER(username)")) {
+              const p0 = String(params[0] || "").toLowerCase().trim();
+              const p1 = String(params[1] || p0).toLowerCase().trim();
+              return allUsers.filter(
+                (u) => u.email && u.email.toLowerCase() === p0 || u.username && u.username.toLowerCase() === p1
+              );
+            }
+            if (cleanSql.includes("LOWER(email) = ?")) {
+              const target = String(params[0] || "").toLowerCase().trim();
+              return allUsers.filter((u) => u.email && u.email.toLowerCase() === target);
+            }
+            return allUsers;
           }
           return [];
         },
@@ -1296,12 +1308,110 @@ async function loadAndApplyDbConfigFromFirestore() {
     console.error("[DB Config] Error restoring database mode from Firestore on startup:", err);
   }
 }
+async function ensureTeamAndClubIntegrity() {
+  try {
+    const clubsData = db.prepare("SELECT * FROM clubs_data").all();
+    if (!clubsData || clubsData.length === 0) return;
+    const clubMap = /* @__PURE__ */ new Map();
+    for (const cd of clubsData) {
+      if (!clubMap.has(cd.clubId)) {
+        clubMap.set(cd.clubId, { teams: /* @__PURE__ */ new Set(), metadata: null, members: null });
+      }
+      const entry = clubMap.get(cd.clubId);
+      if (cd.teamId && cd.teamId !== "club_global") {
+        entry.teams.add(cd.teamId);
+      }
+      if (cd.teamId === "club_global" && cd.segment === "metadata") {
+        try {
+          entry.metadata = typeof cd.data === "string" ? JSON.parse(cd.data) : cd.data;
+        } catch (_) {
+        }
+      }
+      if (cd.teamId === "club_global" && cd.segment === "members") {
+        try {
+          entry.members = typeof cd.data === "string" ? JSON.parse(cd.data) : cd.data;
+        } catch (_) {
+        }
+      }
+    }
+    for (const [clubId, { teams, metadata, members }] of clubMap.entries()) {
+      let metaUpdated = false;
+      let curMeta = metadata || { id: clubId, name: "Klubb", teams: [] };
+      if (!Array.isArray(curMeta.teams)) curMeta.teams = [];
+      for (const tid of teams) {
+        if (!curMeta.teams.some((t) => t && t.id === tid)) {
+          let teamName = "Seniorer / Herrar";
+          const sRow = db.prepare("SELECT data FROM clubs_data WHERE clubId = ? AND teamId = ? AND segment = ?").get(clubId, tid, "settings");
+          if (sRow && sRow.data) {
+            try {
+              const sObj = JSON.parse(sRow.data);
+              if (sObj.teamName) teamName = sObj.teamName;
+              else if (sObj.teamUrl && sObj.teamUrl.includes("Seniorer")) teamName = "Seniorer (Herrar)";
+            } catch (_) {
+            }
+          }
+          curMeta.teams.push({ id: tid, name: teamName });
+          metaUpdated = true;
+        }
+      }
+      if (metaUpdated) {
+        const rawMeta = JSON.stringify(curMeta);
+        db.prepare(`
+          INSERT INTO clubs_data (clubId, teamId, segment, data, updatedAt)
+          VALUES (?, 'club_global', 'metadata', ?, ?)
+          ON CONFLICT(clubId, teamId, segment) DO UPDATE SET data = excluded.data, updatedAt = excluded.updatedAt
+        `).run(clubId, rawMeta, Date.now());
+        console.log(`[Integrity] Auto-repaired metadata.teams for club ${clubId} with ${curMeta.teams.length} teams`);
+      }
+      let membersUpdated = false;
+      let curMembers = members || { members: [] };
+      if (!Array.isArray(curMembers.members)) curMembers.members = [];
+      const rootEmails = ["christer@setterholm.se", "christer.setterholm@gmail.com"];
+      const teamIds = Array.from(teams);
+      for (const re of rootEmails) {
+        const existing = curMembers.members.find((m) => m && m.email && m.email.toLowerCase() === re);
+        if (existing) {
+          if (!existing.teams || existing.teams.length === 0) {
+            existing.teams = teamIds;
+            membersUpdated = true;
+          }
+          if (!existing.roles || existing.roles.length === 0) {
+            existing.roles = ["admin", "coach"];
+            membersUpdated = true;
+          }
+        } else {
+          curMembers.members.push({
+            userId: re === "christer@setterholm.se" ? "a7a4c8a1-096d-4d15-a9c8-ff3df6880ae6" : "user_christer_gmail",
+            email: re,
+            fullName: "Christer Setterholm",
+            roles: ["admin", "coach"],
+            teams: teamIds,
+            photoUrl: "/uploads/photo_1790894131733-182448117.png"
+          });
+          membersUpdated = true;
+        }
+      }
+      if (membersUpdated) {
+        const rawMembers = JSON.stringify(curMembers);
+        db.prepare(`
+          INSERT INTO clubs_data (clubId, teamId, segment, data, updatedAt)
+          VALUES (?, 'club_global', 'members', ?, ?)
+          ON CONFLICT(clubId, teamId, segment) DO UPDATE SET data = excluded.data, updatedAt = excluded.updatedAt
+        `).run(clubId, rawMembers, Date.now());
+        console.log(`[Integrity] Auto-repaired members list for club ${clubId}`);
+      }
+    }
+  } catch (err) {
+    console.warn("[Integrity] Error during team/club auto-integrity check:", err);
+  }
+}
 async function startServer() {
   const app = (0, import_express.default)();
   const PORT = process.env.PORT || 3e3;
   await ensureJwtSecret();
   await loadAndApplyPwaIcons();
   await loadAndApplyDbConfigFromFirestore();
+  await ensureTeamAndClubIntegrity();
   function injectPwaMetaToHtml(html) {
     const appName = customPwaIcons?.appName || "CoachAssist";
     const themeColor = customPwaIcons?.themeColor || "#4f46e5";
@@ -1838,8 +1948,8 @@ async function startServer() {
       return res.status(400).json({ error: "E-post/anv\xE4ndarnamn och l\xF6senord kr\xE4vs." });
     }
     try {
-      let userRow = db.prepare("SELECT * FROM users WHERE LOWER(email) = ? OR LOWER(username) = ?").get(loginInput, loginInput);
-      if (!userRow) {
+      let candidates = db.prepare("SELECT * FROM users WHERE LOWER(email) = ? OR LOWER(username) = ?").all(loginInput, loginInput);
+      if (candidates.length === 0) {
         try {
           let fUser = await getFirestoreDoc(`server_users/${encodeURIComponent(loginInput)}`);
           if (!fUser || !fUser.id) {
@@ -1859,13 +1969,13 @@ async function startServer() {
                 fUser.password_hash,
                 fUser.created_at || Date.now()
               );
-              userRow = {
+              candidates = [{
                 id: fUser.id,
                 email: fUser.email || loginInput,
                 username: fUser.username || null,
                 password_hash: fUser.password_hash,
                 created_at: fUser.created_at || Date.now()
-              };
+              }];
             } catch (e) {
               console.error("Error caching Firestore user to SQLite:", e);
             }
@@ -1881,12 +1991,30 @@ async function startServer() {
           }
         }
       }
+      if (candidates.length === 0) {
+        return res.status(400).json({ error: "Fel e-post/anv\xE4ndarnamn eller l\xF6senord." });
+      }
+      let userRow = null;
+      for (const cand of candidates) {
+        if (cand && cand.password_hash) {
+          try {
+            const matches = await import_bcryptjs.default.compare(password, cand.password_hash);
+            if (matches) {
+              userRow = cand;
+              break;
+            }
+          } catch (_) {
+          }
+        }
+      }
       if (!userRow) {
         return res.status(400).json({ error: "Fel e-post/anv\xE4ndarnamn eller l\xF6senord." });
       }
-      const isValid = await import_bcryptjs.default.compare(password, userRow.password_hash);
-      if (!isValid) {
-        return res.status(400).json({ error: "Fel e-post/anv\xE4ndarnamn eller l\xF6senord." });
+      if (candidates.length > 1 && userRow.email) {
+        try {
+          db.prepare("UPDATE users SET password_hash = ?, has_logged_in = 1 WHERE LOWER(email) = ?").run(userRow.password_hash, userRow.email.toLowerCase());
+        } catch (_) {
+        }
       }
       if (!userRow.has_logged_in) {
         try {

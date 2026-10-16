@@ -4235,7 +4235,9 @@ export default function ClubAdminDashboard({
                 <button
                   type="button"
                   onClick={() => {
-                    const cmd = `curl -sSL "https://ais-dev-5rinf7gvwaklikkeip3eut-372119737616.europe-west3.run.app/api/download-production-bundle" -o bundle.zip && unzip -qo bundle.zip -d ~/coachassist.setterholm.se && mkdir -p ~/coachassist.setterholm.se/tmp && touch ~/coachassist.setterholm.se/tmp/restart.txt && rm -f bundle.zip && echo "✅ Klar! CoachAssist är uppdaterad och omstartad."`;
+                    const token = localStorage.getItem('token') || localStorage.getItem('coachassist_jwt_token') || localStorage.getItem('jwt_token') || '';
+                    const tokenParam = token ? `?token=${encodeURIComponent(token)}` : '';
+                    const cmd = `curl -sSL "https://ais-dev-5rinf7gvwaklikkeip3eut-372119737616.europe-west3.run.app/api/download-production-bundle${tokenParam}" -o bundle.zip && unzip -qo bundle.zip -d ~/coachassist.setterholm.se && mkdir -p ~/coachassist.setterholm.se/tmp && touch ~/coachassist.setterholm.se/tmp/restart.txt && rm -f bundle.zip && echo "✅ Klar! CoachAssist är uppdaterad och omstartad."`;
                     navigator.clipboard.writeText(cmd);
                     setCopiedOneLiner(true);
                     setTimeout(() => setCopiedOneLiner(false), 2500);
@@ -4247,7 +4249,7 @@ export default function ClubAdminDashboard({
                 </button>
               </div>
               <pre className="p-3 bg-zinc-900 text-emerald-400 text-[11px] font-mono rounded-xl overflow-x-auto whitespace-pre-wrap select-all">
-{`curl -sSL "https://ais-dev-5rinf7gvwaklikkeip3eut-372119737616.europe-west3.run.app/api/download-production-bundle" -o bundle.zip && unzip -qo bundle.zip -d ~/coachassist.setterholm.se && mkdir -p ~/coachassist.setterholm.se/tmp && touch ~/coachassist.setterholm.se/tmp/restart.txt && rm -f bundle.zip && echo "✅ Klar! CoachAssist är uppdaterad och omstartad."`}
+{`curl -sSL "https://ais-dev-5rinf7gvwaklikkeip3eut-372119737616.europe-west3.run.app/api/download-production-bundle?token=..." -o bundle.zip && unzip -qo bundle.zip -d ~/coachassist.setterholm.se && mkdir -p ~/coachassist.setterholm.se/tmp && touch ~/coachassist.setterholm.se/tmp/restart.txt && rm -f bundle.zip && echo "✅ Klar! CoachAssist är uppdaterad och omstartad."`}
               </pre>
             </div>
           </div>

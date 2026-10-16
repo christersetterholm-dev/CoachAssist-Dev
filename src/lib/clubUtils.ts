@@ -213,9 +213,8 @@ export async function syncSquadToClubMembers(
         const mPnr = (m.personnummer || '').replace(/\D/g, '');
         const mNum = (m.number || '').trim();
 
-        if (basePlayerId && (m.userId === basePlayerId || m.userId === player.id)) return true;
         if (cleanPnr && mPnr && cleanPnr === mPnr) return true;
-        if (cleanEmail && mEmail === cleanEmail) return true;
+        if (cleanEmail && mEmail && (cleanEmail === mEmail || (['christer.setterholm@gmail.com', 'christer@setterholm.se'].includes(cleanEmail) && ['christer.setterholm@gmail.com', 'christer@setterholm.se'].includes(mEmail)))) return true;
 
         if (mName === cleanName.toLowerCase()) {
           if (cleanNum && mNum) {
@@ -359,7 +358,7 @@ export async function syncAllTeamSquadsToClubMembers(
 
               if (sp.id && (m.userId === sp.id || m.userId === sp.id.replace('_leader', ''))) return true;
               if (cleanPnr && mPnr && cleanPnr === mPnr) return true;
-              if (cleanEmail && mEmail === cleanEmail) return true;
+              if (cleanEmail && mEmail && (cleanEmail === mEmail || (['christer.setterholm@gmail.com', 'christer@setterholm.se'].includes(cleanEmail) && ['christer.setterholm@gmail.com', 'christer@setterholm.se'].includes(mEmail)))) return true;
 
               if (mName === cleanName.toLowerCase()) {
                 if (cleanNum && mNum) return cleanNum === mNum;
