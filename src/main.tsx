@@ -2,6 +2,7 @@ import * as React from 'react';
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import App from './App.tsx';
+import InviteAcceptView from './components/InviteAcceptView.tsx';
 import './index.css';
 
 interface ErrorBoundaryProps {
@@ -59,10 +60,13 @@ class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundarySta
   }
 }
 
+// En inbjudningslänk (?invite=...) visar sidan för att gå med i laget i stället för appen.
+const inviteToken = new URLSearchParams(window.location.search).get('invite');
+
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <ErrorBoundary>
-      <App />
+      {inviteToken ? <InviteAcceptView token={inviteToken} /> : <App />}
     </ErrorBoundary>
   </StrictMode>,
 );

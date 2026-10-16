@@ -1,7 +1,8 @@
 import React, { useState, useRef, useMemo } from 'react';
-import { UserPlus, Trash2, Edit2, X, Users, Upload, FileSpreadsheet, FileText, ClipboardList, Camera, Loader2, ArrowUpDown, Check, Search, AlertTriangle, Activity } from 'lucide-react';
+import { UserPlus, UserCheck, Send, Trash2, Edit2, X, Users, Upload, FileSpreadsheet, FileText, ClipboardList, Camera, Loader2, ArrowUpDown, Check, Search, AlertTriangle, Activity } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { storage, db, ref, uploadBytes, getDownloadURL, getApiUrl, getAuthHeader, doc, getDoc } from '../lib/firebase';
+import { storage, db, ref, uploadBytes, getDownloadURL, getApiUrl, getAuthHeader, doc, getDoc, createInvite } from '../lib/firebase';
+import InviteShareModal from './InviteShareModal';
 import { SquadPlayer, ClubMember, ClubTeam, TrainingSession } from '../types';
 import { deduplicateSquad } from '../lib/clubUtils';
 import * as XLSX from 'xlsx';
@@ -98,6 +99,18 @@ interface SquadManagerProps {
 
 export default function SquadManager({ squad, sessions = [], onUpdateSquad, activeClubId, activeTeamId, isCoachOrAdmin = true }: SquadManagerProps) {
   const [activeTab, setActiveTab] = useState<'roster' | 'attendance'>('roster');
+  const [invite, setInvite] = useState<{ name: string; link?: string; expiresAt?: number; error?: string; loading?: boolean } | null>(null);
+
+  const handleInvite = async (player: SquadPlayer) => {
+    if (!activeClubId) return;
+    setInvite({ name: player.name, loading: true });
+    try {
+      const res = await createInvite(activeClubId, player.id);
+      setInvite({ name: player.name, link: res.link, expiresAt: res.expiresAt });
+    } catch (err: any) {
+      setInvite({ name: player.name, error: err?.message || 'Kunde inte skapa inbjudan' });
+    }
+  };
   const [isAdding, setIsAdding] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
   const [newName, setNewName] = useState('');
@@ -758,6 +771,16 @@ export default function SquadManager({ squad, sessions = [], onUpdateSquad, acti
 
   return (
     <div className="w-full max-w-4xl lg:max-w-5xl xl:max-w-6xl 2xl:max-w-7xl mx-auto p-4 sm:p-6 pb-16 min-w-0">
+      {invite && (
+        <InviteShareModal
+          name={invite.name}
+          link={invite.link}
+          expiresAt={invite.expiresAt}
+          error={invite.error}
+          loading={invite.loading}
+          onClose={() => setInvite(null)}
+        />
+      )}
       {fetchStatusMessage && (
         <div className={`p-4 mb-6 rounded-2xl border text-xs sm:text-sm font-extrabold flex items-center justify-between shadow-sm animate-in fade-in ${
           fetchStatusMessage.type === 'success' 
@@ -1281,6 +1304,22 @@ Kalle Karlsson	Mittback	4	https://image.url"
                     </div>
                     {isCoachOrAdmin && (
                       <div className="flex items-center gap-1.5 shrink-0">
+                        {player.accountLinked ? (
+                          <span
+                            className="p-2 text-emerald-600 dark:text-emerald-400"
+                            title="Har ett konto i appen"
+                          >
+                            <UserCheck size={18} />
+                          </span>
+                        ) : activeClubId ? (
+                          <button
+                            onClick={() => handleInvite(player)}
+                            className="p-2 bg-zinc-100 dark:bg-zinc-800 text-emerald-600 dark:text-emerald-400 rounded-xl hover:bg-emerald-100 dark:hover:bg-emerald-950/50 transition-all active:scale-95 shadow-sm"
+                            title="Bjud in till appen"
+                          >
+                            <Send size={18} />
+                          </button>
+                        ) : null}
                         <button
                           onClick={() => startEdit(player)}
                           className="p-2 bg-zinc-100 dark:bg-zinc-800 text-indigo-600 dark:text-indigo-400 rounded-xl hover:bg-indigo-100 dark:hover:bg-indigo-950/50 transition-all active:scale-95 shadow-sm"
@@ -1354,6 +1393,22 @@ Kalle Karlsson	Mittback	4	https://image.url"
                     </div>
                     {isCoachOrAdmin && (
                       <div className="flex items-center gap-1.5 shrink-0">
+                        {player.accountLinked ? (
+                          <span
+                            className="p-2 text-emerald-600 dark:text-emerald-400"
+                            title="Har ett konto i appen"
+                          >
+                            <UserCheck size={18} />
+                          </span>
+                        ) : activeClubId ? (
+                          <button
+                            onClick={() => handleInvite(player)}
+                            className="p-2 bg-zinc-100 dark:bg-zinc-800 text-emerald-600 dark:text-emerald-400 rounded-xl hover:bg-emerald-100 dark:hover:bg-emerald-950/50 transition-all active:scale-95 shadow-sm"
+                            title="Bjud in till appen"
+                          >
+                            <Send size={18} />
+                          </button>
+                        ) : null}
                         <button
                           onClick={() => startEdit(player)}
                           className="p-2 bg-zinc-100 dark:bg-zinc-800 text-indigo-600 dark:text-indigo-400 rounded-xl hover:bg-indigo-100 dark:hover:bg-indigo-950/50 transition-all active:scale-95 shadow-sm"

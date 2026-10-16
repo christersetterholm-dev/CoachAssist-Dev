@@ -256,11 +256,17 @@ export const SessionRsvpView: React.FC<SessionRsvpViewProps> = ({
   }, [safeSquad, guestPlayers]);
 
   // Identify logged in player from squad
+  // Tränare/admin kan svara för vem som helst; spelare bara för sig själva.
+  const canManageRsvps = userRoles.includes('admin') || userRoles.includes('coach');
+
   const matchedPlayer = useMemo(() => {
     if (!safeSquad || safeSquad.length === 0) return null;
-    if (selectedPlayerId) {
+    if (selectedPlayerId && canManageRsvps) {
       return safeSquad.find(p => p.id === selectedPlayerId) || null;
     }
+    // Servern markerar den inloggades egna rad(er) i truppen; spelarraden går före ledarraden.
+    const mine = safeSquad.filter(p => p.isMe);
+    if (mine.length > 0) return mine.find(p => p.role !== 'leader') || mine[0];
     if (!user) return safeSquad[0] || null;
 
     if (user.email) {
@@ -275,8 +281,8 @@ export const SessionRsvpView: React.FC<SessionRsvpViewProps> = ({
       if (matchName) return matchName;
     }
 
-    return safeSquad[0] || null;
-  }, [safeSquad, user, selectedPlayerId]);
+    return canManageRsvps ? (safeSquad[0] || null) : null;
+  }, [safeSquad, user, selectedPlayerId, canManageRsvps]);
 
   // Sync initial state for logged-in player's RSVP
   React.useEffect(() => {
@@ -947,7 +953,7 @@ export const SessionRsvpView: React.FC<SessionRsvpViewProps> = ({
 
             <div className="flex items-center gap-2 shrink-0">
               {/* Quick selector if user wants to change which player profile is being used */}
-              {safeSquad.length > 1 && (
+              {canManageRsvps && safeSquad.length > 1 && (
                 <div className="flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
                   <span className="text-xs font-bold text-zinc-400 hidden sm:inline">Profil:</span>
                   <select

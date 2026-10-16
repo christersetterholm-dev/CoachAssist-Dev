@@ -2864,6 +2864,8 @@ async function startServer() {
   app.post('/api/docs', async (req, res) => {
     const pathStr = req.query.path as string;
     const { data } = req.body;
+    // setDoc(..., { merge: true }) i appen: slå ihop med befintligt dokument i stället för att ersätta det
+    const mergeRequested = req.body?.merge === true;
     if (!pathStr) return res.status(400).send('Path is required');
 
     if (pathStr === 'shared_leaderboards/all_clubs') {
@@ -2961,6 +2963,12 @@ async function startServer() {
           };
         }
 
+        if (mergeRequested && finalDataToSave && typeof finalDataToSave === 'object' && !Array.isArray(finalDataToSave)) {
+          const prevRow: any = db.prepare('SELECT data FROM users_data WHERE userId = ? AND segment = ?').get(userId, segment);
+          let prev: any = null;
+          try { prev = prevRow ? JSON.parse(prevRow.data) : null; } catch (_) {}
+          if (prev && typeof prev === 'object' && !Array.isArray(prev)) finalDataToSave = { ...prev, ...finalDataToSave };
+        }
         const serializedData = JSON.stringify(finalDataToSave);
         const updateTimestamp = Number(data?.updatedAt) || Date.now();
         db.prepare(`
@@ -3056,6 +3064,12 @@ async function startServer() {
           };
         }
 
+        if (mergeRequested && finalDataToSave && typeof finalDataToSave === 'object' && !Array.isArray(finalDataToSave)) {
+          const prevRow: any = db.prepare('SELECT data FROM clubs_data WHERE clubId = ? AND teamId = ? AND segment = ?').get(clubId, teamId, segment);
+          let prev: any = null;
+          try { prev = prevRow ? JSON.parse(prevRow.data) : null; } catch (_) {}
+          if (prev && typeof prev === 'object' && !Array.isArray(prev)) finalDataToSave = { ...prev, ...finalDataToSave };
+        }
         const serializedData = JSON.stringify(finalDataToSave);
         const updateTimestamp = Number(data?.updatedAt) || Date.now();
         db.prepare(`

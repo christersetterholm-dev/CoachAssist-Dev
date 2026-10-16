@@ -578,18 +578,6 @@ export const signInWithGoogle = async (_forceSelect = false): Promise<User> => {
         const resData = await response.json();
 
         if (!response.ok) {
-          if (response.status === 429 || resData.code === 'RESOURCE_EXHAUSTED' || (resData.error && resData.error.toLowerCase().includes('kvot'))) {
-            const upUrl = resData.upgradeUrl || 'https://console.firebase.google.com/project/tuned-life-pmvz5/firestore/databases/ai-studio-remixcoachassist-3ac8f9c7-729f-4797-87b6-4c498370756c/data?openUpgradeDialog=true';
-            errorDiv.innerHTML = `
-              <div class="space-y-1">
-                <p class="font-bold text-amber-300">Firebase dygnsgräns nådd (50 000 läsningar)</p>
-                <p class="text-xs text-amber-100">${resData.error || 'Dina konton och data är säkra i molnet, men inloggningen är tillfälligt pausad tills kvoten nollställs imorgon.'}</p>
-                <a href="${upUrl}" target="_blank" rel="noopener noreferrer" class="inline-block mt-1 text-xs text-amber-200 underline hover:text-white">Öppna Firebase Console för uppgradering &rarr;</a>
-              </div>
-            `;
-            errorDiv.classList.remove('hidden');
-            return;
-          }
           throw new Error(resData.error || 'Åtgärden misslyckades');
         }
 
@@ -745,7 +733,7 @@ export const getDoc = async (docRef: { path: string }, options?: { forceRefresh?
   }
 };
 
-export const setDoc = async (docRef: { path: string }, data: any, _options?: { merge?: boolean }) => {
+export const setDoc = async (docRef: { path: string }, data: any, options?: { merge?: boolean }) => {
   const token = localStorage.getItem('token');
   const headers: Record<string, string> = {
     'Content-Type': 'application/json'
@@ -757,7 +745,7 @@ export const setDoc = async (docRef: { path: string }, data: any, _options?: { m
   const res = await fetchWithTimeout(getApiUrl(`/api/docs?path=${encodeURIComponent(docRef.path)}`), {
     method: 'POST',
     headers,
-    body: JSON.stringify({ data })
+    body: JSON.stringify({ data, ...(options?.merge ? { merge: true } : {}) })
   }, 12000);
 
   if (!res.ok) {
@@ -883,6 +871,55 @@ export const saveRsvp = async (body: { clubId: string; teamId: string; sessionId
   const json = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(json.error || `Kunde inte spara svaret (${res.status})`);
   return json;
+};
+
+// --- Inbjudningar ---
+const jsonOrError = async (res: Response, fallback: string) => {
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const err: any = new Error(json.error || `${fallback} (${res.status})`);
+    err.code = json.code;
+    err.status = res.status;
+    throw err;
+  }
+  return json;
+};
+
+// Tränare: skapa en personlig inbjudningslänk för en person i föreningen.
+export const createInvite = async (clubId: string, memberId: string): Promise<{ link: string; expiresAt: number }> => {
+  const res = await fetch(getApiUrl('/api/invites'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
+    body: JSON.stringify({ clubId, memberId }),
+  });
+  const json = await jsonOrError(res, 'Kunde inte skapa inbjudan');
+  return { link: `${window.location.origin}/?invite=${encodeURIComponent(json.token)}`, expiresAt: json.expiresAt };
+};
+
+export const getInviteInfo = async (token: string) => {
+  const res = await fetch(getApiUrl(`/api/invites/${encodeURIComponent(token)}`));
+  const json = await res.json().catch(() => ({}));
+  return json as { valid: boolean; reason?: string; clubName?: string; teamNames?: string[]; fullName?: string; email?: string; alreadyLinked?: boolean };
+};
+
+// Den inbjudne: skapa konto (email + lösenord) eller koppla inloggat konto (utan body).
+export const acceptInvite = async (token: string, body?: { email: string; password: string }) => {
+  const res = await fetch(getApiUrl(`/api/invites/${encodeURIComponent(token)}/accept`), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...(body ? {} : getAuthHeader()) },
+    body: JSON.stringify(body || {}),
+  });
+  const json = await jsonOrError(res, 'Kunde inte ta emot inbjudan');
+  completeLogin(json.token, json.user);
+  return json;
+};
+
+// Sparar inloggningen lokalt och meddelar appen (samma som vid vanlig inloggning).
+export const completeLogin = (token: string, user: any) => {
+  localStorage.setItem('token', token);
+  localStorage.setItem('cached_auth_user', JSON.stringify(user));
+  auth.currentUser = user;
+  listeners.forEach(cb => cb(user));
 };
 
 // Tar bort alla svar för en aktivitet (endast tränare).

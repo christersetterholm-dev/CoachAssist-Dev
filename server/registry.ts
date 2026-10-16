@@ -307,6 +307,7 @@ export function getSquadDoc(db: Db, clubId: string, teamId: string, a: ClubAcces
     const isLeaderRow = r.role === 'coach';
     const allRoles = new Set<string>(roles);
     if (clubAdmins.has(r.id)) allRoles.add('admin');
+    const isMe = a.memberIds.includes(r.id);
     squad.push({
       id: isLeaderRow && roles.has('player') ? `${r.id}_leader` : r.id,
       name: r.full_name,
@@ -315,8 +316,9 @@ export function getSquadDoc(db: Db, clubId: string, teamId: string, a: ClubAcces
       position: r.position || undefined,
       number: r.number || undefined,
       photoUrl: r.photo_url || undefined,
-      ...contactFields(r, full),
+      ...contactFields(r, full || isMe),
       accountLinked: !!r.user_id,
+      ...(isMe ? { isMe: true } : {}),
     });
   }
   return { squad, updatedAt };

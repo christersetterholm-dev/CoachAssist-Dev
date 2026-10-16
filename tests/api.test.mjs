@@ -109,7 +109,7 @@ test('truppen sparas i medlemsregistret och läses tillbaka i samma format', asy
   const squad = [
     { id: 'm-coach', name: 'Tränare Ett', role: 'leader' },
     { id: 'm-player', name: 'Spelare Ett', role: 'player', number: '7', personnummer: '20100101-1234' },
-    { id: 'm-ny', name: 'Ny Spelare', role: 'player', number: '9' },
+    { id: 'm-ny', name: 'Ny Spelare', role: 'player', number: '9', personnummer: '20110101-5678' },
     { id: 'm-coach_leader', name: 'Tränare Ett', role: 'leader' },
     { id: 'p-gast', name: 'Gäst Spelare', role: 'player' },
   ];
@@ -119,9 +119,11 @@ test('truppen sparas i medlemsregistret och läses tillbaka i samma format', asy
     ['m-coach', 'leader', ''], ['m-player', 'player', '7'], ['m-ny', 'player', '9'], ['p-gast', 'player', ''],
   ]);
   assert.equal(r.json.squad[1].personnummer, '20100101-1234');
-  // Spelare ser inte personnummer
+  // Spelare ser sitt eget personnummer men inte lagkamraternas
   const asPlayer = await get('clubs/klubb1/teams/lag1/data/squad', playerToken);
-  assert.equal(asPlayer.json.squad[1].personnummer, undefined);
+  assert.equal(asPlayer.json.squad[1].personnummer, '20100101-1234');
+  assert.equal(asPlayer.json.squad[1].isMe, true);
+  assert.equal(asPlayer.json.squad[2].personnummer, undefined);
   // Den nya truppspelaren finns i föreningens medlemslista
   const members = await get('clubs/klubb1/teams/club_global/data/members', coachToken);
   const gast = members.json.members.find((m) => m.userId === 'p-gast');
@@ -240,4 +242,12 @@ test('inbjudningslänk: tränaren bjuder in, spelaren skapar konto och kan svara
 
   // Redan kopplad person kan inte bjudas in igen
   assert.equal((await create(coachToken, 'm-inv')).status, 409);
+});
+
+test('sparning med merge behåller övriga fält', async () => {
+  const path = `users/${coachId}/data/profile`;
+  await post(path, { fullName: 'Tränare Ett', activeClubId: 'klubb1', onboardingCompleted: true }, coachToken);
+  const r = await s.api('POST', `/api/docs?path=${path}`, { token: coachToken, body: { data: { photoUrl: '/uploads/x.png' }, merge: true } });
+  assert.equal(r.status, 200);
+  assert.deepEqual((await get(path, coachToken)).json, { fullName: 'Tränare Ett', activeClubId: 'klubb1', onboardingCompleted: true, photoUrl: '/uploads/x.png' });
 });

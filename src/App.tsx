@@ -1335,7 +1335,7 @@ export default function App() {
               let isMemberUpdated = false;
 
               const matchedMember = members.find(m => {
-                const sameUid = m.userId === uid;
+                const sameUid = m.userId === uid || !!m.isMe;
                 const sameEmail = isSameUserEmail(m.email, cleanUserEmail);
                 return sameUid || sameEmail;
               });
@@ -1431,7 +1431,7 @@ export default function App() {
           const membersSnap = await getDoc(doc(db, 'clubs', p.activeClubId, 'teams', 'club_global', 'data', 'members'));
           if (membersSnap.exists()) {
             const members: ClubMember[] = membersSnap.data().members || [];
-            const myRecord = members.find(m => m.userId === uid || isSameUserEmail(m.email, cleanUserEmail));
+            const myRecord = members.find(m => m.isMe || m.userId === uid || isSameUserEmail(m.email, cleanUserEmail));
             if (myRecord) {
               setUserRoles(myRecord.roles || []);
               if (myRecord.photoUrl && !p.photoUrl) {
@@ -1563,7 +1563,7 @@ export default function App() {
         getDoc(doc(db, 'clubs', updatedProfile.activeClubId, 'teams', 'club_global', 'data', 'members')).then(membersSnap => {
           if (membersSnap.exists()) {
             const members: ClubMember[] = membersSnap.data().members || [];
-            const myRecord = members.find(m => m.userId === user.uid || isSameUserEmail(m.email, user.email));
+            const myRecord = members.find(m => m.isMe || m.userId === user.uid || isSameUserEmail(m.email, user.email));
             if (myRecord) {
               setUserRoles(myRecord.roles || []);
               if (myRecord.photoUrl && !updatedProfile.photoUrl) {

@@ -9,6 +9,8 @@ export interface SquadPlayer {
   email?: string;
   phone?: string;
   personnummer?: string;
+  accountLinked?: boolean; // har ett inloggningskonto kopplat
+  isMe?: boolean; // raden tillhör den inloggade användaren
 }
 
 export interface LineupPlayer {
@@ -382,6 +384,8 @@ export interface ClubMember {
   photoUrl?: string;
   roles: ('admin' | 'coach' | 'player' | 'parent')[];
   teams: string[]; // List of team IDs within the club
+  accountLinked?: boolean; // har ett inloggningskonto kopplat
+  isMe?: boolean; // posten tillhör den inloggade användaren
 }
 
 export interface UserProfile {
