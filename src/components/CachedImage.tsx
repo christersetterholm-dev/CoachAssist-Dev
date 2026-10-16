@@ -80,7 +80,8 @@ export const CachedImage: React.FC<CachedImageProps> = ({ src, className, alt, c
           // Silent proceed to proxy
         }
         
-        if (!response || !response.ok) {
+        // Proxyn används bara för externa bilder (http/https); egna bilder hämtas direkt.
+        if ((!response || !response.ok) && /^https?:\/\//i.test(validSrc)) {
           try {
             response = await fetch(getApiUrl(`/api/proxy?url=${encodeURIComponent(validSrc)}`), { 
               cache: 'default'
@@ -90,7 +91,7 @@ export const CachedImage: React.FC<CachedImageProps> = ({ src, className, alt, c
           }
         }
         
-        if (!response.ok) throw new Error(`Fetch failed`);
+        if (!response || !response.ok) throw new Error(`Fetch failed`);
         
         const blob = await response.blob();
         
