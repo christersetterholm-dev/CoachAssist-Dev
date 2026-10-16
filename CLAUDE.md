@@ -120,3 +120,6 @@ npm run set-password -- e@post.se            # lokalt konto/lösenord
 - Vite-HMR via websocket fungerar inte i middleware-läget (ofarligt, sidan laddas om manuellt).
 - Dela upp `server.ts`, `App.tsx`, `LineupBuilder.tsx` gradvis; appen laddas som ett stort JS-paket (3,4 MB).
 - E-post via SMTP (inbjudningar, glömt lösenord) om det behövs senare.
+- iOS-app och notiser (pausat, utrett okt 2026): steg 1 webbnotiser (Web Push/PWA, egen server,
+  ingen Firebase); steg 2 Capacitor-skal runt befintliga appen för riktiga notiser via APNs och
+  låst stående läge i t.ex. poängräkningen. Påminnelser kräver cron-jobb i cPanel (Passenger kan sova).
