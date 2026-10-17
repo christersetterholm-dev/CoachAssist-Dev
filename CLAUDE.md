@@ -167,6 +167,10 @@ npm run set-password -- e@post.se            # lokalt konto/lösenord
   troligen används pass som sparats i webbläsaren i stället för serverns. Utred synkningen.
 - I poängräkningen (`view === 'exercise'` i App.tsx) är timerpanelen och jokerraden ovanför
   poängkorten fortfarande i gammal stil (VERSALER).
+- Ny menypost **Taktiktavla** (planerad, efter ombyggnaden av taktiktavlan): fristående
+  taktiktavlor för laget (skapa, döp om, kopiera, ta bort), tomma från början, spelare från
+  truppen läggs till vid behov. Samma kod som taktiktavlan under Uppställning. Delning med
+  spelarna är ett aktivt val per tavla (av som standard), visas med öga / överstruket öga.
 - E-post via SMTP (inbjudningar, glömt lösenord) om det behövs senare.
 - iOS-app och notiser (pausat, utrett okt 2026): steg 1 webbnotiser (Web Push/PWA, egen server,
   ingen Firebase); steg 2 Capacitor-skal runt befintliga appen för riktiga notiser via APNs och
