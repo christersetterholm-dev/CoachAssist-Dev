@@ -143,6 +143,9 @@ npm run set-password -- e@post.se            # lokalt konto/lösenord
   Apple Pencil: med "Pennan ritar alltid" (på) ritar pennan och fingret flyttar – först när en penna
   har använts (`pointerType === 'pen'`). Med ett ritverktyg går tryck på en spelare vidare till
   planen, så en pil kan börja vid spelaren.
+  Taktiktavlans rutor är ark (`Sheet`): Text på tavlan, Nummer och roll (dubbeltryck på spelare),
+  Sparade taktiktavlor, Spara taktiktavlan? (vid Stäng), Spara som formation och Motståndarnas
+  formation. Formationsrutan (blått/rött lag) har kvar sin egen ram men nya flikar och typografi.
 - Ny kod ska använda byggklossarna i `src/components/ui` i stället för egna knappklasser.
   Stil: meningsversaler (inte VERSALER), `font-semibold`/`font-bold`, tryckytor minst 40 px.
 - Spelare ser inte Övningsbanken eller tävlingsknapparna i poänglistan (`canManage`).
@@ -171,8 +174,7 @@ npm run set-password -- e@post.se            # lokalt konto/lösenord
 - Vite-HMR via websocket fungerar inte i middleware-läget (ofarligt, sidan laddas om manuellt).
 - Dela upp `server.ts`, `App.tsx`, `LineupBuilder.tsx` gradvis; appen laddas som ett stort JS-paket (3,4 MB).
 - Gränssnittet, kvar att göra i nya stilen:
-  LineupBuilders modaler (formationer, spelarväljare, nummer/position, rubrik) som
-  har kvar VERSALER. Klara: uppställningen (sidopanel och bildläge), taktiktavlan, Översikt, kalender, passplanering
+  LineupBuilders övriga modaler (spelarväljare, rubrik, anteckningar) som har kvar VERSALER. Klara: uppställningen (sidopanel och bildläge), taktiktavlan, Översikt, kalender, passplanering
   och kallelser, Truppen, Tävlingsmoment och GameSetup, Profil, Poängliga, Administrationens
   ram/flikar (flikarnas innehåll har bara fått lugnare typografi).
 - `hideContentForPlayers` döljs bara i appen; servern skickar ändå passets moment till spelare.

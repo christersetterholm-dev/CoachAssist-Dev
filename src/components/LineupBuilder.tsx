@@ -34,6 +34,8 @@ const BOARD_COLORS = ['#ffffff', '#facc15', '#ef4444', '#3b82f6', '#18181b', '#f
 const BOARD_COLOR_NAMES: Record<string, string> = {
   '#ffffff': 'Vit', '#facc15': 'Gul', '#ef4444': 'Röd', '#3b82f6': 'Blå', '#18181b': 'Svart', '#f97316': 'Orange',
 };
+const BOARD_INPUT = 'w-full h-12 px-4 rounded-xl bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 text-base font-semibold text-zinc-900 dark:text-white placeholder:text-zinc-400 placeholder:font-normal focus:outline-none focus:ring-2 focus:ring-indigo-500/60';
+const BOARD_LABEL = 'text-sm font-semibold text-zinc-700 dark:text-zinc-200';
 const markerKey = (color: string) => String(color || '#ffffff').replace(/[^a-zA-Z0-9]/g, '');
 
 // Avstånd från en punkt till en sträcka (i planens procentkoordinater).
@@ -1943,7 +1945,7 @@ export default function LineupBuilder({
   };
 
   const handleSaveAndExitTactical = () => {
-    const nameToUse = exitBoardName.trim() || `Taktisk ritning ${new Date().toLocaleDateString('sv-SE')}`;
+    const nameToUse = exitBoardName.trim() || `Taktiktavla ${new Date().toLocaleDateString('sv-SE')}`;
     
     const newBoard: TacticalSavedBoard = {
       id: Math.random().toString(36).substring(2, 9),
@@ -3621,66 +3623,6 @@ export default function LineupBuilder({
               backgroundSize: (pitchType === 'grass' || pitchType === 'blue' || pitchType === 'blue-grass') ? '20px 20px' : 'auto'
             }}
           >
-
-          {/* Inline Text Editor - Outside rotating layer to keep it readable */}
-          {editingTextId && (
-            <div className="absolute inset-0 z-[100] flex items-center justify-center bg-black/5 backdrop-blur-sm p-4">
-              <div className="bg-white dark:bg-zinc-900 p-6 rounded-3xl shadow-2xl border border-zinc-200 dark:border-zinc-800 w-full max-w-sm mx-auto animate-in zoom-in duration-200">
-                <div className="flex items-center gap-3 mb-4">
-                  <div className="w-10 h-10 rounded-2xl bg-indigo-50 dark:bg-indigo-900/30 flex items-center justify-center text-indigo-600">
-                    <Type size={20} />
-                  </div>
-                  <div>
-                    <h3 className="text-sm font-black uppercase text-zinc-900 dark:text-white tracking-tight leading-none">Skriv på tavlan</h3>
-                    <p className="text-[10px] font-bold text-zinc-400 uppercase mt-1">Välj text och tryck på klar</p>
-                  </div>
-                  <button 
-                    onClick={() => {
-                      const d = tacticalDrawings.find(it => it.id === editingTextId);
-                      if (d && !d.text) {
-                        setTacticalDrawings(prev => prev.filter(it => it.id !== editingTextId));
-                      }
-                      setEditingTextId(null);
-                    }}
-                    className="ml-auto p-2 text-zinc-400 hover:text-zinc-600 transition-colors"
-                  >
-                    <X size={20} />
-                  </button>
-                </div>
-                <input 
-                  autoFocus
-                  type="text"
-                  className="w-full px-5 py-4 rounded-2xl bg-zinc-100 dark:bg-zinc-800 border-2 border-transparent focus:border-indigo-600 focus:ring-0 text-base font-bold transition-all"
-                  placeholder="Din text..."
-                  value={tacticalDrawings.find(d => d.id === editingTextId)?.text || ''}
-                  onChange={(e) => {
-                    setTacticalDrawings(prev => prev.map(d => d.id === editingTextId ? { ...d, text: e.target.value } : d));
-                  }}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') setEditingTextId(null);
-                    if (e.key === 'Escape') setEditingTextId(null);
-                  }}
-                />
-                <div className="grid grid-cols-2 gap-3 mt-6">
-                  <button 
-                    onClick={() => {
-                      setTacticalDrawings(prev => prev.filter(it => it.id !== editingTextId));
-                      setEditingTextId(null);
-                    }}
-                    className="py-4 rounded-2xl bg-zinc-100 dark:bg-zinc-800 text-zinc-500 font-black uppercase text-[10px] tracking-widest active:scale-95 transition-all"
-                  >
-                    Rensa
-                  </button>
-                  <button 
-                    onClick={() => setEditingTextId(null)}
-                    className="py-4 rounded-2xl bg-indigo-600 text-white font-black uppercase text-[10px] tracking-widest shadow-lg shadow-indigo-600/20 active:scale-95 transition-all"
-                  >
-                    Spara
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
 
           {/* Main Container that rotates for landscape */}
           <div 
@@ -5606,6 +5548,23 @@ export default function LineupBuilder({
   ];
 
   const selectedDrawing = selectedDrawingId ? tacticalDrawings.find(d => d.id === selectedDrawingId) : null;
+  // Fokus i textrutan när den öppnas. Görs efter en stund, eftersom trycket på planen
+  // annars tar tillbaka fokus innan man hunnit skriva.
+  const textInputRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (!editingTextId) return;
+    const t = setTimeout(() => textInputRef.current?.focus(), 250);
+    return () => clearTimeout(t);
+  }, [editingTextId]);
+
+  // Stäng textrutan; en tom text tas bort i stället för att ligga kvar osynlig.
+  const finishTextEdit = () => {
+    const d = tacticalDrawings.find(it => it.id === editingTextId);
+    if (d && !String(d.text || '').trim()) {
+      setTacticalDrawings(prev => prev.filter(it => it.id !== editingTextId));
+    }
+    setEditingTextId(null);
+  };
   const resizeSelectedDrawing = (dir: 1 | -1) => {
     if (!selectedDrawing) return;
     pushHistory();
@@ -5993,6 +5952,49 @@ export default function LineupBuilder({
               )}
             </div>
           )}
+
+          {/* Text på tavlan */}
+          <Sheet
+            open={!!editingTextId}
+            onClose={finishTextEdit}
+            title="Text på tavlan"
+            footer={
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="ghost"
+                  className="text-red-600 dark:text-red-400"
+                  icon={<Trash2 size={18} />}
+                  onClick={() => {
+                    setTacticalDrawings(prev => prev.filter(it => it.id !== editingTextId));
+                    setEditingTextId(null);
+                    setSelectedDrawingId(null);
+                    setHasUnsavedChanges(true);
+                  }}
+                >
+                  Ta bort
+                </Button>
+                <span className="flex-1" />
+                <Button icon={<Check size={18} />} onClick={finishTextEdit}>Klar</Button>
+              </div>
+            }
+          >
+            <div className="px-2 pb-2">
+              <input
+                ref={textInputRef}
+                type="text"
+                className={BOARD_INPUT}
+                placeholder="Skriv här"
+                value={tacticalDrawings.find(d => d.id === editingTextId)?.text || ''}
+                onChange={(e) => {
+                  setTacticalDrawings(prev => prev.map(d => d.id === editingTextId ? { ...d, text: e.target.value } : d));
+                  setHasUnsavedChanges(true);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') finishTextEdit();
+                }}
+              />
+            </div>
+          </Sheet>
 
           {/* Mer: inställningar och sådant som inte behövs hela tiden */}
           <Sheet open={showBoardMore} onClose={() => setShowBoardMore(false)} title="Mer">
@@ -6613,244 +6615,147 @@ export default function LineupBuilder({
           </motion.div>
         )}
 
-        {/** Number & Position Edit Modal */}
-        <AnimatePresence>
-          {numberEditTarget && (
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              className="fixed inset-0 bg-black/60 backdrop-blur-md z-[200] flex items-center justify-center p-4"
-              onClick={() => setNumberEditTarget(null)}
-            >
-              <motion.div
-                initial={{ scale: 0.9, opacity: 0, y: 15 }}
-                animate={{ scale: 1, opacity: 1, y: 0 }}
-                exit={{ scale: 0.9, opacity: 0, y: 15 }}
-                className="bg-white dark:bg-zinc-900 rounded-3xl p-6 sm:p-7 max-w-md w-full shadow-2xl border border-zinc-200 dark:border-zinc-800"
-                onClick={(e) => e.stopPropagation()}
-              >
-                {/* Header */}
-                <div className="flex items-center justify-between mb-5">
-                  <div className="flex items-center gap-2.5">
-                    <div 
-                      className="w-9 h-9 rounded-xl flex items-center justify-center text-white font-black text-sm shadow-md"
-                      style={{ backgroundColor: numberEditTarget.teamColor }}
-                    >
-                      <Shirt size={18} fill="currentColor" />
-                    </div>
-                    <div>
-                      <h3 className="text-base font-black text-zinc-900 dark:text-white">
-                        Ändra nummer & position
-                      </h3>
-                      <p className="text-xs font-semibold text-zinc-500">
-                        {numberEditTarget.teamLabel}
-                      </p>
-                    </div>
-                  </div>
-                  <button 
-                    onClick={() => setNumberEditTarget(null)} 
-                    className="w-8 h-8 rounded-xl bg-zinc-100 dark:bg-zinc-800 flex items-center justify-center text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 transition-colors cursor-pointer"
-                  >
-                    <X size={18} />
-                  </button>
-                </div>
-
-                <div className="space-y-4">
-                  {/* Number / Position Input */}
-                  <div>
-                    <label className="block text-xs font-bold text-zinc-700 dark:text-zinc-300 mb-1.5">
-                      Spelarnummer / Position på tröjan
-                    </label>
-                    <div className="relative">
-                      <input
-                        type="text"
-                        value={editNumberValue}
-                        onChange={(e) => setEditNumberValue(e.target.value)}
-                        placeholder="t.ex. 6, 8, 10, MV..."
-                        className="w-full px-3.5 py-2.5 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-xl text-zinc-900 dark:text-white font-bold text-base focus:outline-none focus:ring-2 focus:ring-blue-500/50"
-                        autoFocus
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter') {
-                            e.preventDefault();
-                            handleSaveNumberEdit();
-                          }
-                        }}
-                      />
-                    </div>
-                    <p className="text-[11px] text-zinc-500 dark:text-zinc-400 mt-1">
-                      Flera spelare kan ha samma nummer (t.ex. två 6:or på planen).
-                    </p>
-                  </div>
-
-                  {/* Quick Number Presets */}
-                  <div>
-                    <span className="block text-[11px] font-bold text-zinc-500 uppercase tracking-wider mb-1.5">
-                      Snabbval nummer (1–11)
-                    </span>
-                    <div className="grid grid-cols-6 gap-1.5">
-                      {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11].map(num => (
-                        <button
-                          key={num}
-                          type="button"
-                          onClick={() => {
-                            setEditNumberValue(String(num));
-                            const classic = CLASSIC_POSITIONS[num];
-                            if (classic && !editNameValue) {
-                              setEditNameValue(classic.name);
-                            }
-                          }}
-                          className={`py-1.5 rounded-lg text-xs font-black transition-all cursor-pointer ${
-                            editNumberValue === String(num)
-                              ? 'bg-blue-600 text-white shadow-sm ring-2 ring-blue-500/30'
-                              : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-200 dark:hover:bg-zinc-700'
-                          }`}
-                        >
-                          {num}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-
-                  {/* Quick Tactical Role Presets */}
-                  <div>
-                    <span className="block text-[11px] font-bold text-zinc-500 uppercase tracking-wider mb-1.5">
-                      Vanliga taktiska roller & positioner
-                    </span>
-                    <div className="flex flex-wrap gap-1.5">
-                      {[
-                        { num: '6', name: 'Defensiv mitt (6:a)' },
-                        { num: '8', name: 'Central mitt (8:a)' },
-                        { num: '10', name: 'Offensiv mitt (10:a)' },
-                        { num: '9', name: 'Centerforward (9:a)' },
-                        { num: '7', name: 'Högerytter (7:a)' },
-                        { num: '11', name: 'Vänsterytter (11:a)' },
-                        { num: '4', name: 'Mittback (4:a)' },
-                        { num: '5', name: 'Mittback (5:a)' },
-                        { num: '2', name: 'Högerback (2:a)' },
-                        { num: '3', name: 'Vänsterback (3:a)' },
-                        { num: '1', name: 'Målvakt (1:a)' },
-                      ].map(preset => (
-                        <button
-                          key={preset.name}
-                          type="button"
-                          onClick={() => {
-                            setEditNumberValue(preset.num);
-                            setEditNameValue(preset.name);
-                          }}
-                          className="px-2.5 py-1 rounded-lg text-[11px] font-bold bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-colors cursor-pointer border border-zinc-200/50 dark:border-zinc-700/50"
-                        >
-                          {preset.name}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-
-                  {/* Name / Description Input */}
-                  <div>
-                    <label className="block text-xs font-bold text-zinc-700 dark:text-zinc-300 mb-1.5">
-                      Beskrivning / Roll (valfritt)
-                    </label>
-                    <input
-                      type="text"
-                      value={editNameValue}
-                      onChange={(e) => setEditNameValue(e.target.value)}
-                      placeholder="t.ex. Defensiv mitt, Balans, Spelfördelare..."
-                      className="w-full px-3.5 py-2.5 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-xl text-zinc-900 dark:text-white font-medium text-xs focus:outline-none focus:ring-2 focus:ring-blue-500/50"
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') {
-                          e.preventDefault();
-                          handleSaveNumberEdit();
-                        }
-                      }}
-                    />
-                  </div>
-
-                  {/* Actions */}
-                  <div className="flex items-center justify-between pt-3 border-t border-zinc-100 dark:border-zinc-800 gap-2">
-                    <button
-                      type="button"
-                      onClick={handleDeleteFromEditModal}
-                      className="px-3 py-2 bg-red-50 hover:bg-red-100 dark:bg-red-950/40 dark:hover:bg-red-900/50 text-red-600 dark:text-red-400 rounded-xl text-xs font-bold transition-colors flex items-center gap-1.5 cursor-pointer active:scale-95"
-                      title="Ta bort spelaren från planen (kan ångras)"
-                    >
-                      <Trash2 size={14} />
-                      <span>Ta bort</span>
-                    </button>
-                    
-                    <div className="flex items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={() => setNumberEditTarget(null)}
-                        className="px-4 py-2 bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-zinc-700 dark:text-zinc-300 rounded-xl text-xs font-bold transition-colors cursor-pointer"
-                      >
-                        Avbryt
-                      </button>
-                      <button
-                        type="button"
-                        onClick={handleSaveNumberEdit}
-                        className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold shadow-md transition-all cursor-pointer active:scale-95 flex items-center gap-1.5"
-                      >
-                        <Check size={14} />
-                        <span>Spara</span>
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              </motion.div>
-            </motion.div>
-          )}
-        </AnimatePresence>
-
-        {/** Save Formation Name Modal */}
-        <AnimatePresence>
-          {showSaveFormation && (
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              className="fixed inset-0 bg-black/60 backdrop-blur-md z-[110] flex items-center justify-center p-4"
-              onClick={() => setShowSaveFormation(false)}
-            >
-              <motion.div
-                initial={{ scale: 0.9, opacity: 0, y: 20 }}
-                animate={{ scale: 1, opacity: 1, y: 0 }}
-                exit={{ scale: 0.9, opacity: 0, y: 20 }}
-                className="bg-zinc-50 dark:bg-zinc-950 rounded-[32px] p-8 max-w-md w-full shadow-2xl border border-white dark:border-zinc-900"
-                onClick={(e) => e.stopPropagation()}
-              >
-                <div className="flex items-center justify-between mb-6">
-                  <h3 className="text-2xl font-black text-zinc-900 dark:text-white">Spara formation</h3>
-                  <button onClick={() => setShowSaveFormation(false)} className="text-zinc-400 hover:text-zinc-600">
-                    <X size={24} />
-                  </button>
-                </div>
-                
-                <div className="space-y-6">
-                  <div>
-                    <label className="text-[10px] font-black text-zinc-400 uppercase tracking-widest ml-1 mb-2 block">Formationsnamn</label>
-                    <input 
-                      type="text"
-                      placeholder="T.ex. 4-3-3 Offensiv"
-                      value={newFormationName}
-                      onChange={(e) => setNewFormationName(e.target.value)}
-                      className="w-full h-14 px-6 bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-100 dark:border-zinc-800 text-zinc-900 dark:text-white font-bold focus:outline-none focus:ring-2 focus:ring-indigo-500/20 shadow-sm"
-                      autoFocus
-                    />
-                  </div>
-
+        {/** Nummer och roll för en spelare på taktiktavlan */}
+        <Sheet
+          open={!!numberEditTarget}
+          onClose={() => setNumberEditTarget(null)}
+          title={numberEditTarget ? `Nummer och roll – ${numberEditTarget.teamLabel}` : 'Nummer och roll'}
+          footer={
+            <div className="flex items-center gap-2">
+              <Button variant="ghost" className="text-red-600 dark:text-red-400" icon={<Trash2 size={18} />} onClick={handleDeleteFromEditModal}>
+                Ta bort
+              </Button>
+              <span className="flex-1" />
+              <Button variant="secondary" onClick={() => setNumberEditTarget(null)}>Avbryt</Button>
+              <Button icon={<Check size={18} />} onClick={handleSaveNumberEdit}>Spara</Button>
+            </div>
+          }
+        >
+          <div className="flex flex-col gap-4 px-2 pb-2">
+            <label className="flex flex-col gap-1.5">
+              <span className={BOARD_LABEL}>Nummer eller position på tröjan</span>
+              <input
+                type="text"
+                value={editNumberValue}
+                onChange={(e) => setEditNumberValue(e.target.value)}
+                placeholder="T.ex. 6, 10 eller MV"
+                className={BOARD_INPUT}
+                autoFocus
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    handleSaveNumberEdit();
+                  }
+                }}
+              />
+              <span className="text-xs text-zinc-500 dark:text-zinc-400">Flera spelare kan ha samma nummer.</span>
+            </label>
+            <div className="flex flex-col gap-1.5">
+              <span className={BOARD_LABEL}>Snabbval</span>
+              <div className="grid grid-cols-6 gap-1.5">
+                {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11].map(num => (
                   <button
-                    onClick={handleSaveCurrentAsFormation}
-                    disabled={!newFormationName.trim()}
-                    className="w-full py-4 bg-indigo-600 text-white font-black rounded-2xl active:scale-95 disabled:opacity-50 disabled:grayscale transition-all shadow-lg shadow-indigo-100 dark:shadow-none"
+                    key={num}
+                    type="button"
+                    onClick={() => {
+                      setEditNumberValue(String(num));
+                      const classic = CLASSIC_POSITIONS[num];
+                      if (classic && !editNameValue) setEditNameValue(classic.name);
+                    }}
+                    className={`h-11 rounded-xl text-sm font-bold transition-all cursor-pointer active:scale-95 ${
+                      editNumberValue === String(num)
+                        ? 'bg-indigo-600 text-white'
+                        : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-200 hover:bg-zinc-200 dark:hover:bg-zinc-700'
+                    }`}
                   >
-                    Spara Formation
+                    {num}
                   </button>
-                </div>
-              </motion.div>
-            </motion.div>
-          )}
-        </AnimatePresence>
+                ))}
+              </div>
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <span className={BOARD_LABEL}>Vanliga roller</span>
+              <div className="flex flex-wrap gap-1.5">
+                {[
+                  { num: '1', name: 'Målvakt' },
+                  { num: '2', name: 'Högerback' },
+                  { num: '3', name: 'Vänsterback' },
+                  { num: '4', name: 'Mittback' },
+                  { num: '5', name: 'Mittback' },
+                  { num: '6', name: 'Defensiv mittfältare' },
+                  { num: '8', name: 'Central mittfältare' },
+                  { num: '10', name: 'Offensiv mittfältare' },
+                  { num: '7', name: 'Högerytter' },
+                  { num: '11', name: 'Vänsterytter' },
+                  { num: '9', name: 'Anfallare' },
+                ].map(preset => (
+                  <button
+                    key={`${preset.num}-${preset.name}`}
+                    type="button"
+                    onClick={() => {
+                      setEditNumberValue(preset.num);
+                      setEditNameValue(preset.name);
+                    }}
+                    className={`h-10 px-3 rounded-xl text-sm font-semibold transition-colors cursor-pointer ${
+                      editNumberValue === preset.num && editNameValue === preset.name
+                        ? 'bg-indigo-600 text-white'
+                        : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-200 hover:bg-zinc-200 dark:hover:bg-zinc-700'
+                    }`}
+                  >
+                    {preset.num} · {preset.name}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <label className="flex flex-col gap-1.5">
+              <span className={BOARD_LABEL}>Namn eller roll (valfritt)</span>
+              <input
+                type="text"
+                value={editNameValue}
+                onChange={(e) => setEditNameValue(e.target.value)}
+                placeholder="T.ex. Spelfördelare"
+                className={BOARD_INPUT}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    handleSaveNumberEdit();
+                  }
+                }}
+              />
+            </label>
+          </div>
+        </Sheet>
+
+        {/** Spara spelarnas placering som en egen formation */}
+        <Sheet
+          open={showSaveFormation}
+          onClose={() => setShowSaveFormation(false)}
+          title="Spara som formation"
+          footer={
+            <div className="flex justify-end gap-2">
+              <Button variant="secondary" onClick={() => setShowSaveFormation(false)}>Avbryt</Button>
+              <Button icon={<Save size={18} />} onClick={handleSaveCurrentAsFormation} disabled={!newFormationName.trim()}>Spara</Button>
+            </div>
+          }
+        >
+          <label className="flex flex-col gap-1.5 px-2 pb-2">
+            <span className={BOARD_LABEL}>Namn på formationen</span>
+            <input
+              type="text"
+              placeholder="T.ex. 4-3-3 offensiv"
+              value={newFormationName}
+              onChange={(e) => setNewFormationName(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && newFormationName.trim()) {
+                  e.preventDefault();
+                  handleSaveCurrentAsFormation();
+                }
+              }}
+              className={BOARD_INPUT}
+              autoFocus
+            />
+          </label>
+        </Sheet>
 
         {/** Formation Details Modal */}
         {showFormationModal && (
@@ -6858,81 +6763,42 @@ export default function LineupBuilder({
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-black/60 backdrop-blur-md z-[100] flex items-center justify-center p-4"
+            className="fixed inset-0 bg-black/40 backdrop-blur-[2px] z-[100] flex items-center justify-center p-3 sm:p-4"
             onClick={() => setShowFormationModal(false)}
           >
             <motion.div
               initial={{ scale: 0.9, opacity: 0, y: 20 }}
               animate={{ scale: 1, opacity: 1, y: 0 }}
               exit={{ scale: 0.9, opacity: 0, y: 20 }}
-              className="bg-zinc-50 dark:bg-zinc-950 rounded-[40px] p-6 sm:p-8 max-w-3xl w-full max-h-[88vh] overflow-y-auto shadow-2xl border border-zinc-200 dark:border-zinc-800 custom-scrollbar"
+              className="bg-white dark:bg-zinc-900 rounded-3xl p-5 sm:p-6 max-w-3xl w-full max-h-[88vh] overflow-y-auto shadow-2xl border border-zinc-200 dark:border-zinc-800 custom-scrollbar"
               onClick={(e) => e.stopPropagation()}
             >
-              <div className="flex items-center justify-between mb-6">
+              <div className="flex items-start justify-between gap-3 mb-4">
                 <div>
-                  <h3 className="text-2xl sm:text-3xl font-black text-zinc-900 dark:text-white tracking-tight">
-                    {isMaximized ? 'Formationer & Taktisk Uppställning' : 'Välj formation'}
+                  <h3 className="text-xl font-bold text-zinc-900 dark:text-white">
+                    {isMaximized ? 'Formationer' : 'Välj formation'}
                   </h3>
-                  <p className="text-xs sm:text-sm text-zinc-500 font-medium mt-1">
-                    {isMaximized 
-                      ? 'Välj taktisk formation för Blått och Rött lag, eller utforska klassiska positioner 1–11.' 
-                      : 'Utforska olika taktiska uppställningar för ditt lag.'}
+                  <p className="text-sm text-zinc-500 dark:text-zinc-400 mt-0.5">
+                    {isMaximized
+                      ? 'Ställ upp blått och rött lag, eller se de klassiska tröjnumren 1–11.'
+                      : 'Utforska olika uppställningar för ditt lag.'}
                   </p>
                 </div>
-                <button onClick={() => setShowFormationModal(false)} className="w-10 h-10 sm:w-12 sm:h-12 rounded-2xl bg-white dark:bg-zinc-900 flex items-center justify-center text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 shadow-sm transition-transform active:scale-95">
-                  <X size={22} />
-                </button>
+                <IconButton label="Stäng" onClick={() => setShowFormationModal(false)}><X size={20} /></IconButton>
               </div>
 
               {isMaximized && (
-                <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 mb-6 p-1.5 bg-zinc-200/70 dark:bg-zinc-900 rounded-2xl border border-zinc-200 dark:border-zinc-800">
-                  <button
-                    onClick={() => setFormationTab('blue')}
-                    className={`flex-1 min-w-[110px] py-2.5 px-3 rounded-xl text-xs font-black transition-all flex items-center justify-center gap-2 ${
-                      formationTab === 'blue'
-                        ? 'bg-blue-600 text-white shadow-md'
-                        : 'text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800'
-                    }`}
-                  >
-                    <div className="w-2.5 h-2.5 rounded-full bg-blue-300 border border-white" />
-                    <span>Blått lag ({blueFormation})</span>
-                  </button>
-
-                  <button
-                    onClick={() => setFormationTab('red')}
-                    className={`flex-1 min-w-[110px] py-2.5 px-3 rounded-xl text-xs font-black transition-all flex items-center justify-center gap-2 ${
-                      formationTab === 'red'
-                        ? 'bg-red-600 text-white shadow-md'
-                        : 'text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800'
-                    }`}
-                  >
-                    <div className="w-2.5 h-2.5 rounded-full bg-red-300 border border-white" />
-                    <span>Rött lag ({redFormation})</span>
-                  </button>
-
-                  <button
-                    onClick={() => setFormationTab('classic-info')}
-                    className={`py-2.5 px-3 rounded-xl text-xs font-black transition-all flex items-center justify-center gap-1.5 ${
-                      formationTab === 'classic-info'
-                        ? 'bg-zinc-900 dark:bg-white text-white dark:text-zinc-900 shadow-md'
-                        : 'text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800'
-                    }`}
-                  >
-                    <Info size={14} />
-                    <span>Tröjnummer 1–11</span>
-                  </button>
-
-                  <button
-                    onClick={() => setFormationTab('squad')}
-                    className={`py-2.5 px-3 rounded-xl text-xs font-black transition-all flex items-center justify-center gap-1.5 ${
-                      formationTab === 'squad'
-                        ? 'bg-zinc-900 dark:bg-white text-white dark:text-zinc-900 shadow-md'
-                        : 'text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800'
-                    }`}
-                  >
-                    <Layout size={14} />
-                    <span>Mallar</span>
-                  </button>
+                <div className="mb-5 overflow-x-auto scrollbar-none">
+                  <SegmentedTabs<'blue' | 'red' | 'classic-info' | 'squad'>
+                    tabs={[
+                      { id: 'blue', label: `Blått lag (${blueFormation})` },
+                      { id: 'red', label: `Rött lag (${redFormation})` },
+                      { id: 'classic-info', label: 'Tröjnummer' },
+                      { id: 'squad', label: 'Mallar' },
+                    ]}
+                    value={formationTab}
+                    onChange={setFormationTab}
+                  />
                 </div>
               )}
 
@@ -6941,7 +6807,7 @@ export default function LineupBuilder({
                 <div className="space-y-4">
                   <div className="p-4 rounded-2xl bg-blue-50/90 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-900/60 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                     <div>
-                      <h4 className="text-sm font-black text-blue-950 dark:text-blue-200">Blått lag (11 spelare, nummer 1–11)</h4>
+                      <h4 className="text-sm font-bold text-blue-950 dark:text-blue-200">Blått lag (11 spelare, nummer 1–11)</h4>
                       <p className="text-xs text-blue-800/90 dark:text-blue-300/90 mt-0.5">
                         {orientation === 'landscape' 
                           ? 'I liggande läge (TV) försvarar Blått lag vänster mål och anfaller åt höger.' 
@@ -6975,7 +6841,7 @@ export default function LineupBuilder({
                         >
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-2 mb-1">
-                              <span className={`text-base font-black ${isSelected ? 'text-blue-600 dark:text-blue-400' : 'text-zinc-900 dark:text-white'}`}>
+                              <span className={`text-base font-bold ${isSelected ? 'text-blue-600 dark:text-blue-400' : 'text-zinc-900 dark:text-white'}`}>
                                 {form.name}
                               </span>
                               {isSelected && (
@@ -7013,7 +6879,7 @@ export default function LineupBuilder({
                 <div className="space-y-4">
                   <div className="p-4 rounded-2xl bg-red-50/90 dark:bg-red-950/40 border border-red-200 dark:border-red-900/60 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                     <div>
-                      <h4 className="text-sm font-black text-red-950 dark:text-red-200">Rött lag / Motståndare (11 spelare, nummer 1–11)</h4>
+                      <h4 className="text-sm font-bold text-red-950 dark:text-red-200">Rött lag / Motståndare (11 spelare, nummer 1–11)</h4>
                       <p className="text-xs text-red-800/90 dark:text-red-300/90 mt-0.5">
                         {orientation === 'landscape' 
                           ? 'I liggande läge (TV) försvarar Rött lag höger mål och anfaller åt vänster.' 
@@ -7047,7 +6913,7 @@ export default function LineupBuilder({
                         >
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-2 mb-1">
-                              <span className={`text-base font-black ${isSelected ? 'text-red-600 dark:text-red-400' : 'text-zinc-900 dark:text-white'}`}>
+                              <span className={`text-base font-bold ${isSelected ? 'text-red-600 dark:text-red-400' : 'text-zinc-900 dark:text-white'}`}>
                                 {form.name}
                               </span>
                               {isSelected && (
@@ -7085,7 +6951,7 @@ export default function LineupBuilder({
                 <div className="space-y-4">
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 rounded-2xl bg-zinc-100 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800">
                     <div>
-                      <h4 className="text-sm font-black text-zinc-900 dark:text-white">Klassiska tröjnummer och positioner</h4>
+                      <h4 className="text-sm font-bold text-zinc-900 dark:text-white">Klassiska tröjnummer och positioner</h4>
                       <p className="text-xs text-zinc-500 mt-0.5">Traditionella nummer 1–11 och deras roller på fotbollsplanen.</p>
                     </div>
                     <div className="flex items-center gap-2 flex-wrap self-start sm:self-auto">
@@ -7123,12 +6989,12 @@ export default function LineupBuilder({
                       const num = Number(numStr);
                       return (
                         <div key={num} className="p-3.5 sm:p-4 flex items-start gap-3.5 hover:bg-zinc-50 dark:hover:bg-zinc-850/50 transition-colors">
-                          <div className="relative shrink-0 flex items-center justify-center w-10 h-10 rounded-2xl bg-blue-100 dark:bg-blue-950/80 border border-blue-200 dark:border-blue-900/60 text-blue-700 dark:text-blue-300 font-black text-base shadow-xs">
+                          <div className="relative shrink-0 flex items-center justify-center w-10 h-10 rounded-2xl bg-blue-100 dark:bg-blue-950/80 border border-blue-200 dark:border-blue-900/60 text-blue-700 dark:text-blue-300 font-bold text-base shadow-xs">
                             {num}
                           </div>
                           <div className="flex-1 min-w-0">
                             <div className="flex flex-wrap items-center gap-2 mb-1">
-                              <span className="text-sm font-black text-zinc-900 dark:text-white">{posInfo.name}</span>
+                              <span className="text-sm font-bold text-zinc-900 dark:text-white">{posInfo.name}</span>
                               <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 border border-zinc-200 dark:border-zinc-700">
                                 {posInfo.role}
                               </span>
@@ -7153,7 +7019,7 @@ export default function LineupBuilder({
                     <div className="space-y-4">
                       <div className="flex items-center gap-3 px-1">
                         <div className="h-6 w-1 bg-emerald-600 rounded-full" />
-                        <h4 className="text-lg font-black text-zinc-900 dark:text-white uppercase tracking-tighter">Mina Formationer</h4>
+                        <h4 className="text-lg font-bold text-zinc-900 dark:text-white">Mina formationer</h4>
                       </div>
                       <div className="grid grid-cols-1 gap-3">
                         {customFormations.map((v) => (
@@ -7169,7 +7035,7 @@ export default function LineupBuilder({
                               <div className="flex items-start justify-between gap-4">
                                 <div>
                                   <div className="flex items-center gap-2 mb-1">
-                                    <span className={`text-base font-black ${currentFormation === v.name ? 'text-emerald-600' : 'text-zinc-900 dark:text-white'}`}>
+                                    <span className={`text-base font-bold ${currentFormation === v.name ? 'text-emerald-600' : 'text-zinc-900 dark:text-white'}`}>
                                       {v.name}
                                     </span>
                                   </div>
@@ -7228,7 +7094,7 @@ export default function LineupBuilder({
                     <div key={template.id} className="space-y-4">
                       <div className="flex items-center gap-3 px-1">
                         <div className="h-6 w-1 bg-indigo-600 rounded-full" />
-                        <h4 className="text-lg font-black text-zinc-900 dark:text-white uppercase tracking-tighter">{template.name} ({template.category})</h4>
+                        <h4 className="text-lg font-bold text-zinc-900 dark:text-white">{template.name} ({template.category})</h4>
                       </div>
                       <div className="grid grid-cols-1 gap-3">
                         {template.variants.map((v) => {
@@ -7246,7 +7112,7 @@ export default function LineupBuilder({
                                 <div className="flex items-start justify-between gap-4">
                                   <div>
                                     <div className="flex items-center gap-2 mb-2">
-                                      <span className={`text-base font-black ${currentFormation === v.name ? 'text-indigo-600' : 'text-zinc-900 dark:text-white'}`}>
+                                      <span className={`text-base font-bold ${currentFormation === v.name ? 'text-indigo-600' : 'text-zinc-900 dark:text-white'}`}>
                                         {v.name}
                                       </span>
                                       {currentFormation === v.name && (
@@ -7301,253 +7167,125 @@ export default function LineupBuilder({
             </motion.div>
           </motion.div>
         )}
-        {showTacticalSavedBoardsModal && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-black/60 backdrop-blur-md z-[110] flex items-center justify-center p-4 font-sans"
-            onClick={() => setShowTacticalSavedBoardsModal(false)}
-          >
-            <motion.div
-              initial={{ scale: 0.9, opacity: 0, y: 20 }}
-              animate={{ scale: 1, opacity: 1, y: 0 }}
-              exit={{ scale: 0.9, opacity: 0, y: 20 }}
-              className="bg-zinc-50 dark:bg-zinc-950 rounded-[40px] p-6 sm:p-8 max-w-xl w-full max-h-[85vh] overflow-y-auto shadow-2xl border border-white dark:border-zinc-900 custom-scrollbar"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <div className="flex items-center justify-between mb-6">
-                <div>
-                  <h3 className="text-2xl sm:text-3xl font-black text-zinc-900 dark:text-white tracking-tight">Taktiska ritningar</h3>
-                  <p className="text-sm text-zinc-500 font-medium mt-1">Spara och ladda dina anpassade taktiktavlor manuellt.</p>
-                </div>
-                <button 
-                  onClick={() => setShowTacticalSavedBoardsModal(false)} 
-                  className="w-10 h-10 sm:w-12 sm:h-12 rounded-2xl bg-white dark:bg-zinc-900 flex items-center justify-center text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 shadow-sm transition-transform active:scale-95"
-                >
-                  <X size={20} />
-                </button>
-              </div>
-
-              {/* SECTION: Save current view */}
-              <div className="bg-white dark:bg-zinc-900 p-4 sm:p-5 rounded-3xl border border-zinc-200 dark:border-zinc-800 shadow-sm mb-6">
-                <h4 className="text-base font-black text-zinc-800 dark:text-zinc-200 mb-3">Spara aktuell taktiktavla</h4>
-                <div className="flex flex-col sm:flex-row gap-3">
-                  <input
-                    type="text"
-                    value={newSavedBoardName}
-                    onChange={(e) => setNewSavedBoardName(e.target.value)}
-                    placeholder="Namnge ritningen (t.ex. Hörnvariant A)..."
-                    className="flex-1 px-4 py-2.5 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 text-zinc-900 dark:text-white"
-                  />
-                  <button
-                    onClick={handleSaveTacticalBoard}
-                    disabled={!newSavedBoardName.trim()}
-                    className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-bold rounded-xl shadow-md shadow-emerald-600/10 flex items-center justify-center gap-1.5 transition-all active:scale-95 pr-5 pointer-events-auto"
-                  >
-                    <Save size={16} />
-                    Spara
-                  </button>
-                </div>
-              </div>
-
-              {/* SECTION: Saved presets list */}
-              <div>
-                <h4 className="text-base font-black text-zinc-800 dark:text-zinc-200 mb-3 block">Sparade ritningar</h4>
-                {(!lineup || !lineup.savedTacticalBoards || lineup.savedTacticalBoards.length === 0) ? (
-                  <div className="text-center py-8 text-zinc-400 border border-dashed border-zinc-200 dark:border-zinc-800 rounded-3xl">
-                    <Bookmark className="mx-auto mb-2 opacity-30" size={32} />
-                    <p className="text-xs font-semibold">Inga sparade taktiktavlor ännu.</p>
-                    <p className="text-[11px] text-zinc-500 mt-0.5">Skriv ett namn ovan för att spara din första ritning.</p>
-                  </div>
-                ) : (
-                  <div className="space-y-3">
-                    {lineup.savedTacticalBoards.map((board, idx) => (
-                      <div 
-                        key={`board-${board.id || idx}-${idx}`} 
-                        className="flex items-center justify-between p-3.5 sm:p-4 bg-white dark:bg-zinc-900 border border-zinc-150 dark:border-zinc-800/80 rounded-2xl hover:border-emerald-500/30 transition-all shadow-sm group"
-                      >
-                        <div className="flex-1 min-w-0 pr-2">
-                           <p className="text-sm font-black text-zinc-800 dark:text-zinc-200 truncate">{board.name}</p>
-                           <p className="text-[10px] text-zinc-500 mt-0.5">
-                             Sparad {new Date(board.createdAt).toLocaleDateString('sv-SE')} kl. {new Date(board.createdAt).toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' })}
-                           </p>
-                        </div>
-                        <div className="flex items-center gap-2 pointer-events-auto">
-                          <button
-                            onClick={() => handleLoadTacticalBoard(board)}
-                            className="px-3 py-1.5 bg-emerald-600/15 text-emerald-650 hover:bg-emerald-600 hover:text-white text-xs font-black rounded-lg transition-all active:scale-90 flex items-center gap-1"
-                          >
-                            <FolderOpen size={12} />
-                            Öppna
-                          </button>
-                          <button
-                            onClick={() => handleDeleteTacticalBoard(board.id)}
-                            className="p-1.5 text-zinc-400 hover:text-red-500 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/20 rounded-lg transition-all active:scale-90"
-                            title="Ta bort sparad ritning"
-                          >
-                            <Trash2 size={14} />
-                          </button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-            </motion.div>
-          </motion.div>
-        )}
-
-        {/** Save & Close Tactical board Dialog Modal */}
-        {showSaveOnCloseModal && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-black/60 backdrop-blur-md z-[200] flex items-center justify-center p-4 font-sans"
-            onClick={() => setShowSaveOnCloseModal(false)}
-          >
-            <motion.div
-              initial={{ scale: 0.9, opacity: 0, y: 20 }}
-              animate={{ scale: 1, opacity: 1, y: 0 }}
-              exit={{ scale: 0.9, opacity: 0, y: 20 }}
-              className="bg-zinc-50 dark:bg-zinc-950 rounded-[40px] p-6 sm:p-8 max-w-lg w-full shadow-2xl border border-white dark:border-zinc-900 overflow-hidden"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <div className="flex items-center gap-3 mb-6">
-                <div className="w-12 h-12 rounded-2xl bg-amber-600/10 dark:bg-amber-600/20 flex items-center justify-center text-amber-650 shrink-0">
-                  <Bookmark size={24} />
-                </div>
-                <div>
-                  <h3 className="text-xl sm:text-2xl font-black text-zinc-900 dark:text-white tracking-tight">Spara taktisk ritning?</h3>
-                  <p className="text-xs text-zinc-500 font-medium">Vill du spara dina ändringar på taktiktavlan innan du stänger?</p>
-                </div>
-              </div>
-
-              {/* Name Field */}
-              <div className="mb-6">
-                <label className="block text-[10px] font-black uppercase text-zinc-400 dark:text-zinc-500 tracking-wider mb-2">Namnge din ritning</label>
+        {/** Sparade taktiktavlor för uppställningen */}
+        <Sheet open={showTacticalSavedBoardsModal} onClose={() => setShowTacticalSavedBoardsModal(false)} title="Sparade taktiktavlor">
+          <div className="flex flex-col gap-5 px-2 pb-2">
+            <div className="flex flex-col gap-1.5">
+              <span className={BOARD_LABEL}>Spara tavlan som den ser ut nu</span>
+              <div className="flex gap-2">
                 <input
                   type="text"
-                  value={exitBoardName}
-                  onChange={(e) => setExitBoardName(e.target.value)}
-                  placeholder="Hörnvariant, Frisparkstaktik, etc..."
-                  className="w-full px-4 py-3 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500 text-zinc-900 dark:text-white font-bold"
+                  value={newSavedBoardName}
+                  onChange={(e) => setNewSavedBoardName(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && newSavedBoardName.trim()) {
+                      e.preventDefault();
+                      handleSaveTacticalBoard();
+                    }
+                  }}
+                  placeholder="T.ex. Hörna variant A"
+                  className={`${BOARD_INPUT} flex-1 min-w-0`}
                 />
+                <Button icon={<Save size={18} />} onClick={handleSaveTacticalBoard} disabled={!newSavedBoardName.trim()}>Spara</Button>
               </div>
-
-              {/* Warning box for NO option */}
-              <div className="bg-red-500/10 dark:bg-red-500/15 border border-red-500/35 p-4 rounded-2xl text-xs text-red-700 dark:text-red-400 font-semibold mb-6 flex gap-2.5 items-start">
-                <span className="text-base leading-none shrink-0">⚠️</span>
-                <p className="leading-normal">
-                  <strong className="block font-black uppercase tracking-wider text-[10px] text-red-800 dark:text-red-300 mb-1">Vad händer om du svarar Nej?</strong>
-                  Taktiktavlan kommer att rensas helt från klotter, ritningar och uppställda motståndare. Du kommer att återgå till den aktiva ordinarie laguppställningen. Din ritning går förlorad om du inte sparar den.
-                </p>
-              </div>
-
-              {/* Dialog buttons */}
-              <div className="flex flex-col sm:flex-row gap-2.5">
-                <button
-                  type="button"
-                  onClick={handleSaveAndExitTactical}
-                  className="flex-1 px-5 py-3.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-2xl shadow-lg active:scale-95 transition-all text-sm flex items-center justify-center gap-1.5 order-2 sm:order-1"
-                >
-                  <Save size={16} />
-                  Ja, spara & stäng
-                </button>
-                <button
-                  type="button"
-                  onClick={handleDiscardAndExitTactical}
-                  className="px-5 py-3.5 bg-zinc-200 hover:bg-zinc-300 dark:bg-zinc-900 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300 font-bold rounded-2xl active:scale-95 transition-all text-sm order-1 sm:order-2"
-                >
-                  Nej, stäng utan att spara
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setShowSaveOnCloseModal(false)}
-                  className="px-4 py-3.5 bg-transparent text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-250 font-bold text-sm text-center shrink-0 order-3 active:scale-95 transition-all"
-                >
-                  Avbryt
-                </button>
-              </div>
-            </motion.div>
-          </motion.div>
-        )}
-
-        {/** Opponent Formation Modal */}
-        {showOpponentFormationModal && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-black/60 backdrop-blur-md z-[110] flex items-center justify-center p-4"
-            onClick={() => setShowOpponentFormationModal(false)}
-          >
-            <motion.div
-              initial={{ scale: 0.9, opacity: 0, y: 20 }}
-              animate={{ scale: 1, opacity: 1, y: 0 }}
-              exit={{ scale: 0.9, opacity: 0, y: 20 }}
-              className="bg-zinc-50 dark:bg-zinc-950 rounded-[40px] p-8 max-w-2xl w-full max-h-[85vh] overflow-y-auto shadow-2xl border border-white dark:border-zinc-900 custom-scrollbar"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <div className="flex items-center justify-between mb-8">
-                <div>
-                  <h3 className="text-3xl font-black text-zinc-900 dark:text-white tracking-tight">Motståndaruppställning</h3>
-                  <p className="text-sm text-zinc-500 font-medium mt-1">Välj en formation för motståndarna (spegelvänd mot toppmålet).</p>
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <span className={BOARD_LABEL}>Sparade</span>
+              {(!lineup || !lineup.savedTacticalBoards || lineup.savedTacticalBoards.length === 0) ? (
+                <div className="text-center py-8 px-4 text-zinc-500 dark:text-zinc-400 border border-dashed border-zinc-200 dark:border-zinc-700 rounded-2xl">
+                  <Bookmark className="mx-auto mb-2 opacity-40" size={28} />
+                  <p className="text-sm font-semibold">Inga sparade taktiktavlor ännu</p>
+                  <p className="text-xs mt-0.5">Skriv ett namn ovan för att spara den första.</p>
                 </div>
-                <button onClick={() => setShowOpponentFormationModal(false)} className="w-12 h-12 rounded-2xl bg-white dark:bg-zinc-900 flex items-center justify-center text-zinc-400 hover:text-zinc-600 shadow-sm">
-                  <X size={24} />
-                </button>
-              </div>
+              ) : (
+                <div className="flex flex-col gap-1">
+                  {lineup.savedTacticalBoards.map((board, idx) => (
+                    <div key={`board-${board.id || idx}-${idx}`} className="flex items-center gap-1">
+                      <div className="flex-1 min-w-0">
+                        <MenuItem
+                          icon={<Bookmark size={18} />}
+                          label={board.name}
+                          description={`Sparad ${new Date(board.createdAt).toLocaleDateString('sv-SE')} kl. ${new Date(board.createdAt).toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' })}`}
+                          onClick={() => handleLoadTacticalBoard(board)}
+                        />
+                      </div>
+                      <IconButton label={`Ta bort ${board.name}`} className="hover:text-red-600" onClick={() => handleDeleteTacticalBoard(board.id)}>
+                        <Trash2 size={18} />
+                      </IconButton>
+                    </div>
+                  ))}
+                  <p className="px-3 pt-1 text-xs text-zinc-500 dark:text-zinc-400">Tryck på en tavla för att öppna den.</p>
+                </div>
+              )}
+            </div>
+          </div>
+        </Sheet>
 
-              <div className="space-y-10">
-                {FORMATION_TEMPLATES.map((template) => (
-                  <div key={template.id} className="space-y-4">
-                    <div className="flex items-center gap-3 px-1">
-                      <div className="h-6 w-1 bg-emerald-600 rounded-full" />
-                      <h4 className="text-lg font-black text-zinc-900 dark:text-white uppercase tracking-tighter">{template.name}</h4>
-                    </div>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                      {template.variants.map((v) => (
-                        <button
-                          key={v.id}
-                          onClick={() => applyOpponentFormation(v)}
-                          className="group relative text-left p-5 rounded-3xl border-2 border-white dark:border-zinc-900 bg-white dark:bg-zinc-900 shadow-sm transition-all hover:scale-[1.02] active:scale-[0.98] hover:border-emerald-500"
-                        >
-                          <div className="flex items-center justify-between gap-3">
-                            <div className="flex-1">
-                              <span className="text-base font-black text-zinc-900 dark:text-white group-hover:text-emerald-600 transition-colors">
-                                {v.name}
-                              </span>
-                              <p className="text-[10px] text-zinc-500 font-medium line-clamp-2 mt-1">
-                                {v.description}
-                              </p>
-                            </div>
-                            <div className="shrink-0 w-16 h-16 bg-zinc-100 dark:bg-zinc-800 rounded-xl flex items-center justify-center border border-zinc-200 dark:border-zinc-700">
-                               <div className="w-12 h-12 relative">
-                                  <div className="absolute inset-0 border border-zinc-300 dark:border-zinc-600 rounded-md" />
-                                  {/* Opponent perspective: GK at top, y flipped */}
-                                  <div className="absolute w-1 h-1 bg-red-500 rounded-full" style={{ left: '50%', top: '10%', transform: 'translate(-50%, -50%)' }} />
-                                  {v.positions.map((pos, idx) => (
-                                    <div 
-                                      key={idx} 
-                                      className="absolute w-1 h-1 bg-red-400 rounded-full"
-                                      style={{ left: `${100 - pos.x}%`, top: `${100 - pos.y}%`, transform: 'translate(-50%, -50%)' }}
-                                    />
-                                  ))}
-                               </div>
-                            </div>
-                          </div>
-                        </button>
+        {/** Fråga om att spara när taktiktavlan stängs */}
+        <Sheet
+          open={showSaveOnCloseModal}
+          onClose={() => setShowSaveOnCloseModal(false)}
+          title="Spara taktiktavlan?"
+          footer={
+            <div className="flex flex-col gap-2">
+              <Button block icon={<Save size={18} />} onClick={handleSaveAndExitTactical}>Spara och stäng</Button>
+              <Button block variant="secondary" className="text-red-600 dark:text-red-400" onClick={handleDiscardAndExitTactical}>Stäng utan att spara</Button>
+              <Button block variant="ghost" onClick={() => setShowSaveOnCloseModal(false)}>Fortsätt rita</Button>
+            </div>
+          }
+        >
+          <div className="flex flex-col gap-4 px-2 pb-2">
+            <p className="text-sm text-zinc-600 dark:text-zinc-300">
+              Du har ändrat på taktiktavlan. Sparar du den hittar du den sedan under Sparade taktiktavlor.
+              Stänger du utan att spara rensas ritningar, motståndare och boll, och spelarna går tillbaka till uppställningen.
+            </p>
+            <label className="flex flex-col gap-1.5">
+              <span className={BOARD_LABEL}>Namn (valfritt)</span>
+              <input
+                type="text"
+                value={exitBoardName}
+                onChange={(e) => setExitBoardName(e.target.value)}
+                placeholder="T.ex. Frispark nära straffområdet"
+                className={BOARD_INPUT}
+              />
+            </label>
+          </div>
+        </Sheet>
+
+        {/** Motståndarnas formation */}
+        <Sheet open={showOpponentFormationModal} onClose={() => setShowOpponentFormationModal(false)} title="Motståndarnas formation">
+          <div className="flex flex-col gap-5 px-2 pb-2">
+            <p className="text-sm text-zinc-500 dark:text-zinc-400 px-1">Motståndarna ställs upp spegelvänt, mot det övre målet.</p>
+            {FORMATION_TEMPLATES.map((template) => (
+              <div key={template.id} className="flex flex-col gap-1">
+                <h3 className="px-1 pb-1 text-xs font-bold text-zinc-500 dark:text-zinc-400">{template.name}</h3>
+                {template.variants.map((v) => (
+                  <button
+                    key={v.id}
+                    type="button"
+                    onClick={() => applyOpponentFormation(v)}
+                    className="w-full flex items-center gap-3 p-2.5 rounded-xl text-left hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors cursor-pointer active:scale-[0.99]"
+                  >
+                    <span className="shrink-0 w-12 h-14 rounded-lg bg-emerald-600/90 relative border border-emerald-700">
+                      <span className="absolute w-1.5 h-1.5 rounded-full bg-white" style={{ left: '50%', top: '8%', transform: 'translate(-50%, -50%)' }} />
+                      {v.positions.map((pos, idx) => (
+                        <span
+                          key={idx}
+                          className="absolute w-1.5 h-1.5 rounded-full"
+                          style={{ backgroundColor: opponentColor, left: `${100 - pos.x}%`, top: `${100 - pos.y}%`, transform: 'translate(-50%, -50%)' }}
+                        />
                       ))}
-                    </div>
-                  </div>
+                    </span>
+                    <span className="flex-1 min-w-0">
+                      <span className="block text-sm font-semibold text-zinc-900 dark:text-white">{v.name}</span>
+                      {v.description && <span className="block text-xs text-zinc-500 dark:text-zinc-400 line-clamp-2">{v.description}</span>}
+                    </span>
+                  </button>
                 ))}
               </div>
-            </motion.div>
-          </motion.div>
-        )}
+            ))}
+          </div>
+        </Sheet>
 
         {/** Notes & Media Modal */}
         {showNotesModal && (
