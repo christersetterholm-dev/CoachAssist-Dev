@@ -17,6 +17,7 @@ import { createRequire } from 'module';
 import { openDatabase } from './server/database.ts';
 import * as registry from './server/registry.ts';
 import * as invites from './server/invites.ts';
+import * as tacticalBoards from './server/tacticalBoards.ts';
 
 const customRequire = typeof require !== 'undefined' ? require : createRequire(import.meta.url);
 
@@ -2497,6 +2498,38 @@ async function startServer() {
     res.json({ success: true, token: inv.token, expiresAt: inv.expiresAt, fullName: member.full_name });
   });
 
+  // Lagets taktiktavlor. Tränare ser och ändrar alla; spelare får bara delade tavlor.
+  const tacticalBoardAccess = async (req: express.Request, clubId: unknown, teamId: unknown) => {
+    if (typeof clubId !== 'string' || typeof teamId !== 'string' || !clubId || !teamId || teamId === registry.CLUB_LEVEL) return null;
+    const user = (req as any).user;
+    const access = registry.getClubAccess(db, user, clubId, await verifyIsRootAdmin(user));
+    return { user, clubId, teamId, canRead: registry.canReadClubDoc(access, teamId, tacticalBoards.SEGMENT), isCoach: registry.isTeamCoach(access, teamId) };
+  };
+
+  app.get('/api/tacticalboards', requireAuthUser, async (req, res) => {
+    const a = await tacticalBoardAccess(req, req.query.clubId, req.query.teamId);
+    if (!a) return res.status(400).json({ error: 'clubId och teamId krävs.' });
+    if (!a.canRead) return res.status(403).json({ error: 'Du har inte behörighet till det här laget.' });
+    res.json({ boards: tacticalBoards.listBoards(db, a.clubId, a.teamId, a.isCoach), canEdit: a.isCoach });
+  });
+
+  app.put('/api/tacticalboards/:id', requireAuthUser, async (req, res) => {
+    const a = await tacticalBoardAccess(req, req.body?.clubId, req.body?.teamId);
+    if (!a) return res.status(400).json({ error: 'clubId och teamId krävs.' });
+    if (!a.isCoach) return res.status(403).json({ error: 'Bara tränare kan ändra taktiktavlor.' });
+    const r = tacticalBoards.saveBoard(db, a.clubId, a.teamId, req.params.id, req.body?.board, a.user.id);
+    if (!r.ok) return res.status(r.status).json({ error: r.error });
+    res.json({ board: r.board });
+  });
+
+  app.delete('/api/tacticalboards/:id', requireAuthUser, async (req, res) => {
+    const a = await tacticalBoardAccess(req, req.query.clubId, req.query.teamId);
+    if (!a) return res.status(400).json({ error: 'clubId och teamId krävs.' });
+    if (!a.isCoach) return res.status(403).json({ error: 'Bara tränare kan ta bort taktiktavlor.' });
+    if (!tacticalBoards.deleteBoard(db, a.clubId, a.teamId, req.params.id)) return res.status(404).json({ error: 'Tavlan finns inte.' });
+    res.json({ success: true });
+  });
+
   // Öppna inbjudningar i föreningen (för att visa "Inbjuden" i listor).
   app.get('/api/invites', requireAuthUser, async (req, res) => {
     const user = (req as any).user;
@@ -2800,6 +2833,10 @@ async function startServer() {
           return res.json(null);
         }
         const parsedDoc = typeof row.data === 'string' ? JSON.parse(row.data) : row.data;
+        if (segment === tacticalBoards.SEGMENT) {
+          // Ej delade taktiktavlor skickas aldrig till spelare.
+          return res.json(tacticalBoards.filterDoc(parsedDoc, registry.isTeamCoach(access, teamId)));
+        }
         res.json(segment === 'sessions' ? registry.overlayRsvps(db, clubId, teamId, parsedDoc) : parsedDoc);
       } catch (e: any) {
         if (e.name === 'JsonWebTokenError' || e.name === 'TokenExpiredError' || e.message === 'Invalid token' || e.message === 'No token provided') {

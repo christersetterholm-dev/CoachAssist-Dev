@@ -251,3 +251,44 @@ test('sparning med merge behåller övriga fält', async () => {
   assert.equal(r.status, 200);
   assert.deepEqual((await get(path, coachToken)).json, { fullName: 'Tränare Ett', activeClubId: 'klubb1', onboardingCompleted: true, photoUrl: '/uploads/x.png' });
 });
+
+test('taktiktavlor: tränare sparar en tavla i taget, spelare ser bara delade', async () => {
+  const q = 'clubId=klubb1&teamId=lag1';
+  const put = (token, id, board) => s.api('PUT', `/api/tacticalboards/${id}`, { token, body: { clubId: 'klubb1', teamId: 'lag1', board } });
+  const list = (token) => s.api('GET', `/api/tacticalboards?${q}`, { token });
+
+  // Bara tränare kan spara
+  assert.equal((await put(playerToken, 'tb1', { name: 'Hörna', state: {} })).status, 403);
+  assert.equal((await put(otherToken, 'tb1', { name: 'Hörna', state: {} })).status, 403);
+  assert.equal((await put(coachToken, 'tb1', { name: '', state: {} })).status, 400, 'namn krävs');
+  assert.equal((await put(coachToken, 'ogiltigt id!', { name: 'X', state: {} })).status, 400);
+
+  const a = await put(coachToken, 'tb1', { name: 'Hörna', state: { drawings: [{ id: 'd1', type: 'line' }] } });
+  assert.equal(a.status, 200);
+  assert.equal(a.json.board.sharedWithPlayers, false, 'inte delad från början');
+  assert.equal((await put(coachToken, 'tb2', { name: 'Frispark', sharedWithPlayers: true, state: {} })).status, 200);
+
+  // Tränaren ser båda, spelaren bara den delade – både via egna adressen och via /api/docs
+  assert.deepEqual((await list(coachToken)).json.boards.map((b) => b.id).sort(), ['tb1', 'tb2']);
+  assert.equal((await list(coachToken)).json.canEdit, true);
+  const forPlayer = await list(playerToken);
+  assert.deepEqual(forPlayer.json.boards.map((b) => b.id), ['tb2']);
+  assert.equal(forPlayer.json.canEdit, false);
+  assert.deepEqual((await get('clubs/klubb1/teams/lag1/data/tacticalboards', playerToken)).json.boards.map((b) => b.id), ['tb2']);
+  assert.equal((await list(otherToken)).status, 403, 'annan förening nekas');
+
+  // En ändring av en tavla rör inte den andra, och skapad-tiden ligger kvar
+  const before = (await list(coachToken)).json.boards.find((b) => b.id === 'tb1');
+  await put(coachToken, 'tb1', { name: 'Hörna variant B', sharedWithPlayers: true, state: { drawings: [] } });
+  const boards = (await list(coachToken)).json.boards;
+  assert.equal(boards.find((b) => b.id === 'tb1').name, 'Hörna variant B');
+  assert.equal(boards.find((b) => b.id === 'tb1').createdAt, before.createdAt);
+  assert.equal(boards.find((b) => b.id === 'tb2').name, 'Frispark');
+  assert.equal((await list(playerToken)).json.boards.length, 2, 'nu delad');
+
+  // Ta bort
+  assert.equal((await s.api('DELETE', `/api/tacticalboards/tb2?${q}`, { token: playerToken })).status, 403);
+  assert.equal((await s.api('DELETE', `/api/tacticalboards/tb2?${q}`, { token: coachToken })).status, 200);
+  assert.equal((await s.api('DELETE', `/api/tacticalboards/tb2?${q}`, { token: coachToken })).status, 404);
+  assert.deepEqual((await list(coachToken)).json.boards.map((b) => b.id), ['tb1']);
+});

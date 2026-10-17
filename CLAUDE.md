@@ -32,6 +32,7 @@ Läs den här filen först i varje nytt samtal. Håll den uppdaterad när något
 | Databas, schema, flytt från gammal JSON-databas | `server/database.ts` |
 | Medlemsregister, behörigheter, svar på kallelser | `server/registry.ts` |
 | Inbjudningslänkar | `server/invites.ts` |
+| Lagets taktiktavlor (menyposten Taktiktavla) | `server/tacticalBoards.ts`, `src/components/TacticalBoardsView.tsx` |
 | Startfil på webbhotellet (Passenger) | `app.cjs` → `dist/server.cjs` |
 | React-appen | `src/` (`App.tsx` och `LineupBuilder.tsx` är mycket stora) |
 | Appens skal (sidomeny, bottenmeny, toppfält, kontomeny) | `src/components/shell/AppShell.tsx` |
@@ -43,7 +44,10 @@ Läs den här filen först i varje nytt samtal. Håll den uppdaterad när något
 ### Dokumentlagringen (`/api/docs?path=...`)
 Appen läser/skriver JSON-dokument via sökvägar:
 - `clubs/<förening>/teams/<lag>/data/<segment>` – segment: sessions, exercises, lineups,
-  periods, settings, squad. `teams/club_global/data/{members,metadata}` = föreningsnivå.
+  periods, settings, squad, tacticalboards. `teams/club_global/data/{members,metadata}` = föreningsnivå.
+- `tacticalboards` = `{ boards: [{ id, name, sharedWithPlayers, createdAt, updatedAt, state }] }`.
+  Appen sparar en tavla i taget via `GET/PUT/DELETE /api/tacticalboards` (inte hela dokumentet),
+  och servern skickar bara delade tavlor till spelare – även via `/api/docs`.
 - `users/<uid>/data/profile` – profil (aktiv förening/lag m.m.). `setDoc(..., {merge:true})`
   slår ihop på servern.
 - `shared_leaderboards/<id>` – delade poänglistor (publika att läsa).
@@ -111,7 +115,7 @@ npm run set-password -- e@post.se            # lokalt konto/lösenord
 
 ## Gränssnittet (ombyggt okt 2026, gren `ux-ombyggnad`)
 
-- Navigering: bottenmeny på mobil (Översikt, Kalender, Truppen, Taktik, Poäng), sidomeny från
+- Navigering: bottenmeny på mobil (Översikt, Kalender, Truppen, Uppställn., Taktik, Poäng), sidomeny från
   768 px bredd (iPad/dator). Lagsida, Administration, profil, tema, "Hämta senaste" och
   Logga ut ligger i kontomenyn (avataren) och i sidomenyn.
 - Startvy är `home` (Översikt). Poängräkning (`exercise`) och skapa tävlingsmoment (`setup`)
@@ -130,11 +134,12 @@ npm run set-password -- e@post.se            # lokalt konto/lösenord
   storlek, skalat till skärmen. Ett tryck visar Klar i två sekunder, och Esc stänger. Den ersätter
   den gamla förhandsgranskningen/skärmbildsmodalen.
 - Taktiktavlan (`isMaximized` i LineupBuilder, ombyggd okt 2026): övre rad med Ångra/Gör om/
-  Visa-dölj ritningar (vänster) och Taktiktavlor/Bildläge/Storskärm/Mer/Stäng (höger). En
+  Visa-dölj ritningar (vänster) och Taktiktavlor/Bildläge/Liggande-stående plan/Helskärm/Mer/Stäng
+  (höger; under 640 px ligger Taktiktavlor och Bildläge i Mer). En
   verktygsrad (48 px knappar) längst ner, lodrätt till vänster när skärmen ligger ner och är minst
   900 px bred: Flytta, Penna, Pil, Löpning, Linje, Zon, Text, Boll, Motståndare, Sudd, färg, Bänken.
   Övriga inställningar ligger i arket Mer; Rensa allt frågar "Bara ritningar" eller "Allt".
-  `boardMode`: 'edit' | 'present' (storskärm: bara planen, verktygen fälls in) | 'snapshot'
+  `boardMode`: 'edit' | 'present' (helskärm: bara planen, verktygen fälls in, knapp för liggande plan) | 'snapshot'
   (bildläge: inga knappar, tryck visar Klar, Esc stänger). Planens storlek räknas med CSS-variablerna
   `--board-rx`/`--board-ry` så att den inte hamnar under raderna.
   Ritningar (`tacticalBoard.drawings`): löpning sparas som `freehand-arrow` med `lineType: 'dashed'`,
@@ -146,6 +151,13 @@ npm run set-password -- e@post.se            # lokalt konto/lösenord
   Taktiktavlans rutor är ark (`Sheet`): Text på tavlan, Nummer och roll (dubbeltryck på spelare),
   Sparade taktiktavlor, Spara taktiktavlan? (vid Stäng), Spara som formation och Motståndarnas
   formation. Formationsrutan (blått/rött lag) har kvar sin egen ram men nya flikar och typografi.
+- Menyposten **Taktiktavla** (`view === 'tacticalboards'`, `TacticalBoardsView`): lagets egna
+  taktiktavlor för alla i laget. Tränare skapar, byter namn, kopierar, delar (öga) och tar bort; en
+  ny tavla är tom och spelare tas fram med Visa truppen (hela truppen, ingen gräns på 7). Tavlan
+  visas med `LineupBuilder` i läget `standaloneBoard` (öppnas direkt i taktiktavlan; uppställningens
+  sparade tavlor, anteckningar och publicering är dolda; Stäng går tillbaka till listan). Spelare
+  ser bara delade tavlor och utan verktyg (`boardReadOnly`). Tavlan översätts till och från en
+  "uppställning" i `boardToLineup`/`lineupToState`; bänken sparas inte.
 - Ny kod ska använda byggklossarna i `src/components/ui` i stället för egna knappklasser.
   Stil: meningsversaler (inte VERSALER), `font-semibold`/`font-bold`, tryckytor minst 40 px.
 - Spelare ser inte Övningsbanken eller tävlingsknapparna i poänglistan (`canManage`).
@@ -182,10 +194,6 @@ npm run set-password -- e@post.se            # lokalt konto/lösenord
   troligen används pass som sparats i webbläsaren i stället för serverns. Utred synkningen.
 - I poängräkningen (`view === 'exercise'` i App.tsx) är timerpanelen och jokerraden ovanför
   poängkorten fortfarande i gammal stil (VERSALER).
-- Ny menypost **Taktiktavla** (planerad, efter ombyggnaden av taktiktavlan): fristående
-  taktiktavlor för laget (skapa, döp om, kopiera, ta bort), tomma från början, spelare från
-  truppen läggs till vid behov. Samma kod som taktiktavlan under Uppställning. Delning med
-  spelarna är ett aktivt val per tavla (av som standard), visas med öga / överstruket öga.
 - E-post via SMTP (inbjudningar, glömt lösenord) om det behövs senare.
 - iOS-app och notiser (pausat, utrett okt 2026): steg 1 webbnotiser (Web Push/PWA, egen server,
   ingen Firebase); steg 2 Capacitor-skal runt befintliga appen för riktiga notiser via APNs och

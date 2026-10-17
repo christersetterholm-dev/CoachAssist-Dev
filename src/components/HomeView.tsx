@@ -6,7 +6,7 @@
 import React, { useMemo, useState } from 'react';
 import {
   Calendar, Clock, MapPin, Check, X, HelpCircle, ChevronRight, Plus, Trophy, Shirt, Users,
-  ClipboardList, Swords, Dumbbell, UserPlus, Medal,
+  ClipboardList, Swords, Dumbbell, UserPlus, Medal, Presentation,
 } from 'lucide-react';
 import { Exercise, Period, SquadPlayer, TrainingSession, RsvpStatus, UserProfile } from '../types';
 import { User, saveRsvp } from '../lib/firebase';
@@ -27,7 +27,7 @@ interface HomeViewProps {
   onOpenPendingRequests: () => void;
   onOpenSession: (id: string, tab?: 'schema' | 'attendance' | 'rsvp') => void;
   onOpenLineupForSession: (session: TrainingSession) => void;
-  onNavigate: (view: 'training' | 'squad' | 'lineup' | 'leaderboard') => void;
+  onNavigate: (view: 'training' | 'squad' | 'lineup' | 'leaderboard' | 'tacticalboards') => void;
   onNewSession: () => void;
   onNewExercise: () => void;
   onUpdateSession: (session: TrainingSession) => void;
@@ -368,7 +368,7 @@ export default function HomeView(props: HomeViewProps) {
                   {[
                     { label: 'Ny aktivitet', icon: <Plus size={20} />, onClick: onNewSession },
                     { label: 'Tävlingsmoment', icon: <Trophy size={20} />, onClick: onNewExercise },
-                    ...(canViewLineup ? [{ label: 'Taktiktavla', icon: <Shirt size={20} />, onClick: () => onNavigate('lineup') }] : []),
+                    { label: 'Taktiktavla', icon: <Presentation size={20} />, onClick: () => onNavigate('tacticalboards') },
                     { label: 'Truppen', icon: <Users size={20} />, onClick: () => onNavigate('squad') },
                   ].map(a => (
                     <Card key={a.label} interactive onClick={a.onClick} className="flex flex-col items-start gap-3 !p-4">

@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { RotateCcw, Trophy, ArrowLeft, Check, Timer as TimerIcon, Edit2, Zap, Rocket, Users, Unlock, LogIn, LogOut, User as UserIcon, Cloud, Calendar, Settings, VibrateOff, Maximize2, MoreVertical } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { SquadPlayer, Exercise, Team, PointsConfig, Period, PeriodStandings, Lineup, TrainingSession, TrainingSettings, CoachData, BankExercise, SessionMoment, UserProfile, ClubMember, ClubTeam, Club } from './types';
+import { SquadPlayer, Exercise, Team, PointsConfig, Period, PeriodStandings, Lineup, TrainingSession, TrainingSettings, CoachData, BankExercise, SessionMoment, UserProfile, ClubMember, ClubTeam, Club, FormationVariant } from './types';
 import { auth, signInWithGoogle, db, handleFirestoreError, OperationType, getApiUrl, doc, onSnapshot, setDoc, getDoc, collection, getDocs, onAuthStateChanged, signOut, User, deleteObject } from './lib/firebase';
 import { calculateLeaderboard } from './lib/leaderboardUtils';
 import { deduplicateSquad } from './lib/clubUtils';
@@ -13,6 +13,7 @@ import Timer from './components/Timer';
 import SquadManager from './components/SquadManager';
 import Leaderboard from './components/Leaderboard';
 import LineupBuilder from './components/LineupBuilder';
+import TacticalBoardsView from './components/TacticalBoardsView';
 
 import TeamPage from './components/TeamPage';
 import TrainingManager from './components/TrainingManager';
@@ -30,7 +31,7 @@ import { OnboardingModal } from './components/OnboardingModal';
 import { PendingRequestsModal } from './components/PendingRequestsModal';
 import { ShakeProtectionModal, QuickShakeModal } from './components/ShakeProtectionModal';
 
-type View = 'home' | 'training' | 'setup' | 'exercise' | 'squad' | 'leaderboard' | 'profile' | 'lineup' | 'teampage' | 'clubadmin';
+type View = 'home' | 'training' | 'setup' | 'exercise' | 'squad' | 'leaderboard' | 'profile' | 'lineup' | 'tacticalboards' | 'teampage' | 'clubadmin';
 
 const INITIAL_DATA: CoachData = {
   squad: [],
@@ -803,6 +804,8 @@ export default function App() {
 
   const [openTrainingSettings, setOpenTrainingSettings] = useState(false);
   const [isLineupMaximized, setIsLineupMaximized] = useState(false);
+  // En av lagets taktiktavlor är öppen (menyposten Taktiktavla): då döljs menyerna.
+  const [isTeamBoardOpen, setIsTeamBoardOpen] = useState(false);
   // Storskärmsläge: döljer meny och toppfält och försöker visa sidan i helskärm.
   const [isPresenting, setIsPresenting] = useState(false);
   const [isExerciseMenuOpen, setIsExerciseMenuOpen] = useState(false);
@@ -3766,11 +3769,43 @@ export default function App() {
     setSessionActionCount(prev => prev + 1);
   };
 
+  // Formationer delas av uppställningen och lagets taktiktavlor.
+  const formationProps = {
+    customFormations,
+    pinnedFormationIds,
+    onTogglePinFormation: (id: string) => {
+      setData(prev => {
+        const pinned = prev.pinnedFormationIds || ['4-2-3-1', '4-4-2', '4-3-3'];
+        const isPinned = pinned.includes(id);
+        const newPinned = isPinned
+          ? pinned.filter(pid => pid !== id)
+          : [...pinned, id];
+        return { ...prev, pinnedFormationIds: newPinned };
+      });
+      setSessionActionCount(prev => prev + 1);
+    },
+    onSaveCustomFormation: (formation: FormationVariant) => {
+      setData(prev => ({
+        ...prev,
+        customFormations: [...(prev.customFormations || []), formation]
+      }));
+      setSessionActionCount(prev => prev + 1);
+    },
+    onDeleteCustomFormation: (id: string) => {
+      setData(prev => ({
+        ...prev,
+        customFormations: (prev.customFormations || []).filter(f => f.id !== id)
+      }));
+      setSessionActionCount(prev => prev + 1);
+    },
+  };
+
   const shellTitles: Record<string, string> = {
     home: 'Översikt',
     training: 'Kalender',
     squad: 'Truppen',
     lineup: 'Uppställning & taktik',
+    tacticalboards: 'Taktiktavla',
     leaderboard: 'Poängliga',
     teampage: 'Lagsida',
     clubadmin: 'Administration',
@@ -3841,7 +3876,7 @@ export default function App() {
 
   const mainContent = (
     <div className={`flex-1 flex flex-col min-h-0 w-full max-w-full overflow-x-hidden ${
-      view === 'exercise' || view === 'teampage' || view === 'home' || (view === 'lineup' && (isLineupMaximized || isPresenting))
+      view === 'exercise' || view === 'teampage' || view === 'home' || view === 'tacticalboards' || (view === 'lineup' && (isLineupMaximized || isPresenting))
         ? 'overflow-hidden'
         : 'overflow-y-auto'
     } ${view === 'exercise' ? 'select-none' : ''}`}>
@@ -4293,33 +4328,7 @@ export default function App() {
               onCopyLineup={handleCopyLineup}
               onReorderLineups={handleReorderLineups}
               onUpdateSquad={handleUpdateSquad}
-              customFormations={customFormations}
-              pinnedFormationIds={pinnedFormationIds}
-              onTogglePinFormation={(id) => {
-                setData(prev => {
-                  const pinned = prev.pinnedFormationIds || ['4-2-3-1', '4-4-2', '4-3-3'];
-                  const isPinned = pinned.includes(id);
-                  const newPinned = isPinned 
-                    ? pinned.filter(pid => pid !== id)
-                    : [...pinned, id];
-                  return { ...prev, pinnedFormationIds: newPinned };
-                });
-                setSessionActionCount(prev => prev + 1);
-              }}
-              onSaveCustomFormation={(formation) => {
-                setData(prev => ({
-                  ...prev,
-                  customFormations: [...(prev.customFormations || []), formation]
-                }));
-                setSessionActionCount(prev => prev + 1);
-              }}
-              onDeleteCustomFormation={(id) => {
-                setData(prev => ({
-                  ...prev,
-                  customFormations: (prev.customFormations || []).filter(f => f.id !== id)
-                }));
-                setSessionActionCount(prev => prev + 1);
-              }}
+              {...formationProps}
               user={user}
               isSyncing={isSyncing}
               sessionActionCount={sessionActionCount}
@@ -4329,6 +4338,17 @@ export default function App() {
               onManualPush={handleManualPush}
               onMaximizedChange={setIsLineupMaximized}
               presentationMode={isPresenting}
+            />
+          )}
+
+          {view === 'tacticalboards' && (
+            <TacticalBoardsView
+              clubId={userProfile.activeClubId}
+              teamId={userProfile.activeTeamId}
+              isCoachOrAdmin={isCoachOrAdmin}
+              squad={squad}
+              builderProps={{ user, onUpdateSquad: handleUpdateSquad, ...formationProps }}
+              onBoardOpenChange={setIsTeamBoardOpen}
             />
           )}
 
@@ -4591,7 +4611,7 @@ export default function App() {
           )}
         </AnimatePresence>
 
-        {view !== 'exercise' && view !== 'teampage' && view !== 'home' && view !== 'setup' && !(view === 'lineup' && (isLineupMaximized || isPresenting)) && !isPresenting && (
+        {view !== 'exercise' && view !== 'teampage' && view !== 'home' && view !== 'setup' && view !== 'tacticalboards' && !(view === 'lineup' && (isLineupMaximized || isPresenting)) && !isPresenting && (
           <div className="mt-8 mb-4 flex justify-center">
             <VersionFooter />
           </div>
@@ -5047,7 +5067,7 @@ export default function App() {
         onLogin={handleLogin}
         onOpenShakeInfo={() => setIsShakeInfoModalOpen(true)}
         onOpenPendingRequests={() => setIsPendingRequestsModalOpen(true)}
-        chromeHidden={isPresenting || (view === 'lineup' && isLineupMaximized)}
+        chromeHidden={isPresenting || (view === 'lineup' && isLineupMaximized) || (view === 'tacticalboards' && isTeamBoardOpen)}
         hideTopBar={view === 'teampage'}
         presenting={isPresenting}
         onExitPresenting={stopPresenting}

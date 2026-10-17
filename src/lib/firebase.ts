@@ -934,6 +934,36 @@ export const clearRsvps = async (body: { clubId: string; teamId: string; session
   return json;
 };
 
+// --- Lagets taktiktavlor (en tavla i taget, se server/tacticalBoards.ts) ---
+export const listTacticalBoards = async (clubId: string, teamId: string): Promise<{ boards: any[]; canEdit: boolean }> => {
+  const q = `clubId=${encodeURIComponent(clubId)}&teamId=${encodeURIComponent(teamId)}`;
+  const res = await fetch(getApiUrl(`/api/tacticalboards?${q}`), { headers: { ...getAuthHeader() } });
+  const json = await jsonOrError(res, 'Kunde inte hämta taktiktavlorna');
+  // En server som inte känner till taktiktavlorna (t.ex. inte omstartad) svarar med en webbsida.
+  if (!json || !Array.isArray(json.boards)) {
+    throw new Error('Servern svarar inte på taktiktavlorna. Starta om servern (npm run dev) och ladda om sidan.');
+  }
+  return json;
+};
+
+export const saveTacticalBoard = async (clubId: string, teamId: string, board: { id: string; name: string; sharedWithPlayers: boolean; state: any }) => {
+  const res = await fetch(getApiUrl(`/api/tacticalboards/${encodeURIComponent(board.id)}`), {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
+    body: JSON.stringify({ clubId, teamId, board }),
+  });
+  return (await jsonOrError(res, 'Kunde inte spara taktiktavlan')).board;
+};
+
+export const deleteTacticalBoard = async (clubId: string, teamId: string, id: string) => {
+  const q = `clubId=${encodeURIComponent(clubId)}&teamId=${encodeURIComponent(teamId)}`;
+  const res = await fetch(getApiUrl(`/api/tacticalboards/${encodeURIComponent(id)}?${q}`), {
+    method: 'DELETE',
+    headers: { ...getAuthHeader() },
+  });
+  return jsonOrError(res, 'Kunde inte ta bort taktiktavlan');
+};
+
 // Authorization-header för anrop som kräver inloggning (t.ex. bilduppladdning).
 export const getAuthHeader = (): Record<string, string> => {
   const token = localStorage.getItem('token');

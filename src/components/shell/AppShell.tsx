@@ -5,11 +5,11 @@
 import React from 'react';
 import {
   House, Calendar, Users, Shirt, Trophy, Globe, ShieldCheck, User as UserIcon, Sun, Moon,
-  RefreshCw, LogOut, Building2, ChevronRight, Cloud, CloudOff, Loader2, VibrateOff, Minimize2,
+  RefreshCw, LogOut, Building2, ChevronRight, Cloud, CloudOff, Loader2, VibrateOff, Minimize2, Presentation,
 } from 'lucide-react';
 import { Avatar, MenuItem, Sheet } from '../ui';
 
-export type ShellView = 'home' | 'training' | 'squad' | 'lineup' | 'leaderboard' | 'teampage' | 'clubadmin' | 'profile';
+export type ShellView = 'home' | 'training' | 'squad' | 'lineup' | 'tacticalboards' | 'leaderboard' | 'teampage' | 'clubadmin' | 'profile';
 
 export interface NavItem {
   id: ShellView;
@@ -25,7 +25,9 @@ export const buildNavItems = (opts: { canViewLineup: boolean }): { primary: NavI
     { id: 'training', label: 'Kalender', icon: Calendar },
     { id: 'squad', label: 'Truppen', icon: Users },
   ];
-  if (opts.canViewLineup) primary.push({ id: 'lineup', label: 'Uppställning', shortLabel: 'Taktik', icon: Shirt });
+  if (opts.canViewLineup) primary.push({ id: 'lineup', label: 'Uppställning', shortLabel: 'Uppställn.', icon: Shirt });
+  // Lagets taktiktavlor: alla i laget (spelare ser de tavlor som tränaren har delat).
+  primary.push({ id: 'tacticalboards', label: 'Taktiktavla', shortLabel: 'Taktik', icon: Presentation });
   primary.push({ id: 'leaderboard', label: 'Poängliga', shortLabel: 'Poäng', icon: Trophy });
   return { primary, secondary: [{ id: 'teampage', label: 'Lagsida', icon: Globe }] };
 };

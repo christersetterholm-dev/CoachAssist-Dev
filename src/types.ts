@@ -73,6 +73,32 @@ export interface Lineup {
   savedTacticalBoards?: TacticalSavedBoard[];
 }
 
+// En av lagets taktiktavlor (menyposten Taktiktavla). Sparas via /api/tacticalboards.
+export interface TeamTacticalBoard {
+  id: string;
+  name: string;
+  sharedWithPlayers: boolean;
+  createdAt: number;
+  updatedAt: number;
+  createdBy?: string;
+  updatedBy?: string;
+  state: {
+    drawings?: any[];
+    players?: LineupPlayer[];
+    opponents?: { id: string, x: number, y: number, number?: number | string, name?: string, role?: string }[];
+    footballPos?: { x: number, y: number } | null;
+    footballScale?: number;
+    showOpponents?: boolean;
+    showPositionDescriptions?: boolean;
+    opponentColor?: string;
+    pitchType?: Lineup['pitchType'];
+    orientation?: 'vertical' | 'landscape';
+    attackDirection?: 'up' | 'down' | 'left' | 'right';
+    playerScale?: number;
+    formation?: string;
+  };
+}
+
 export interface TacticalSavedBoard {
   id: string;
   name: string;

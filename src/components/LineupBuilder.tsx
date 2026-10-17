@@ -4,7 +4,7 @@ import { motion, AnimatePresence, useDragControls } from 'motion/react';
 import { SquadPlayer, Lineup, LineupPlayer, FormationVariant, TacticalSavedBoard, TrainingSession } from '../types';
 import { User as FirebaseUser } from '../lib/firebase';
 import { CachedImage } from './CachedImage';
-import { Plus, Minus, X, Trash2, Image as ImageIcon, User, Save, Settings, ClipboardList, ClipboardPaste, ClipboardCheck, Camera, Check, Edit2, Undo2, Redo2, Maximize2, Minimize2, Copy, Trophy, Upload, Pencil, ArrowUpRight, Eraser, RotateCcw, Shirt, Pin, PinOff, Smartphone, Monitor, ChevronDown, ChevronUp, RefreshCw, GripVertical, Footprints, Archive, ArchiveRestore, Layout, Eye, EyeOff, Target, Play, Move, Type, FolderOpen, Cloud, CloudOff, Bookmark, Network, UserCheck, Link, Unlink, Calendar, Users, Info, MoreHorizontal, Tv, Slash, ChevronLeft } from 'lucide-react';
+import { Plus, Minus, X, Trash2, Image as ImageIcon, User, Save, Settings, ClipboardList, ClipboardPaste, ClipboardCheck, Camera, Check, Edit2, Undo2, Redo2, Maximize2, Minimize2, Copy, Trophy, Upload, Pencil, ArrowUpRight, Eraser, RotateCcw, Shirt, Pin, PinOff, Smartphone, Monitor, ChevronDown, ChevronUp, RefreshCw, GripVertical, Footprints, Archive, ArchiveRestore, Layout, Eye, EyeOff, Target, Play, Move, Type, FolderOpen, Cloud, CloudOff, Bookmark, Network, UserCheck, Link, Unlink, Calendar, Users, Info, MoreHorizontal, Slash, ChevronLeft } from 'lucide-react';
 
 import { FORMATION_TEMPLATES } from '../lib/formations';
 import { findSquadMatch } from '../lib/teamUtils';
@@ -104,6 +104,10 @@ interface LineupBuilderProps {
   onMaximizedChange?: (isMaximized: boolean) => void;
   /** Storskärmsläge: visa bara planen, så stor som skärmen tillåter. */
   presentationMode?: boolean;
+  /** Fristående taktiktavla (menyposten Taktiktavla): öppnas direkt i taktiktavlan, utan
+   *  uppställningens egna funktioner. Stäng anropar onExitBoard. */
+  standaloneBoard?: boolean;
+  onExitBoard?: () => void;
 }
 
 interface DelaunayPoint {
@@ -561,7 +565,9 @@ export default function LineupBuilder({
   onManualSync,
   onManualPush,
   onMaximizedChange,
-  presentationMode = false
+  presentationMode = false,
+  standaloneBoard = false,
+  onExitBoard
 }: LineupBuilderProps) {
   const SoccerBallIcon = ({ size = 20, className = "" }: { size?: number, className?: string }) => (
     <svg 
@@ -624,10 +630,11 @@ export default function LineupBuilder({
       }
     }
 
-    // Keep bench substitutes capped at max 7 to respect the bench capacity
-    const cappedSubs = subsList.slice(0, 7);
+    // Keep bench substitutes capped at max 7 to respect the bench capacity.
+    // En fristående taktiktavla har hela truppen på bänken.
+    const cappedSubs = standaloneBoard ? subsList : subsList.slice(0, 7);
     return [...startersList, ...cappedSubs];
-  }, []);
+  }, [standaloneBoard]);
 
   const getValidSubsCount = useCallback((playerList: LineupPlayer[], excludeIdOrPlayerId?: string): number => {
     const seenPlayerIds = new Set<string>();
@@ -761,7 +768,9 @@ export default function LineupBuilder({
   const [sortBySelected, setSortBySelected] = useState(false);
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [dragPos, setDragPos] = useState<{ x: number, y: number } | null>(null);
-  const [isMaximized, setIsMaximized] = useState(false);
+  const [isMaximized, setIsMaximized] = useState(standaloneBoard);
+  // En delad taktiktavla som spelare tittar på: bara visning, inga verktyg.
+  const boardReadOnly = standaloneBoard && !isCoachOrAdmin;
 
   // Storskärmsläge: skala planen så att den fyller skärmen.
   const presentRef = useRef<HTMLDivElement>(null);
@@ -831,7 +840,7 @@ export default function LineupBuilder({
   const [fullScreenZoom, setFullScreenZoom] = useState(1);
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [isArchiveExpanded, setIsArchiveExpanded] = useState(false);
-  const [showSavedLineups, setShowSavedLineups] = useState(true);
+  const [showSavedLineups, setShowSavedLineups] = useState(!standaloneBoard);
   const [showBenchMaximized, setShowBenchMaximized] = useState(false);
   const [showTacticalSavedBoardsModal, setShowTacticalSavedBoardsModal] = useState(false);
   const [newSavedBoardName, setNewSavedBoardName] = useState('');
@@ -1488,6 +1497,7 @@ export default function LineupBuilder({
   }, [numberEditTarget, pushHistory]);
 
   const handlePointerDownWithDeletion = (e: React.PointerEvent, type: 'opponent' | 'blue' | 'ball', id?: string) => {
+    if (boardReadOnly) return;
     const tool = isMaximized ? resolveTool(e) : tacticalTool;
     if (isMaximized && DRAW_TOOLS.includes(tool)) {
       // Med ett ritverktyg går trycket vidare till planen, så att en pil kan börja vid en spelare.
@@ -1633,7 +1643,7 @@ export default function LineupBuilder({
   };
 
   const handleTacticalStart = (e: React.PointerEvent) => {
-    if (!isMaximized || !fieldRef.current || boardMode === 'snapshot') return;
+    if (!isMaximized || !fieldRef.current || boardMode === 'snapshot' || boardReadOnly) return;
     const tool = resolveTool(e);
     activeToolRef.current = tool;
     setShowBoardColors(false);
@@ -5511,7 +5521,7 @@ export default function LineupBuilder({
   const boardSectionClass = 'px-3 pb-1 text-xs font-bold text-zinc-500 dark:text-zinc-400';
   // Lodrät verktygsrad när skärmen ligger ner och är bred nog (iPad liggande, dator).
   const boardVertical = viewport.w > viewport.h && viewport.w >= 900;
-  const boardToolbarVisible = isMaximized && (boardMode === 'edit' || (boardMode === 'present' && boardToolbarOpen));
+  const boardToolbarVisible = isMaximized && !boardReadOnly && (boardMode === 'edit' || (boardMode === 'present' && boardToolbarOpen));
 
   const boardTools: { id: TacticalTool; label: string; icon: React.ReactNode }[] = [
     { id: 'move', label: 'Flytta', icon: <Move size={22} /> },
@@ -5623,6 +5633,24 @@ export default function LineupBuilder({
     flashBoardHint();
     requestBoardFullscreen();
   };
+  // Liggande/stående plan (liggande passar en tv eller storskärm).
+  const toggleBoardOrientation = () => {
+    const newOrientation = orientation === 'vertical' ? 'landscape' : 'vertical';
+    setOrientation(newOrientation);
+    setAttackDirection(newOrientation === 'landscape' ? 'right' : 'up');
+    setHasUnsavedChanges(true);
+  };
+  const orientationButton = (className: string) => (
+    <IconButton
+      label={orientation === 'landscape' ? 'Stående plan' : 'Liggande plan (tv/storskärm)'}
+      className={className}
+      active={orientation === 'landscape'}
+      onClick={toggleBoardOrientation}
+    >
+      {orientation === 'landscape' ? <Smartphone size={22} /> : <Monitor size={22} />}
+    </IconButton>
+  );
+
   const enterBoardPresent = () => {
     closeBoardPopups();
     setBoardToolbarOpen(false);
@@ -5759,8 +5787,12 @@ export default function LineupBuilder({
           {boardMode === 'edit' && (
             <div className="fixed top-[calc(0.5rem+env(safe-area-inset-top,0px))] left-2 right-2 z-[60] flex items-start justify-between gap-2 pointer-events-none">
               <div className={`${boardBarClass} pointer-events-auto`}>
-                <IconButton label="Ångra" className={boardBtnClass} onClick={handleUndo} disabled={history.length === 0}><Undo2 size={22} /></IconButton>
-                <IconButton label="Gör om" className={boardBtnClass} onClick={handleRedo} disabled={future.length === 0}><Redo2 size={22} /></IconButton>
+                {!boardReadOnly && (
+                  <>
+                    <IconButton label="Ångra" className={boardBtnClass} onClick={handleUndo} disabled={history.length === 0}><Undo2 size={22} /></IconButton>
+                    <IconButton label="Gör om" className={boardBtnClass} onClick={handleRedo} disabled={future.length === 0}><Redo2 size={22} /></IconButton>
+                  </>
+                )}
                 <IconButton
                   label={isDrawingsVisible ? 'Dölj ritningar' : 'Visa ritningar'}
                   className={boardBtnClass}
@@ -5771,13 +5803,18 @@ export default function LineupBuilder({
                 </IconButton>
               </div>
               <div className={`${boardBarClass} pointer-events-auto`}>
-                <IconButton label="Spara eller öppna taktiktavlor" className={boardBtnClass} active={showTacticalSavedBoardsModal} onClick={() => setShowTacticalSavedBoardsModal(true)}><Bookmark size={22} /></IconButton>
-                <IconButton label="Bildläge (skärmbild utan knappar)" className={boardBtnClass} onClick={enterBoardSnapshot}><Camera size={22} /></IconButton>
-                {viewport.w >= 640 && (
-                  <IconButton label="Visa på storskärm" className={boardBtnClass} onClick={enterBoardPresent}><Tv size={22} /></IconButton>
+                {!standaloneBoard && viewport.w >= 640 && (
+                  <IconButton label="Spara eller öppna taktiktavlor" className={boardBtnClass} active={showTacticalSavedBoardsModal} onClick={() => setShowTacticalSavedBoardsModal(true)}><Bookmark size={22} /></IconButton>
                 )}
-                <IconButton label="Mer" className={boardBtnClass} active={showBoardMore} onClick={() => { setShowBoardColors(false); setShowBoardMore(true); }}><MoreHorizontal size={22} /></IconButton>
-                <IconButton label="Stäng taktiktavlan" className={boardBtnClass} onClick={handleCloseTacticalRequest}><X size={22} /></IconButton>
+                {(viewport.w >= 640 || boardReadOnly) && (
+                  <IconButton label="Bildläge (skärmbild utan knappar)" className={boardBtnClass} onClick={enterBoardSnapshot}><Camera size={22} /></IconButton>
+                )}
+                {orientationButton(boardBtnClass)}
+                <IconButton label="Helskärm (bara planen)" className={boardBtnClass} onClick={enterBoardPresent}><Maximize2 size={22} /></IconButton>
+                {!boardReadOnly && (
+                  <IconButton label="Mer" className={boardBtnClass} active={showBoardMore} onClick={() => { setShowBoardColors(false); setShowBoardMore(true); }}><MoreHorizontal size={22} /></IconButton>
+                )}
+                <IconButton label="Stäng taktiktavlan" className={boardBtnClass} onClick={standaloneBoard ? () => onExitBoard?.() : handleCloseTacticalRequest}><X size={22} /></IconButton>
               </div>
             </div>
           )}
@@ -5822,7 +5859,7 @@ export default function LineupBuilder({
                   <span className="w-6 h-6 rounded-full border-2 border-zinc-300 dark:border-zinc-600 shadow-inner" style={{ backgroundColor: tacticalColor }} />
                 </IconButton>
                 <IconButton
-                  label={showBenchMaximized ? 'Dölj bänken' : 'Visa bänken'}
+                  label={standaloneBoard ? (showBenchMaximized ? 'Dölj truppen' : 'Visa truppen') : (showBenchMaximized ? 'Dölj bänken' : 'Visa bänken')}
                   className={boardBtnClass}
                   active={showBenchMaximized}
                   onClick={() => {
@@ -5913,16 +5950,17 @@ export default function LineupBuilder({
             </div>
           )}
 
-          {/* Storskärm: bara planen. Knapparna här tar fram verktygen eller avslutar. */}
+          {/* Helskärm: bara planen. Knapparna här vrider planen, tar fram verktygen eller avslutar. */}
           {boardMode === 'present' && (
             <div className="fixed right-[calc(0.75rem+env(safe-area-inset-right,0px))] bottom-[calc(0.75rem+env(safe-area-inset-bottom,0px))] z-[61] flex items-center gap-2 opacity-60 hover:opacity-100 focus-within:opacity-100 transition-opacity">
-              {!boardToolbarOpen && (
+              {!boardToolbarOpen && !boardReadOnly && (
                 <Button variant="secondary" size="lg" icon={<Pencil size={20} />} onClick={() => setBoardToolbarOpen(true)}>
                   Verktyg
                 </Button>
               )}
+              {orientationButton('w-12 h-12 bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 shadow-sm')}
               <Button variant="secondary" size="lg" icon={<Minimize2 size={20} />} onClick={exitBoardMode}>
-                Avsluta storskärm
+                Avsluta helskärm
               </Button>
             </div>
           )}
@@ -6116,22 +6154,23 @@ export default function LineupBuilder({
                 {renderBoardStepper('Planens storlek', `${Math.round(fullScreenZoom * 100)} %`,
                   () => setFullScreenZoom(Math.max(0.5, Math.round((fullScreenZoom - 0.1) * 10) / 10)),
                   () => setFullScreenZoom(Math.min(2, Math.round((fullScreenZoom + 0.1) * 10) / 10)))}
-                <MenuItem
-                  icon={orientation === 'landscape' ? <Smartphone size={18} /> : <Monitor size={18} />}
-                  label={orientation === 'landscape' ? 'Stående plan' : 'Liggande plan'}
-                  onClick={() => {
-                    const newOrientation = orientation === 'vertical' ? 'landscape' : 'vertical';
-                    setOrientation(newOrientation);
-                    setAttackDirection(newOrientation === 'landscape' ? 'right' : 'up');
-                  }}
-                />
               </section>
 
               <section className="flex flex-col gap-1">
-                <h3 className={boardSectionClass}>Uppställningen</h3>
-                <MenuItem icon={<FolderOpen size={18} />} label="Sparade uppställningar" onClick={() => { setShowBoardMore(false); setShowBenchMaximized(false); setShowSavedLineups(true); }} />
-                <MenuItem icon={<ClipboardList size={18} />} label="Anteckningar" onClick={() => { setShowBoardMore(false); setShowNotesModal(true); }} />
-                {isCoachOrAdmin && lineup && (
+                <h3 className={boardSectionClass}>{standaloneBoard ? 'Tavlan' : 'Uppställningen'}</h3>
+                {viewport.w < 640 && (
+                  <MenuItem icon={<Camera size={18} />} label="Bildläge" description="Skärmbild utan knappar" onClick={() => { setShowBoardMore(false); enterBoardSnapshot(); }} />
+                )}
+                {!standaloneBoard && viewport.w < 640 && (
+                  <MenuItem icon={<Bookmark size={18} />} label="Sparade taktiktavlor" onClick={() => { setShowBoardMore(false); setShowTacticalSavedBoardsModal(true); }} />
+                )}
+                {!standaloneBoard && (
+                  <>
+                    <MenuItem icon={<FolderOpen size={18} />} label="Sparade uppställningar" onClick={() => { setShowBoardMore(false); setShowBenchMaximized(false); setShowSavedLineups(true); }} />
+                    <MenuItem icon={<ClipboardList size={18} />} label="Anteckningar" onClick={() => { setShowBoardMore(false); setShowNotesModal(true); }} />
+                  </>
+                )}
+                {!standaloneBoard && isCoachOrAdmin && lineup && (
                   <MenuItem
                     icon={<UserCheck size={18} />}
                     label="Publicerad för spelarna"
@@ -6279,7 +6318,7 @@ export default function LineupBuilder({
                 <div className="flex items-center justify-between border-b border-zinc-100 dark:border-zinc-800 pb-1.5 px-1 bg-transparent">
                   <div className="flex items-center gap-1.5">
                     <Shirt size={14} className="text-indigo-600 dark:text-indigo-400" />
-                    <span className="text-[10px] font-black uppercase text-zinc-500 dark:text-zinc-400 tracking-wider">Avbytarbänk ({subs.length})</span>
+                    <span className="text-[10px] font-black uppercase text-zinc-500 dark:text-zinc-400 tracking-wider">{standaloneBoard ? 'Truppen' : 'Avbytarbänk'} ({subs.length})</span>
                   </div>
                   <button 
                     onClick={() => setShowBenchMaximized(false)}
