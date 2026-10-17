@@ -1,18 +1,17 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { motion, AnimatePresence, useDragControls } from 'motion/react';
 // import html2canvas from 'html-to-image'; // Removed
-import { SquadPlayer, Lineup, LineupPlayer, FormationVariant, FormationPosition, TacticalSavedBoard, TrainingSession } from '../types';
+import { SquadPlayer, Lineup, LineupPlayer, FormationVariant, TacticalSavedBoard, TrainingSession } from '../types';
 import { User as FirebaseUser } from '../lib/firebase';
 import { CachedImage } from './CachedImage';
-import { Plus, Minus, X, Trash2, Image as ImageIcon, User, Save, Settings, ClipboardList, ClipboardPaste, ClipboardCheck, Camera, Check, Edit2, Undo2, Redo2, Maximize2, Minimize2, Copy, Trophy, Upload, Pencil, ArrowUpRight, Eraser, RotateCcw, Trash, Shirt, Pin, PinOff, Smartphone, Monitor, ChevronDown, ChevronUp, RefreshCw, GripVertical, Footprints, Archive, ArchiveRestore, Layout, Eye, EyeOff, Target, Play, Move, Route, Type, FolderOpen, Cloud, CloudOff, Bookmark, Network, UserCheck, Link, Unlink, Calendar, Users, Info } from 'lucide-react';
+import { Plus, Minus, X, Trash2, Image as ImageIcon, User, Save, Settings, ClipboardList, ClipboardPaste, ClipboardCheck, Camera, Check, Edit2, Undo2, Redo2, Maximize2, Minimize2, Copy, Trophy, Upload, Pencil, ArrowUpRight, Eraser, RotateCcw, Shirt, Pin, PinOff, Smartphone, Monitor, ChevronDown, ChevronUp, RefreshCw, GripVertical, Footprints, Archive, ArchiveRestore, Layout, Eye, EyeOff, Target, Play, Move, Type, FolderOpen, Cloud, CloudOff, Bookmark, Network, UserCheck, Link, Unlink, Calendar, Users, Info, MoreHorizontal, Tv, Slash, ChevronLeft } from 'lucide-react';
 
 import { FORMATION_TEMPLATES } from '../lib/formations';
 import { findSquadMatch } from '../lib/teamUtils';
 import { isMatchSession } from '../utils/sessionCategory';
 import { Reorder } from 'motion/react';
-import ColorPicker from './ColorPicker';
 import ImageCropper from './ImageCropper';
-import { Button, IconButton, Card, SegmentedTabs, Badge, Sheet, type TabItem } from './ui';
+import { Button, IconButton, Card, SegmentedTabs, Badge, Sheet, MenuItem, type TabItem } from './ui';
 
 // Delarna i uppställningsvyns sidopanel (bred skärm) eller ark (mobil).
 type LineupPanel = 'lineups' | 'formation' | 'settings' | 'notes';
@@ -24,6 +23,57 @@ const PANEL_TITLES: Record<LineupPanel, string> = {
 };
 
 import { storage, ref, uploadBytes, getDownloadURL, deleteObject } from '../lib/firebase';
+
+// Taktiktavlans verktyg. Gamla verktyg (freehand-arrow, circle, rectangle, square) finns kvar
+// för att kunna visa äldre ritningar, men nås inte längre från verktygsraden.
+type TacticalTool =
+  | 'move' | 'pen' | 'arrow' | 'run' | 'line' | 'zone' | 'text' | 'ball' | 'opponent' | 'eraser'
+  | 'freehand-arrow' | 'circle' | 'rectangle' | 'square';
+const DRAW_TOOLS: TacticalTool[] = ['pen', 'arrow', 'run', 'line', 'zone', 'text'];
+const BOARD_COLORS = ['#ffffff', '#facc15', '#ef4444', '#3b82f6', '#18181b', '#f97316'];
+const BOARD_COLOR_NAMES: Record<string, string> = {
+  '#ffffff': 'Vit', '#facc15': 'Gul', '#ef4444': 'Röd', '#3b82f6': 'Blå', '#18181b': 'Svart', '#f97316': 'Orange',
+};
+const markerKey = (color: string) => String(color || '#ffffff').replace(/[^a-zA-Z0-9]/g, '');
+
+// Avstånd från en punkt till en sträcka (i planens procentkoordinater).
+const distToSegment = (px: number, py: number, a: { x: number; y: number }, b: { x: number; y: number }) => {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const len2 = dx * dx + dy * dy;
+  const t = len2 === 0 ? 0 : Math.max(0, Math.min(1, ((px - a.x) * dx + (py - a.y) * dy) / len2));
+  return Math.hypot(px - (a.x + t * dx), py - (a.y + t * dy));
+};
+
+// Träffar punkten (x, y) en ritning? Används av suddet och för att välja ritningar.
+// `inside` = räkna även insidan av cirklar/fyrkanter (annars bara kanten, om de inte är fyllda zoner).
+const hitDrawing = (d: any, x: number, y: number, tol: number, inside: boolean, aspect: number) => {
+  if (!d?.points?.length) return false;
+  if (d.type === 'text') return Math.hypot(d.points[0].x - x, d.points[0].y - y) < tol * 2.5;
+  if (d.type === 'circle') {
+    const rx = Math.sqrt(Math.pow(d.points[0].x - d.points[1].x, 2) + Math.pow((d.points[0].y - d.points[1].y) / aspect, 2)) || 0.01;
+    const ry = rx * aspect;
+    const dist = Math.sqrt(Math.pow((x - d.points[0].x) / rx, 2) + Math.pow((y - d.points[0].y) / ry, 2));
+    if (inside || d.filled) return dist <= 1 + tol / rx;
+    return Math.abs(dist - 1) * rx < tol;
+  }
+  if (d.type === 'rectangle' || d.type === 'square') {
+    const xMin = Math.min(d.points[0].x, d.points[1].x);
+    const xMax = Math.max(d.points[0].x, d.points[1].x);
+    const yMin = Math.min(d.points[0].y, d.points[1].y);
+    const yMax = Math.max(d.points[0].y, d.points[1].y);
+    const inBox = x >= xMin - tol && x <= xMax + tol && y >= yMin - tol && y <= yMax + tol;
+    if (!inBox) return false;
+    if (inside || d.filled) return true;
+    return x <= xMin + tol || x >= xMax - tol || y <= yMin + tol || y >= yMax - tol;
+  }
+  const pts = d.points;
+  if (pts.length === 1) return Math.hypot(pts[0].x - x, pts[0].y - y) < tol;
+  for (let i = 1; i < pts.length; i++) {
+    if (distToSegment(x, y, pts[i - 1], pts[i]) < tol) return true;
+  }
+  return false;
+};
 
 interface LineupBuilderProps {
   squad: SquadPlayer[];
@@ -749,8 +799,31 @@ export default function LineupBuilder({
       onMaximizedChange?.(false);
     };
   }, [onMaximizedChange]);
-  const [isControlsVisible, setIsControlsVisible] = useState(false);
-  const [isDrawingsVisible, setIsDrawingsVisible] = useState(false);
+  const [isDrawingsVisible, setIsDrawingsVisible] = useState(true);
+  // Taktiktavlans visningsläge: vanlig redigering, storskärm (bara planen + infällbar
+  // verktygsrad) eller bildläge (inga knappar alls, för skärmbilder).
+  const [boardMode, setBoardMode] = useState<'edit' | 'present' | 'snapshot'>('edit');
+  const [boardToolbarOpen, setBoardToolbarOpen] = useState(true);
+  const [showBoardMore, setShowBoardMore] = useState(false);
+  const [showBoardClear, setShowBoardClear] = useState(false);
+  const [showBoardColors, setShowBoardColors] = useState(false);
+  const [showBoardHint, setShowBoardHint] = useState(false);
+  const [zoneShape, setZoneShape] = useState<'rectangle' | 'circle'>('rectangle');
+  // Apple Pencil: pennan ritar alltid och fingret flyttar (gäller först när en penna har använts).
+  const [pencilDraws, setPencilDraws] = useState(true);
+  const pencilSeenRef = useRef(false);
+  const lastDrawToolRef = useRef<TacticalTool>('pen');
+  const activeToolRef = useRef<TacticalTool>('move');
+  const [isErasing, setIsErasing] = useState(false);
+  const [viewport, setViewport] = useState(() => ({
+    w: typeof window !== 'undefined' ? window.innerWidth : 1024,
+    h: typeof window !== 'undefined' ? window.innerHeight : 768,
+  }));
+  useEffect(() => {
+    const onResize = () => setViewport({ w: window.innerWidth, h: window.innerHeight });
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
   const [showDelaunayNetwork, setShowDelaunayNetwork] = useState(false);
   const [passingNetworkMode, setPassingNetworkMode] = useState<'triangulation' | 'standard' | 'maximum' | 'ultra' | 'lanes'>('standard');
   const [fullScreenZoom, setFullScreenZoom] = useState(1);
@@ -758,16 +831,19 @@ export default function LineupBuilder({
   const [isArchiveExpanded, setIsArchiveExpanded] = useState(false);
   const [showSavedLineups, setShowSavedLineups] = useState(true);
   const [showBenchMaximized, setShowBenchMaximized] = useState(false);
-  const [showZoomMenu, setShowZoomMenu] = useState(false);
   const [showTacticalSavedBoardsModal, setShowTacticalSavedBoardsModal] = useState(false);
   const [newSavedBoardName, setNewSavedBoardName] = useState('');
   const [showSaveOnCloseModal, setShowSaveOnCloseModal] = useState(false);
   const [exitBoardName, setExitBoardName] = useState('');
-  const dragControls = useDragControls();
   const markerSuffix = useMemo(() => Math.random().toString(36).substring(2, 7), []);
 
   // Tactical Board State
-  const [tacticalTool, setTacticalTool] = useState<'pen' | 'arrow' | 'freehand-arrow' | 'eraser' | 'ball' | 'opponent' | 'move' | 'text' | 'circle' | 'rectangle' | 'square'>('move');
+  const [tacticalTool, setTacticalToolState] = useState<TacticalTool>('move');
+  const setTacticalTool = (tool: TacticalTool) => {
+    if (DRAW_TOOLS.includes(tool)) lastDrawToolRef.current = tool;
+    setShowBoardColors(false);
+    setTacticalToolState(tool);
+  };
   const [editingTextId, setEditingTextId] = useState<string | null>(null);
   const pitchAspectRatio = 68/105;
   const constrainSquare = (p0: { x: number, y: number }, p1: { x: number, y: number }) => {
@@ -827,7 +903,6 @@ export default function LineupBuilder({
   }, [isMaximized, players]);
 
   const [tacticalDrawings, setTacticalDrawings] = useState<any[]>(lineup?.tacticalBoard?.drawings || []);
-  const [tacticalLineType, setTacticalLineType] = useState<'solid' | 'dashed'>('solid');
   const [tacticalLineWidth, setTacticalLineWidth] = useState<number>(0.8);
   const [tacticalFontSize, setTacticalFontSize] = useState<number>(16);
   const [tacticalColor, setTacticalColor] = useState('#ffffff');
@@ -929,7 +1004,7 @@ export default function LineupBuilder({
     );
   };
 
-  // Whenever entering rittavlan/maximized mode, copy the current lineup's player positions to the tactical players and set initial snapshot
+  // Whenever entering taktiktavlan/maximized mode, copy the current lineup's player positions to the tactical players and set initial snapshot
   useEffect(() => {
     if (isMaximized) {
       setTacticalPlayers(prev => {
@@ -1411,6 +1486,11 @@ export default function LineupBuilder({
   }, [numberEditTarget, pushHistory]);
 
   const handlePointerDownWithDeletion = (e: React.PointerEvent, type: 'opponent' | 'blue' | 'ball', id?: string) => {
+    const tool = isMaximized ? resolveTool(e) : tacticalTool;
+    if (isMaximized && DRAW_TOOLS.includes(tool)) {
+      // Med ett ritverktyg går trycket vidare till planen, så att en pil kan börja vid en spelare.
+      return;
+    }
     e.stopPropagation();
     hasLongPressedRef.current = false;
     dragHistoryPushedRef.current = false;
@@ -1429,7 +1509,7 @@ export default function LineupBuilder({
     lastTapTime.current = now;
 
     // Direct eraser check
-    if (tacticalTool === 'eraser') {
+    if (tool === 'eraser') {
       pushHistory();
       if (type === 'opponent' && id) {
         setOpponents(prev => prev.filter(o => o.id !== id));
@@ -1512,17 +1592,58 @@ export default function LineupBuilder({
     return { x, y };
   };
 
+  // Vilket verktyg gäller för just den här pekaren? Med inställningen "Pennan ritar alltid"
+  // ritar Apple Pencil alltid och fingret flyttar – men först när en penna faktiskt har använts,
+  // så att det inte ändrar något på enheter utan penna.
+  const resolveTool = (e: React.PointerEvent): TacticalTool => {
+    if (e.pointerType === 'pen') {
+      pencilSeenRef.current = true;
+      if (pencilDraws && !DRAW_TOOLS.includes(tacticalTool) && tacticalTool !== 'eraser') return lastDrawToolRef.current;
+      return tacticalTool;
+    }
+    if (e.pointerType === 'touch' && pencilDraws && pencilSeenRef.current && DRAW_TOOLS.includes(tacticalTool)) return 'move';
+    return tacticalTool;
+  };
+
+  // Suddar allt ritat, motståndare och boll som träffas på vägen från förra punkten till (x, y).
+  // Hela sträckan provas, så att även ett snabbt svep tar med sig allt det passerar.
+  const lastEraseRef = useRef<{ x: number; y: number } | null>(null);
+  const eraseAt = (x: number, y: number, fresh = false) => {
+    const from = fresh || !lastEraseRef.current ? { x, y } : lastEraseRef.current;
+    lastEraseRef.current = { x, y };
+    const steps = Math.max(1, Math.ceil(Math.hypot(x - from.x, y - from.y) / 1.5));
+    const samples = Array.from({ length: steps + 1 }, (_, i) => ({
+      x: from.x + ((x - from.x) * i) / steps,
+      y: from.y + ((y - from.y) * i) / steps,
+    }));
+    const hits = (px: number, py: number, r: number) => samples.some(s => Math.hypot(s.x - px, s.y - py) < r);
+    setTacticalDrawings(prev => {
+      const next = prev.filter(d => !samples.some(s => hitDrawing(d, s.x, s.y, 2.5, false, pitchAspectRatio)));
+      return next.length !== prev.length ? next : prev;
+    });
+    setOpponents(prev => {
+      const next = prev.filter(o => !hits(o.x, o.y, 3.5));
+      return next.length !== prev.length ? next : prev;
+    });
+    if (footballPos && hits(footballPos.x, footballPos.y, 3.5 * footballScale)) {
+      setFootballPos(null);
+    }
+  };
+
   const handleTacticalStart = (e: React.PointerEvent) => {
-    if (!isMaximized || !fieldRef.current) return;
+    if (!isMaximized || !fieldRef.current || boardMode === 'snapshot') return;
+    const tool = resolveTool(e);
+    activeToolRef.current = tool;
+    setShowBoardColors(false);
     const { x, y } = transformCoords(e.clientX, e.clientY);
 
-    if (tacticalTool === 'ball') {
+    if (tool === 'ball') {
       pushHistory();
       setFootballPos({ x, y });
       setDraggingBall(true);
       return;
     }
-    if (tacticalTool === 'move') {
+    if (tool === 'move') {
       // First check if we're clicking a resize handle of a selected drawing
       if (selectedDrawingId) {
         const draw = tacticalDrawings.find(d => d.id === selectedDrawingId);
@@ -1561,7 +1682,7 @@ export default function LineupBuilder({
            const yMax = Math.max(d.points[0].y, d.points[1].y);
            return x >= xMin - 2 && x <= xMax + 2 && y >= yMin - 2 && y <= yMax + 2;
         }
-        return d.points.some((p: any) => Math.hypot(p.x - x, p.y - y) < 5);
+        return hitDrawing(d, x, y, 3, true, pitchAspectRatio);
       });
 
       if (clickedDrawing) {
@@ -1575,51 +1696,24 @@ export default function LineupBuilder({
       return;
     }
 
-    if (tacticalTool === 'opponent') {
+    if (tool === 'opponent') {
       pushHistory();
       const newOpponent = { id: Math.random().toString(36).substr(2, 9), x, y };
       setOpponents(prev => [...prev, newOpponent]);
-      return;
-    }
-
-    if (tacticalTool === 'eraser') {
-      pushHistory();
-      // Find and remove clicked drawing
-      setTacticalDrawings(prev => prev.filter(d => {
-        if (d.type === 'text') {
-           // Click near center of text
-           return Math.hypot(d.points[0].x - x, d.points[0].y - y) > 5;
-        }
-        if (d.type === 'circle') {
-           // Click near edge of circle, accounting for aspect ratio distortion
-           const rx = Math.hypot(d.points[0].x - d.points[1].x, d.points[0].y - d.points[1].y);
-           const ry = rx * pitchAspectRatio;
-           const dx = x - d.points[0].x;
-           const dy = y - d.points[0].y;
-           const dist = Math.sqrt(Math.pow(dx / rx, 2) + Math.pow(dy / ry, 2));
-           return Math.abs(dist - 1) > 0.2; // Tolerance for clicking on the line
-        }
-        if (d.type === 'rectangle' || d.type === 'square') {
-           const xMin = Math.min(d.points[0].x, d.points[1].x);
-           const xMax = Math.max(d.points[0].x, d.points[1].x);
-           const yMin = Math.min(d.points[0].y, d.points[1].y);
-           const yMax = Math.max(d.points[0].y, d.points[1].y);
-           const inside = x >= xMin - 2 && x <= xMax + 2 && y >= yMin - 2 && y <= yMax + 2;
-           return !inside;
-        }
-        return !d.points.some((p: any) => Math.hypot(p.x - x, p.y - y) < 3);
-      }));;
-      // Also remove opponents if clicked near
-      setOpponents(prev => prev.filter(o => Math.hypot(o.x - x, o.y - y) > 5));
-      // Remove football if clicked near
-      if (footballPos && Math.hypot(footballPos.x - x, footballPos.y - y) < 5 * footballScale) {
-        setFootballPos(null);
-      }
       setHasUnsavedChanges(true);
       return;
     }
 
-    if (tacticalTool === 'text') {
+    if (tool === 'eraser') {
+      // Sudda det som träffas – och fortsätt sudda så länge fingret/pennan dras över planen.
+      pushHistory();
+      setIsErasing(true);
+      eraseAt(x, y, true);
+      setHasUnsavedChanges(true);
+      return;
+    }
+
+    if (tool === 'text') {
       // Check if clicking near/on an existing text element to edit it directly
       const clickedText = tacticalDrawings.slice().reverse().find(d => {
         return d.type === 'text' && Math.hypot(d.points[0].x - x, d.points[0].y - y) < 8;
@@ -1744,9 +1838,15 @@ export default function LineupBuilder({
       return;
     }
 
+    if (isErasing) {
+      eraseAt(x, y);
+      return;
+    }
+
     if (!isDrawing) return;
 
-    if (tacticalTool === 'pen' || tacticalTool === 'freehand-arrow') {
+    const tool = activeToolRef.current;
+    if (tool === 'pen' || tool === 'run' || tool === 'freehand-arrow') {
       setCurrentPath(prev => {
         if (prev.length === 0) return [{ x, y }];
         const last = prev[prev.length - 1];
@@ -1754,8 +1854,8 @@ export default function LineupBuilder({
         if (dist < 1.2) return prev; // Filter out tiny jitters to stabilize the drawing and arrowheads
         return [...prev, { x, y }];
       });
-    } else if (tacticalTool === 'arrow' || tacticalTool === 'circle' || tacticalTool === 'rectangle' || tacticalTool === 'square') {
-      if (tacticalTool === 'square') {
+    } else if (tool === 'arrow' || tool === 'line' || tool === 'zone' || tool === 'circle' || tool === 'rectangle' || tool === 'square') {
+      if (tool === 'square') {
         const constrained = constrainSquare(currentPath[0], { x, y });
         setCurrentPath([currentPath[0], constrained]);
       } else {
@@ -1767,6 +1867,7 @@ export default function LineupBuilder({
   const handleTacticalEnd = () => {
     clearLongPress();
     dragHistoryPushedRef.current = false;
+    if (isErasing) setIsErasing(false);
 
     if (hasLongPressedRef.current) {
       hasLongPressedRef.current = false;
@@ -1781,18 +1882,24 @@ export default function LineupBuilder({
     }
 
     if (isDrawing) {
-      if (currentPath.length > 1) {
+      const tool = activeToolRef.current;
+      const first = currentPath[0];
+      const last = currentPath[currentPath.length - 1];
+      // Ett kort tryck (utan att dra) ska inte lämna små prickar efter sig.
+      if (currentPath.length > 1 && Math.hypot(last.x - first.x, last.y - first.y) > 0.8) {
         pushHistory();
-        const newId = Math.random().toString(36).substr(2, 9);
-        setTacticalDrawings(prev => [...prev, {
-          id: newId,
-          type: tacticalTool,
+        // Sparformat: löpning sparas som streckad frihandspil och zon som fylld fyrkant/cirkel,
+        // så att äldre appversioner fortfarande kan rita dem. Bara 'line' är en ny typ.
+        const newDrawing: any = {
+          id: Math.random().toString(36).substr(2, 9),
+          type: tool === 'run' ? 'freehand-arrow' : tool === 'zone' ? zoneShape : tool,
           points: currentPath,
           color: tacticalColor,
-          lineType: tacticalLineType,
+          lineType: tool === 'run' ? 'dashed' : 'solid',
           lineWidth: tacticalLineWidth
-        }]);
-        setSelectedDrawingId(newId);
+        };
+        if (tool === 'zone') newDrawing.filled = true;
+        setTacticalDrawings(prev => [...prev, newDrawing]);
         setHasUnsavedChanges(true);
       }
       setIsDrawing(false);
@@ -1832,7 +1939,6 @@ export default function LineupBuilder({
       setIsMaximized(false);
       setShowSavedLineups(true);
       setShowBenchMaximized(false);
-      setShowZoomMenu(false);
     }
   };
 
@@ -1866,7 +1972,6 @@ export default function LineupBuilder({
     setIsMaximized(false);
     setShowSavedLineups(true);
     setShowBenchMaximized(false);
-    setShowZoomMenu(false);
     
     setShowSaveOnCloseModal(false);
     setExitBoardName('');
@@ -1878,7 +1983,6 @@ export default function LineupBuilder({
     setIsMaximized(false);
     setShowSavedLineups(true);
     setShowBenchMaximized(false);
-    setShowZoomMenu(false);
     
     setShowSaveOnCloseModal(false);
     setExitBoardName('');
@@ -3251,7 +3355,7 @@ export default function LineupBuilder({
   }, [activePlayers, isMaximized, squad, squadPlayers]);
 
   const starters = useMemo(() => {
-    // Rittavlan: spelare på bänken stannar på bänken tills de tas fram via bänkpanelen.
+    // Taktiktavlan: spelare på bänken stannar på bänken tills de tas fram via bänkpanelen.
     if (isMaximized) return activePlayers.filter(p => !p.isSubstitute);
     return validLineupPlayers.filter(p => !p.isSubstitute);
   }, [isMaximized, activePlayers, validLineupPlayers]);
@@ -3462,164 +3566,6 @@ export default function LineupBuilder({
         >
           {/* Pitch Container */}
           <div className="w-full flex flex-col items-center justify-center relative">
-          {/* Tactical Toolbar for selected drawing */}
-          {(selectedDrawingId || tacticalTool === 'eraser') && !isTransforming && (
-            <div 
-              onPointerDown={(e) => e.stopPropagation()}
-              onPointerUp={(e) => e.stopPropagation()}
-              onPointerMove={(e) => e.stopPropagation()}
-              onClick={(e) => e.stopPropagation()}
-              className="absolute -top-16 left-1/2 -translate-x-1/2 z-[110] flex items-center gap-2 bg-white/95 dark:bg-zinc-900/95 backdrop-blur-md px-4 py-2 rounded-2xl shadow-xl border border-zinc-200 dark:border-zinc-800 animate-in fade-in slide-in-from-top-2 duration-300 pointer-events-auto"
-            >
-              {tacticalTool === 'eraser' ? (
-                <>
-                  <span className="text-xs font-bold text-orange-600 dark:text-orange-400 flex items-center gap-1.5 px-1 bg-orange-50/50 dark:bg-orange-950/20 py-1.5 rounded-xl border border-orange-200/50 dark:border-orange-900/40">
-                    <Eraser size={14} className="text-orange-600" /> Suddgummi aktivt. Klicka på fribandslinjer, pilar eller figurer för att sudda.
-                  </span>
-                  <button 
-                    onClick={() => {
-                      pushHistory();
-                      setTacticalDrawings([]);
-                      setFootballPos(null);
-                      setOpponents([]);
-                      setSelectedDrawingId(null);
-                      setHasUnsavedChanges(true);
-                    }}
-                    className="p-2 rounded-xl bg-red-50 dark:bg-red-900/20 text-red-600 hover:bg-red-100 transition-colors ml-2"
-                    title="Radera allt ritat"
-                  >
-                    <Trash2 size={18} />
-                  </button>
-                  <button 
-                    onClick={() => {
-                      setSelectedDrawingId(null);
-                      setTacticalTool('move');
-                    }}
-                    className="p-2 rounded-xl bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 hover:text-indigo-600 transition-colors ml-1"
-                    title="Avsluta suddgummi"
-                  >
-                    <X size={18} />
-                  </button>
-                </>
-              ) : (
-                <>
-                  <div className="flex items-center gap-1.5 border-r border-zinc-200 dark:border-zinc-800 pr-2 mr-1">
-                    {['#ffffff', '#ef4444', '#facc15'].map(color => (
-                      <button 
-                        key={color}
-                        onClick={() => {
-                          setTacticalColor(color);
-                          setTacticalDrawings(prev => prev.map(d => d.id === selectedDrawingId ? { ...d, color } : d));
-                          setHasUnsavedChanges(true);
-                        }}
-                        className={`w-6 h-6 rounded-full border-2 transition-transform active:scale-90 ${
-                          tacticalDrawings.find(d => d.id === selectedDrawingId)?.color === color ? 'border-indigo-500 scale-110' : 'border-transparent'
-                        }`}
-                        style={{ backgroundColor: color }}
-                      />
-                    ))}
-                  </div>
-
-                  {tacticalDrawings.find(d => d.id === selectedDrawingId)?.type === 'text' && (
-                    <button 
-                      onClick={() => setEditingTextId(selectedDrawingId)}
-                      className="p-2 rounded-xl bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 hover:text-indigo-600 transition-colors"
-                      title="Redigera text"
-                    >
-                      <Type size={18} />
-                    </button>
-                  )}
-
-                  <div className="flex items-center gap-1 px-2 border-r border-zinc-200 dark:border-zinc-800 mr-1 text-zinc-400">
-                    <button 
-                      onClick={() => {
-                        const drawing = tacticalDrawings.find(d => d.id === selectedDrawingId);
-                        if (!drawing) return;
-                        if (drawing.type === 'text') {
-                          const newSize = Math.max(8, (drawing.fontSize || 16) - 2);
-                          setTacticalFontSize(newSize);
-                          setTacticalDrawings(prev => prev.map(d => d.id === selectedDrawingId ? { ...d, fontSize: newSize } : d));
-                        } else {
-                          const newWidth = Math.max(0.2, (drawing.lineWidth || 0.8) - 0.1);
-                          setTacticalLineWidth(newWidth);
-                          setTacticalDrawings(prev => prev.map(d => d.id === selectedDrawingId ? { ...d, lineWidth: newWidth } : d));
-                        }
-                        setHasUnsavedChanges(true);
-                      }}
-                      className="p-1 hover:text-zinc-600"
-                    >
-                       <Minus size={16} />
-                    </button>
-                    <span className="text-[10px] font-black w-6 text-center text-zinc-800 dark:text-zinc-200">
-                      {(() => {
-                        const drawing = tacticalDrawings.find(d => d.id === selectedDrawingId);
-                        if (!drawing) return '0.8';
-                        return drawing.type === 'text' 
-                          ? Math.round(drawing.fontSize || 16) 
-                          : (drawing.lineWidth || 0.8).toFixed(1);
-                      })()}
-                    </span>
-                    <button 
-                      onClick={() => {
-                        const drawing = tacticalDrawings.find(d => d.id === selectedDrawingId);
-                        if (!drawing) return;
-                        if (drawing.type === 'text') {
-                          const newSize = Math.min(48, (drawing.fontSize || 16) + 2);
-                          setTacticalFontSize(newSize);
-                          setTacticalDrawings(prev => prev.map(d => d.id === selectedDrawingId ? { ...d, fontSize: newSize } : d));
-                        } else {
-                          const newWidth = Math.min(5, (drawing.lineWidth || 0.8) + 0.1);
-                          setTacticalLineWidth(newWidth);
-                          setTacticalDrawings(prev => prev.map(d => d.id === selectedDrawingId ? { ...d, lineWidth: newWidth } : d));
-                        }
-                        setHasUnsavedChanges(true);
-                      }}
-                      className="p-1 hover:text-zinc-600"
-                    >
-                       <Plus size={16} />
-                    </button>
-                  </div>
-
-                  <button 
-                    onClick={() => {
-                      setTacticalTool('eraser');
-                    }}
-                    className={`p-2 rounded-xl transition-colors ${
-                      ((tacticalTool as any) === 'eraser')
-                        ? 'bg-indigo-600 text-white shadow-md'
-                        : 'bg-orange-50 dark:bg-orange-900/10 text-orange-650 dark:text-orange-400 hover:bg-orange-100'
-                    }`}
-                    title="Aktivera suddgummi (Sudd-läge)"
-                  >
-                    <Eraser size={18} />
-                  </button>
-
-                  <button 
-                    onClick={() => {
-                      pushHistory();
-                      clearTactical();
-                      setSelectedDrawingId(null);
-                    }}
-                    className="p-2 rounded-xl bg-red-50 dark:bg-red-900/20 text-red-600 hover:bg-red-100 transition-colors"
-                    title="Radera allt ritat"
-                  >
-                    <Trash2 size={18} />
-                  </button>
-                  
-                  <button 
-                    onClick={() => {
-                      setSelectedDrawingId(null);
-                    }}
-                    className="p-2 rounded-xl bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 hover:text-indigo-600 transition-colors ml-1"
-                    title="Stäng inställningar"
-                  >
-                    <X size={18} />
-                  </button>
-                </>
-              )}
-            </div>
-          )}
-
           {/* The Football Pitch */}
           <div 
             className={`football-pitch relative rounded-none sm:rounded-2xl overflow-hidden border-y-[6px] border-x-0 sm:border-[8px] border-white/20 shadow-none transition-all duration-500 ${isFieldMaximized ? 'mb-0' : 'mb-0'} ${
@@ -3649,14 +3595,14 @@ export default function LineupBuilder({
             onPointerLeave={isSimplified ? undefined : handleTacticalEnd}
             style={{
               width: isFieldMaximized 
-                ? (orientation === 'landscape' ? `min(98vw, calc((100vh - 24px) * ${R}))` : `min(98vw, calc((100vh - 24px) * ${invR}))`)
+                ? (orientation === 'landscape' ? `min(calc(98vw - var(--board-rx, 0px)), calc((100vh - 24px - var(--board-ry, 0px)) * ${R}))` : `min(calc(98vw - var(--board-rx, 0px)), calc((100vh - 24px - var(--board-ry, 0px)) * ${invR}))`)
                 : isSimplified
                   ? '100%' // bildläget: fast storlek som sedan skalas till skärmen
                   : (orientation === 'landscape'
                     ? `min(100%, 1024px, calc((100vh - 160px) * ${R}))`
                     : `min(100%, 680px, calc((100dvh - 200px) * ${invR}))`),
               height: isFieldMaximized
-                ? (orientation === 'landscape' ? `min(calc(98vw / ${R}), calc(100vh - 24px))` : `min(calc(98vw / ${invR}), calc(100vh - 24px))`)
+                ? (orientation === 'landscape' ? `min(calc((98vw - var(--board-rx, 0px)) / ${R}), calc(100vh - 24px - var(--board-ry, 0px)))` : `min(calc((98vw - var(--board-rx, 0px)) / ${invR}), calc(100vh - 24px - var(--board-ry, 0px)))`)
                 : (orientation === 'landscape' 
                     ? 'auto' 
                     : 'auto'),
@@ -3757,9 +3703,12 @@ export default function LineupBuilder({
               style={{ width: '100%', height: '100%' }}
             >
               <defs>
-                <marker id={`arrowhead-white-${markerSuffix}`} markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="white" /></marker>
-                <marker id={`arrowhead-red-${markerSuffix}`} markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#ef4444" /></marker>
-                <marker id={`arrowhead-yellow-${markerSuffix}`} markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#facc15" /></marker>
+                {/* En pilspets per färg, så att spetsen alltid har samma färg som pilen. */}
+                {Array.from(new Set<string>([...BOARD_COLORS, tacticalColor, ...tacticalDrawings.map((d: any) => d.color || '#ffffff')])).map(color => (
+                  <marker key={color} id={`arrowhead-${markerKey(color)}-${markerSuffix}`} markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
+                    <path d="M0,0 L6,3 L0,6 Z" fill={color} />
+                  </marker>
+                ))}
               </defs>
               
               {/* Previous Drawings */}
@@ -3771,7 +3720,8 @@ export default function LineupBuilder({
                       cy={draw.points[0].y}
                       rx={Math.sqrt(Math.pow(draw.points[0].x - draw.points[1].x, 2) + Math.pow((draw.points[0].y - draw.points[1].y) / pitchAspectRatio, 2))}
                       ry={Math.sqrt(Math.pow(draw.points[0].x - draw.points[1].x, 2) + Math.pow((draw.points[0].y - draw.points[1].y) / pitchAspectRatio, 2)) * pitchAspectRatio}
-                      fill="none"
+                      fill={draw.filled ? draw.color : 'none'}
+                      fillOpacity={draw.filled ? 0.28 : undefined}
                       stroke={draw.color}
                       strokeWidth={(draw.lineWidth || 0.8) * 4}
                       strokeDasharray={draw.lineType === 'dashed' ? "6, 4" : "none"}
@@ -3783,7 +3733,8 @@ export default function LineupBuilder({
                       y={Math.min(draw.points[0].y, draw.points[1].y)}
                       width={Math.abs(draw.points[0].x - draw.points[1].x)}
                       height={Math.abs(draw.points[0].y - draw.points[1].y)}
-                      fill="none"
+                      fill={draw.filled ? draw.color : 'none'}
+                      fillOpacity={draw.filled ? 0.28 : undefined}
                       stroke={draw.color}
                       strokeWidth={(draw.lineWidth || 0.8) * 4}
                       strokeDasharray={draw.lineType === 'dashed' ? "6, 4" : "none"}
@@ -3813,7 +3764,7 @@ export default function LineupBuilder({
                       strokeLinecap="round"
                       strokeLinejoin="round"
                       strokeDasharray={draw.lineType === 'dashed' ? "6, 4" : "none"}
-                      markerEnd={draw.type === 'freehand-arrow' ? `url(#arrowhead-${draw.color === '#ffffff' ? 'white' : draw.color === '#ef4444' ? 'red' : 'yellow'}-${markerSuffix})` : undefined}
+                      markerEnd={draw.type === 'freehand-arrow' ? `url(#arrowhead-${markerKey(draw.color)}-${markerSuffix})` : undefined}
                       vectorEffect="non-scaling-stroke"
                     />
                   ) : (
@@ -3825,7 +3776,8 @@ export default function LineupBuilder({
                       stroke={draw.color}
                       strokeWidth={(draw.lineWidth || 0.8) * 4}
                       strokeDasharray={draw.lineType === 'dashed' ? "6, 4" : "none"}
-                      markerEnd={`url(#arrowhead-${draw.color === '#ffffff' ? 'white' : draw.color === '#ef4444' ? 'red' : 'yellow'}-${markerSuffix})`}
+                      strokeLinecap="round"
+                      markerEnd={draw.type === 'line' ? undefined : `url(#arrowhead-${markerKey(draw.color)}-${markerSuffix})`}
                       vectorEffect="non-scaling-stroke"
                     />
                   )}
@@ -3903,59 +3855,50 @@ export default function LineupBuilder({
               ))}
 
               {/* Current Drawing */}
-              {!isSimplified && isDrawing && currentPath.length > 1 && (
-                <g>
-                   {tacticalTool === 'circle' ? (
-                     <ellipse
-                       cx={currentPath[0].x}
-                       cy={currentPath[0].y}
-                       rx={Math.sqrt(Math.pow(currentPath[0].x - currentPath[1].x, 2) + Math.pow((currentPath[0].y - currentPath[1].y) / pitchAspectRatio, 2))}
-                       ry={Math.sqrt(Math.pow(currentPath[0].x - currentPath[1].x, 2) + Math.pow((currentPath[0].y - currentPath[1].y) / pitchAspectRatio, 2)) * pitchAspectRatio}
-                       fill="none"
-                       stroke={tacticalColor}
-                       strokeWidth={tacticalLineWidth * 4}
-                       strokeDasharray={tacticalLineType === 'dashed' ? "6, 4" : "none"}
-                       vectorEffect="non-scaling-stroke"
-                     />
-                   ) : (tacticalTool === 'rectangle' || tacticalTool === 'square') ? (
-                     <rect
-                       x={Math.min(currentPath[0].x, currentPath[1].x)}
-                       y={Math.min(currentPath[0].y, currentPath[1].y)}
-                       width={Math.abs(currentPath[0].x - currentPath[1].x)}
-                       height={Math.abs(currentPath[0].y - currentPath[1].y)}
-                       fill="none"
-                       stroke={tacticalColor}
-                       strokeWidth={tacticalLineWidth * 4}
-                       strokeDasharray={tacticalLineType === 'dashed' ? "6, 4" : "none"}
-                       vectorEffect="non-scaling-stroke"
-                     />
-                   ) : tacticalTool === 'pen' || tacticalTool === 'freehand-arrow' ? (
+              {!isSimplified && isDrawing && currentPath.length > 1 && (() => {
+                const tool = activeToolRef.current;
+                const shape = tool === 'zone' ? zoneShape : tool;
+                const filled = tool === 'zone';
+                const dash = tool === 'run' ? '6, 4' : 'none';
+                const width = tacticalLineWidth * 4;
+                const p0 = currentPath[0];
+                const p1 = currentPath[currentPath.length - 1];
+                if (shape === 'circle') {
+                  const rx = Math.sqrt(Math.pow(p0.x - p1.x, 2) + Math.pow((p0.y - p1.y) / pitchAspectRatio, 2));
+                  return <ellipse cx={p0.x} cy={p0.y} rx={rx} ry={rx * pitchAspectRatio} fill={filled ? tacticalColor : 'none'} fillOpacity={filled ? 0.28 : undefined} stroke={tacticalColor} strokeWidth={width} vectorEffect="non-scaling-stroke" />;
+                }
+                if (shape === 'rectangle' || shape === 'square') {
+                  return <rect x={Math.min(p0.x, p1.x)} y={Math.min(p0.y, p1.y)} width={Math.abs(p0.x - p1.x)} height={Math.abs(p0.y - p1.y)} fill={filled ? tacticalColor : 'none'} fillOpacity={filled ? 0.28 : undefined} stroke={tacticalColor} strokeWidth={width} vectorEffect="non-scaling-stroke" />;
+                }
+                if (tool === 'pen' || tool === 'run' || tool === 'freehand-arrow') {
+                  return (
                     <path
-                      d={`M ${currentPath[0].x} ${currentPath[0].y} ${currentPath.slice(1).map(p => `L ${p.x} ${p.y}`).join(' ')}`}
+                      d={`M ${p0.x} ${p0.y} ${currentPath.slice(1).map(p => `L ${p.x} ${p.y}`).join(' ')}`}
                       fill="none"
                       stroke={tacticalColor}
-                      strokeWidth={tacticalLineWidth * 4}
+                      strokeWidth={width}
                       strokeLinecap="round"
                       strokeLinejoin="round"
-                      strokeDasharray={tacticalLineType === 'dashed' ? "6, 4" : "none"}
-                      markerEnd={tacticalTool === 'freehand-arrow' ? `url(#arrowhead-${tacticalColor === '#ffffff' ? 'white' : tacticalColor === '#ef4444' ? 'red' : 'yellow'}-${markerSuffix})` : undefined}
+                      strokeDasharray={dash}
+                      markerEnd={tool === 'pen' ? undefined : `url(#arrowhead-${markerKey(tacticalColor)}-${markerSuffix})`}
                       vectorEffect="non-scaling-stroke"
                     />
-                  ) : (
-                    <line
-                      x1={currentPath[0].x}
-                      y1={currentPath[0].y}
-                      x2={currentPath[1].x}
-                      y2={currentPath[1].y}
-                      stroke={tacticalColor}
-                      strokeWidth={tacticalLineWidth * 4}
-                      strokeDasharray={tacticalLineType === 'dashed' ? "6, 4" : "none"}
-                      markerEnd={`url(#arrowhead-${tacticalColor === '#ffffff' ? 'white' : tacticalColor === '#ef4444' ? 'red' : 'yellow'}-${markerSuffix})`}
-                      vectorEffect="non-scaling-stroke"
-                    />
-                  )}
-                </g>
-              )}
+                  );
+                }
+                return (
+                  <line
+                    x1={p0.x}
+                    y1={p0.y}
+                    x2={p1.x}
+                    y2={p1.y}
+                    stroke={tacticalColor}
+                    strokeWidth={width}
+                    strokeLinecap="round"
+                    markerEnd={tool === 'line' ? undefined : `url(#arrowhead-${markerKey(tacticalColor)}-${markerSuffix})`}
+                    vectorEffect="non-scaling-stroke"
+                  />
+                );
+              })()}
 
               {/* Automatically generated Delaunay Network (Passningsmöjligheter) */}
               {showDelaunayNetwork && starters.length >= 2 && (() => {
@@ -5613,8 +5556,148 @@ export default function LineupBuilder({
     setIsMaximized(true);
     setShowSavedLineups(false);
     setShowBenchMaximized(false);
-    setShowZoomMenu(false);
+    setIsDrawingsVisible(true);
+    setBoardMode('edit');
+    setBoardToolbarOpen(true);
   };
+
+  /* ---------- Taktiktavlan: verktygsrad, storskärm och bildläge ---------- */
+
+  const boardBarClass = 'flex items-center gap-1 p-1 rounded-2xl bg-white/95 dark:bg-zinc-900/95 backdrop-blur-md border border-zinc-200 dark:border-zinc-700 shadow-xl';
+  const boardBtnClass = 'w-11 h-11 sm:w-12 sm:h-12';
+  const boardDividerClass = 'shrink-0 bg-zinc-200 dark:bg-zinc-700 w-px h-7 mx-0.5 [.flex-col>&]:w-7 [.flex-col>&]:h-px [.flex-col>&]:mx-0 [.flex-col>&]:my-0.5';
+  const boardSectionClass = 'px-3 pb-1 text-xs font-bold text-zinc-500 dark:text-zinc-400';
+  // Lodrät verktygsrad när skärmen ligger ner och är bred nog (iPad liggande, dator).
+  const boardVertical = viewport.w > viewport.h && viewport.w >= 900;
+  const boardToolbarVisible = isMaximized && (boardMode === 'edit' || (boardMode === 'present' && boardToolbarOpen));
+
+  const boardTools: { id: TacticalTool; label: string; icon: React.ReactNode }[] = [
+    { id: 'move', label: 'Flytta', icon: <Move size={22} /> },
+    { id: 'pen', label: 'Penna', icon: <Pencil size={22} /> },
+    { id: 'arrow', label: 'Pil (passning)', icon: <ArrowUpRight size={22} /> },
+    {
+      id: 'run',
+      label: 'Löpning (streckad pil)',
+      icon: (
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <path d="M4 19 C 8 19, 9 9, 17 7" strokeDasharray="3 3" />
+          <path d="M13 5 L18 6.5 L16 11" />
+        </svg>
+      ),
+    },
+    { id: 'line', label: 'Linje', icon: <Slash size={22} /> },
+    {
+      id: 'zone',
+      label: 'Zon',
+      icon: (
+        <span className="relative w-5 h-5 rounded-md border-2 border-current overflow-hidden">
+          <span className="absolute inset-0 bg-current opacity-30" />
+        </span>
+      ),
+    },
+    { id: 'text', label: 'Text', icon: <Type size={22} /> },
+    { id: 'ball', label: 'Boll', icon: <SoccerBallIcon size={22} /> },
+    {
+      id: 'opponent',
+      label: 'Motståndare',
+      icon: <span className="w-5 h-5 rounded-full border-2 border-white/80 shadow" style={{ backgroundColor: opponentColor }} />,
+    },
+    { id: 'eraser', label: 'Sudd (dra över det som ska bort)', icon: <Eraser size={22} /> },
+  ];
+
+  const selectedDrawing = selectedDrawingId ? tacticalDrawings.find(d => d.id === selectedDrawingId) : null;
+  const resizeSelectedDrawing = (dir: 1 | -1) => {
+    if (!selectedDrawing) return;
+    pushHistory();
+    if (selectedDrawing.type === 'text') {
+      const size = Math.max(8, Math.min(48, (selectedDrawing.fontSize || 16) + dir * 2));
+      setTacticalDrawings(prev => prev.map(d => d.id === selectedDrawingId ? { ...d, fontSize: size } : d));
+    } else {
+      const width = Math.max(0.2, Math.min(3, Math.round(((selectedDrawing.lineWidth || 0.8) + dir * 0.2) * 10) / 10));
+      setTacticalDrawings(prev => prev.map(d => d.id === selectedDrawingId ? { ...d, lineWidth: width } : d));
+    }
+    setHasUnsavedChanges(true);
+  };
+
+  const renderBoardStepper = (label: string, value: string, onMinus: () => void, onPlus: () => void) => (
+    <div className="flex items-center justify-between gap-3 px-3 py-1.5">
+      <span className="text-sm font-semibold text-zinc-800 dark:text-zinc-100">{label}</span>
+      <div className="flex items-center gap-1">
+        <IconButton label={`Minska ${label.toLowerCase()}`} onClick={onMinus}><Minus size={18} /></IconButton>
+        <span className="min-w-[3.5rem] text-center text-sm font-bold tabular-nums text-zinc-900 dark:text-white">{value}</span>
+        <IconButton label={`Öka ${label.toLowerCase()}`} onClick={onPlus}><Plus size={18} /></IconButton>
+      </div>
+    </div>
+  );
+
+  const renderBoardSwitch = (on: boolean) => (
+    <span className={`relative w-11 h-6 shrink-0 rounded-full transition-colors ${on ? 'bg-indigo-600' : 'bg-zinc-300 dark:bg-zinc-700'}`}>
+      <span className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-all ${on ? 'left-[22px]' : 'left-0.5'}`} />
+    </span>
+  );
+
+  const requestBoardFullscreen = () => {
+    try {
+      const el = document.documentElement as any;
+      const req = el.requestFullscreen || el.webkitRequestFullscreen;
+      if (req && !document.fullscreenElement) req.call(el)?.catch?.(() => {});
+    } catch (e) {}
+  };
+  const boardHintTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const flashBoardHint = () => {
+    setShowBoardHint(true);
+    if (boardHintTimer.current) clearTimeout(boardHintTimer.current);
+    boardHintTimer.current = setTimeout(() => setShowBoardHint(false), 2000);
+  };
+  const closeBoardPopups = () => {
+    (document.activeElement as HTMLElement | null)?.blur?.();
+    setSelectedDrawingId(null);
+    setEditingTextId(null);
+    setShowBoardMore(false);
+    setShowBoardColors(false);
+    setShowSavedLineups(false);
+  };
+  const enterBoardSnapshot = () => {
+    closeBoardPopups();
+    setShowBenchMaximized(false);
+    setBoardMode('snapshot');
+    flashBoardHint();
+    requestBoardFullscreen();
+  };
+  const enterBoardPresent = () => {
+    closeBoardPopups();
+    setBoardToolbarOpen(false);
+    setBoardMode('present');
+    requestBoardFullscreen();
+  };
+  const exitBoardMode = useCallback(() => {
+    setBoardMode('edit');
+    setBoardToolbarOpen(true);
+    setShowBoardHint(false);
+    try {
+      const d = document as any;
+      if (d.fullscreenElement || d.webkitFullscreenElement) (d.exitFullscreen || d.webkitExitFullscreen)?.call(d);
+    } catch (e) {}
+  }, []);
+  useEffect(() => {
+    if (boardMode === 'edit') return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') exitBoardMode(); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [boardMode, exitBoardMode]);
+  useEffect(() => {
+    if (!isMaximized && boardMode !== 'edit') exitBoardMode();
+  }, [isMaximized, boardMode, exitBoardMode]);
+  useEffect(() => () => { if (boardHintTimer.current) clearTimeout(boardHintTimer.current); }, []);
+
+  // Plats som verktygsraderna tar, så att planen krymper i stället för att hamna under dem.
+  const boardReserve = (() => {
+    if (!isMaximized || boardMode === 'snapshot') return { top: 0, left: 0, bottom: 0 };
+    const bar = viewport.w < 640 ? 64 : 72;
+    const top = boardMode === 'edit' ? bar : 0;
+    if (!boardToolbarVisible) return { top, left: 0, bottom: 0 };
+    return boardVertical ? { top, left: bar + 8, bottom: 0 } : { top, left: 0, bottom: bar };
+  })();
 
   // Verktygsraden under planen.
   const renderToolbar = () => (
@@ -5661,7 +5744,7 @@ export default function LineupBuilder({
           >
             {showPositionDescriptions ? <EyeOff size={18} /> : <Eye size={18} />}
           </IconButton>
-          <IconButton label="Öppna rittavlan" onClick={openTacticalBoard}><Maximize2 size={18} /></IconButton>
+          <IconButton label="Öppna taktiktavlan" onClick={openTacticalBoard}><Maximize2 size={18} /></IconButton>
         </div>
       </div>
       {!isWide && (
@@ -5701,247 +5784,402 @@ export default function LineupBuilder({
   return (
     <div
       ref={rootRef} 
+      style={isMaximized ? ({
+        paddingTop: `calc(env(safe-area-inset-top, 0px) + ${boardReserve.top + 4}px)`,
+        paddingLeft: boardReserve.left ? `calc(env(safe-area-inset-left, 0px) + ${boardReserve.left}px)` : undefined,
+        paddingBottom: boardReserve.bottom ? `calc(env(safe-area-inset-bottom, 0px) + ${boardReserve.bottom}px)` : undefined,
+        '--board-rx': `${boardReserve.left}px`,
+        '--board-ry': `${boardReserve.top + boardReserve.bottom}px`,
+      } as React.CSSProperties) : undefined}
       className={`mx-auto transition-all duration-500 w-full px-0 sm:px-6 ${isMaximized ? 'fixed inset-0 z-50 bg-zinc-50 dark:bg-zinc-955 text-zinc-900 dark:text-zinc-100 p-1 xs:p-2 md:p-3 pt-safe overflow-hidden flex flex-col items-center justify-center' : presentationMode ? 'flex-1 min-h-0 flex items-center justify-center overflow-hidden' : 'max-w-[1600px] pt-safe sm:pt-4 pb-16'}`}
     >
       {isMaximized && (
         <>
-          <div className="fixed top-[calc(0.75rem+env(safe-area-inset-top,0px))] left-3 right-3 z-[100] flex justify-end pointer-events-none">
-            <div className="flex items-center gap-1.5 overflow-x-auto whitespace-nowrap scrollbar-none touch-pan-x py-1.5 px-2.5 pointer-events-auto max-w-full bg-white/95 dark:bg-zinc-900/95 backdrop-blur-md rounded-2xl border border-zinc-200 dark:border-zinc-700 shadow-2xl">
-              <button
-                onClick={() => setIsDrawingsVisible(!isDrawingsVisible)}
-                className={`w-8 h-8 rounded-lg flex items-center justify-center shadow-sm border transition-all flex-shrink-0 group pointer-events-auto cursor-pointer ${
-                  isDrawingsVisible
-                    ? 'bg-indigo-600 text-white border-indigo-500 hover:bg-indigo-700'
-                    : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-800 dark:text-zinc-100 border-zinc-200 dark:border-zinc-700 hover:bg-zinc-200 dark:hover:bg-zinc-700 hover:text-black dark:hover:text-white'
-                }`}
-                title={isDrawingsVisible ? "Dölj ritat/placerat på planen" : "Visa ritat/placerat på planen"}
-              >
-                {isDrawingsVisible ? <Eye size={16} /> : <EyeOff size={16} />}
-              </button>
-              <button
-                onClick={() => setShowDelaunayNetwork(!showDelaunayNetwork)}
-                className={`w-8 h-8 rounded-lg flex items-center justify-center shadow-sm border transition-all flex-shrink-0 group pointer-events-auto cursor-pointer ${
-                  showDelaunayNetwork
-                    ? 'bg-indigo-600 text-white border-indigo-500 hover:bg-indigo-700'
-                    : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-800 dark:text-zinc-100 border-zinc-200 dark:border-zinc-700 hover:bg-zinc-200 dark:hover:bg-zinc-700 hover:text-black dark:hover:text-white'
-                }`}
-                title={showDelaunayNetwork ? "Dölj passningsnät (Delaunay)" : "Visa passningsnät (Delaunay)"}
-              >
-                <Network size={16} />
-              </button>
-              <button
-                onClick={() => {
-                  const nextVisible = !isControlsVisible;
-                  setIsControlsVisible(nextVisible);
-                  if (nextVisible) {
-                    setTacticalTool('pen');
-                    setIsDrawingsVisible(true);
-                  } else {
-                    setTacticalTool('move');
-                  }
-                }}
-                className={`w-8 h-8 rounded-lg flex items-center justify-center shadow-sm border transition-all flex-shrink-0 group pointer-events-auto cursor-pointer ${
-                  isControlsVisible 
-                    ? 'bg-indigo-600 text-white border-indigo-500 hover:bg-indigo-700' 
-                    : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-800 dark:text-zinc-100 border-zinc-200 dark:border-zinc-700 hover:bg-zinc-200 dark:hover:bg-zinc-700 hover:text-black dark:hover:text-white'
-                }`}
-                title={isControlsVisible ? "Dölj ritverktyg" : "Visa ritverktyg"}
-              >
-                <Pencil size={16} />
-              </button>
-
-              {/* Ångra & Gör om snabbknappar */}
-              <div className="flex items-center gap-0.5 bg-zinc-100 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 p-0.5 rounded-lg shrink-0">
-                <button
-                  type="button"
-                  onClick={handleUndo}
-                  disabled={history.length === 0}
-                  className={`w-7 h-7 rounded-md flex items-center justify-center transition-all ${
-                    history.length === 0
-                      ? 'text-zinc-300 dark:text-zinc-600 cursor-not-allowed opacity-40'
-                      : 'text-zinc-700 dark:text-zinc-200 hover:text-black dark:hover:text-white hover:bg-zinc-200 dark:hover:bg-zinc-700 cursor-pointer active:scale-95'
-                  }`}
-                  title="Ångra borttagning eller flytt (Ctrl+Z)"
+          {/* Övre raden (bara i vanligt läge): ångra/gör om/visa ritningar till vänster,
+              taktiktavlor, bildläge, storskärm, mer och stäng till höger. */}
+          {boardMode === 'edit' && (
+            <div className="fixed top-[calc(0.5rem+env(safe-area-inset-top,0px))] left-2 right-2 z-[60] flex items-start justify-between gap-2 pointer-events-none">
+              <div className={`${boardBarClass} pointer-events-auto`}>
+                <IconButton label="Ångra" className={boardBtnClass} onClick={handleUndo} disabled={history.length === 0}><Undo2 size={22} /></IconButton>
+                <IconButton label="Gör om" className={boardBtnClass} onClick={handleRedo} disabled={future.length === 0}><Redo2 size={22} /></IconButton>
+                <IconButton
+                  label={isDrawingsVisible ? 'Dölj ritningar' : 'Visa ritningar'}
+                  className={boardBtnClass}
+                  active={!isDrawingsVisible}
+                  onClick={() => setIsDrawingsVisible(!isDrawingsVisible)}
                 >
-                  <Undo2 size={15} />
-                </button>
-                <button
-                  type="button"
-                  onClick={handleRedo}
-                  disabled={future.length === 0}
-                  className={`w-7 h-7 rounded-md flex items-center justify-center transition-all ${
-                    future.length === 0
-                      ? 'text-zinc-300 dark:text-zinc-600 cursor-not-allowed opacity-40'
-                      : 'text-zinc-700 dark:text-zinc-200 hover:text-black dark:hover:text-white hover:bg-zinc-200 dark:hover:bg-zinc-700 cursor-pointer active:scale-95'
-                  }`}
-                  title="Gör om (Ctrl+Y / Ctrl+Shift+Z)"
-                >
-                  <Redo2 size={15} />
-                </button>
+                  {isDrawingsVisible ? <Eye size={22} /> : <EyeOff size={22} />}
+                </IconButton>
               </div>
-
-              {/* 2 Lag (11v11) Snabbknapp: Blått vs Rött lag */}
-              <button
-                onClick={() => setupTwoTeams()}
-                className="px-2.5 h-8 bg-blue-600 hover:bg-blue-700 text-white rounded-lg flex items-center gap-1.5 shadow-md border border-blue-500 text-[11px] font-bold transition-all shrink-0 cursor-pointer pointer-events-auto active:scale-95"
-                title="Ställ upp 2 lag (11 mot 11: Blått lag mot Rött lag med nummer 1-11)"
-              >
-                <Users size={15} />
-                <span>2 Lag (11v11)</span>
-              </button>
-
-              {/* Visa/dölj beskrivningar (Badgen under spelaren) snabbknapp */}
-              <button
-                onClick={() => {
-                  setShowPositionDescriptions(!showPositionDescriptions);
-                  setHasUnsavedChanges(true);
-                }}
-                className={`px-2.5 h-8 rounded-lg flex items-center gap-1.5 shadow-sm border text-[11px] font-bold transition-all shrink-0 cursor-pointer pointer-events-auto active:scale-95 ${
-                  showPositionDescriptions
-                    ? 'bg-indigo-600 text-white border-indigo-500 hover:bg-indigo-700 shadow-md'
-                    : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-800 dark:text-zinc-100 border-zinc-200 dark:border-zinc-700 hover:bg-zinc-200 dark:hover:bg-zinc-700 hover:text-black dark:hover:text-white'
-                }`}
-                title={showPositionDescriptions ? "Dölj positionsbeskrivningar under spelarna på planen" : "Visa positionsbeskrivningar under spelarna på planen"}
-              >
-                {showPositionDescriptions ? <EyeOff size={15} /> : <Eye size={15} />}
-                <span>{showPositionDescriptions ? 'Dölj beskrivningar' : 'Visa beskrivningar'}</span>
-              </button>
-
-              <button
-                onClick={() => {
-                  setFormationTab('blue');
-                  setShowFormationModal(true);
-                }}
-                className={`w-8 h-8 rounded-lg flex items-center justify-center shadow-sm border transition-all flex-shrink-0 group pointer-events-auto cursor-pointer ${
-                  showFormationModal
-                    ? 'bg-indigo-600 text-white border-indigo-500 hover:bg-indigo-700'
-                    : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-800 dark:text-zinc-100 border-zinc-200 dark:border-zinc-700 hover:bg-zinc-200 dark:hover:bg-zinc-700 hover:text-black dark:hover:text-white'
-                }`}
-                title="Välj formation för Blått & Rött lag"
-              >
-                <Layout size={16} />
-              </button>
-              <button
-                onClick={() => setShowNotesModal(true)}
-                className="w-8 h-8 bg-zinc-100 dark:bg-zinc-800 text-zinc-800 dark:text-zinc-100 border border-zinc-200 dark:border-zinc-700 hover:bg-zinc-200 dark:hover:bg-zinc-700 hover:text-black dark:hover:text-white rounded-lg flex items-center justify-center shadow-sm transition-all flex-shrink-0 group pointer-events-auto cursor-pointer"
-                title="Anteckningar"
-              >
-                <ClipboardList size={16} />
-              </button>
-              <button
-                onClick={() => setShowTacticalSavedBoardsModal(true)}
-                className={`w-8 h-8 rounded-lg flex items-center justify-center shadow-sm border transition-all flex-shrink-0 group pointer-events-auto cursor-pointer ${
-                  showTacticalSavedBoardsModal 
-                    ? 'bg-indigo-600 text-white border-indigo-500 hover:bg-indigo-700' 
-                    : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-800 dark:text-zinc-100 border-zinc-200 dark:border-zinc-700 hover:bg-zinc-200 dark:hover:bg-zinc-700 hover:text-black dark:hover:text-white'
-                }`}
-                title="Spara / Öppna rittavlor"
-              >
-                <Bookmark size={16} />
-              </button>
-              <button
-                onClick={() => {
-                  const nextVal = !showSavedLineups;
-                  setShowSavedLineups(nextVal);
-                  if (nextVal) {
-                    setShowBenchMaximized(false);
-                    setShowZoomMenu(false);
-                  }
-                }}
-                className={`w-8 h-8 rounded-lg flex items-center justify-center shadow-sm border transition-all flex-shrink-0 group pointer-events-auto cursor-pointer ${
-                  showSavedLineups 
-                    ? 'bg-indigo-600 text-white border-indigo-500 hover:bg-indigo-700' 
-                    : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-800 dark:text-zinc-100 border-zinc-200 dark:border-zinc-700 hover:bg-zinc-200 dark:hover:bg-zinc-700 hover:text-black dark:hover:text-white'
-                }`}
-                title={showSavedLineups ? "Dölj sparade laguppställningar" : "Visa sparade laguppställningar"}
-              >
-                <FolderOpen size={16} />
-              </button>
-              {isCoachOrAdmin && lineup && (
-                <button
-                  onClick={() => {
-                    onSaveLineup({ ...lineup, isPublishedToPlayers: !lineup.isPublishedToPlayers });
-                  }}
-                  className={`px-2.5 h-8 rounded-lg flex items-center gap-1.5 shadow-sm border text-[11px] font-bold transition-all shrink-0 pointer-events-auto cursor-pointer ${
-                    lineup.isPublishedToPlayers
-                      ? 'bg-emerald-600 text-white border-emerald-500 hover:bg-emerald-700'
-                      : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-800 dark:text-zinc-100 border-zinc-200 dark:border-zinc-700 hover:bg-zinc-200 dark:hover:bg-zinc-700 hover:text-black dark:hover:text-white'
-                  }`}
-                  title={lineup.isPublishedToPlayers ? "Publicerad för spelare (Klicka för att dölja)" : "Publicera för spelare"}
-                >
-                  {lineup.isPublishedToPlayers ? <Eye size={15} /> : <EyeOff size={15} />}
-                  <span className="hidden sm:inline">{lineup.isPublishedToPlayers ? 'Publicerad' : 'Publicera'}</span>
-                </button>
-              )}
-              <button
-                onClick={() => {
-                  const nextVal = !showBenchMaximized;
-                  setShowBenchMaximized(nextVal);
-                  if (nextVal) {
-                    setShowSavedLineups(false);
-                    setShowZoomMenu(false);
-                  }
-                }}
-                className={`w-8 h-8 rounded-lg flex items-center justify-center shadow-sm border transition-all flex-shrink-0 group pointer-events-auto cursor-pointer ${
-                  showBenchMaximized 
-                    ? 'bg-indigo-600 text-white border-indigo-500 hover:bg-indigo-700' 
-                    : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-800 dark:text-zinc-100 border-zinc-200 dark:border-zinc-700 hover:bg-zinc-200 dark:hover:bg-zinc-700 hover:text-black dark:hover:text-white'
-                }`}
-                title={showBenchMaximized ? "Dölj avbätare" : "Visa avbytare (Bänk)"}
-              >
-                <Shirt size={16} />
-              </button>
-              <button
-                onClick={() => {
-                  const nextVal = !showZoomMenu;
-                  setShowZoomMenu(nextVal);
-                  if (nextVal) {
-                    setShowSavedLineups(false);
-                    setShowBenchMaximized(false);
-                  }
-                }}
-                className={`w-8 h-8 rounded-lg flex items-center justify-center shadow-sm border transition-all flex-shrink-0 group pointer-events-auto cursor-pointer ${
-                  showZoomMenu 
-                    ? 'bg-indigo-600 text-white border-indigo-500 hover:bg-indigo-700' 
-                    : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-800 dark:text-zinc-100 border-zinc-200 dark:border-zinc-700 hover:bg-zinc-200 dark:hover:bg-zinc-700 hover:text-black dark:hover:text-white'
-                }`}
-                title={showZoomMenu ? "Dölj inställningar & zoom" : "Visa inställningar & zoom"}
-              >
-                <Settings size={16} />
-              </button>
-              <button
-                onClick={() => {
-                  const newOrientation = orientation === 'vertical' ? 'landscape' : 'vertical';
-                  setOrientation(newOrientation);
-                  if (newOrientation === 'landscape') {
-                    setAttackDirection('right');
-                  } else {
-                    setAttackDirection('up');
-                  }
-                }}
-                className="w-8 h-8 bg-zinc-100 dark:bg-zinc-800 text-zinc-800 dark:text-zinc-100 border border-zinc-200 dark:border-zinc-700 hover:bg-zinc-200 dark:hover:bg-zinc-700 hover:text-black dark:hover:text-white rounded-lg flex items-center justify-center shadow-sm transition-all flex-shrink-0 group pointer-events-auto cursor-pointer"
-                title={orientation === 'landscape' ? "Byt till stående läge" : "Byt till liggande läge (TV)"}
-              >
-                {orientation === 'landscape' ? <Smartphone size={16} /> : <Monitor size={16} />}
-              </button>
-              <button
-                onClick={handleCloseTacticalRequest}
-                className="w-8 h-8 bg-zinc-100 dark:bg-zinc-800 text-zinc-800 dark:text-zinc-100 border border-zinc-200 dark:border-zinc-700 hover:bg-zinc-200 dark:hover:bg-zinc-700 hover:text-black dark:hover:text-white rounded-lg flex items-center justify-center shadow-sm transition-all flex-shrink-0 group pointer-events-auto cursor-pointer"
-                title="Lämna rittavlan"
-              >
-                <Minimize2 size={16} className="group-hover:rotate-12 transition-transform" />
-              </button>
+              <div className={`${boardBarClass} pointer-events-auto`}>
+                <IconButton label="Spara eller öppna taktiktavlor" className={boardBtnClass} active={showTacticalSavedBoardsModal} onClick={() => setShowTacticalSavedBoardsModal(true)}><Bookmark size={22} /></IconButton>
+                <IconButton label="Bildläge (skärmbild utan knappar)" className={boardBtnClass} onClick={enterBoardSnapshot}><Camera size={22} /></IconButton>
+                {viewport.w >= 640 && (
+                  <IconButton label="Visa på storskärm" className={boardBtnClass} onClick={enterBoardPresent}><Tv size={22} /></IconButton>
+                )}
+                <IconButton label="Mer" className={boardBtnClass} active={showBoardMore} onClick={() => { setShowBoardColors(false); setShowBoardMore(true); }}><MoreHorizontal size={22} /></IconButton>
+                <IconButton label="Stäng taktiktavlan" className={boardBtnClass} onClick={handleCloseTacticalRequest}><X size={22} /></IconButton>
+              </div>
             </div>
-          </div>
+          )}
+
+          {/* Verktygsraden: längst ner, eller lodrätt längs vänsterkanten när skärmen ligger ner. */}
+          {boardToolbarVisible && (
+            <div
+              className={boardVertical
+                ? 'fixed left-[calc(0.5rem+env(safe-area-inset-left,0px))] top-0 bottom-0 z-[60] flex items-center pointer-events-none'
+                : 'fixed left-2 right-2 bottom-[calc(0.5rem+env(safe-area-inset-bottom,0px))] z-[60] flex justify-center pointer-events-none'}
+            >
+              <div
+                className={`${boardBarClass} pointer-events-auto ${boardVertical
+                  ? 'flex-col max-h-[calc(100vh-1rem)] overflow-y-auto scrollbar-none'
+                  : 'max-w-full overflow-x-auto touch-pan-x scrollbar-none'}`}
+              >
+                {boardMode === 'present' && (
+                  <>
+                    <IconButton label="Ångra" className={boardBtnClass} onClick={handleUndo} disabled={history.length === 0}><Undo2 size={22} /></IconButton>
+                    <IconButton label="Gör om" className={boardBtnClass} onClick={handleRedo} disabled={future.length === 0}><Redo2 size={22} /></IconButton>
+                    <span className={boardDividerClass} />
+                  </>
+                )}
+                {boardTools.map(tool => (
+                  <IconButton
+                    key={tool.id}
+                    label={tool.label}
+                    className={boardBtnClass}
+                    active={tacticalTool === tool.id}
+                    onClick={() => setTacticalTool(tool.id)}
+                  >
+                    {tool.icon}
+                  </IconButton>
+                ))}
+                <span className={boardDividerClass} />
+                <IconButton
+                  label={`Färg: ${BOARD_COLOR_NAMES[tacticalColor] || 'egen'}`}
+                  className={boardBtnClass}
+                  active={showBoardColors}
+                  onClick={() => setShowBoardColors(!showBoardColors)}
+                >
+                  <span className="w-6 h-6 rounded-full border-2 border-zinc-300 dark:border-zinc-600 shadow-inner" style={{ backgroundColor: tacticalColor }} />
+                </IconButton>
+                <IconButton
+                  label={showBenchMaximized ? 'Dölj bänken' : 'Visa bänken'}
+                  className={boardBtnClass}
+                  active={showBenchMaximized}
+                  onClick={() => {
+                    setShowBenchMaximized(!showBenchMaximized);
+                    setShowSavedLineups(false);
+                  }}
+                >
+                  <Users size={22} />
+                </IconButton>
+                {boardMode === 'present' && (
+                  <IconButton label="Fäll in verktygen" className={boardBtnClass} onClick={() => { setBoardToolbarOpen(false); setShowBoardColors(false); }}>
+                    {boardVertical ? <ChevronLeft size={22} /> : <ChevronDown size={22} />}
+                  </IconButton>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Färgval för ritverktygen */}
+          {boardToolbarVisible && showBoardColors && (
+            <div
+              className={boardVertical
+                ? 'fixed left-[calc(5rem+env(safe-area-inset-left,0px))] top-1/2 -translate-y-1/2 z-[61]'
+                : 'fixed left-1/2 -translate-x-1/2 bottom-[calc(5rem+env(safe-area-inset-bottom,0px))] z-[61]'}
+            >
+              <div className={`${boardBarClass} ${boardVertical ? 'flex-col' : ''}`}>
+                {BOARD_COLORS.map(color => (
+                  <button
+                    key={color}
+                    type="button"
+                    title={BOARD_COLOR_NAMES[color]}
+                    aria-label={BOARD_COLOR_NAMES[color]}
+                    onClick={() => {
+                      setTacticalColor(color);
+                      setShowBoardColors(false);
+                    }}
+                    className={`w-11 h-11 sm:w-12 sm:h-12 rounded-xl flex items-center justify-center cursor-pointer transition-all active:scale-95 ${tacticalColor === color ? 'bg-indigo-100 dark:bg-indigo-950' : 'hover:bg-zinc-100 dark:hover:bg-zinc-800'}`}
+                  >
+                    <span className={`w-7 h-7 rounded-full border-2 ${tacticalColor === color ? 'border-indigo-600 dark:border-indigo-400' : 'border-zinc-300 dark:border-zinc-600'}`} style={{ backgroundColor: color }} />
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Verktyg för en vald ritning (i flyttläget) */}
+          {boardMode === 'edit' && tacticalTool === 'move' && selectedDrawing && !isTransforming && !editingTextId && (
+            <div className={`fixed left-2 right-2 z-[60] flex justify-center pointer-events-none ${boardVertical
+              ? 'bottom-[calc(0.5rem+env(safe-area-inset-bottom,0px))]'
+              : 'top-[calc(4.25rem+env(safe-area-inset-top,0px))] sm:top-[calc(4.75rem+env(safe-area-inset-top,0px))]'}`}>
+              <div className={`${boardBarClass} pointer-events-auto max-w-full overflow-x-auto touch-pan-x scrollbar-none`}>
+                {BOARD_COLORS.map(color => (
+                  <button
+                    key={color}
+                    type="button"
+                    title={BOARD_COLOR_NAMES[color]}
+                    aria-label={BOARD_COLOR_NAMES[color]}
+                    onClick={() => {
+                      pushHistory();
+                      setTacticalDrawings(prev => prev.map(d => d.id === selectedDrawingId ? { ...d, color } : d));
+                      setHasUnsavedChanges(true);
+                    }}
+                    className="w-10 h-10 shrink-0 rounded-xl flex items-center justify-center cursor-pointer hover:bg-zinc-100 dark:hover:bg-zinc-800"
+                  >
+                    <span className={`w-6 h-6 rounded-full border-2 ${selectedDrawing.color === color ? 'border-indigo-600 dark:border-indigo-400' : 'border-zinc-300 dark:border-zinc-600'}`} style={{ backgroundColor: color }} />
+                  </button>
+                ))}
+                <span className={boardDividerClass} />
+                <IconButton label={selectedDrawing.type === 'text' ? 'Mindre text' : 'Tunnare'} onClick={() => resizeSelectedDrawing(-1)}><Minus size={20} /></IconButton>
+                <IconButton label={selectedDrawing.type === 'text' ? 'Större text' : 'Tjockare'} onClick={() => resizeSelectedDrawing(1)}><Plus size={20} /></IconButton>
+                {selectedDrawing.type === 'text' && (
+                  <IconButton label="Ändra texten" onClick={() => setEditingTextId(selectedDrawing.id)}><Type size={20} /></IconButton>
+                )}
+                <IconButton
+                  label="Ta bort ritningen"
+                  className="text-red-600 dark:text-red-400"
+                  onClick={() => {
+                    pushHistory();
+                    setTacticalDrawings(prev => prev.filter(d => d.id !== selectedDrawingId));
+                    setSelectedDrawingId(null);
+                    setHasUnsavedChanges(true);
+                  }}
+                >
+                  <Trash2 size={20} />
+                </IconButton>
+                <IconButton label="Klar" onClick={() => setSelectedDrawingId(null)}><Check size={20} /></IconButton>
+              </div>
+            </div>
+          )}
+
+          {/* Storskärm: bara planen. Knapparna här tar fram verktygen eller avslutar. */}
+          {boardMode === 'present' && (
+            <div className="fixed right-[calc(0.75rem+env(safe-area-inset-right,0px))] bottom-[calc(0.75rem+env(safe-area-inset-bottom,0px))] z-[61] flex items-center gap-2 opacity-60 hover:opacity-100 focus-within:opacity-100 transition-opacity">
+              {!boardToolbarOpen && (
+                <Button variant="secondary" size="lg" icon={<Pencil size={20} />} onClick={() => setBoardToolbarOpen(true)}>
+                  Verktyg
+                </Button>
+              )}
+              <Button variant="secondary" size="lg" icon={<Minimize2 size={20} />} onClick={exitBoardMode}>
+                Avsluta storskärm
+              </Button>
+            </div>
+          )}
+
+          {/* Bildläge: inga knappar. Ett tryck visar Klar i två sekunder. */}
+          {boardMode === 'snapshot' && (
+            <div
+              className="fixed inset-0 z-[300] select-none"
+              style={{ WebkitTapHighlightColor: 'transparent' }}
+              onClick={flashBoardHint}
+            >
+              {showBoardHint && (
+                <div className="fixed top-[calc(0.75rem+env(safe-area-inset-top,0px))] left-3 right-3 flex items-center justify-between gap-3 pointer-events-none">
+                  <span className="px-3 py-2 rounded-xl bg-zinc-900/85 text-white text-sm font-medium shadow-lg">
+                    Ta skärmbilden när knappen har försvunnit
+                  </span>
+                  <Button
+                    className="pointer-events-auto shadow-lg"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      exitBoardMode();
+                    }}
+                  >
+                    Klar
+                  </Button>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Mer: inställningar och sådant som inte behövs hela tiden */}
+          <Sheet open={showBoardMore} onClose={() => setShowBoardMore(false)} title="Mer">
+            <div className="flex flex-col gap-5 px-2 pb-2">
+              <section className="flex flex-col gap-1">
+                <h3 className={boardSectionClass}>Ritning</h3>
+                {renderBoardStepper('Linjetjocklek', tacticalLineWidth.toFixed(1),
+                  () => setTacticalLineWidth(Math.max(0.2, Math.round((tacticalLineWidth - 0.2) * 10) / 10)),
+                  () => setTacticalLineWidth(Math.min(3, Math.round((tacticalLineWidth + 0.2) * 10) / 10)))}
+                {renderBoardStepper('Textstorlek', String(tacticalFontSize),
+                  () => setTacticalFontSize(Math.max(8, tacticalFontSize - 2)),
+                  () => setTacticalFontSize(Math.min(48, tacticalFontSize + 2)))}
+                <div className="flex items-center justify-between gap-3 px-3 py-2">
+                  <span className="text-sm font-semibold text-zinc-800 dark:text-zinc-100">Zonens form</span>
+                  <SegmentedTabs<'rectangle' | 'circle'>
+                    size="sm"
+                    tabs={[{ id: 'rectangle', label: 'Fyrkant' }, { id: 'circle', label: 'Cirkel' }]}
+                    value={zoneShape}
+                    onChange={setZoneShape}
+                  />
+                </div>
+                <MenuItem
+                  icon={<Pencil size={18} />}
+                  label="Pennan ritar alltid"
+                  description="Pennan ritar, fingret flyttar"
+                  onClick={() => setPencilDraws(!pencilDraws)}
+                  trailing={renderBoardSwitch(pencilDraws)}
+                />
+              </section>
+
+              <section className="flex flex-col gap-1">
+                <h3 className={boardSectionClass}>Spelare</h3>
+                <MenuItem icon={<Users size={18} />} label="Två lag, 11 mot 11" description="Blått mot rött, nummer 1–11" onClick={() => { setShowBoardMore(false); setupTwoTeams(); }} />
+                <MenuItem icon={<Layout size={18} />} label="Formation" description={currentFormation || 'Välj formation för blått och rött lag'} onClick={() => { setShowBoardMore(false); setFormationTab('blue'); setShowFormationModal(true); }} />
+                <MenuItem
+                  icon={<Save size={18} />}
+                  label="Spara som formation"
+                  description="Spelarnas placering blir en formation"
+                  onClick={() => {
+                    setShowBoardMore(false);
+                    if (tacticalPlayers.some(p => !p.isSubstitute)) {
+                      setNewFormationName('');
+                      setShowSaveFormation(true);
+                    }
+                  }}
+                />
+                <MenuItem
+                  icon={<Info size={18} />}
+                  label="Positionsbeskrivningar"
+                  onClick={() => { setShowPositionDescriptions(!showPositionDescriptions); setHasUnsavedChanges(true); }}
+                  trailing={renderBoardSwitch(showPositionDescriptions)}
+                />
+                {renderBoardStepper('Spelarnas storlek', `${Math.round(playerScale * 100)} %`,
+                  () => { setPlayerScale(Math.max(0.5, playerScale - 0.05)); setHasUnsavedChanges(true); },
+                  () => { setPlayerScale(Math.min(2, playerScale + 0.05)); setHasUnsavedChanges(true); })}
+              </section>
+
+              <section className="flex flex-col gap-1">
+                <h3 className={boardSectionClass}>Motståndare och boll</h3>
+                <MenuItem
+                  icon={<Eye size={18} />}
+                  label="Visa motståndare"
+                  onClick={() => { setShowOpponents(!showOpponents); setHasUnsavedChanges(true); }}
+                  trailing={renderBoardSwitch(showOpponents)}
+                />
+                <div className="flex items-center justify-between gap-3 px-3 py-2">
+                  <span className="text-sm font-semibold text-zinc-800 dark:text-zinc-100">Motståndarnas färg</span>
+                  <div className="flex items-center gap-1">
+                    {['#ef4444', '#3b82f6', '#facc15', '#18181b', '#ffffff', '#f97316'].map(color => (
+                      <button
+                        key={color}
+                        type="button"
+                        title={BOARD_COLOR_NAMES[color]}
+                        aria-label={BOARD_COLOR_NAMES[color]}
+                        onClick={() => { setOpponentColor(color); setHasUnsavedChanges(true); }}
+                        className="w-10 h-10 rounded-xl flex items-center justify-center cursor-pointer hover:bg-zinc-100 dark:hover:bg-zinc-800"
+                      >
+                        <span className={`w-6 h-6 rounded-full border-2 ${opponentColor === color ? 'border-indigo-600 dark:border-indigo-400' : 'border-zinc-300 dark:border-zinc-600'}`} style={{ backgroundColor: color }} />
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <MenuItem icon={<Layout size={18} />} label="Motståndarnas formation" onClick={() => { setShowBoardMore(false); setShowOpponentFormationModal(true); }} />
+                {renderBoardStepper('Bollens storlek', `${Math.round(footballScale * 100)} %`,
+                  () => setFootballScale(Math.max(0.5, Math.round((footballScale - 0.1) * 10) / 10)),
+                  () => setFootballScale(Math.min(3, Math.round((footballScale + 0.1) * 10) / 10)))}
+              </section>
+
+              <section className="flex flex-col gap-1">
+                <h3 className={boardSectionClass}>Planen</h3>
+                <MenuItem
+                  icon={<Network size={18} />}
+                  label="Passningsnät"
+                  description="Linjer mellan spelarna som visar passningsvägar"
+                  onClick={() => setShowDelaunayNetwork(!showDelaunayNetwork)}
+                  trailing={renderBoardSwitch(showDelaunayNetwork)}
+                />
+                {showDelaunayNetwork && (
+                  <div className="grid grid-cols-2 gap-1.5 px-3 pb-1">
+                    {([
+                      ['triangulation', 'Trianglar'],
+                      ['standard', '3 närmaste'],
+                      ['maximum', '4 närmaste'],
+                      ['ultra', '5 närmaste'],
+                      ['lanes', 'Alla fria vägar'],
+                    ] as const).map(([mode, label]) => (
+                      <Button
+                        key={mode}
+                        size="sm"
+                        variant={passingNetworkMode === mode ? 'primary' : 'secondary'}
+                        className={mode === 'lanes' ? 'col-span-2' : ''}
+                        onClick={() => setPassingNetworkMode(mode)}
+                      >
+                        {label}
+                      </Button>
+                    ))}
+                  </div>
+                )}
+                {renderBoardStepper('Planens storlek', `${Math.round(fullScreenZoom * 100)} %`,
+                  () => setFullScreenZoom(Math.max(0.5, Math.round((fullScreenZoom - 0.1) * 10) / 10)),
+                  () => setFullScreenZoom(Math.min(2, Math.round((fullScreenZoom + 0.1) * 10) / 10)))}
+                <MenuItem
+                  icon={orientation === 'landscape' ? <Smartphone size={18} /> : <Monitor size={18} />}
+                  label={orientation === 'landscape' ? 'Stående plan' : 'Liggande plan'}
+                  onClick={() => {
+                    const newOrientation = orientation === 'vertical' ? 'landscape' : 'vertical';
+                    setOrientation(newOrientation);
+                    setAttackDirection(newOrientation === 'landscape' ? 'right' : 'up');
+                  }}
+                />
+              </section>
+
+              <section className="flex flex-col gap-1">
+                <h3 className={boardSectionClass}>Uppställningen</h3>
+                <MenuItem icon={<FolderOpen size={18} />} label="Sparade uppställningar" onClick={() => { setShowBoardMore(false); setShowBenchMaximized(false); setShowSavedLineups(true); }} />
+                <MenuItem icon={<ClipboardList size={18} />} label="Anteckningar" onClick={() => { setShowBoardMore(false); setShowNotesModal(true); }} />
+                {isCoachOrAdmin && lineup && (
+                  <MenuItem
+                    icon={<UserCheck size={18} />}
+                    label="Publicerad för spelarna"
+                    onClick={() => onSaveLineup({ ...lineup, isPublishedToPlayers: !lineup.isPublishedToPlayers })}
+                    trailing={renderBoardSwitch(!!lineup.isPublishedToPlayers)}
+                  />
+                )}
+                <MenuItem icon={<Trash2 size={18} />} tone="danger" label="Rensa allt" onClick={() => { setShowBoardMore(false); setShowBoardClear(true); }} />
+              </section>
+            </div>
+          </Sheet>
+
+          {/* Rensa allt: fråga först och låt tränaren välja hur mycket */}
+          <Sheet open={showBoardClear} onClose={() => setShowBoardClear(false)} title="Rensa taktiktavlan">
+            <div className="flex flex-col gap-1 px-2 pb-2">
+              <MenuItem
+                icon={<Eraser size={18} />}
+                label="Bara ritningar"
+                description="Pilar, linjer, zoner och text tas bort"
+                onClick={() => {
+                  pushHistory();
+                  setTacticalDrawings([]);
+                  setSelectedDrawingId(null);
+                  setHasUnsavedChanges(true);
+                  setShowBoardClear(false);
+                }}
+              />
+              <MenuItem
+                icon={<Trash2 size={18} />}
+                tone="danger"
+                label="Allt"
+                description="Även motståndare och boll tas bort"
+                onClick={() => {
+                  clearTactical();
+                  setSelectedDrawingId(null);
+                  setShowBoardClear(false);
+                }}
+              />
+              <p className="px-3 pt-2 text-xs text-zinc-500 dark:text-zinc-400">"Allt" flyttar också tillbaka spelarna till uppställningen. Du kan ångra med Ångra-knappen.</p>
+            </div>
+          </Sheet>
 
           {/* Floating Compact Lineups Menu under top right controls bar */}
           <AnimatePresence>
-            {showSavedLineups && (
+            {showSavedLineups && boardMode === 'edit' && (
               <motion.div 
                 initial={{ opacity: 0, y: -10, scale: 0.95 }}
                 animate={{ opacity: 1, y: 0, scale: 1 }}
                 exit={{ opacity: 0, y: -10, scale: 0.95 }}
-                className="fixed top-14 right-3 z-[155] w-72 bg-white/95 dark:bg-zinc-900/95 backdrop-blur-md rounded-2xl shadow-2xl border border-zinc-200 dark:border-zinc-800 p-3 flex flex-col gap-2 max-h-[60vh] overflow-y-auto scrollbar-thin pointer-events-auto font-sans"
+                className="fixed top-[calc(4.5rem+env(safe-area-inset-top,0px))] sm:top-[calc(5rem+env(safe-area-inset-top,0px))] right-2 z-[59] w-72 bg-white/95 dark:bg-zinc-900/95 backdrop-blur-md rounded-2xl shadow-2xl border border-zinc-200 dark:border-zinc-800 p-3 flex flex-col gap-2 max-h-[60vh] overflow-y-auto scrollbar-thin pointer-events-auto font-sans"
               >
                 <div className="flex items-center justify-between border-b border-zinc-100 dark:border-zinc-800 pb-2 mb-1">
                   <span className="text-[10px] font-black uppercase text-zinc-400 tracking-wider">Mina Laguppställningar</span>
@@ -6018,207 +6256,9 @@ export default function LineupBuilder({
             )}
           </AnimatePresence>
 
-          {/* Floating Compact Zoom Menu under top right controls bar */}
-          <AnimatePresence>
-            {showZoomMenu && (
-              <motion.div 
-                initial={{ opacity: 0, y: -10, scale: 0.95 }}
-                animate={{ opacity: 1, y: 0, scale: 1 }}
-                exit={{ opacity: 0, y: -10, scale: 0.95 }}
-                className="fixed top-14 right-3 z-[155] w-72 bg-white/95 dark:bg-zinc-900/95 backdrop-blur-md rounded-2xl shadow-2xl border border-zinc-200 dark:border-zinc-800 p-3.5 flex flex-col gap-3 pointer-events-auto font-sans"
-              >
-                <div className="flex items-center justify-between border-b border-zinc-100 dark:border-zinc-800 pb-2">
-                  <span className="text-[10px] font-black uppercase text-zinc-700 dark:text-zinc-300 tracking-wider">Inställningar & Zoom</span>
-                  <button 
-                    onClick={() => setShowZoomMenu(false)}
-                    className="text-zinc-400 hover:text-zinc-650 dark:hover:text-zinc-200 transition-colors p-0.5 rounded"
-                  >
-                    <X size={14} />
-                  </button>
-                </div>
-
-                <div className="flex flex-col gap-3">
-                  {/* Field Zoom */}
-                  <div className="flex flex-col gap-1.5">
-                    <span className="text-[10px] font-bold text-zinc-700 dark:text-zinc-300 uppercase tracking-wide">Spelplanens storlek (Zoom)</span>
-                    <div className="flex items-center justify-between bg-zinc-50 dark:bg-black/20 p-1.5 rounded-xl border border-zinc-100 dark:border-zinc-800">
-                      <button 
-                        onClick={() => setFullScreenZoom(Math.max(0.2, fullScreenZoom - 0.1))}
-                        className="w-8 h-8 flex items-center justify-center bg-white dark:bg-zinc-900 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-lg text-zinc-500 hover:text-zinc-900 dark:hover:text-white transition-all border border-zinc-200/50 dark:border-zinc-800"
-                        title="Minska planens zoom"
-                      >
-                        <Minus size={14} />
-                      </button>
-                      <div className="flex flex-col items-center">
-                        <span className="text-[11px] font-black text-zinc-900 dark:text-white">{Math.round(fullScreenZoom * 100)}%</span>
-                        {fullScreenZoom !== 1 && (
-                          <button 
-                            onClick={() => setFullScreenZoom(1)}
-                            className="text-[9px] text-indigo-600 dark:text-indigo-400 hover:underline font-semibold mt-0.5"
-                          >
-                            Återställ
-                          </button>
-                        )}
-                      </div>
-                      <button 
-                        onClick={() => setFullScreenZoom(Math.min(3.0, fullScreenZoom + 0.1))}
-                        className="w-8 h-8 flex items-center justify-center bg-white dark:bg-zinc-900 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-lg text-zinc-500 hover:text-zinc-900 dark:hover:text-white transition-all border border-zinc-200/50 dark:border-zinc-800"
-                        title="Öka planens zoom"
-                      >
-                        <Plus size={14} />
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* Player Scale */}
-                  <div className="flex flex-col gap-1.5">
-                    <span className="text-[10px] font-bold text-zinc-700 dark:text-zinc-300 uppercase tracking-wide">Spelarnas storlek</span>
-                    <div className="flex items-center justify-between bg-zinc-50 dark:bg-black/20 p-1.5 rounded-xl border border-zinc-100 dark:border-zinc-800">
-                      <button 
-                        onClick={() => {
-                          setPlayerScale(Math.max(0.5, playerScale - 0.05));
-                          setHasUnsavedChanges(true);
-                        }}
-                        className="w-8 h-8 flex items-center justify-center bg-white dark:bg-zinc-900 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-lg text-zinc-500 hover:text-zinc-900 dark:hover:text-white transition-all border border-zinc-200/50 dark:border-zinc-800"
-                        title="Minska spelarnas storlek"
-                      >
-                        <Minus size={14} />
-                      </button>
-                      <div className="flex flex-col items-center">
-                        <span className="text-[11px] font-black text-zinc-900 dark:text-white">{Math.round(playerScale * 100)}%</span>
-                        {playerScale !== 1 && (
-                          <button 
-                            onClick={() => {
-                              setPlayerScale(1);
-                              setHasUnsavedChanges(true);
-                            }}
-                            className="text-[9px] text-indigo-600 dark:text-indigo-400 hover:underline font-semibold mt-0.5"
-                          >
-                            Återställ
-                          </button>
-                        )}
-                      </div>
-                      <button 
-                        onClick={() => {
-                          setPlayerScale(Math.min(2.0, playerScale + 0.05));
-                          setHasUnsavedChanges(true);
-                        }}
-                        className="w-8 h-8 flex items-center justify-center bg-white dark:bg-zinc-900 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-lg text-zinc-500 hover:text-zinc-900 dark:hover:text-white transition-all border border-zinc-200/50 dark:border-zinc-800"
-                        title="Öka spelarnas storlek"
-                      >
-                        <Plus size={14} />
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* Passningsnätverk settings */}
-                  <div className="flex flex-col gap-1.5 pt-2 border-t border-zinc-100 dark:border-zinc-800/80">
-                    <span className="text-[10px] font-bold text-zinc-700 dark:text-zinc-300 uppercase tracking-wide">Passningsnätverk (Kopplingar)</span>
-                    <div className="grid grid-cols-2 gap-1 p-1 bg-zinc-50 dark:bg-black/20 rounded-xl border border-zinc-100 dark:border-zinc-800">
-                      <button
-                        onClick={() => {
-                          setPassingNetworkMode('triangulation');
-                          setHasUnsavedChanges(true);
-                        }}
-                        className={`px-2 py-1.5 rounded-lg text-[9px] font-black uppercase transition-all text-center leading-none ${
-                          passingNetworkMode === 'triangulation'
-                            ? 'bg-indigo-600 text-white shadow-sm'
-                            : 'text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800/50'
-                        }`}
-                        title="Enbart Delaunay-triangulering"
-                      >
-                        Trianglar
-                      </button>
-                      <button
-                        onClick={() => {
-                          setPassingNetworkMode('standard');
-                          setHasUnsavedChanges(true);
-                        }}
-                        className={`px-2 py-1.5 rounded-lg text-[9px] font-black uppercase transition-all text-center leading-none ${
-                          passingNetworkMode === 'standard'
-                            ? 'bg-indigo-600 text-white shadow-sm'
-                            : 'text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800/50'
-                        }`}
-                        title="Standard (trianglar + 3 närmaste)"
-                      >
-                        Standard (3)
-                      </button>
-                      <button
-                        onClick={() => {
-                          setPassingNetworkMode('maximum');
-                          setHasUnsavedChanges(true);
-                        }}
-                        className={`px-2 py-1.5 rounded-lg text-[9px] font-black uppercase transition-all text-center leading-none ${
-                          passingNetworkMode === 'maximum'
-                            ? 'bg-indigo-600 text-white shadow-sm'
-                            : 'text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800/50'
-                        }`}
-                        title="Maximal (trianglar + 4 närmaste)"
-                      >
-                        Maximal (4)
-                      </button>
-                      <button
-                        onClick={() => {
-                          setPassingNetworkMode('ultra');
-                          setHasUnsavedChanges(true);
-                        }}
-                        className={`px-2 py-1.5 rounded-lg text-[9px] font-black uppercase transition-all text-center leading-none ${
-                          passingNetworkMode === 'ultra'
-                            ? 'bg-indigo-600 text-white shadow-sm'
-                            : 'text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800/50'
-                        }`}
-                        title="Ultimat (trianglar + 5 närmaste)"
-                      >
-                        Ultimat (5)
-                      </button>
-                      <button
-                        onClick={() => {
-                          setPassingNetworkMode('lanes');
-                          setHasUnsavedChanges(true);
-                        }}
-                        className={`col-span-2 px-2 py-1.5 rounded-lg text-[9px] font-black uppercase transition-all text-center leading-none ${
-                          passingNetworkMode === 'lanes'
-                            ? 'bg-indigo-600 text-white shadow-sm'
-                            : 'text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800/50'
-                        }`}
-                        title="Öppna Spelvägar (Korsande linjer tillåtna för alla fria passningskanaler)"
-                      >
-                        Öppna Spelvägar (Fritt)
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* Positionsbeskrivningar setting toggle */}
-                  <div className="flex flex-col gap-1.5 pt-2 border-t border-zinc-100 dark:border-zinc-800/80">
-                    <div className="flex items-center justify-between">
-                      <span className="text-[10px] font-bold text-zinc-700 dark:text-zinc-300 uppercase tracking-wide">Positionsbeskrivning</span>
-                      <span className="text-[9px] font-semibold text-zinc-500 dark:text-zinc-400">{showPositionDescriptions ? 'Visas' : 'Dold'}</span>
-                    </div>
-                    <button
-                      onClick={() => {
-                        setShowPositionDescriptions(!showPositionDescriptions);
-                        setHasUnsavedChanges(true);
-                      }}
-                      className={`w-full py-2 px-3 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all flex items-center justify-center gap-2 border cursor-pointer ${
-                        showPositionDescriptions
-                          ? 'bg-indigo-600 border-indigo-500 text-white shadow-sm'
-                          : 'bg-zinc-50 dark:bg-black/20 border-zinc-200 dark:border-zinc-800 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800/50'
-                      }`}
-                      title={showPositionDescriptions ? "Dölj beskrivning av positioner" : "Visa beskrivning av positioner"}
-                    >
-                      {showPositionDescriptions ? <EyeOff size={13} /> : <Eye size={13} />}
-                      <span>{showPositionDescriptions ? 'Dölj beskrivningar' : 'Visa beskrivningar'}</span>
-                    </button>
-                  </div>
-
-                </div>
-              </motion.div>
-            )}
-          </AnimatePresence>
-
           {/* Floating Compact Bench Dock in maximized mode */}
           <AnimatePresence>
-            {showBenchMaximized && (
+            {showBenchMaximized && boardMode !== 'snapshot' && (
               <motion.div 
                 initial={orientation === 'vertical' 
                   ? { opacity: 0, x: -40, y: '-50%' } 
@@ -6231,8 +6271,8 @@ export default function LineupBuilder({
                   : { opacity: 0, y: 30, x: '-50%' }}
                 style={orientation === 'vertical' ? { top: '50%' } : undefined}
                 className={orientation === 'vertical' 
-                  ? "fixed left-4 z-[99] w-64 bg-white/95 dark:bg-zinc-900/95 backdrop-blur-md rounded-3xl shadow-2xl border border-zinc-200 dark:border-zinc-800 p-4 flex flex-col gap-3 pointer-events-auto font-sans max-h-[75vh]" 
-                  : `fixed left-1/2 z-[99] w-[95vw] max-w-xl bg-white/95 dark:bg-zinc-900/95 backdrop-blur-md rounded-2xl shadow-2xl border border-zinc-200 dark:border-zinc-800 p-3 flex flex-col gap-2 pointer-events-auto font-sans transition-all duration-300 ${isControlsVisible ? 'bottom-40 md:bottom-36' : 'bottom-6'}`}
+                  ? `fixed ${boardVertical && boardToolbarVisible ? 'left-[calc(5.5rem+env(safe-area-inset-left,0px))]' : 'left-4'} z-[59] w-64 bg-white/95 dark:bg-zinc-900/95 backdrop-blur-md rounded-3xl shadow-2xl border border-zinc-200 dark:border-zinc-800 p-4 flex flex-col gap-3 pointer-events-auto font-sans max-h-[75vh]` 
+                  : `fixed left-1/2 z-[59] w-[95vw] max-w-xl bg-white/95 dark:bg-zinc-900/95 backdrop-blur-md rounded-2xl shadow-2xl border border-zinc-200 dark:border-zinc-800 p-3 flex flex-col gap-2 pointer-events-auto font-sans transition-all duration-300 ${boardToolbarVisible && !boardVertical ? 'bottom-[calc(5.5rem+env(safe-area-inset-bottom,0px))]' : 'bottom-6'}`}
               >
                 <div className="flex items-center justify-between border-b border-zinc-100 dark:border-zinc-800 pb-1.5 px-1 bg-transparent">
                   <div className="flex items-center gap-1.5">
@@ -6358,357 +6398,6 @@ export default function LineupBuilder({
             )}
           </AnimatePresence>
 
-          <AnimatePresence>
-            {isControlsVisible && (
-              <motion.div 
-                drag
-                dragMomentum={false}
-                dragControls={dragControls}
-                dragListener={false}
-                dragConstraints={{ 
-                  left: -Math.max(0, window.innerWidth / 2 - 20), 
-                  right: Math.max(0, window.innerWidth / 2 - 20),
-                  top: -window.innerHeight + 150,
-                  bottom: 20
-                }}
-                initial={{ opacity: 0, y: 50, x: '-50%' }}
-                animate={{ opacity: 1, y: 0, x: '-50%' }}
-                exit={{ opacity: 0, y: 50, x: '-50%' }}
-                className="fixed bottom-10 left-1/2 z-[100] flex flex-col gap-3 p-3 bg-white/95 dark:bg-zinc-900/95 backdrop-blur-2xl rounded-[32px] border border-zinc-200 dark:border-zinc-800 shadow-2xl w-[95vw] max-w-2xl"
-              >
-            <div className="flex flex-col gap-3">
-              {/* Row 1: Tools & Universal Settings */}
-              <div className="w-full min-w-0 flex items-center gap-4 pb-0.5 overflow-x-auto touch-pan-x scrollbar-thin scrollbar-track-transparent scrollbar-thumb-zinc-700">
-                <div className="flex items-center gap-1 shrink-0">
-                  <div 
-                    className="p-2 cursor-grab active:cursor-grabbing text-zinc-600 hover:text-zinc-400 touch-none"
-                    onPointerDown={(e) => dragControls.start(e)}
-                  >
-                    <GripVertical size={20} />
-                  </div>
-                  
-                  {/* Undo, Redo & Clear moved to the left */}
-                  <div className="flex items-center gap-1 bg-zinc-100 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 p-1 rounded-xl mr-1">
-                    <button 
-                      onClick={handleUndo}
-                      className={`p-2 rounded-lg transition-all ${history.length === 0 ? 'text-zinc-400 dark:text-zinc-600 cursor-not-allowed' : 'text-zinc-700 dark:text-zinc-200 hover:text-black dark:hover:text-white hover:bg-zinc-200 dark:hover:bg-zinc-700'}`}
-                      disabled={history.length === 0}
-                      title="Ångra"
-                    >
-                      <Undo2 size={18} />
-                    </button>
-                    <button 
-                      onClick={handleRedo}
-                      className={`p-2 rounded-lg transition-all ${future.length === 0 ? 'text-zinc-400 dark:text-zinc-600 cursor-not-allowed' : 'text-zinc-700 dark:text-zinc-200 hover:text-black dark:hover:text-white hover:bg-zinc-200 dark:hover:bg-zinc-700'}`}
-                      disabled={future.length === 0}
-                      title="Gör om"
-                    >
-                      <Redo2 size={18} />
-                    </button>
-                    <button 
-                      onClick={clearTactical}
-                      className="p-2 rounded-lg text-zinc-700 dark:text-zinc-200 hover:text-red-500 hover:bg-red-500/10 transition-all font-bold"
-                      title="Radera allt"
-                    >
-                      <Trash size={18} />
-                    </button>
-                  </div>
-
-                  <button 
-                    onClick={() => setTacticalTool('move')}
-                    className={`p-2.5 rounded-xl border transition-all ${tacticalTool === 'move' ? 'bg-indigo-600 text-white border-indigo-500 shadow-md ring-2 ring-indigo-400/50 scale-105' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-800 dark:text-zinc-100 border-zinc-200 dark:border-zinc-700 hover:bg-zinc-200 dark:hover:bg-zinc-700 hover:text-black dark:hover:text-white shadow-sm'}`}
-                    title="Flyttläge"
-                  >
-                    <Move size={20} strokeWidth={2.5} />
-                  </button>
-                  <button 
-                    onClick={() => setTacticalTool('pen')}
-                    className={`p-2.5 rounded-xl border transition-all ${tacticalTool === 'pen' ? 'bg-indigo-600 text-white border-indigo-500 shadow-md ring-2 ring-indigo-400/50 scale-105' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-800 dark:text-zinc-100 border-zinc-200 dark:border-zinc-700 hover:bg-zinc-200 dark:hover:bg-zinc-700 hover:text-black dark:hover:text-white shadow-sm'}`}
-                    title="Frihandspenna"
-                  >
-                    <Pencil size={20} strokeWidth={2.5} />
-                  </button>
-                  <button 
-                    onClick={() => setTacticalTool('arrow')}
-                    className={`p-2.5 rounded-xl border transition-all ${tacticalTool === 'arrow' ? 'bg-indigo-600 text-white border-indigo-500 shadow-md ring-2 ring-indigo-400/50 scale-105' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-800 dark:text-zinc-100 border-zinc-200 dark:border-zinc-700 hover:bg-zinc-200 dark:hover:bg-zinc-700 hover:text-black dark:hover:text-white shadow-sm'}`}
-                    title="Dra pilar"
-                  >
-                    <ArrowUpRight size={20} strokeWidth={2.5} />
-                  </button>
-                  <button 
-                    onClick={() => setTacticalTool('freehand-arrow')}
-                    className={`p-2.5 rounded-xl border transition-all ${tacticalTool === 'freehand-arrow' ? 'bg-indigo-600 text-white border-indigo-500 shadow-md ring-2 ring-indigo-400/50 scale-105' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-800 dark:text-zinc-100 border-zinc-200 dark:border-zinc-700 hover:bg-zinc-200 dark:hover:bg-zinc-700 hover:text-black dark:hover:text-white shadow-sm'}`}
-                    title="Frihandspil"
-                  >
-                    <Route size={20} strokeWidth={2.5} />
-                  </button>
-                  <button 
-                    onClick={() => setTacticalTool('circle')}
-                    className={`p-2.5 rounded-xl border transition-all ${tacticalTool === 'circle' ? 'bg-indigo-600 text-white border-indigo-500 shadow-md ring-2 ring-indigo-400/50 scale-105' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-800 dark:text-zinc-100 border-zinc-200 dark:border-zinc-700 hover:bg-zinc-200 dark:hover:bg-zinc-700 hover:text-black dark:hover:text-white shadow-sm'}`}
-                    title="Rita cirkel"
-                  >
-                    <div className="w-5 h-5 rounded-full border-2 border-current" />
-                  </button>
-                  <button 
-                    onClick={() => setTacticalTool('rectangle')}
-                    className={`p-2.5 rounded-xl border transition-all ${tacticalTool === 'rectangle' ? 'bg-indigo-600 text-white border-indigo-500 shadow-md ring-2 ring-indigo-400/50 scale-105' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-800 dark:text-zinc-100 border-zinc-200 dark:border-zinc-700 hover:bg-zinc-200 dark:hover:bg-zinc-700 hover:text-black dark:hover:text-white shadow-sm'}`}
-                    title="Rita fyrkant"
-                  >
-                    <div className="w-5 h-5 border-2 border-current rounded-sm" />
-                  </button>
-                  <button 
-                    onClick={() => setTacticalTool('text')}
-                    className={`p-2.5 rounded-xl border transition-all ${tacticalTool === 'text' ? 'bg-indigo-600 text-white border-indigo-500 shadow-md ring-2 ring-indigo-400/50 scale-105' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-800 dark:text-zinc-100 border-zinc-200 dark:border-zinc-700 hover:bg-zinc-200 dark:hover:bg-zinc-700 hover:text-black dark:hover:text-white shadow-sm'}`}
-                    title="Skriv text"
-                  >
-                    <Type size={20} strokeWidth={2.5} />
-                  </button>
-                  <button 
-                    onClick={() => setTacticalTool('ball')}
-                    className={`p-2.5 rounded-xl border transition-all ${tacticalTool === 'ball' ? 'bg-indigo-600 text-white border-indigo-500 shadow-md ring-2 ring-indigo-400/50 scale-105' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-800 dark:text-zinc-100 border-zinc-200 dark:border-zinc-700 hover:bg-zinc-200 dark:hover:bg-zinc-700 hover:text-black dark:hover:text-white shadow-sm'}`}
-                    title="Placera boll"
-                  >
-                    <SoccerBallIcon size={20} className={tacticalTool === 'ball' ? 'text-white' : 'text-zinc-800 dark:text-zinc-100'} />
-                  </button>
-                  <button 
-                    onClick={() => setTacticalTool('opponent')}
-                    className={`p-2.5 rounded-xl border transition-all ${tacticalTool === 'opponent' ? 'bg-indigo-600 text-white border-indigo-500 shadow-md ring-2 ring-indigo-400/50 scale-105' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-800 dark:text-zinc-100 border-zinc-200 dark:border-zinc-700 hover:bg-zinc-200 dark:hover:bg-zinc-700 hover:text-black dark:hover:text-white shadow-sm'}`}
-                    title="Placera motståndare"
-                  >
-                    <Shirt size={20} strokeWidth={2.5} />
-                  </button>
-                  <button 
-                    onClick={() => setTacticalTool('eraser')}
-                    className={`p-2.5 rounded-xl border transition-all ${tacticalTool === 'eraser' ? 'bg-indigo-600 text-white border-indigo-500 shadow-md ring-2 ring-indigo-400/50 scale-105' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-800 dark:text-zinc-100 border-zinc-200 dark:border-zinc-700 hover:bg-zinc-200 dark:hover:bg-zinc-700 hover:text-black dark:hover:text-white shadow-sm'}`}
-                    title="Suddgummi"
-                  >
-                    <Eraser size={20} strokeWidth={2.5} />
-                  </button>
-
-                  <div className="h-6 w-[1px] bg-zinc-200 dark:bg-zinc-800 mx-1 shrink-0" />
-
-                  <button 
-                    onClick={() => setShowDelaunayNetwork(!showDelaunayNetwork)}
-                    className={`p-2.5 rounded-xl border transition-all ${showDelaunayNetwork ? 'bg-indigo-600 text-white border-indigo-500 shadow-md ring-2 ring-indigo-400/50 scale-105' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-800 dark:text-zinc-100 border-zinc-200 dark:border-zinc-700 hover:bg-zinc-200 dark:hover:bg-zinc-700 hover:text-black dark:hover:text-white shadow-sm'}`}
-                    title={showDelaunayNetwork ? "Dölj passningsnät (Delaunay)" : "Visa passningsnät (Delaunay)"}
-                  >
-                    <Network size={20} strokeWidth={2.5} />
-                  </button>
-                </div>
-
-
-
-
-
-
-              </div>
-
-              {/* Row 2: Contextual Settings & Actions */}
-              <div className="w-full min-w-0 flex items-center gap-4 py-1 min-h-[52px] overflow-x-auto touch-pan-x scrollbar-thin scrollbar-track-transparent">
-                <AnimatePresence mode="wait">
-                  {(tacticalTool === 'pen' || tacticalTool === 'arrow' || tacticalTool === 'freehand-arrow' || tacticalTool === 'circle' || tacticalTool === 'rectangle' || tacticalTool === 'square' || tacticalTool === 'text') && (
-                    <motion.div 
-                      key="context-settings"
-                      initial={{ opacity: 0, x: -10 }}
-                      animate={{ opacity: 1, x: 0 }}
-                      exit={{ opacity: 0, x: 10 }}
-                      className="flex items-center gap-3 shrink-0"
-                    >
-                      {/* Tool Colors */}
-                      <div className="flex items-center gap-2 pr-3 border-r border-zinc-800 overflow-visible">
-                        <ColorPicker 
-                          selectedColor={tacticalColor} 
-                          onChange={setTacticalColor} 
-                          direction="up"
-                          minimal={true}
-                        />
-                      </div>
-
-                      {/* Tool Specific Settings */}
-                      <div className="flex items-center gap-3">
-                        {tacticalTool === 'text' ? (
-                          <div className="flex flex-col gap-0.5">
-                             <span className="text-[7px] font-black text-zinc-500 uppercase tracking-widest pl-1 leading-none mb-1">Textstorlek</span>
-                             <div className="flex items-center gap-2 bg-zinc-100 dark:bg-black/40 px-3 py-1.5 rounded-xl">
-                               <button onClick={() => setTacticalFontSize(Math.max(8, tacticalFontSize - 2))} className="text-zinc-500 hover:text-white"><Minus size={12} /></button>
-                               <span className="text-[10px] font-black text-zinc-900 dark:text-white min-w-4 text-center">{tacticalFontSize}</span>
-                               <button onClick={() => setTacticalFontSize(Math.min(72, tacticalFontSize + 2))} className="text-zinc-500 hover:text-white"><Plus size={12} /></button>
-                             </div>
-                          </div>
-                        ) : (
-                          <div className="flex flex-col gap-0.5">
-                             <span className="text-[7px] font-black text-zinc-500 uppercase tracking-widest pl-1 leading-none mb-1">Tjocklek</span>
-                             <div className="flex items-center gap-2 bg-zinc-100 dark:bg-black/40 px-3 py-1.5 rounded-xl">
-                               <button onClick={() => setTacticalLineWidth(Math.max(0.1, tacticalLineWidth - 0.1))} className="text-zinc-500 hover:text-white"><Minus size={12} /></button>
-                               <span className="text-[10px] font-black text-zinc-900 dark:text-white min-w-4 text-center">{tacticalLineWidth.toFixed(1)}</span>
-                               <button onClick={() => setTacticalLineWidth(Math.min(5, tacticalLineWidth + 0.1))} className="text-zinc-500 hover:text-white"><Plus size={12} /></button>
-                             </div>
-                          </div>
-                        )}
-
-                        {(tacticalTool === 'pen' || tacticalTool === 'arrow' || tacticalTool === 'freehand-arrow' || tacticalTool === 'circle' || tacticalTool === 'rectangle' || tacticalTool === 'square') && (
-                          <div className="flex bg-zinc-100 dark:bg-black/40 p-1 rounded-xl">
-                            <button 
-                              onClick={() => setTacticalLineType('solid')}
-                              className={`px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase transition-all ${tacticalLineType === 'solid' ? 'bg-white dark:bg-zinc-700 text-zinc-900 dark:text-white shadow-sm' : 'text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300'}`}
-                            >
-                              Hel
-                            </button>
-                            <button 
-                              onClick={() => setTacticalLineType('dashed')}
-                              className={`px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase transition-all ${tacticalLineType === 'dashed' ? 'bg-white dark:bg-zinc-700 text-zinc-900 dark:text-white shadow-sm' : 'text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300'}`}
-                            >
-                              Sträck
-                            </button>
-                          </div>
-                        )}
-                      </div>
-                    </motion.div>
-                  )}
-
-                  {tacticalTool === 'ball' && (
-                    <motion.div 
-                      key="ball-settings"
-                      initial={{ opacity: 0, x: -10 }}
-                      animate={{ opacity: 1, x: 0 }}
-                      exit={{ opacity: 0, x: 10 }}
-                      className="flex items-center gap-3 shrink-0"
-                    >
-                      <div className="flex flex-col gap-0.5">
-                        <span className="text-[7px] font-black text-zinc-500 uppercase tracking-widest pl-1 leading-none mb-1">Bollstorlek</span>
-                        <div className="flex items-center gap-2 bg-zinc-100 dark:bg-black/40 px-3 py-1.5 rounded-xl">
-                          <button onClick={() => setFootballScale(Math.max(0.5, footballScale - 0.1))} className="text-zinc-500 hover:text-white"><Minus size={12} /></button>
-                          <span className="text-[10px] font-black text-zinc-900 dark:text-white min-w-4 text-center">{(footballScale * 100).toFixed(0)}%</span>
-                          <button onClick={() => setFootballScale(Math.min(3, footballScale + 0.1))} className="text-zinc-500 hover:text-white"><Plus size={12} /></button>
-                        </div>
-                      </div>
-                    </motion.div>
-                  )}
-
-                  {tacticalTool === 'opponent' && (
-                    <motion.div 
-                      key="opponent-settings"
-                      initial={{ opacity: 0, x: -10 }}
-                      animate={{ opacity: 1, x: 0 }}
-                      exit={{ opacity: 0, x: 10 }}
-                      className="flex items-center gap-3 shrink-0"
-                    >
-                      {/* Opponent Colors */}
-                      <div className="flex items-center gap-2 pr-3 border-r border-zinc-800 overflow-visible">
-                        <span className="text-[7px] font-black text-zinc-500 uppercase tracking-tighter mr-1">Färg</span>
-                        <ColorPicker 
-                          selectedColor={opponentColor} 
-                          onChange={(color) => {
-                            setOpponentColor(color);
-                            setHasUnsavedChanges(true);
-                          }} 
-                          direction="up"
-                          minimal={true}
-                        />
-                      </div>
-
-                      {/* Opponent Formation Button */}
-                      <button 
-                        onClick={() => setShowOpponentFormationModal(true)}
-                        className="px-3 py-2 rounded-xl bg-emerald-600 text-white text-[10px] font-black uppercase tracking-widest shadow-lg flex items-center gap-2"
-                      >
-                        <Layout size={14} />
-                        <span>Formation</span>
-                      </button>
-
-                      {/* Show/Hide Opponents */}
-                      <button 
-                        onClick={() => setShowOpponents(!showOpponents)}
-                        className={`px-3 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all whitespace-nowrap border ${showOpponents ? 'bg-emerald-600/10 text-emerald-400 border-emerald-500/30' : 'bg-red-600/10 text-red-400 border-red-500/30'}`}
-                      >
-                        {showOpponents ? 'Dölj Motstånd' : 'Visa Motstånd'}
-                      </button>
-                    </motion.div>
-                  )}
-
-                  {tacticalTool === 'move' && (
-                    <motion.div 
-                      key="move-settings"
-                      initial={{ opacity: 0, x: -10 }}
-                      animate={{ opacity: 1, x: 0 }}
-                      exit={{ opacity: 0, x: 10 }}
-                      className="flex items-center gap-4 shrink-0"
-                    >
-                      <div className="flex flex-col gap-0.5">
-                        <span className="text-[7px] font-black text-zinc-500 uppercase tracking-widest pl-1 leading-none mb-1">Lagformation</span>
-                        <div className="flex items-center gap-1.5 bg-zinc-100 dark:bg-black/40 p-1 rounded-xl border border-zinc-200 dark:border-zinc-800">
-                          {Array.from(new Set(pinnedFormationIds)).slice(0, 3).map(id => {
-                            const temp = FORMATION_TEMPLATES.find(t => t.id === id);
-                            if (temp) {
-                              const variant = temp.variants[0];
-                              const isSelected = currentFormation === variant.name;
-                              return (
-                                <button
-                                  key={id}
-                                  onClick={() => applyFormation(variant)}
-                                  className={`px-3 py-1.5 rounded-lg text-[10px] font-black transition-all ${
-                                    isSelected 
-                                      ? 'bg-indigo-600 text-white shadow-sm' 
-                                      : 'text-zinc-500 hover:text-zinc-900 dark:hover:text-white hover:bg-white dark:hover:bg-zinc-800'
-                                  }`}
-                                >
-                                  {temp.name}
-                                </button>
-                              );
-                            }
-                            return null;
-                          })}
-                          <button 
-                            onClick={() => setShowFormationModal(true)}
-                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-black text-zinc-500 hover:text-zinc-900 dark:hover:text-white hover:bg-white dark:hover:bg-zinc-800 transition-all border border-dashed border-zinc-300 dark:border-zinc-700 ml-1"
-                          >
-                            <Layout size={12} />
-                            <span>{currentFormation || 'Fler'}</span>
-                          </button>
-                        </div>
-                      </div>
-
-                      <div className="h-8 w-px bg-zinc-200 dark:bg-zinc-800" />
-
-                      <div className="flex flex-col gap-0.5">
-                        <span className="text-[7px] font-black text-zinc-500 uppercase tracking-widest pl-1 leading-none mb-1">Status</span>
-                        <div className="flex items-center gap-3">
-                          <div className="flex items-center px-4 py-1.5 bg-zinc-100 dark:bg-black/20 rounded-xl">
-                            <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest">Flyttläge aktivt</span>
-                          </div>
-                          
-                          <button 
-                            onClick={() => {
-                              const positions: FormationPosition[] = tacticalPlayers
-                                .filter(p => !p.isSubstitute)
-                                .map(p => ({
-                                  id: p.id,
-                                  x: p.x,
-                                  y: p.y,
-                                  role: getSquadPlayer(p.playerId)?.position || 'Player'
-                                }));
-                              
-                              if (positions.length > 0) {
-                                setNewFormationName('');
-                                setShowSaveFormation(true);
-                              }
-                            }}
-                            className="flex items-center gap-2 px-3 py-1.5 bg-white dark:bg-zinc-800 text-indigo-600 dark:text-indigo-400 rounded-xl border border-zinc-200 dark:border-zinc-700 hover:bg-indigo-50 dark:hover:bg-zinc-700/50 transition-all font-black text-[10px] uppercase shadow-sm group"
-                            title="Spara denna layout som en ny formation"
-                          >
-                            <Save size={12} className="group-hover:scale-110 transition-transform" />
-                            Spara som formation
-                          </button>
-                        </div>
-                      </div>
-                    </motion.div>
-                  )}
-                </AnimatePresence>
-              </div>
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
     </>
   )}
 
@@ -7630,7 +7319,7 @@ export default function LineupBuilder({
               <div className="flex items-center justify-between mb-6">
                 <div>
                   <h3 className="text-2xl sm:text-3xl font-black text-zinc-900 dark:text-white tracking-tight">Taktiska ritningar</h3>
-                  <p className="text-sm text-zinc-500 font-medium mt-1">Spara och ladda dina anpassade rittavlor manuellt.</p>
+                  <p className="text-sm text-zinc-500 font-medium mt-1">Spara och ladda dina anpassade taktiktavlor manuellt.</p>
                 </div>
                 <button 
                   onClick={() => setShowTacticalSavedBoardsModal(false)} 
@@ -7642,7 +7331,7 @@ export default function LineupBuilder({
 
               {/* SECTION: Save current view */}
               <div className="bg-white dark:bg-zinc-900 p-4 sm:p-5 rounded-3xl border border-zinc-200 dark:border-zinc-800 shadow-sm mb-6">
-                <h4 className="text-base font-black text-zinc-800 dark:text-zinc-200 mb-3">Spara aktuell rittavla</h4>
+                <h4 className="text-base font-black text-zinc-800 dark:text-zinc-200 mb-3">Spara aktuell taktiktavla</h4>
                 <div className="flex flex-col sm:flex-row gap-3">
                   <input
                     type="text"
@@ -7668,7 +7357,7 @@ export default function LineupBuilder({
                 {(!lineup || !lineup.savedTacticalBoards || lineup.savedTacticalBoards.length === 0) ? (
                   <div className="text-center py-8 text-zinc-400 border border-dashed border-zinc-200 dark:border-zinc-800 rounded-3xl">
                     <Bookmark className="mx-auto mb-2 opacity-30" size={32} />
-                    <p className="text-xs font-semibold">Inga sparade rittavlor ännu.</p>
+                    <p className="text-xs font-semibold">Inga sparade taktiktavlor ännu.</p>
                     <p className="text-[11px] text-zinc-500 mt-0.5">Skriv ett namn ovan för att spara din första ritning.</p>
                   </div>
                 ) : (
@@ -7732,7 +7421,7 @@ export default function LineupBuilder({
                 </div>
                 <div>
                   <h3 className="text-xl sm:text-2xl font-black text-zinc-900 dark:text-white tracking-tight">Spara taktisk ritning?</h3>
-                  <p className="text-xs text-zinc-500 font-medium">Vill du spara dina ändringar på rittavlan innan du stänger?</p>
+                  <p className="text-xs text-zinc-500 font-medium">Vill du spara dina ändringar på taktiktavlan innan du stänger?</p>
                 </div>
               </div>
 
@@ -7753,7 +7442,7 @@ export default function LineupBuilder({
                 <span className="text-base leading-none shrink-0">⚠️</span>
                 <p className="leading-normal">
                   <strong className="block font-black uppercase tracking-wider text-[10px] text-red-800 dark:text-red-300 mb-1">Vad händer om du svarar Nej?</strong>
-                  Rittavlan kommer att rensas helt från klotter, ritningar och uppställda motståndare. Du kommer att återgå till den aktiva ordinarie laguppställningen. Din ritning går förlorad om du inte sparar den.
+                  Taktiktavlan kommer att rensas helt från klotter, ritningar och uppställda motståndare. Du kommer att återgå till den aktiva ordinarie laguppställningen. Din ritning går förlorad om du inte sparar den.
                 </p>
               </div>
 

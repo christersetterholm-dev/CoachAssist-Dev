@@ -129,6 +129,20 @@ npm run set-password -- e@post.se            # lokalt konto/lösenord
   hela skärmen och visar bara lagkortet (`renderLineupContent(true)`) med plan och bänk i fast
   storlek, skalat till skärmen. Ett tryck visar Klar i två sekunder, och Esc stänger. Den ersätter
   den gamla förhandsgranskningen/skärmbildsmodalen.
+- Taktiktavlan (`isMaximized` i LineupBuilder, ombyggd okt 2026): övre rad med Ångra/Gör om/
+  Visa-dölj ritningar (vänster) och Taktiktavlor/Bildläge/Storskärm/Mer/Stäng (höger). En
+  verktygsrad (48 px knappar) längst ner, lodrätt till vänster när skärmen ligger ner och är minst
+  900 px bred: Flytta, Penna, Pil, Löpning, Linje, Zon, Text, Boll, Motståndare, Sudd, färg, Bänken.
+  Övriga inställningar ligger i arket Mer; Rensa allt frågar "Bara ritningar" eller "Allt".
+  `boardMode`: 'edit' | 'present' (storskärm: bara planen, verktygen fälls in) | 'snapshot'
+  (bildläge: inga knappar, tryck visar Klar, Esc stänger). Planens storlek räknas med CSS-variablerna
+  `--board-rx`/`--board-ry` så att den inte hamnar under raderna.
+  Ritningar (`tacticalBoard.drawings`): löpning sparas som `freehand-arrow` med `lineType: 'dashed'`,
+  zon som `rectangle`/`circle` med `filled: true`; bara `line` är en ny typ (äldre appversioner ritar
+  den som en pil). Suddet träffar hela linjen (`hitDrawing`) och suddar längs hela draget.
+  Apple Pencil: med "Pennan ritar alltid" (på) ritar pennan och fingret flyttar – först när en penna
+  har använts (`pointerType === 'pen'`). Med ett ritverktyg går tryck på en spelare vidare till
+  planen, så en pil kan börja vid spelaren.
 - Ny kod ska använda byggklossarna i `src/components/ui` i stället för egna knappklasser.
   Stil: meningsversaler (inte VERSALER), `font-semibold`/`font-bold`, tryckytor minst 40 px.
 - Spelare ser inte Övningsbanken eller tävlingsknapparna i poänglistan (`canManage`).
@@ -157,9 +171,8 @@ npm run set-password -- e@post.se            # lokalt konto/lösenord
 - Vite-HMR via websocket fungerar inte i middleware-läget (ofarligt, sidan laddas om manuellt).
 - Dela upp `server.ts`, `App.tsx`, `LineupBuilder.tsx` gradvis; appen laddas som ett stort JS-paket (3,4 MB).
 - Gränssnittet, kvar att göra i nya stilen:
-  taktiktavlan (`isMaximized` i LineupBuilder: flytande menyer och ritverktyg, egen
-  session) och LineupBuilders modaler (formationer, spelarväljare, nummer/position, rubrik) som
-  har kvar VERSALER. Klara: uppställningen (sidopanel och bildläge), Översikt, kalender, passplanering
+  LineupBuilders modaler (formationer, spelarväljare, nummer/position, rubrik) som
+  har kvar VERSALER. Klara: uppställningen (sidopanel och bildläge), taktiktavlan, Översikt, kalender, passplanering
   och kallelser, Truppen, Tävlingsmoment och GameSetup, Profil, Poängliga, Administrationens
   ram/flikar (flikarnas innehåll har bara fått lugnare typografi).
 - `hideContentForPlayers` döljs bara i appen; servern skickar ändå passets moment till spelare.
