@@ -580,7 +580,7 @@ function MomentItem({
                 icon={<Layout size={15} />}
                 onClick={() => onOpenTacticalBoard && onOpenTacticalBoard(moment)}
               >
-                Rittavla{boardCount > 0 ? ` (${boardCount})` : ''}
+                Taktiktavla{boardCount > 0 ? ` (${boardCount})` : ''}
               </Button>
 
               {onSaveToBank && (
@@ -684,7 +684,7 @@ function MomentItem({
                 )}
                 {onOpenTacticalBoard && (isCoachOrAdmin || boardCount > 0) && (
                   <Button variant="secondary" size="sm" className="h-10" icon={<Layout size={15} />} onClick={() => onOpenTacticalBoard(moment)}>
-                    Rittavla{boardCount > 0 ? ` (${boardCount})` : ''}
+                    Taktiktavla{boardCount > 0 ? ` (${boardCount})` : ''}
                   </Button>
                 )}
                 {isCoachOrAdmin && moment.exerciseId && onShowTeams && (
@@ -1464,7 +1464,7 @@ export default function SessionEditor({
         />
       )}
 
-      {/* Rittavla för ett moment (spelare kan titta men inte spara) */}
+      {/* Taktiktavla för ett moment (spelare kan titta men inte spara) */}
       {tacticalBoardMoment && (
         <TacticalBoardModal
           boards={tacticalBoardMoment.tacticalBoards || []}
@@ -1474,7 +1474,7 @@ export default function SessionEditor({
           }}
           onClose={() => setTacticalBoardMoment(null)}
           squad={squad}
-          title={`Rittavla – ${tacticalBoardMoment.name || 'Moment'}`}
+          title={`Taktiktavla – ${tacticalBoardMoment.name || 'Moment'}`}
         />
       )}
 

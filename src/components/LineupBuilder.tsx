@@ -3251,7 +3251,8 @@ export default function LineupBuilder({
   }, [activePlayers, isMaximized, squad, squadPlayers]);
 
   const starters = useMemo(() => {
-    if (isMaximized) return activePlayers;
+    // Rittavlan: spelare på bänken stannar på bänken tills de tas fram via bänkpanelen.
+    if (isMaximized) return activePlayers.filter(p => !p.isSubstitute);
     return validLineupPlayers.filter(p => !p.isSubstitute);
   }, [isMaximized, activePlayers, validLineupPlayers]);
   const subs = useMemo(() => validLineupPlayers.filter(p => p.isSubstitute), [validLineupPlayers]);
@@ -4460,7 +4461,8 @@ export default function LineupBuilder({
                         </>
                       )}
                     </div>
-                    {showPositionDescriptions && (
+                    {/* Namnet styrs av "Spelarnamn"; taktiktavlans positionsmarkörer av "Positionsbeskrivning". */}
+                    {(isTacticalBlue ? showPositionDescriptions : showName) && (
                       <div className="mt-1">
                         {isTacticalBlue ? (
                           <span 

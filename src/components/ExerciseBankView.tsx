@@ -608,10 +608,10 @@ export default function ExerciseBankView({
                           type="button"
                           onClick={() => setTacticalBoardExercise(ex)}
                           className="p-1 px-1.5 bg-emerald-50/70 hover:bg-emerald-100 dark:bg-emerald-950/50 dark:hover:bg-emerald-900/60 text-emerald-700 dark:text-emerald-300 rounded-lg text-[11px] font-black uppercase tracking-wider flex items-center gap-0.5 transition-all"
-                          title="Öppna rittavla"
+                          title="Öppna taktiktavla"
                         >
                           <Layout size={11} />
-                          <span>Rittavla {ex.tacticalBoards && ex.tacticalBoards.length > 0 ? `(${ex.tacticalBoards.length})` : ''}</span>
+                          <span>Taktiktavla {ex.tacticalBoards && ex.tacticalBoards.length > 0 ? `(${ex.tacticalBoards.length})` : ''}</span>
                         </button>
                         <button
                           type="button"
@@ -1143,7 +1143,7 @@ export default function ExerciseBankView({
                 {/* Tactical Boards Whiteboard Section */}
                 <div className="space-y-1.5 pt-1">
                   <label className="text-zinc-700 dark:text-zinc-300 text-xs font-bold uppercase tracking-wider block">
-                    Rittavlor ({formTacticalBoards.length})
+                    Taktiktavlor ({formTacticalBoards.length})
                   </label>
                   <p className="text-[11px] text-zinc-500 dark:text-zinc-400">
                     Skapa och rita illustrationer eller taktiska genomgångar för övningen.
@@ -1157,7 +1157,7 @@ export default function ExerciseBankView({
                       className="flex items-center gap-1.5 px-4 py-2.5 bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/50 dark:hover:bg-emerald-900/60 text-emerald-700 dark:text-emerald-300 rounded-xl text-xs font-black uppercase tracking-wider transition-all border border-emerald-200 dark:border-emerald-800 active:scale-95"
                     >
                       <Layout size={14} />
-                      <span>{formTacticalBoards.length > 0 ? 'Öppna rittavlor' : 'Skapa rittavla'}</span>
+                      <span>{formTacticalBoards.length > 0 ? 'Öppna taktiktavlor' : 'Skapa taktiktavla'}</span>
                     </button>
                   </div>
                 </div>
@@ -1262,7 +1262,7 @@ export default function ExerciseBankView({
           }}
           onClose={() => setTacticalBoardExercise(null)}
           squad={squad}
-          title={`Rittavla - ${tacticalBoardExercise.name}`}
+          title={`Taktiktavla - ${tacticalBoardExercise.name}`}
         />
       )}
 
@@ -1276,7 +1276,7 @@ export default function ExerciseBankView({
           }}
           onClose={() => setIsFormTacticalBoardOpen(false)}
           squad={squad}
-          title={`Rittavlor - ${formName || 'Ny övning'}`}
+          title={`Taktiktavlor - ${formName || 'Ny övning'}`}
         />
       )}
     </div>

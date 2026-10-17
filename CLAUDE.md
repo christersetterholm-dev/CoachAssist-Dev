@@ -141,6 +141,9 @@ npm run set-password -- e@post.se            # lokalt konto/lösenord
 
 ## Konventioner
 
+- Ordval: allt som tidigare hette "rittavla" heter **taktiktavla** – både uppställningens
+  `isMaximized`-läge och ritytan för övningar/moment (TacticalBoardModal). Gäller samtal och appens texter.
+
 - Arbeta på en egen git-gren per uppgift; slå ihop till `main` när tester och typkontroll går
   igenom. Commit-meddelanden på svenska.
 - Lägg till/uppdatera tester i `tests/` för server- och behörighetsändringar.
@@ -154,7 +157,7 @@ npm run set-password -- e@post.se            # lokalt konto/lösenord
 - Vite-HMR via websocket fungerar inte i middleware-läget (ofarligt, sidan laddas om manuellt).
 - Dela upp `server.ts`, `App.tsx`, `LineupBuilder.tsx` gradvis; appen laddas som ett stort JS-paket (3,4 MB).
 - Gränssnittet, kvar att göra i nya stilen:
-  taktiktavlan/rittavlan (`isMaximized` i LineupBuilder: flytande menyer och ritverktyg, egen
+  taktiktavlan (`isMaximized` i LineupBuilder: flytande menyer och ritverktyg, egen
   session) och LineupBuilders modaler (formationer, spelarväljare, nummer/position, rubrik) som
   har kvar VERSALER. Klara: uppställningen (sidopanel och bildläge), Översikt, kalender, passplanering
   och kallelser, Truppen, Tävlingsmoment och GameSetup, Profil, Poängliga, Administrationens

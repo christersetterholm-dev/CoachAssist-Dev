@@ -82,7 +82,7 @@ export default function TacticalBoardModal({
   onSave, 
   onClose, 
   squad = [],
-  title = "Övningens Rittavla"
+  title = "Övningens taktiktavla"
 }: TacticalBoardModalProps) {
   
   // Local list of boards, initialized to ensure we have at least one board
@@ -706,7 +706,7 @@ export default function TacticalBoardModal({
 
   const deleteBoard = (boardId: string) => {
     if (localBoards.length <= 1) {
-      alert("Du måste ha minst en rittavla kvar.");
+      alert("Du måste ha minst en taktiktavla kvar.");
       return;
     }
     const filtered = localBoards.filter(b => b.id !== boardId);
@@ -895,7 +895,7 @@ export default function TacticalBoardModal({
           
           {/* Sidebar Header */}
           <div className="flex items-center justify-between border-b border-zinc-800 p-4 shrink-0 bg-zinc-900/80">
-            <span className="text-xs font-black uppercase tracking-wider text-white">Rittavlor ({localBoards.length})</span>
+            <span className="text-xs font-black uppercase tracking-wider text-white">Taktiktavlor ({localBoards.length})</span>
             
             {/* Quick close sidebar button inside sidebar itself */}
             <button
@@ -914,7 +914,7 @@ export default function TacticalBoardModal({
               className="w-full py-3 px-4 border border-dashed border-indigo-500/30 hover:border-indigo-500/60 bg-indigo-950/10 hover:bg-indigo-950/25 rounded-2xl flex items-center justify-center gap-2 text-indigo-400 text-xs font-black uppercase tracking-widest transition-all"
             >
               <Plus size={14} className="stroke-[3px]" />
-              Skapa rittavla
+              Skapa taktiktavla
             </button>
 
             <div className="space-y-2">
