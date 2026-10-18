@@ -53,8 +53,12 @@ export function normalizeEmoji(input: string): string | null {
   return out.join('');
 }
 
+const OFFLINE = 'Kunde inte nå servern. Kontrollera anslutningen (eller att appen är igång) och försök igen.';
+// fetch som ger ett begripligt fel när servern inte svarar alls (i stället för "Failed to fetch").
+const safeFetch = (url: string, init: RequestInit) => fetch(url, init).catch(() => { throw new Error(OFFLINE); });
+
 const call = async (method: string, path: string, body?: any) => {
-  const res = await fetch(getApiUrl(path), {
+  const res = await safeFetch(getApiUrl(path), {
     method,
     headers: { ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}), ...getAuthHeader() },
     body: body !== undefined ? JSON.stringify(body) : undefined,
@@ -90,7 +94,7 @@ export const uploadPostImage = async (file: File): Promise<string> => {
   const optimized = await optimizeImageForUpload(file);
   const form = new FormData();
   form.append('file', optimized, optimized.name);
-  const res = await fetch(getApiUrl('/api/upload'), { method: 'POST', headers: getAuthHeader(), body: form });
+  const res = await safeFetch(getApiUrl('/api/upload'), { method: 'POST', headers: getAuthHeader(), body: form });
   const json = await res.json().catch(() => null);
   if (!res.ok || !json?.url) throw new Error(json?.error || 'Bilden kunde inte laddas upp.');
   return json.url;

@@ -7,7 +7,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Megaphone, Pin, Plus, MessageCircle, Eye, ExternalLink, Calendar, ImagePlus, Trash2, Edit2, X, Link2,
-  ChevronRight, Send, Check, Swords, Dumbbell, SmilePlus,
+  ChevronRight, Send, Check, Swords, Dumbbell, SmilePlus, ImageOff, RefreshCw,
 } from 'lucide-react';
 import EmojiPicker from './EmojiPicker';
 import type { TrainingSession } from '../types';
@@ -51,6 +51,35 @@ export const sessionLabel = (s: TrainingSession) => {
 };
 
 const hostOf = (url: string) => { try { return new URL(url).hostname.replace(/^www\./, ''); } catch { return url; } };
+
+// Inläggets bild. Går den inte att visa (borttagen fil, servern nere) visas en ruta med en ikon
+// i stället för en trasig bild, så att det syns att något är fel och kan rättas.
+export const PostImage: React.FC<{ url: string; variant: 'thumb' | 'thumbSmall' | 'full' }> = ({ url, variant }) => {
+  const [failed, setFailed] = useState(false);
+  useEffect(() => setFailed(false), [url]);
+  const box = variant === 'full'
+    ? 'w-full h-48 sm:h-56 rounded-xl'
+    : `${variant === 'thumbSmall' ? 'w-14 h-14' : 'w-16 h-16'} rounded-xl shrink-0`;
+  if (failed) {
+    return (
+      <div className={`${box} bg-zinc-100 dark:bg-zinc-800 text-zinc-400 flex flex-col items-center justify-center gap-1.5 text-center`} title="Bilden kunde inte visas">
+        <ImageOff size={variant === 'full' ? 28 : 20} />
+        {variant === 'full' && <span className="text-sm">Bilden kunde inte visas</span>}
+      </div>
+    );
+  }
+  return (
+    <img
+      src={getApiUrl(url)}
+      alt=""
+      loading="lazy"
+      onError={() => setFailed(true)}
+      className={variant === 'full'
+        ? 'w-full max-h-80 min-h-[6rem] object-contain rounded-xl bg-zinc-100 dark:bg-zinc-800'
+        : `${box} object-cover bg-zinc-100 dark:bg-zinc-800`}
+    />
+  );
+};
 
 // Text med klickbara webbadresser och bevarade radbrytningar.
 const URL_RE = /(https?:\/\/[^\s<]+[^\s<.,;:!?)\]'"])/g;
@@ -108,9 +137,7 @@ const PostRow: React.FC<{ post: Post; session?: TrainingSession; showReads: bool
       )}
       <span className="block mt-1"><PostMeta post={post} showReads={showReads} /></span>
     </span>
-    {post.imageUrl && (
-      <img src={getApiUrl(post.imageUrl)} alt="" loading="lazy" className={`${compact ? 'w-14 h-14' : 'w-16 h-16'} rounded-xl object-cover shrink-0 bg-zinc-100 dark:bg-zinc-800`} />
-    )}
+    {post.imageUrl && <PostImage url={post.imageUrl} variant={compact ? 'thumbSmall' : 'thumb'} />}
   </button>
 );
 
@@ -349,7 +376,7 @@ export const PostDetailSheet: React.FC<{
 
           {post.imageUrl && (
             <a href={getApiUrl(post.imageUrl)} target="_blank" rel="noopener noreferrer" className="block">
-              <img src={getApiUrl(post.imageUrl)} alt="" className="w-full max-h-80 object-contain rounded-xl bg-zinc-100 dark:bg-zinc-800" />
+              <PostImage url={post.imageUrl} variant="full" />
             </a>
           )}
 
@@ -600,11 +627,16 @@ export const PostEditorSheet: React.FC<{
         <div className="flex flex-col gap-1.5">
           <span className={LABEL}>Bild (valfritt)</span>
           {form.imageUrl ? (
-            <div className="relative">
-              <img src={getApiUrl(form.imageUrl)} alt="" className="w-full max-h-56 object-contain rounded-xl bg-zinc-100 dark:bg-zinc-800" />
-              <IconButton label="Ta bort bilden" onClick={() => set('imageUrl', null)} className="!absolute top-2 right-2 !bg-white/90 dark:!bg-zinc-900/90">
-                <X size={18} />
-              </IconButton>
+            <div className="flex flex-col gap-2">
+              <PostImage url={form.imageUrl} variant="full" />
+              <div className="grid grid-cols-2 gap-2">
+                <Button variant="secondary" icon={<RefreshCw size={18} />} onClick={() => fileRef.current?.click()} disabled={uploading}>
+                  {uploading ? 'Förbereder…' : 'Byt bild'}
+                </Button>
+                <Button variant="secondary" icon={<Trash2 size={18} />} onClick={() => set('imageUrl', null)} disabled={uploading} className="!text-red-600 dark:!text-red-400">
+                  Ta bort bild
+                </Button>
+              </div>
             </div>
           ) : (
             <Button variant="secondary" icon={<ImagePlus size={18} />} onClick={() => fileRef.current?.click()} disabled={uploading}>
