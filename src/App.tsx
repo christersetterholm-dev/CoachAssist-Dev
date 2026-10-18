@@ -14,6 +14,8 @@ import SquadManager from './components/SquadManager';
 import Leaderboard from './components/Leaderboard';
 import LineupBuilder from './components/LineupBuilder';
 import TacticalBoardsView from './components/TacticalBoardsView';
+import PostsView, { PostDetailSheet, PostEditorSheet } from './components/PostsView';
+import { usePosts, type Post } from './lib/posts';
 
 import TeamPage from './components/TeamPage';
 import TrainingManager from './components/TrainingManager';
@@ -31,7 +33,7 @@ import { OnboardingModal } from './components/OnboardingModal';
 import { PendingRequestsModal } from './components/PendingRequestsModal';
 import { ShakeProtectionModal, QuickShakeModal } from './components/ShakeProtectionModal';
 
-type View = 'home' | 'training' | 'setup' | 'exercise' | 'squad' | 'leaderboard' | 'profile' | 'lineup' | 'tacticalboards' | 'teampage' | 'clubadmin';
+type View = 'home' | 'training' | 'setup' | 'exercise' | 'squad' | 'leaderboard' | 'profile' | 'lineup' | 'tacticalboards' | 'posts' | 'teampage' | 'clubadmin';
 
 const INITIAL_DATA: CoachData = {
   squad: [],
@@ -862,6 +864,10 @@ export default function App() {
     } catch (e) {}
   }, [activeSessionId]);
   const [sessionEditorTab, setSessionEditorTab] = useState<'schema' | 'attendance' | 'rsvp'>('schema');
+  // Inlägg till laget (hämtas från /api/posts, inte via lagets dokument)
+  const postsState = usePosts(userProfile.activeClubId, userProfile.activeTeamId, !!user);
+  const [openPostId, setOpenPostId] = useState<string | null>(null);
+  const [editingPost, setEditingPost] = useState<Post | 'new' | null>(null);
   const [sessionMode, setSessionMode] = useState<'plan' | 'live'>('plan');
   const [showResetConfirm, setShowResetConfirm] = useState(false);
   const [showFinishConfirm, setShowFinishConfirm] = useState(false);
@@ -3806,6 +3812,7 @@ export default function App() {
     squad: 'Truppen',
     lineup: 'Uppställning & taktik',
     tacticalboards: 'Taktiktavla',
+    posts: 'Inlägg',
     leaderboard: 'Poängliga',
     teampage: 'Lagsida',
     clubadmin: 'Administration',
@@ -3876,7 +3883,7 @@ export default function App() {
 
   const mainContent = (
     <div className={`flex-1 flex flex-col min-h-0 w-full max-w-full overflow-x-hidden ${
-      view === 'exercise' || view === 'teampage' || view === 'home' || view === 'tacticalboards' || (view === 'lineup' && (isLineupMaximized || isPresenting))
+      view === 'exercise' || view === 'teampage' || view === 'home' || view === 'tacticalboards' || view === 'posts' || (view === 'lineup' && (isLineupMaximized || isPresenting))
         ? 'overflow-hidden'
         : 'overflow-y-auto'
     } ${view === 'exercise' ? 'select-none' : ''}`}>
@@ -3908,6 +3915,21 @@ export default function App() {
                 setView('setup');
               }}
               onUpdateSession={onUpdateSession}
+              posts={postsState.posts}
+              canWritePosts={postsState.canEdit}
+              onOpenPost={setOpenPostId}
+              onNewPost={() => setEditingPost('new')}
+              onShowAllPosts={() => setView('posts')}
+            />
+          )}
+
+          {view === 'posts' && (
+            <PostsView
+              key="posts"
+              postsState={postsState}
+              sessions={sessions}
+              onOpenPost={setOpenPostId}
+              onNewPost={() => setEditingPost('new')}
             />
           )}
 
@@ -4611,7 +4633,7 @@ export default function App() {
           )}
         </AnimatePresence>
 
-        {view !== 'exercise' && view !== 'teampage' && view !== 'home' && view !== 'setup' && view !== 'tacticalboards' && !(view === 'lineup' && (isLineupMaximized || isPresenting)) && !isPresenting && (
+        {view !== 'exercise' && view !== 'teampage' && view !== 'home' && view !== 'setup' && view !== 'tacticalboards' && view !== 'posts' && !(view === 'lineup' && (isLineupMaximized || isPresenting)) && !isPresenting && (
           <div className="mt-8 mb-4 flex justify-center">
             <VersionFooter />
           </div>
@@ -4621,6 +4643,26 @@ export default function App() {
 
   const overlays = (
     <>
+      <PostDetailSheet
+        postId={openPostId}
+        postsState={postsState}
+        sessions={sessions}
+        onClose={() => setOpenPostId(null)}
+        onEdit={(p) => { setOpenPostId(null); setEditingPost(p); }}
+        onOpenSession={(id) => {
+          setOpenPostId(null);
+          setActiveSessionId(id);
+          setSessionEditorTab(isCoachOrAdmin ? 'schema' : 'rsvp');
+        }}
+      />
+      <PostEditorSheet
+        editing={editingPost}
+        clubId={userProfile.activeClubId}
+        teamId={userProfile.activeTeamId}
+        sessions={sessions}
+        postsState={postsState}
+        onClose={() => setEditingPost(null)}
+      />
       <AnimatePresence>
         {showTeamOverview && activeExercise && (
           <TeamOverviewModal
@@ -5046,6 +5088,7 @@ export default function App() {
         view={view as ShellView}
         onNavigate={(v) => { setIsPresenting(false); setView(v); }}
         canViewLineup={canViewLineup}
+        unreadPosts={postsState.unreadCount}
         isCoachOrAdmin={isCoachOrAdmin}
         title={shellTitle}
         actions={shellActions}

@@ -292,3 +292,96 @@ test('taktiktavlor: tränare sparar en tavla i taget, spelare ser bara delade', 
   assert.equal((await s.api('DELETE', `/api/tacticalboards/tb2?${q}`, { token: coachToken })).status, 404);
   assert.deepEqual((await list(coachToken)).json.boards.map((b) => b.id), ['tb1']);
 });
+
+test('inlägg: tränare skriver, laget läser, reagerar och kommenterar, andra nekas', async () => {
+  const q = 'clubId=klubb1&teamId=lag1';
+  const create = (token, post) => s.api('POST', '/api/posts', { token, body: { clubId: 'klubb1', teamId: 'lag1', post } });
+  const list = (token) => s.api('GET', `/api/posts?${q}`, { token });
+
+  // Bara tränare skriver, och rubrik krävs
+  assert.equal((await create(playerToken, { title: 'Hej' })).status, 403, 'spelare får inte skriva');
+  assert.equal((await create(otherToken, { title: 'Hej' })).status, 403, 'annan förening får inte skriva');
+  assert.equal((await create(coachToken, { title: '  ' })).status, 400, 'rubrik krävs');
+  assert.equal((await create(coachToken, { title: 'X', imageUrl: 'https://evil.example/a.png' })).status, 400, 'bara uppladdade bilder');
+  assert.equal((await create(coachToken, { title: 'X', links: [{ url: 'javascript:alert(1)' }] })).status, 400, 'bara webblänkar');
+
+  const a = await create(coachToken, { title: 'Inför matchen', body: 'Samling 17.30', links: [{ url: 'example.com/karta', label: 'Karta' }] });
+  assert.equal(a.status, 200);
+  const postId = a.json.post.id;
+  assert.equal(a.json.post.authorName, 'Tränare Ett');
+  assert.deepEqual(a.json.post.links, [{ url: 'https://example.com/karta', label: 'Karta' }]);
+  const pinned = await create(coachToken, { title: 'Viktigt', pinned: true });
+  assert.equal(pinned.status, 200);
+
+  // Laget läser (fästa först); andra föreningar och utloggade nekas
+  const forPlayer = await list(playerToken);
+  assert.equal(forPlayer.status, 200);
+  assert.deepEqual(forPlayer.json.posts.map((p) => p.title), ['Viktigt', 'Inför matchen']);
+  assert.equal(forPlayer.json.canEdit, false);
+  assert.equal(forPlayer.json.posts[1].isRead, false);
+  assert.equal(forPlayer.json.posts[1].readCount, undefined, 'spelare ser inte läst-statistik');
+  assert.equal((await list(otherToken)).status, 403);
+  assert.equal((await s.api('GET', `/api/posts?${q}`)).status, 401);
+  assert.equal((await s.api('GET', `/api/posts/${postId}`, { token: otherToken })).status, 404, 'annan förening ser inte inlägget');
+  assert.equal((await s.api('POST', `/api/posts/${postId}/read`, { token: otherToken })).status, 404);
+
+  // Läst av
+  assert.equal((await s.api('POST', `/api/posts/${postId}/read`, { token: playerToken })).status, 200);
+  assert.equal((await list(playerToken)).json.posts[1].isRead, true);
+  const coachView = (await list(coachToken)).json.posts.find((p) => p.id === postId);
+  assert.equal(coachView.readCount, 1);
+  const detail = await s.api('GET', `/api/posts/${postId}`, { token: coachToken });
+  assert.deepEqual(detail.json.readers.read.map((r) => r.name), ['Spelare Ett']);
+  assert.ok(detail.json.readers.unread.some((r) => r.name === 'Ny Spelare'));
+  assert.ok(!detail.json.readers.unread.some((r) => r.name === 'Tränare Ett'), 'tränare räknas inte');
+  assert.equal(coachView.readerTotal, 1 + detail.json.readers.unread.length);
+  assert.equal((await s.api('GET', `/api/posts/${postId}`, { token: playerToken })).json.readers, undefined);
+
+  // Reaktioner slås av och på
+  const react = (token, emoji) => s.api('POST', `/api/posts/${postId}/reactions`, { token, body: { emoji } });
+  assert.equal((await react(playerToken, 'hej')).status, 400, 'bara emojis');
+  assert.equal((await react(playerToken, '<b>')).status, 400);
+  assert.equal((await react(playerToken, '👍')).json.post.reactions['👍'], 1);
+  assert.equal((await react(coachToken, '👍')).json.post.reactions['👍'], 2);
+  const off = await react(playerToken, '👍');
+  assert.equal(off.json.on, false);
+  assert.equal(off.json.post.reactions['👍'], 1);
+  assert.equal((await react(otherToken, '👍')).status, 404);
+  // Flera olika reaktioner från samma person
+  await react(playerToken, '❤️');
+  const several = await react(playerToken, '🔥');
+  assert.deepEqual(several.json.post.myReactions.sort(), ['❤️', '🔥'].sort());
+  assert.equal(several.json.post.reactions['👍'], 1, 'tränarens tumme finns kvar');
+  // Valfri emoji från väljaren, och 👍 med U+FE0F räknas som samma som 👍
+  assert.deepEqual((await react(playerToken, '🦄')).json.post.myReactions.sort(), ['❤️', '🔥', '🦄'].sort());
+  const thumb = await react(playerToken, '👍\uFE0F');
+  assert.equal(thumb.json.post.reactions['👍'], 2);
+  assert.equal(thumb.json.post.reactions['👍\uFE0F'], undefined);
+  await react(playerToken, '👍');
+  await react(playerToken, '🦄');
+
+  // Kommentarer: alla i laget skriver, egna eller tränaren tar bort
+  const comment = (token, body) => s.api('POST', `/api/posts/${postId}/comments`, { token, body: { body } });
+  assert.equal((await comment(playerToken, '')).status, 400);
+  const c1 = await comment(playerToken, 'Jag kommer!');
+  assert.equal(c1.status, 200);
+  assert.equal(c1.json.comment.authorName, 'Spelare Ett');
+  const c2 = await comment(coachToken, 'Bra!');
+  assert.equal((await comment(otherToken, 'Hej')).status, 404);
+  assert.equal((await s.api('DELETE', `/api/posts/${postId}/comments/${c2.json.comment.id}`, { token: playerToken })).status, 403, 'inte andras kommentarer');
+  assert.equal((await s.api('DELETE', `/api/posts/${postId}/comments/${c1.json.comment.id}`, { token: playerToken })).status, 200);
+  assert.equal((await list(playerToken)).json.posts[1].commentCount, 1);
+
+  // Ändra och ta bort: bara tränare
+  const upd = (token, post) => s.api('PUT', `/api/posts/${postId}`, { token, body: { post } });
+  assert.equal((await upd(playerToken, { title: 'Hack' })).status, 403);
+  assert.equal((await upd(otherToken, { title: 'Hack' })).status, 404);
+  const u = await upd(coachToken, { title: 'Inför matchen (ändrad)', body: 'Samling 17.00', pinned: true });
+  assert.equal(u.status, 200);
+  assert.equal(u.json.post.pinned, true);
+  assert.equal(u.json.post.reactions['👍'], 1, 'reaktioner finns kvar efter ändring');
+  assert.equal((await s.api('DELETE', `/api/posts/${postId}`, { token: playerToken })).status, 403);
+  assert.equal((await s.api('DELETE', `/api/posts/${postId}`, { token: coachToken })).status, 200);
+  assert.equal((await s.api('GET', `/api/posts/${postId}`, { token: coachToken })).status, 404);
+  assert.deepEqual((await list(playerToken)).json.posts.map((p) => p.title), ['Viktigt']);
+});
