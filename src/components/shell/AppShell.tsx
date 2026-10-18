@@ -5,11 +5,11 @@
 import React from 'react';
 import {
   House, Calendar, Users, Shirt, Trophy, Globe, ShieldCheck, User as UserIcon, Sun, Moon,
-  RefreshCw, LogOut, Building2, ChevronRight, Cloud, CloudOff, Loader2, VibrateOff, Minimize2, Presentation,
+  RefreshCw, LogOut, Building2, ChevronRight, Cloud, CloudOff, Loader2, VibrateOff, Minimize2, Presentation, Megaphone,
 } from 'lucide-react';
 import { Avatar, MenuItem, Sheet } from '../ui';
 
-export type ShellView = 'home' | 'training' | 'squad' | 'lineup' | 'tacticalboards' | 'leaderboard' | 'teampage' | 'clubadmin' | 'profile';
+export type ShellView = 'home' | 'training' | 'squad' | 'lineup' | 'tacticalboards' | 'posts' | 'leaderboard' | 'teampage' | 'clubadmin' | 'profile';
 
 export interface NavItem {
   id: ShellView;
@@ -17,11 +17,15 @@ export interface NavItem {
   shortLabel?: string;
   icon: React.ComponentType<{ size?: number; strokeWidth?: number; className?: string }>;
   badge?: number;
+  /** Visas inte i bottenmenyn på mobil (där får Översikt i stället märket). */
+  desktopOnly?: boolean;
 }
 
-export const buildNavItems = (opts: { canViewLineup: boolean }): { primary: NavItem[]; secondary: NavItem[] } => {
+export const buildNavItems = (opts: { canViewLineup: boolean; unreadPosts?: number }): { primary: NavItem[]; secondary: NavItem[] } => {
   const primary: NavItem[] = [
     { id: 'home', label: 'Översikt', icon: House },
+    // Inlägg från tränarna. På mobil nås de via Översikt, så bottenmenyn inte blir för trång.
+    { id: 'posts', label: 'Inlägg', icon: Megaphone, badge: opts.unreadPosts || undefined, desktopOnly: true },
     { id: 'training', label: 'Kalender', icon: Calendar },
     { id: 'squad', label: 'Truppen', icon: Users },
   ];
@@ -45,6 +49,8 @@ export interface AppShellProps {
   view: ShellView;
   onNavigate: (view: ShellView) => void;
   canViewLineup: boolean;
+  /** Antal olästa inlägg (märke på menyvalet). */
+  unreadPosts?: number;
   isCoachOrAdmin: boolean;
   title: string;
   /** Knappar som hör till den aktuella sidan, visas till höger i toppfältet. */
@@ -159,12 +165,12 @@ const ExitPresentingButton: React.FC<{ onExit: () => void }> = ({ onExit }) => {
 
 export const AppShell: React.FC<AppShellProps> = props => {
   const {
-    view, onNavigate, canViewLineup, isCoachOrAdmin, title, actions, clubName, teamName, account,
+    view, onNavigate, canViewLineup, unreadPosts, isCoachOrAdmin, title, actions, clubName, teamName, account,
     pendingRequests, syncState, onSaveNow, onRefresh, theme, onToggleTheme, onLogout, onLogin,
     onOpenShakeInfo, onOpenPendingRequests, chromeHidden, hideTopBar, presenting, onExitPresenting, banner, children,
   } = props;
   const [accountOpen, setAccountOpen] = React.useState(false);
-  const { primary, secondary } = buildNavItems({ canViewLineup });
+  const { primary, secondary } = buildNavItems({ canViewLineup, unreadPosts });
   const adminItem: NavItem | null = isCoachOrAdmin && account
     ? { id: 'clubadmin', label: 'Administration', icon: ShieldCheck, badge: pendingRequests || undefined }
     : null;
@@ -295,9 +301,10 @@ export const AppShell: React.FC<AppShellProps> = props => {
             className="md:hidden shrink-0 bg-white/95 dark:bg-zinc-900/95 backdrop-blur-md border-t border-zinc-200/80 dark:border-zinc-800 pb-safe z-30"
           >
             <div className="flex items-stretch justify-around px-1">
-              {primary.map(item => {
-                const active = view === item.id;
+              {primary.filter(item => !item.desktopOnly).map(item => {
+                const active = view === item.id || (item.id === 'home' && view === 'posts');
                 const Icon = item.icon;
+                const badge = item.id === 'home' ? unreadPosts : item.badge;
                 return (
                   <button
                     key={item.id}
@@ -308,8 +315,11 @@ export const AppShell: React.FC<AppShellProps> = props => {
                       active ? 'text-indigo-600 dark:text-indigo-300' : 'text-zinc-500 dark:text-zinc-400'
                     }`}
                   >
-                    <span className={`flex items-center justify-center w-14 h-7 rounded-full transition-colors ${active ? 'bg-indigo-50 dark:bg-indigo-950/70' : ''}`}>
+                    <span className={`relative flex items-center justify-center w-14 h-7 rounded-full transition-colors ${active ? 'bg-indigo-50 dark:bg-indigo-950/70' : ''}`}>
                       <Icon size={21} strokeWidth={active ? 2.4 : 2} />
+                      {badge ? (
+                        <span className="absolute -top-1 right-1.5 min-w-[16px] h-[16px] px-1 rounded-full bg-red-600 text-white text-[10px] font-bold leading-[16px] text-center">{badge}</span>
+                      ) : null}
                     </span>
                     <span className={`text-[11px] leading-tight ${active ? 'font-bold' : 'font-medium'}`}>{item.shortLabel || item.label}</span>
                   </button>

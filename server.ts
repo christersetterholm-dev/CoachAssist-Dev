@@ -18,6 +18,7 @@ import { openDatabase } from './server/database.ts';
 import * as registry from './server/registry.ts';
 import * as invites from './server/invites.ts';
 import * as tacticalBoards from './server/tacticalBoards.ts';
+import * as posts from './server/posts.ts';
 
 const customRequire = typeof require !== 'undefined' ? require : createRequire(import.meta.url);
 
@@ -2527,6 +2528,107 @@ async function startServer() {
     if (!a) return res.status(400).json({ error: 'clubId och teamId krävs.' });
     if (!a.isCoach) return res.status(403).json({ error: 'Bara tränare kan ta bort taktiktavlor.' });
     if (!tacticalBoards.deleteBoard(db, a.clubId, a.teamId, req.params.id)) return res.status(404).json({ error: 'Tavlan finns inte.' });
+    res.json({ success: true });
+  });
+
+  // Inlägg: tränare skriver till laget, alla i laget läser, reagerar och kommenterar.
+  const teamAccess = async (req: express.Request, clubId: unknown, teamId: unknown) => {
+    if (typeof clubId !== 'string' || typeof teamId !== 'string' || !clubId || !teamId || teamId === registry.CLUB_LEVEL) return null;
+    const user = (req as any).user;
+    const access = registry.getClubAccess(db, user, clubId, await verifyIsRootAdmin(user));
+    const memberId = access.memberIds[0] || null;
+    const me: any = memberId ? db.prepare('SELECT full_name FROM members WHERE id = ?').get(memberId) : null;
+    // Medlemsraden i just det här laget (om personen finns i flera lag/rader)
+    const teamMember: any = access.memberIds.length
+      ? db.prepare(`SELECT member_id FROM team_roles WHERE club_id = ? AND team_id = ? AND member_id IN (${access.memberIds.map(() => '?').join(',')}) LIMIT 1`)
+        .get(clubId, teamId, ...access.memberIds)
+      : null;
+    return {
+      user, clubId, teamId,
+      memberId: teamMember?.member_id || memberId,
+      name: me?.full_name || user.email,
+      canRead: registry.isTeamMember(access, teamId),
+      isCoach: registry.isTeamCoach(access, teamId),
+    };
+  };
+  // Inlägget plus behörigheten i dess lag. Svarar själv med fel om något saknas.
+  const postAccess = async (req: express.Request, res: express.Response) => {
+    const row = posts.getPostRow(db, req.params.id);
+    const a = row ? await teamAccess(req, row.club_id, row.team_id) : null;
+    if (!row || !a || !a.canRead) { res.status(404).json({ error: 'Inlägget finns inte.' }); return null; }
+    return { row, a };
+  };
+
+  app.get('/api/posts', requireAuthUser, async (req, res) => {
+    const a = await teamAccess(req, req.query.clubId, req.query.teamId);
+    if (!a) return res.status(400).json({ error: 'clubId och teamId krävs.' });
+    if (!a.canRead) return res.status(403).json({ error: 'Du har inte behörighet till det här laget.' });
+    res.json({ posts: posts.listPosts(db, a.clubId, a.teamId, a.user.id, a.isCoach), canEdit: a.isCoach, reactions: posts.REACTIONS });
+  });
+
+  app.post('/api/posts', requireAuthUser, async (req, res) => {
+    const a = await teamAccess(req, req.body?.clubId, req.body?.teamId);
+    if (!a) return res.status(400).json({ error: 'clubId och teamId krävs.' });
+    if (!a.isCoach) return res.status(403).json({ error: 'Bara tränare kan skriva inlägg.' });
+    const v = posts.cleanInput(req.body?.post);
+    if ('error' in v) return res.status(400).json({ error: v.error });
+    const row = posts.createPost(db, a.clubId, a.teamId, v.value, { userId: a.user.id, name: a.name });
+    res.json(posts.getPost(db, row, a.user.id, true));
+  });
+
+  app.get('/api/posts/:id', requireAuthUser, async (req, res) => {
+    const p = await postAccess(req, res);
+    if (!p) return;
+    res.json(posts.getPost(db, p.row, p.a.user.id, p.a.isCoach));
+  });
+
+  app.put('/api/posts/:id', requireAuthUser, async (req, res) => {
+    const p = await postAccess(req, res);
+    if (!p) return;
+    if (!p.a.isCoach) return res.status(403).json({ error: 'Bara tränare kan ändra inlägg.' });
+    const v = posts.cleanInput(req.body?.post);
+    if ('error' in v) return res.status(400).json({ error: v.error });
+    res.json(posts.getPost(db, posts.updatePost(db, p.row.id, v.value), p.a.user.id, true));
+  });
+
+  app.delete('/api/posts/:id', requireAuthUser, async (req, res) => {
+    const p = await postAccess(req, res);
+    if (!p) return;
+    if (!p.a.isCoach) return res.status(403).json({ error: 'Bara tränare kan ta bort inlägg.' });
+    posts.deletePost(db, p.row.id);
+    res.json({ success: true });
+  });
+
+  app.post('/api/posts/:id/read', requireAuthUser, async (req, res) => {
+    const p = await postAccess(req, res);
+    if (!p) return;
+    posts.markRead(db, p.row.id, p.a.user.id, p.a.memberId);
+    res.json({ success: true });
+  });
+
+  app.post('/api/posts/:id/reactions', requireAuthUser, async (req, res) => {
+    const p = await postAccess(req, res);
+    if (!p) return;
+    const r = posts.toggleReaction(db, p.row.id, p.a.user.id, req.body?.emoji);
+    if ('error' in r) return res.status(400).json({ error: r.error });
+    res.json({ on: r.on, post: posts.getPost(db, p.row, p.a.user.id, p.a.isCoach).post });
+  });
+
+  app.post('/api/posts/:id/comments', requireAuthUser, async (req, res) => {
+    const p = await postAccess(req, res);
+    if (!p) return;
+    const r = posts.addComment(db, p.row.id, p.a.user.id, p.a.name, req.body?.body);
+    if ('error' in r) return res.status(400).json({ error: r.error });
+    res.json({ comment: r.comment });
+  });
+
+  app.delete('/api/posts/:id/comments/:commentId', requireAuthUser, async (req, res) => {
+    const p = await postAccess(req, res);
+    if (!p) return;
+    const c = posts.getComment(db, p.row.id, req.params.commentId);
+    if (!c) return res.status(404).json({ error: 'Kommentaren finns inte.' });
+    if (c.user_id !== p.a.user.id && !p.a.isCoach) return res.status(403).json({ error: 'Du kan bara ta bort egna kommentarer.' });
+    posts.deleteComment(db, req.params.commentId);
     res.json({ success: true });
   });
 

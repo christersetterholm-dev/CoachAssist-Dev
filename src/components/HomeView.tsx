@@ -1,17 +1,19 @@
 /**
  * Översikt – appens startsida. Visar det viktigaste just nu:
  * nästa aktivitet (med svar på kallelsen för spelare, svarsläge för tränare),
- * kommande aktiviteter, snabbval och poängligans topp.
+ * tränarnas inlägg, kommande aktiviteter, snabbval och poängligans topp.
  */
 import React, { useMemo, useState } from 'react';
 import {
   Calendar, Clock, MapPin, Check, X, HelpCircle, ChevronRight, Plus, Trophy, Shirt, Users,
-  ClipboardList, Swords, Dumbbell, UserPlus, Medal, Presentation,
+  ClipboardList, Swords, Dumbbell, UserPlus, Medal, Presentation, Megaphone,
 } from 'lucide-react';
 import { Exercise, Period, SquadPlayer, TrainingSession, RsvpStatus, UserProfile } from '../types';
 import { User, saveRsvp } from '../lib/firebase';
 import { calculateLeaderboard } from '../lib/leaderboardUtils';
 import { isMatchSession } from '../utils/sessionCategory';
+import type { Post } from '../lib/posts';
+import { PostsHomeSection } from './PostsView';
 import { Avatar, Badge, Button, Card, EmptyState, SectionHeader } from './ui';
 
 interface HomeViewProps {
@@ -31,6 +33,11 @@ interface HomeViewProps {
   onNewSession: () => void;
   onNewExercise: () => void;
   onUpdateSession: (session: TrainingSession) => void;
+  posts: Post[];
+  canWritePosts: boolean;
+  onOpenPost: (id: string) => void;
+  onNewPost: () => void;
+  onShowAllPosts: () => void;
 }
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -106,6 +113,7 @@ export default function HomeView(props: HomeViewProps) {
   const {
     user, userProfile, isCoachOrAdmin, canViewLineup, squad, sessions, exercises, periods, pendingRequests,
     onOpenPendingRequests, onOpenSession, onOpenLineupForSession, onNavigate, onNewSession, onNewExercise, onUpdateSession,
+    posts, canWritePosts, onOpenPost, onNewPost, onShowAllPosts,
   } = props;
   const [rsvpError, setRsvpError] = useState<string | null>(null);
   const [savingId, setSavingId] = useState<string | null>(null);
@@ -219,6 +227,15 @@ export default function HomeView(props: HomeViewProps) {
 
         <div className="grid gap-6 lg:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)]">
           <div className="space-y-6 min-w-0">
+            <PostsHomeSection
+              posts={posts}
+              canEdit={canWritePosts}
+              sessions={sessions}
+              onOpenPost={onOpenPost}
+              onNewPost={onNewPost}
+              onShowAll={onShowAllPosts}
+            />
+
             {/* Nästa aktivitet */}
             <section>
               <SectionHeader title="Nästa aktivitet" icon={<Calendar size={16} />} action={
@@ -249,6 +266,14 @@ export default function HomeView(props: HomeViewProps) {
                   </button>
 
                   <div className="px-4 sm:px-5 pb-4 sm:pb-5 pt-1 space-y-3">
+                    {posts.filter(p => p.sessionId === next.id).map(p => (
+                      <button key={p.id} type="button" onClick={() => onOpenPost(p.id)} className="w-full flex items-center gap-2.5 p-2.5 rounded-xl bg-indigo-50/70 dark:bg-indigo-950/30 text-left cursor-pointer hover:bg-indigo-50 dark:hover:bg-indigo-950/50">
+                        <Megaphone size={16} className="text-indigo-600 dark:text-indigo-300 shrink-0" />
+                        <span className={`flex-1 min-w-0 text-sm truncate ${p.isRead ? 'font-medium' : 'font-bold'}`}>{p.title}</span>
+                        {!p.isRead && <span className="w-2 h-2 rounded-full bg-red-600 shrink-0" aria-label="Oläst" />}
+                        <ChevronRight size={16} className="text-zinc-400 shrink-0" />
+                      </button>
+                    ))}
                     {!isCoachOrAdmin && me && (
                       <>
                         <div className="text-sm font-semibold text-zinc-600 dark:text-zinc-300">

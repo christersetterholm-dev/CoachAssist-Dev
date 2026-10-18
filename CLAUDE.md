@@ -34,6 +34,7 @@ Läs den här filen först i varje nytt samtal. Håll den uppdaterad när något
 | Inbjudningslänkar | `server/invites.ts` |
 | Lagets taktiktavlor (menyposten Taktiktavla) | `server/tacticalBoards.ts`, `src/components/TacticalBoardsView.tsx` |
 | Animationer i steg på taktiktavlan (räknandet, ingen React) | `src/utils/boardAnimation.ts` (tester i `tests/boardAnimation.test.mjs`) |
+| Inlägg (tränarnas meddelanden till laget) | `server/posts.ts`, `src/lib/posts.ts`, `src/components/PostsView.tsx` |
 | Startfil på webbhotellet (Passenger) | `app.cjs` → `dist/server.cjs` |
 | React-appen | `src/` (`App.tsx` och `LineupBuilder.tsx` är mycket stora) |
 | Appens skal (sidomeny, bottenmeny, toppfält, kontomeny) | `src/components/shell/AppShell.tsx` |
@@ -77,6 +78,26 @@ Appen läser/skriver JSON-dokument via sökvägar:
 
 ### Poängligor
 - `getConsolidatedPeriods` samlar bara från det egna laget/användaren (läckte tidigare mellan lag).
+
+### Inlägg (`/api/posts`, `server/posts.ts`)
+- Egna tabeller (inte dokumentlagringen): `posts` (per förening+lag; rubrik, text, fäst, valfri
+  `session_id`, bild `/uploads/...`, länkar som JSON), `post_reads` (läst av, per konto + medlem),
+  `post_reactions` (valfri emoji, högst 20 per person och inlägg; `REACTIONS` = snabbvalen),
+  `post_comments`. Emojis normaliseras (`normalizeEmoji`, samma i server och app) så att t.ex.
+  👍 och 👍️ (med U+FE0F) blir samma reaktion.
+- Plusknappen öppnar `src/components/EmojiPicker.tsx`: svensk sökning och kategorier från
+  `emojibase-data/sv` (laddas som egen fil först när väljaren öppnas), "Senaste reaktioner"
+  sparas i webbläsarens localStorage.
+- Tränare/föreningsadmin i laget skriver, ändrar, fäster, tar bort (och tar bort andras
+  kommentarer). Alla i laget läser, reagerar och kommenterar. Annat lag/förening får 404.
+- "Läst av" räknas mot lagets spelare (roll `player`); bara tränare får siffror och namnlistor.
+- Bilder: bara uppladdade (`/uploads/...`). HEIC görs om till JPEG och krymps i webbläsaren
+  (`optimizeImageForUpload` i `src/utils/imageOptimizer.ts`, heic2any) – serverns sharp kan inte
+  läsa iPhones HEIC. Länkar måste vara http/https och öppnas i ny flik.
+- Appen: `usePosts` i App.tsx (hämtar var 5:e minut). Kortet på Översikt (`PostsHomeSection`, med
+  miniatyrbild), sidan Inlägg (`view === 'posts'`), läsarket `PostDetailSheet` och skrivarket
+  `PostEditorSheet` ligger i `overlays`. Menyvalet Inlägg (märke = olästa) syns i sidomenyn; i
+  mobilens bottenmeny finns det inte (för trångt) – där får Översikt märket.
 
 ## Köra, testa, driftsätta
 
@@ -196,6 +217,10 @@ npm run set-password -- e@post.se            # lokalt konto/lösenord
 - Ändra inte produktionsdata direkt; prova databasflyttar mot en kopia först.
 
 ## Kvar att göra / idéer
+
+- Inlägg: visa kopplade inlägg även i passvyn (`SessionRsvpView`); notiser när nytt inlägg kommer.
+- `isProduction` i server.ts blir sant om mappens sökväg innehåller "dist" (t.ex. en worktree som
+  heter `distracted-...`) – då letar `npm run dev` efter `dist/index.html`. Kontrollera hellre mappnamnet exakt.
 
 - Föräldrar kopplade till barn (svara på kallelser åt dem).
 - `admins/root_admins_list` kan läsas av alla inloggade – begränsa.

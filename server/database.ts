@@ -193,6 +193,52 @@ export const SCHEMA = `
     used_by TEXT
   );
   CREATE INDEX IF NOT EXISTS idx_invites_member ON invites(member_id);
+
+  -- Inlägg: tränarnas meddelanden till laget (se server/posts.ts).
+  CREATE TABLE IF NOT EXISTS posts (
+    id TEXT PRIMARY KEY,
+    club_id TEXT NOT NULL,
+    team_id TEXT NOT NULL,
+    author_user_id TEXT,
+    author_name TEXT,
+    title TEXT NOT NULL,
+    body TEXT NOT NULL DEFAULT '',
+    pinned INTEGER NOT NULL DEFAULT 0,
+    session_id TEXT,
+    image_url TEXT,
+    links TEXT,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_posts_team ON posts(club_id, team_id);
+
+  -- Vem som har läst ett inlägg (en rad per person).
+  CREATE TABLE IF NOT EXISTS post_reads (
+    post_id TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    member_id TEXT,
+    read_at INTEGER NOT NULL,
+    PRIMARY KEY (post_id, user_id)
+  );
+
+  -- Reaktioner (t.ex. tumme upp): en rad per person och symbol.
+  CREATE TABLE IF NOT EXISTS post_reactions (
+    post_id TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    emoji TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    PRIMARY KEY (post_id, user_id, emoji)
+  );
+
+  CREATE TABLE IF NOT EXISTS post_comments (
+    id TEXT PRIMARY KEY,
+    post_id TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    author_name TEXT,
+    body TEXT NOT NULL,
+    created_at INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_post_comments_post ON post_comments(post_id);
 `;
 
 const USER_COLUMNS = [
