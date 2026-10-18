@@ -256,13 +256,14 @@ export const PostDetailSheet: React.FC<{
   const listed = postsState.posts.find(p => p.id === postId) || null;
   const [detail, setDetail] = useState<PostDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [comment, setComment] = useState('');
+  // Kommentarsrutan styrs inte av React (se DICTATION nedan); texten läses från rutan vid Skicka.
+  const commentRef = useRef<HTMLTextAreaElement>(null);
   const [sending, setSending] = useState(false);
   const [showReaders, setShowReaders] = useState(false);
   const [showPicker, setShowPicker] = useState(false);
 
   useEffect(() => {
-    setDetail(null); setError(null); setComment(''); setShowReaders(false); setShowPicker(false);
+    setDetail(null); setError(null); setShowReaders(false); setShowPicker(false);
     if (!postId) return;
     let cancelled = false;
     getPost(postId)
@@ -304,13 +305,16 @@ export const PostDetailSheet: React.FC<{
   };
 
   const send = async () => {
-    if (!post || !comment.trim()) return;
+    const comment = commentRef.current?.value || '';
+    if (!post) return;
+    if (!comment.trim()) { setError('Skriv något i kommentaren först.'); return; }
+    setError(null);
     setSending(true);
     try {
       const r = await addPostComment(post.id, comment);
       setDetail(d => (d ? { ...d, comments: [...d.comments, r.comment] } : d));
       patch(post.id, { commentCount: (post.commentCount || 0) + 1 });
-      setComment('');
+      if (commentRef.current) commentRef.current.value = '';
     } catch (e: any) { setError(e?.message || 'Kunde inte skicka kommentaren.'); }
     finally { setSending(false); }
   };
@@ -344,12 +348,12 @@ export const PostDetailSheet: React.FC<{
             className={`${TEXTAREA} !py-2.5 min-h-[44px] max-h-32`}
             rows={1}
             placeholder="Skriv en kommentar…"
-            value={comment}
+            ref={commentRef}
+            defaultValue=""
             maxLength={2000}
-            onChange={e => setComment(e.target.value)}
             onKeyDown={e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) send(); }}
           />
-          <IconButton label="Skicka kommentar" onClick={send} disabled={sending || !comment.trim()} className="!bg-indigo-600 !text-white disabled:opacity-40 shrink-0">
+          <IconButton label="Skicka kommentar" onClick={send} disabled={sending} className="!bg-indigo-600 !text-white disabled:opacity-40 shrink-0">
             <Send size={18} />
           </IconButton>
         </div>
@@ -532,6 +536,12 @@ export const PostEditorSheet: React.FC<{
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  // DICTATION: Rubrik och text styrs inte av React. Dikteringsverktyg (t.ex. tal-till-text på Macen)
+  // klistrar ibland in text utan att webbläsaren meddelar det; en React-styrd ruta skrev då över
+  // texten med sitt gamla (tomma) värde vid nästa omritning. Nu läses rutorna först när man sparar.
+  const titleRef = useRef<HTMLInputElement>(null);
+  const bodyRef = useRef<HTMLTextAreaElement>(null);
+  const initial = editing && editing !== 'new' ? editing : null;
 
   useEffect(() => {
     setError(null);
@@ -564,11 +574,14 @@ export const PostEditorSheet: React.FC<{
   };
 
   const save = async () => {
-    if (!form.title.trim() || !editing) return;
+    if (!editing) return;
+    const title = titleRef.current?.value || '';
+    const body = bodyRef.current?.value || '';
+    if (!title.trim()) { setError('Skriv en rubrik.'); titleRef.current?.focus(); return; }
     setSaving(true);
     setError(null);
     try {
-      const input = { ...form, links: form.links.filter(l => l.url.trim()) };
+      const input = { ...form, title, body, links: form.links.filter(l => l.url.trim()) };
       const r = editing === 'new' ? await createPost(clubId!, teamId!, input) : await updatePost(editing.id, input);
       postsState.replace(r.post);
       onSaved?.(r.post);
@@ -590,7 +603,7 @@ export const PostEditorSheet: React.FC<{
           {error ? <p className="text-sm text-red-600 dark:text-red-400 min-w-0">{error}</p> : <span />}
           <div className="flex gap-2 shrink-0">
             <Button variant="secondary" onClick={onClose}>Avbryt</Button>
-            <Button onClick={save} disabled={saving || uploading || !form.title.trim()}>{saving ? 'Sparar…' : editing === 'new' ? 'Publicera' : 'Spara'}</Button>
+            <Button onClick={save} disabled={saving || uploading}>{saving ? 'Sparar…' : editing === 'new' ? 'Publicera' : 'Spara'}</Button>
           </div>
         </div>
       }
@@ -598,12 +611,12 @@ export const PostEditorSheet: React.FC<{
       <div className="flex flex-col gap-4 px-2 pb-2">
         <label className="flex flex-col gap-1.5">
           <span className={LABEL}>Rubrik</span>
-          <input autoFocus type="text" className={`${INPUT} font-semibold`} value={form.title} maxLength={150} onChange={e => set('title', e.target.value)} placeholder="T.ex. Inför matchen på lördag" />
+          <input ref={titleRef} autoFocus type="text" className={`${INPUT} font-semibold`} defaultValue={initial?.title || ''} maxLength={150} placeholder="T.ex. Inför matchen på lördag" />
         </label>
 
         <label className="flex flex-col gap-1.5">
           <span className={LABEL}>Text</span>
-          <textarea className={TEXTAREA} rows={6} value={form.body} maxLength={10000} onChange={e => set('body', e.target.value)} placeholder="Samling, utrustning, vad som gäller…" />
+          <textarea ref={bodyRef} className={TEXTAREA} rows={6} defaultValue={initial?.body || ''} maxLength={10000} placeholder="Samling, utrustning, vad som gäller…" />
         </label>
 
         <label className="flex flex-col gap-1.5">
