@@ -29,7 +29,7 @@ import { TrainingSession, SquadPlayer, RsvpStatus, PlayerRsvp, SessionRsvpConfig
 import { findSquadMatch } from '../lib/teamUtils';
 import { saveRsvp, clearRsvps } from '../lib/firebase';
 import { isMatchSession } from '../utils/sessionCategory';
-import { Button, Card, SectionHeader, SegmentedTabs, Badge, EmptyState, Avatar, Sheet, MenuItem } from './ui';
+import { Button, Card, SectionHeader, SegmentedTabs, Badge, EmptyState, Avatar, Sheet, MenuItem, TextArea, TextInput } from './ui';
 
 interface SessionRsvpViewProps {
   session: TrainingSession;
@@ -700,7 +700,7 @@ export const SessionRsvpView: React.FC<SessionRsvpViewProps> = ({
         <div>
           <label htmlFor="rsvp-my-comment" className={labelClass}>Kommentar till tränaren (valfritt)</label>
           <div className="flex gap-2">
-            <input
+            <TextInput
               id="rsvp-my-comment"
               type="text"
               value={myComment}
@@ -1069,14 +1069,14 @@ export const SessionRsvpView: React.FC<SessionRsvpViewProps> = ({
                 </div>
                 <div>
                   <label htmlFor="rsvp-edit-comment" className={labelClass}>Kommentar</label>
-                  <input id="rsvp-edit-comment" type="text" value={editComment} onChange={(e) => setEditComment(e.target.value)} placeholder="Valfri kommentar" className={inputClass} />
+                  <TextInput id="rsvp-edit-comment" type="text" value={editComment} onChange={(e) => setEditComment(e.target.value)} placeholder="Valfri kommentar" className={inputClass} />
                 </div>
               </>
             )}
             {editTargetIsGuest && (
               <div>
                 <label htmlFor="rsvp-guest-pos" className={labelClass}>Position</label>
-                <input
+                <TextInput
                   id="rsvp-guest-pos"
                   type="text"
                   value={editTarget.position || ''}
@@ -1137,7 +1137,7 @@ export const SessionRsvpView: React.FC<SessionRsvpViewProps> = ({
             {clipboardStatus === 'pasted' ? 'Inklistrat' : 'Klistra in från urklipp'}
           </Button>
           <div className="relative">
-            <textarea
+            <TextArea
               ref={pasteTextareaRef}
               autoComplete="off"
               autoCorrect="off"
@@ -1199,11 +1199,11 @@ export const SessionRsvpView: React.FC<SessionRsvpViewProps> = ({
           <p className="text-sm text-zinc-500 dark:text-zinc-400">Provspelaren finns bara på det här passet och markeras som närvarande.</p>
           <div>
             <label htmlFor="guest-name" className={labelClass}>Namn</label>
-            <input id="guest-name" type="text" required value={guestName} onChange={(e) => setGuestName(e.target.value)} placeholder="För- och efternamn" className={inputClass} />
+            <TextInput id="guest-name" type="text" required value={guestName} onChange={(e) => setGuestName(e.target.value)} placeholder="För- och efternamn" className={inputClass} />
           </div>
           <div>
             <label htmlFor="guest-position" className={labelClass}>Position (valfritt)</label>
-            <input id="guest-position" type="text" value={guestPosition} onChange={(e) => setGuestPosition(e.target.value)} placeholder="T.ex. målvakt eller anfallare" className={inputClass} />
+            <TextInput id="guest-position" type="text" value={guestPosition} onChange={(e) => setGuestPosition(e.target.value)} placeholder="T.ex. målvakt eller anfallare" className={inputClass} />
           </div>
           <button type="submit" className="hidden" />
         </form>
@@ -1237,7 +1237,7 @@ export const SessionRsvpView: React.FC<SessionRsvpViewProps> = ({
           </div>
           <div>
             <label htmlFor="inv-notes" className={labelClass}>Meddelande till spelarna</label>
-            <textarea
+            <TextArea
               id="inv-notes"
               rows={3}
               value={inviteNotes}

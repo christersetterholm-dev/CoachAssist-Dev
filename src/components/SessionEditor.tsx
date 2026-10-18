@@ -9,7 +9,7 @@ import TacticalBoardModal from './TacticalBoardModal';
 import { SessionRsvpView } from './SessionRsvpView';
 import { isMatchSession } from '../utils/sessionCategory';
 import { optimizeImageForUpload } from '../utils/imageOptimizer';
-import { Button, IconButton, Card, SectionHeader, SegmentedTabs, Badge, EmptyState, Sheet } from './ui';
+import { Button, IconButton, Card, SectionHeader, SegmentedTabs, Badge, EmptyState, Sheet, TextArea, TextInput } from './ui';
 
 interface SessionEditorProps {
   session: TrainingSession;
@@ -310,7 +310,7 @@ function MomentItem({
             )}
             <div className="flex-1 min-w-0">
               {isPlan ? (
-                <input
+                <TextInput
                   type="text"
                   value={moment.name || ''}
                   onChange={(e) => updateMoment(moment.id, { name: e.target.value })}
@@ -345,7 +345,7 @@ function MomentItem({
           </div>
 
           {isPlan ? (
-            <textarea
+            <TextArea
               ref={textareaRef}
               value={moment.description || ''}
               onChange={(e) => updateMoment(moment.id, { description: e.target.value })}
@@ -1004,7 +1004,7 @@ export default function SessionEditor({
     <Card>
       <SectionHeader title="Syfte och anteckningar" icon={<FileText size={16} />} />
       {canEditPlan ? (
-        <textarea
+        <TextArea
           ref={notesTextareaRef}
           value={session.notes || ''}
           onChange={(e) => {
@@ -1139,7 +1139,7 @@ export default function SessionEditor({
             </IconButton>
             <div className="flex-1 min-w-0">
               {canEditPlan ? (
-                <input
+                <TextInput
                   type="text"
                   value={session.title}
                   onChange={(e) => onUpdate({ ...session, title: e.target.value })}
@@ -1381,7 +1381,7 @@ export default function SessionEditor({
           </div>
           <div>
             <label htmlFor="session-location" className={fieldLabel}>Plats</label>
-            <input
+            <TextInput
               id="session-location"
               type="text"
               value={session.location || ''}

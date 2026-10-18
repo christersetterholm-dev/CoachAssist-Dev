@@ -8,6 +8,7 @@ import { motion, AnimatePresence, useDragControls } from 'motion/react';
 import { SquadPlayer, TacticalSavedBoard, LineupPlayer } from '../types';
 import ColorPicker from './ColorPicker';
 import { CachedImage } from './CachedImage';
+import { TextInput } from './ui';
 
 interface TacticalBoardModalProps {
   boards: TacticalSavedBoard[];
@@ -935,7 +936,7 @@ export default function TacticalBoardModal({
                     <div className="flex items-center justify-between w-full min-h-[36px]">
                       {isRenaming ? (
                         <div className="flex items-center gap-1.5 flex-1 mr-2" onClick={(e) => e.stopPropagation()}>
-                          <input
+                          <TextInput
                             type="text"
                             value={renameValue}
                             onChange={(e) => setRenameValue(e.target.value)}
@@ -1603,7 +1604,7 @@ export default function TacticalBoardModal({
                       <X size={18} />
                     </button>
                   </div>
-                  <input 
+                  <TextInput 
                     autoFocus
                     type="text"
                     className="w-full px-4 py-3.5 rounded-xl bg-zinc-950 border border-zinc-800 focus:border-indigo-500 focus:ring-0 text-sm font-bold text-white transition-all"

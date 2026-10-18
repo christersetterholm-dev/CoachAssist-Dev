@@ -4,7 +4,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { SquadPlayer, PRESET_COLORS, Exercise, Team, PointsConfig, TrainingSession } from '../types';
 import { sortPlayersByPosition, findSquadMatch } from '../lib/teamUtils';
 import ColorPicker from './ColorPicker';
-import { Badge, Button, Card, IconButton, MenuItem, SectionHeader, SegmentedTabs, Sheet } from './ui';
+import { Badge, Button, Card, IconButton, MenuItem, SectionHeader, SegmentedTabs, Sheet, TextArea, TextInput } from './ui';
 
 interface GameSetupProps {
   onStartGame: (
@@ -694,7 +694,7 @@ export default function GameSetup({
         <Card className="space-y-4">
           <div>
             <label htmlFor="game-name" className="block text-sm font-semibold text-zinc-600 dark:text-zinc-300 mb-1.5">Namn på tävlingsmomentet</label>
-            <input
+            <TextInput
               id="game-name"
               type="text"
               value={gameName}
@@ -911,7 +911,7 @@ export default function GameSetup({
                   <div className="flex items-center gap-3">
                     <span className="w-4 h-10 rounded-full shrink-0" style={{ backgroundColor: team.color }} />
                     <div className="flex-1 min-w-0">
-                      <input
+                      <TextInput
                         type="text"
                         value={team.name}
                         onChange={(e) => updateTeam(team.id, { name: e.target.value })}
@@ -1181,7 +1181,7 @@ export default function GameSetup({
             {setupClipboardStatus === 'pasted' ? 'Inklistrat' : 'Klistra in från urklipp'}
           </Button>
           <div className="relative">
-            <textarea
+            <TextArea
               ref={attendanceTextareaRef}
               autoComplete="off"
               autoCorrect="off"
@@ -1246,7 +1246,7 @@ export default function GameSetup({
           <div className="px-2 pb-2 space-y-5">
             <div className="space-y-3">
               <p className="text-sm font-semibold text-zinc-600 dark:text-zinc-300">Ny gästspelare</p>
-              <input
+              <TextInput
                 type="text"
                 value={guestName}
                 onChange={(e) => setGuestName(e.target.value)}

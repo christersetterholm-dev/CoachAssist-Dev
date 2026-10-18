@@ -39,6 +39,7 @@ Läs den här filen först i varje nytt samtal. Håll den uppdaterad när något
 | React-appen | `src/` (`App.tsx` och `LineupBuilder.tsx` är mycket stora) |
 | Appens skal (sidomeny, bottenmeny, toppfält, kontomeny) | `src/components/shell/AppShell.tsx` |
 | Gemensamma byggklossar (Button, IconButton, Card, SegmentedTabs, Badge, EmptyState, Avatar, Sheet, MenuItem) | `src/components/ui/index.tsx` |
+| Textrutor som tål diktering (TextInput, TextArea) | `src/components/ui/TextField.tsx` |
 | Startsidan Översikt (nästa aktivitet, svar på kallelse, snabbval, poängtopp) | `src/components/HomeView.tsx` |
 | Välkomstsida för utloggade | `src/components/WelcomeScreen.tsx` |
 | Tester | `tests/*.test.mjs` (node:test, startar servern mot tom temp-databas) |
@@ -197,6 +198,13 @@ npm run set-password -- e@post.se            # lokalt konto/lösenord
   ser bara delade tavlor och utan verktyg (`boardReadOnly`). Tavlan översätts till och från en
   "uppställning" i `boardToLineup`/`lineupToState`; bänken sparas inte.
 - Ny kod ska använda byggklossarna i `src/components/ui` i stället för egna knappklasser.
+- **Fritextrutor** (namn, beskrivningar, anteckningar, kommentarer) ska vara `TextInput`/`TextArea`
+  från `src/components/ui`, inte `<input>`/`<textarea>`. Christers dikteringsverktyg klistrar ibland in
+  text utan input-händelse, och en React-styrd ruta (value + onChange) skrev då över texten vid nästa
+  omritning. Byggklossarna används som vanliga rutor (value + onChange) men React skriver bara in nya
+  värden utifrån; en fokuserad ruta kollas var 250 ms, och när man lämnar den eller den försvinner, så
+  att sådan text ändå når onChange. Utan `value` är de helt ostyrda (ref + defaultValue, läs vid sparning
+  – så gör Inlägg). Sök på "DICTATION". LineupBuilder har kvar vanliga rutor (inte genomgången än).
   Stil: meningsversaler (inte VERSALER), `font-semibold`/`font-bold`, tryckytor minst 40 px.
 - Spelare ser inte Övningsbanken eller tävlingsknapparna i poänglistan (`canManage`).
 - Passvyn (`SessionEditor` + `SessionRsvpView`): tränaren har flikarna Planera / Träna / Närvaro,

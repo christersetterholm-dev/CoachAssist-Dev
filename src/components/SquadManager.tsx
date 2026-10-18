@@ -1,7 +1,7 @@
 import React, { useState, useRef, useMemo } from 'react';
 import { UserPlus, UserCheck, Send, Trash2, Edit2, X, Users, Upload, FileSpreadsheet, ClipboardList, Camera, Loader2, ArrowUpDown, Check, Search, AlertTriangle, Activity, MoreVertical } from 'lucide-react';
 import { AnimatePresence } from 'motion/react';
-import { Badge, Button, Card, EmptyState, IconButton, MenuItem, SectionHeader, SegmentedTabs, Sheet } from './ui';
+import { Badge, Button, Card, EmptyState, IconButton, MenuItem, SectionHeader, SegmentedTabs, Sheet, TextArea, TextInput } from './ui';
 import { storage, db, ref, uploadBytes, getDownloadURL, getApiUrl, getAuthHeader, doc, getDoc, createInvite } from '../lib/firebase';
 import InviteShareModal from './InviteShareModal';
 import { SquadPlayer, ClubMember, ClubTeam, TrainingSession } from '../types';
@@ -852,7 +852,7 @@ export default function SquadManager({ squad, sessions = [], onUpdateSquad, acti
 
       <div>
         <label htmlFor="person-name" className={fieldLabel}>Namn</label>
-        <input
+        <TextInput
           id="person-name"
           type="text"
           value={newName}
@@ -865,7 +865,7 @@ export default function SquadManager({ squad, sessions = [], onUpdateSquad, acti
       <div className="grid grid-cols-[1fr_7rem] gap-3">
         <div>
           <label htmlFor="person-position" className={fieldLabel}>{newRole === 'leader' ? 'Roll' : 'Position'}</label>
-          <input
+          <TextInput
             id="person-position"
             type="text"
             value={newPosition}
@@ -1192,7 +1192,7 @@ export default function SquadManager({ squad, sessions = [], onUpdateSquad, acti
 
           <div>
             <label htmlFor="squad-paste" className={fieldLabel}>Eller klistra in en lista</label>
-            <textarea
+            <TextArea
               id="squad-paste"
               value={pasteData}
               onChange={(e) => setPasteData(e.target.value)}

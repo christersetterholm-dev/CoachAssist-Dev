@@ -4,7 +4,7 @@ import { Club, ClubMetadata, ClubTeam, ClubMember, SquadPlayer, TrainingSettings
 import { db, storage, getApiUrl, getAuthHeader, ref, uploadBytes, getDownloadURL, doc, getDoc, setDoc } from '../lib/firebase';
 import PwaIconGenerator from './PwaIconGenerator';
 import ImageCropper from './ImageCropper';
-import { Badge, Button } from './ui';
+import { Badge, Button, TextArea, TextInput } from './ui';
 import { CachedImage } from './CachedImage';
 import { syncTeamCalendar } from '../utils/calendarSync';
 import { deduplicateClubMembers, deduplicateSquad } from '../lib/clubUtils';
@@ -1957,7 +1957,7 @@ export default function ClubAdminDashboard({
             <form onSubmit={handleCreateClub} className="space-y-4">
               <div>
                 <label className="block text-xs font-bold text-zinc-400 mb-2">Föreningens Namn</label>
-                <input
+                <TextInput
                   type="text"
                   required
                   placeholder="t.ex. IFK Göteborg"
@@ -2047,7 +2047,7 @@ export default function ClubAdminDashboard({
             <form onSubmit={handleAddTeam} className="space-y-4">
               <div>
                 <label className="block text-xs font-bold text-zinc-400 mb-2">Lagets Namn</label>
-                <input
+                <TextInput
                   type="text"
                   required
                   placeholder="t.ex. Pojkar 2012 eller Damlaget"
@@ -2363,7 +2363,7 @@ export default function ClubAdminDashboard({
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>
                       <label className="block text-xs font-bold text-zinc-650 dark:text-zinc-400 mb-2">Medlemmens fullständiga namn</label>
-                      <input
+                      <TextInput
                         type="text"
                         required
                         placeholder="t.ex. Kalle Nilsson"
@@ -2427,7 +2427,7 @@ export default function ClubAdminDashboard({
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>
                       <label className="block text-xs font-bold text-zinc-650 dark:text-zinc-400 mb-2">Position / Roll (Valfritt)</label>
-                      <input
+                      <TextInput
                         type="text"
                         placeholder="t.ex. MV, MB, Forward eller Tränare"
                         value={memberPosition}
@@ -2815,7 +2815,7 @@ export default function ClubAdminDashboard({
                   ) : (
                     <div>
                       <label className="block text-xs font-bold text-zinc-650 dark:text-zinc-400 mb-2">Klistra in rader (från Excel / Google Sheets / Text)</label>
-                      <textarea
+                      <TextArea
                         rows={5}
                         placeholder={"Kalle Nilsson\tkalle@exempel.se\t0701234567\tSpelare\nAnna Svensson\tanna@exempel.se\tTränare"}
                         value={importPasteText}

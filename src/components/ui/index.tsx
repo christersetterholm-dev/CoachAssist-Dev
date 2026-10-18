@@ -360,3 +360,8 @@ export const MenuItem: React.FC<{
     {trailing}
   </button>
 );
+
+/* ---------- Textrutor som tål diktering (se TextField.tsx) ---------- */
+
+export { TextInput, TextArea } from './TextField';
+export type { TextInputProps, TextAreaProps } from './TextField';

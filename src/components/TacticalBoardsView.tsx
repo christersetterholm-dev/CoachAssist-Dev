@@ -12,7 +12,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Copy, Edit2, Eye, EyeOff, MoreHorizontal, Plus, Presentation, Trash2 } from 'lucide-react';
 import type { Lineup, LineupPlayer, SquadPlayer, TeamTacticalBoard } from '../types';
 import { listTacticalBoards, saveTacticalBoard, deleteTacticalBoard } from '../lib/firebase';
-import { Button, Card, EmptyState, IconButton, MenuItem, Sheet } from './ui';
+import { Button, Card, EmptyState, IconButton, MenuItem, Sheet, TextInput } from './ui';
 import LineupBuilder from './LineupBuilder';
 
 type BuilderProps = React.ComponentProps<typeof LineupBuilder>;
@@ -338,7 +338,7 @@ export default function TacticalBoardsView({ clubId, teamId, isCoachOrAdmin, squ
       >
         <label className="flex flex-col gap-1.5 px-2 pb-2">
           <span className="text-sm font-semibold text-zinc-700 dark:text-zinc-200">Namn</span>
-          <input
+          <TextInput
             autoFocus
             type="text"
             className={INPUT}

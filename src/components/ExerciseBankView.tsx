@@ -6,6 +6,7 @@ import { BankExercise, TrainingSession, SquadPlayer } from '../types';
 import TacticalBoardModal from './TacticalBoardModal';
 import { optimizeImageForUpload } from '../utils/imageOptimizer';
 import { CachedImage } from './CachedImage';
+import { TextArea, TextInput } from './ui';
 
 interface ExerciseBankViewProps {
   exerciseBank?: BankExercise[];
@@ -844,7 +845,7 @@ export default function ExerciseBankView({
                     Skapa ny kategori
                   </label>
                   <div className="flex gap-2">
-                    <input
+                    <TextInput
                       type="text"
                       value={newCategoryInput}
                       onChange={(e) => setNewCategoryInput(e.target.value)}
@@ -946,7 +947,7 @@ export default function ExerciseBankView({
                   <label className="text-zinc-700 dark:text-zinc-300 text-xs font-bold uppercase tracking-wider">
                     Övningsnamn *
                   </label>
-                  <input
+                  <TextInput
                     type="text"
                     required
                     value={formName}
@@ -1014,7 +1015,7 @@ export default function ExerciseBankView({
                   <label className="text-zinc-700 dark:text-zinc-300 text-xs font-bold uppercase tracking-wider">
                     Beskrivning / Instruktioner
                   </label>
-                  <textarea
+                  <TextArea
                     rows={4}
                     value={formDescription}
                     onChange={(e) => setFormDescription(e.target.value)}

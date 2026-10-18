@@ -3,6 +3,7 @@ import { User, Phone, Fingerprint, Check, Save, AtSign, Lock, Key, Eye, EyeOff, 
 import { UserProfile, Club, ClubMetadata, ClubMember } from '../types';
 import { db, getApiUrl, getAuthHeader, auth, linkGoogleAccount, unlinkGoogleAccount, storage, ref, uploadBytes, getDownloadURL, doc, getDoc, setDoc } from '../lib/firebase';
 import ImageCropper from './ImageCropper';
+import { TextInput } from './ui';
 
 interface ProfileAndSettingsProps {
   userId: string;
@@ -655,7 +656,7 @@ export default function ProfileAndSettings({
                 <span className="absolute left-4 top-3.5 text-zinc-400">
                   <User size={18} />
                 </span>
-                <input
+                <TextInput
                   type="text"
                   required
                   placeholder="Skriv ditt fullständiga namn..."

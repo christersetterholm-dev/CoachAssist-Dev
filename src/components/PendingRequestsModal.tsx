@@ -4,6 +4,7 @@ import { PendingUserRequest, ClubTeam, ClubMember, SquadPlayer } from '../types'
 import { db, doc, getDoc, setDoc, deleteDoc, collection, getDocs } from '../lib/firebase';
 import { deduplicateClubMembers, deduplicateSquad } from '../lib/clubUtils';
 import { X, Check, Trash2, UserCheck, Loader2, CheckCircle2 } from 'lucide-react';
+import { TextInput } from './ui';
 
 interface PendingRequestsModalProps {
   activeClubId: string | null;
@@ -364,7 +365,7 @@ export const PendingRequestsModal: React.FC<PendingRequestsModalProps> = ({
                         <label className="block text-[10px] font-black text-zinc-400 uppercase tracking-wider mb-1">
                           Fullständigt Namn
                         </label>
-                        <input
+                        <TextInput
                           type="text"
                           value={edit.fullName}
                           onChange={e => handleFieldChange(req.uid, 'fullName', e.target.value)}

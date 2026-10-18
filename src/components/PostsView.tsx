@@ -17,7 +17,7 @@ import {
   Post, PostComment, PostDetail, PostInput, PostsState, addPostComment, createPost, deletePost, deletePostComment,
   getPost, markPostRead, togglePostReaction, updatePost, uploadPostImage,
 } from '../lib/posts';
-import { Badge, Button, Card, EmptyState, IconButton, SectionHeader, Sheet } from './ui';
+import { Badge, Button, Card, EmptyState, IconButton, SectionHeader, Sheet, TextArea, TextInput } from './ui';
 
 const INPUT = 'w-full h-12 px-4 rounded-xl bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 text-base text-zinc-900 dark:text-white placeholder:text-zinc-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/60';
 const TEXTAREA = 'w-full px-4 py-3 rounded-xl bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 text-base text-zinc-900 dark:text-white placeholder:text-zinc-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/60 resize-y';
@@ -256,7 +256,7 @@ export const PostDetailSheet: React.FC<{
   const listed = postsState.posts.find(p => p.id === postId) || null;
   const [detail, setDetail] = useState<PostDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
-  // Kommentarsrutan styrs inte av React (se DICTATION nedan); texten läses från rutan vid Skicka.
+  // Kommentarsrutan styrs inte av React (DICTATION, se ui/TextField.tsx); texten läses från rutan vid Skicka.
   const commentRef = useRef<HTMLTextAreaElement>(null);
   const [sending, setSending] = useState(false);
   const [showReaders, setShowReaders] = useState(false);
@@ -344,7 +344,7 @@ export const PostDetailSheet: React.FC<{
       title={post?.title || 'Inlägg'}
       footer={post ? (
         <div className="flex items-end gap-2">
-          <textarea
+          <TextArea
             className={`${TEXTAREA} !py-2.5 min-h-[44px] max-h-32`}
             rows={1}
             placeholder="Skriv en kommentar…"
@@ -536,9 +536,7 @@ export const PostEditorSheet: React.FC<{
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
-  // DICTATION: Rubrik och text styrs inte av React. Dikteringsverktyg (t.ex. tal-till-text på Macen)
-  // klistrar ibland in text utan att webbläsaren meddelar det; en React-styrd ruta skrev då över
-  // texten med sitt gamla (tomma) värde vid nästa omritning. Nu läses rutorna först när man sparar.
+  // DICTATION (se ui/TextField.tsx): rubrik och text styrs inte av React utan läses från rutorna när man sparar.
   const titleRef = useRef<HTMLInputElement>(null);
   const bodyRef = useRef<HTMLTextAreaElement>(null);
   const initial = editing && editing !== 'new' ? editing : null;
@@ -611,12 +609,12 @@ export const PostEditorSheet: React.FC<{
       <div className="flex flex-col gap-4 px-2 pb-2">
         <label className="flex flex-col gap-1.5">
           <span className={LABEL}>Rubrik</span>
-          <input ref={titleRef} autoFocus type="text" className={`${INPUT} font-semibold`} defaultValue={initial?.title || ''} maxLength={150} placeholder="T.ex. Inför matchen på lördag" />
+          <TextInput ref={titleRef} autoFocus type="text" className={`${INPUT} font-semibold`} defaultValue={initial?.title || ''} maxLength={150} placeholder="T.ex. Inför matchen på lördag" />
         </label>
 
         <label className="flex flex-col gap-1.5">
           <span className={LABEL}>Text</span>
-          <textarea ref={bodyRef} className={TEXTAREA} rows={6} defaultValue={initial?.body || ''} maxLength={10000} placeholder="Samling, utrustning, vad som gäller…" />
+          <TextArea ref={bodyRef} className={TEXTAREA} rows={6} defaultValue={initial?.body || ''} maxLength={10000} placeholder="Samling, utrustning, vad som gäller…" />
         </label>
 
         <label className="flex flex-col gap-1.5">
@@ -668,7 +666,7 @@ export const PostEditorSheet: React.FC<{
                 <input type="url" inputMode="url" className={`${INPUT} !h-11`} value={l.url} placeholder="https://…" onChange={e => set('links', form.links.map((x, j) => (j === i ? { ...x, url: e.target.value } : x)))} />
                 <IconButton label="Ta bort länken" onClick={() => set('links', form.links.filter((_, j) => j !== i))}><Trash2 size={18} /></IconButton>
               </div>
-              <input type="text" className={`${INPUT} !h-11`} value={l.label} maxLength={100} placeholder="Namn på länken, t.ex. Vägbeskrivning" onChange={e => set('links', form.links.map((x, j) => (j === i ? { ...x, label: e.target.value } : x)))} />
+              <TextInput type="text" className={`${INPUT} !h-11`} value={l.label} maxLength={100} placeholder="Namn på länken, t.ex. Vägbeskrivning" onChange={e => set('links', form.links.map((x, j) => (j === i ? { ...x, label: e.target.value } : x)))} />
             </div>
           ))}
           {form.links.length < 10 && (

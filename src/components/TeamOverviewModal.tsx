@@ -3,6 +3,7 @@ import { motion } from 'motion/react';
 import { Users, Plus, LayoutList, Play, X, UserPlus, Copy, ChevronDown } from 'lucide-react';
 import { Exercise, SquadPlayer } from '../types';
 import { sortPlayersByPosition } from '../lib/teamUtils';
+import { TextInput } from './ui';
 
 interface TeamOverviewModalProps {
   exercise: Exercise;
@@ -452,7 +453,7 @@ export default function TeamOverviewModal({
                       }}
                       className="space-y-3 w-full"
                     >
-                      <input
+                      <TextInput
                         autoFocus
                         type="text"
                         value={guestName}

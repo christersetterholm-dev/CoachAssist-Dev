@@ -4,7 +4,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { SquadPlayer, Exercise, Period, PeriodStandings, TrainingSession } from '../types';
 import { db, auth, handleFirestoreError, OperationType, doc, getDoc, setDoc, getApiUrl, getAuthHeader } from '../lib/firebase';
 import { calculateLeaderboard } from '../lib/leaderboardUtils';
-import { Button, IconButton, MenuItem, Sheet } from './ui';
+import { Button, IconButton, MenuItem, Sheet, TextInput } from './ui';
 import { CachedImage } from './CachedImage';
 
 interface LeaderboardProps {
@@ -812,7 +812,7 @@ export default function Leaderboard({
               <div className="space-y-4">
                 <div>
                   <label className="block text-[10px] font-bold text-zinc-400 uppercase tracking-wider mb-2">Tävlingens namn</label>
-                  <input
+                  <TextInput
                     type="text"
                     value={newPeriodName}
                     onChange={(e) => setNewPeriodName(e.target.value)}
@@ -865,7 +865,7 @@ export default function Leaderboard({
               <div className="space-y-4 mt-4">
                 <div>
                   <label className="block text-[10px] font-bold text-zinc-400 uppercase tracking-wider mb-2">Nytt namn</label>
-                  <input
+                  <TextInput
                     type="text"
                     value={renameValue}
                     onChange={(e) => setRenameValue(e.target.value)}
@@ -1107,7 +1107,7 @@ export default function Leaderboard({
 
                 <div>
                   <label className="block text-[10px] font-bold text-zinc-400 uppercase tracking-wider mb-2">Anledning</label>
-                  <input
+                  <TextInput
                     type="text"
                     value={bonusData.reason}
                     onChange={(e) => setBonusData(prev => ({ ...prev, reason: e.target.value }))}

@@ -8,7 +8,7 @@ import GameList from './GameList';
 import TeamOverviewModal from './TeamOverviewModal';
 import MobileCalendarView from './MobileCalendarView';
 import ExerciseBankView from './ExerciseBankView';
-import { SegmentedTabs } from './ui';
+import { SegmentedTabs, TextInput } from './ui';
 
 interface TrainingManagerProps {
   exercises: Exercise[];
@@ -1905,7 +1905,7 @@ export default function TrainingManager({
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
                 <div>
                   <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-1.5 font-bold">Standardtitel</label>
-                  <input
+                  <TextInput
                     type="text"
                     value={seriesTitle}
                     onChange={(e) => setSeriesTitle(e.target.value)}

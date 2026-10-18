@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { Download, Upload, RefreshCw, Smartphone, Layers, Check, Copy, Sparkles, CheckCircle2, AlertCircle, UploadCloud } from 'lucide-react';
 import { createZipBlob, ZipFileInput } from '../utils/zipHelper';
 import { getApiUrl } from '../lib/firebase';
+import { TextInput } from './ui';
 
 interface PwaIconGeneratorProps {
   initialLogoUrl?: string;
@@ -617,7 +618,7 @@ export default function PwaIconGenerator({ initialLogoUrl, clubName = 'CoachAssi
             <label className="block text-xs font-black uppercase text-zinc-500 dark:text-zinc-400 tracking-wider">
               2. Appnamn för Hemskärm (Föreningsnamn)
             </label>
-            <input
+            <TextInput
               type="text"
               value={appName}
               onChange={(e) => setAppName(e.target.value)}

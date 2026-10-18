@@ -3,6 +3,7 @@ import { motion } from 'motion/react';
 import { UserProfile, Club, ClubTeam } from '../types';
 import { db, doc, getDoc, setDoc, User } from '../lib/firebase';
 import { ShieldAlert, Clock, LogOut, Send, User as UserIcon, Phone, FileText, Building2, Users, Edit3, Loader2 } from 'lucide-react';
+import { TextInput } from './ui';
 
 interface OnboardingModalProps {
   user: User;
@@ -302,7 +303,7 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
                 
                 <div className="relative">
                   <UserIcon size={18} className="absolute left-4 top-3.5 text-zinc-400" />
-                  <input
+                  <TextInput
                     type="text"
                     required
                     value={fullName}
