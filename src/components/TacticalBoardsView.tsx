@@ -65,6 +65,7 @@ function boardToLineup(board: TeamTacticalBoard, squad: SquadPlayer[]): Lineup {
     tacticalBoard: {
       drawings: st.drawings || [],
       footballPos: st.footballPos || null,
+      ...(st.footballs ? { footballs: st.footballs } : {}),
       footballScale: st.footballScale || 1,
       opponents: st.opponents || [],
       showOpponents: st.showOpponents ?? true,
@@ -85,6 +86,7 @@ function lineupToState(l: Lineup): TeamTacticalBoard['state'] {
     players: (tb?.players || l.players || []).filter(p => !p.isSubstitute).map(p => ({ ...p, isHolding: false })),
     opponents: tb?.opponents || [],
     footballPos: tb?.footballPos || null,
+    ...(tb?.footballs ? { footballs: tb.footballs } : {}),
     footballScale: tb?.footballScale || 1,
     showOpponents: tb?.showOpponents ?? true,
     showPositionDescriptions: tb?.showPositionDescriptions ?? false,

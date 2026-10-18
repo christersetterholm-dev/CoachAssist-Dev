@@ -5,6 +5,7 @@ import {
   normalizeAnimation, insertFrameAfter, removeFrame, moveFrame, frameAt, playbackPosition,
   trailsUpTo, easeInOut, stepDurationMs, MAX_FRAMES, NOTE_MAX_LENGTH,
   normalizePlaybackRate, nextPlaybackRate, playbackRateLabel, scaledStepMs,
+  normalizeBalls, firstBallPos, MAX_BALLS,
 } from '../src/utils/boardAnimation.ts';
 
 const frame = (id, players, extra = {}) => ({
@@ -33,6 +34,8 @@ test('normalizeAnimation tvättar trasiga steg och sätter standardvärden', () 
   assert.deepEqual(a.frames[0].players, [{ id: '1', x: 50, y: 10, customName: 'Nia' }]);
   assert.deepEqual(a.frames[0].opponents, []);
   assert.deepEqual(a.frames[0].footballPos, { x: 3, y: 50 });
+  assert.deepEqual(a.frames[0].footballs, [{ id: 'ball-1', x: 3, y: 50 }], 'gamla steg med en boll får en bollista');
+  assert.deepEqual(a.frames[1].footballs, []);
   assert.ok(a.frames[1].id, 'steg utan id får ett');
   assert.equal(a.frames[1].note.length, NOTE_MAX_LENGTH);
   const many = normalizeAnimation({ frames: Array.from({ length: 50 }, (_, i) => ({ id: `f${i}` })) });
@@ -80,7 +83,7 @@ test('frameAt glider mellan stegen och tonar in/ut spelare', () => {
   const p = mid.players.find(t => t.id === 'p');
   assert.equal(p.x, 50);
   assert.equal(p.y, 25);
-  assert.deepEqual(mid.footballPos, { x: 50, y: 50 });
+  assert.deepEqual(mid.footballs, [{ id: 'ball-1', x: 50, y: 50, opacity: 1 }], 'gamla steg med bara footballPos glider också');
   assert.equal(mid.players.find(t => t.id === 'in').opacity, 0.5);
   assert.equal(mid.players.find(t => t.id === 'ut').opacity, 0.5);
   assert.deepEqual(mid.drawings, ['pil1'], 'ritningarna byts först när spelarna är framme');
@@ -95,10 +98,35 @@ test('frameAt glider mellan stegen och tonar in/ut spelare', () => {
   assert.equal(last.progress, 1, 'sista steget står still');
 });
 
-test('bollen som bara finns i ett av stegen hoppar i mitten', () => {
+test('en boll som bara finns i ett av stegen tonas in', () => {
   const frames = [frame('a', [], { footballPos: null }), frame('b', [], { footballPos: { x: 5, y: 5 } })];
-  assert.equal(frameAt(frames, 0, 0.2).footballPos, null);
-  assert.deepEqual(frameAt(frames, 0, 0.8).footballPos, { x: 5, y: 5 });
+  assert.deepEqual(frameAt(frames, 0, 0).footballs, []);
+  const mid = frameAt(frames, 0, 0.5).footballs;
+  assert.equal(mid.length, 1);
+  assert.equal(mid[0].opacity, 0.5);
+  assert.deepEqual(frameAt(frames, 0, 1).footballs, [{ id: 'ball-1', x: 5, y: 5, opacity: 1 }]);
+});
+
+test('flera bollar glider var för sig, och en ny boll tonas in', () => {
+  const frames = [
+    frame('a', [], { footballs: [{ id: 'b1', x: 0, y: 0 }, { id: 'b2', x: 50, y: 50 }] }),
+    frame('b', [], { footballs: [{ id: 'b1', x: 100, y: 0 }, { id: 'b3', x: 10, y: 10 }] }),
+  ];
+  const mid = frameAt(frames, 0, 0.5).footballs;
+  assert.deepEqual(mid.find(b => b.id === 'b1'), { id: 'b1', x: 50, y: 0, opacity: 1 });
+  assert.equal(mid.find(b => b.id === 'b2').opacity, 0.5, 'bollen som försvinner tonas ut');
+  assert.equal(mid.find(b => b.id === 'b3').opacity, 0.5, 'bollen som kommer till tonas in');
+});
+
+test('normalizeBalls läser både nya och gamla tavlor', () => {
+  assert.deepEqual(normalizeBalls({ footballPos: { x: 1, y: 2 } }), [{ id: 'ball-1', x: 1, y: 2 }]);
+  assert.deepEqual(normalizeBalls({ footballPos: null }), []);
+  assert.deepEqual(normalizeBalls({}), []);
+  assert.deepEqual(normalizeBalls({ footballs: [], footballPos: { x: 1, y: 2 } }), [], 'en tom bollista vinner över footballPos');
+  assert.deepEqual(normalizeBalls({ footballs: [{ x: 3, y: 4 }, null, { id: 7, x: 'x', y: 1 }] }), [{ id: 'ball-1', x: 3, y: 4 }, { id: '7', x: 50, y: 1 }]);
+  assert.equal(normalizeBalls({ footballs: Array.from({ length: 30 }, (_, i) => ({ id: `b${i}`, x: 1, y: 1 })) }).length, MAX_BALLS);
+  assert.deepEqual(firstBallPos([{ id: 'a', x: 4, y: 5 }]), { x: 4, y: 5 });
+  assert.equal(firstBallPos([]), null);
 });
 
 test('playbackPosition räknar steg och slut', () => {

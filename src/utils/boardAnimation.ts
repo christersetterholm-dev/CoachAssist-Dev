@@ -1,7 +1,7 @@
 // Animationer på taktiktavlan: "steg" (nyckelbilder) som spelas upp efter varandra.
 //
 // Steg 1 är utgångsläget, steg 2, 3 … är nya situationer. Varje steg är en hel bild av tavlan:
-// egna spelare, motståndare, boll, ritningar och en kort text. Vid uppspelning glider spelare,
+// egna spelare, motståndare, bollar, ritningar och en kort text. Vid uppspelning glider spelare,
 // motståndare och boll från ett steg till nästa. Ritningarna hör till sitt steg och byts när
 // spelarna har kommit fram.
 //
@@ -21,6 +21,8 @@ export interface BoardFrame {
   id: string;
   players: BoardToken[];
   opponents: BoardToken[];
+  footballs: BoardToken[];
+  // Första bollen, för äldre appversioner som bara känner till en boll.
   footballPos: BoardPos | null;
   drawings: any[];
   note?: string;
@@ -66,6 +68,24 @@ export const playbackRateLabel = (rate: number) => `${String(normalizePlaybackRa
 // Hur länge ett steg tar med tavlans hastighet och valt tempo.
 export const scaledStepMs = (speed: BoardSpeed | undefined, rate: number) => stepDurationMs(speed) / normalizePlaybackRate(rate);
 
+export const MAX_BALLS = 10;
+export const LEGACY_BALL_ID = 'ball-1';
+export const newBallId = () => `ball_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+
+// Bollarna på en tavla eller i ett steg. Äldre tavlor har bara footballPos (en boll); de får id 'ball-1'.
+export function normalizeBalls(src: any): BoardToken[] {
+  if (src && Array.isArray(src.footballs)) {
+    return src.footballs
+      .filter((b: any) => b && typeof b === 'object')
+      .slice(0, MAX_BALLS)
+      .map((b: any, i: number) => ({ id: b.id != null && b.id !== '' ? String(b.id) : `ball-${i + 1}`, x: num(b.x), y: num(b.y) }));
+  }
+  const p = src?.footballPos;
+  return p && typeof p === 'object' ? [{ id: LEGACY_BALL_ID, x: num(p.x), y: num(p.y) }] : [];
+}
+
+export const firstBallPos = (balls: BoardToken[]): BoardPos | null => (balls[0] ? { x: balls[0].x, y: balls[0].y } : null);
+
 export const newFrameId = () => `fr_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
 
 // Mjuk start och inbromsning, som när en spelare springer.
@@ -90,9 +110,8 @@ export function normalizeAnimation(raw: any): BoardAnimation | null {
       id: typeof f.id === 'string' && f.id ? f.id : newFrameId(),
       players: tokens(f.players),
       opponents: tokens(f.opponents),
-      footballPos: f.footballPos && typeof f.footballPos === 'object'
-        ? { x: num(f.footballPos.x), y: num(f.footballPos.y) }
-        : null,
+      footballs: normalizeBalls(f),
+      footballPos: firstBallPos(normalizeBalls(f)),
       drawings: Array.isArray(f.drawings) ? f.drawings : [],
       note: typeof f.note === 'string' ? f.note.slice(0, NOTE_MAX_LENGTH) : '',
     }));
@@ -108,6 +127,7 @@ export function copyFrame(frame: BoardFrame): BoardFrame {
     id: newFrameId(),
     players: frame.players.map(p => ({ ...p })),
     opponents: frame.opponents.map(o => ({ ...o })),
+    footballs: normalizeBalls(frame),
     footballPos: frame.footballPos ? { ...frame.footballPos } : null,
     drawings: frame.drawings.map(d => (d && typeof d === 'object' ? { ...d } : d)),
     note: '',
@@ -143,7 +163,7 @@ export interface AnimatedToken extends BoardToken {
 export interface AnimatedBoard {
   players: AnimatedToken[];
   opponents: AnimatedToken[];
-  footballPos: BoardPos | null;
+  footballs: AnimatedToken[];
   drawings: any[];
   note: string;
   fromIndex: number;
@@ -174,17 +194,12 @@ export function frameAt(frames: BoardFrame[], fromIndex: number, progress: numbe
   const from = frames[i];
   const to = frames[j];
   const t = easeInOut(p);
-  let footballPos: BoardPos | null = null;
-  if (from.footballPos && to.footballPos) {
-    footballPos = { x: lerp(from.footballPos.x, to.footballPos.x, t), y: lerp(from.footballPos.y, to.footballPos.y, t) };
-  } else {
-    footballPos = (t < 0.5 ? from.footballPos : to.footballPos) || null;
-  }
   const arrived = p >= 1;
   return {
     players: blendTokens(from.players, to.players, t),
     opponents: blendTokens(from.opponents, to.opponents, t),
-    footballPos,
+    // Bollar med samma id glider; en boll som bara finns i ett av stegen tonas in eller ut.
+    footballs: blendTokens(normalizeBalls(from), normalizeBalls(to), t),
     // Ritningarna i ett steg visar vad som ska hända härnäst; de ligger kvar tills spelarna är framme.
     drawings: arrived ? to.drawings : from.drawings,
     note: (arrived ? to.note : from.note) || '',

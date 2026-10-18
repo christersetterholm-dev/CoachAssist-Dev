@@ -63,6 +63,8 @@ export interface Lineup {
   tacticalBoard?: {
     drawings: any[];
     footballPos: { x: number, y: number } | null;
+    // Alla bollar (flera går). footballPos är den första, för äldre appversioner.
+    footballs?: { id: string, x: number, y: number }[];
     footballScale?: number;
     opponents: { id: string, x: number, y: number, number?: number | string, name?: string, role?: string }[];
     showOpponents: boolean;
@@ -90,6 +92,7 @@ export interface TeamTacticalBoard {
     players?: LineupPlayer[];
     opponents?: { id: string, x: number, y: number, number?: number | string, name?: string, role?: string }[];
     footballPos?: { x: number, y: number } | null;
+    footballs?: { id: string, x: number, y: number }[];
     footballScale?: number;
     showOpponents?: boolean;
     showPositionDescriptions?: boolean;

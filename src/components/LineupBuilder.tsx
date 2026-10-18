@@ -12,7 +12,7 @@ import { isMatchSession } from '../utils/sessionCategory';
 import { Reorder } from 'motion/react';
 import ImageCropper from './ImageCropper';
 import { Button, IconButton, Card, SegmentedTabs, Badge, Sheet, MenuItem, type TabItem } from './ui';
-import { normalizeAnimation, frameAt, trailsUpTo, playbackPosition, scaledStepMs, normalizePlaybackRate, nextPlaybackRate, playbackRateLabel, insertFrameAfter, removeFrame, moveFrame, copyFrame, newFrameId, MAX_FRAMES, NOTE_MAX_LENGTH, SPEED_LABEL, type BoardAnimation, type BoardFrame, type BoardSpeed } from '../utils/boardAnimation';
+import { normalizeAnimation, frameAt, trailsUpTo, playbackPosition, scaledStepMs, normalizePlaybackRate, nextPlaybackRate, playbackRateLabel, insertFrameAfter, removeFrame, moveFrame, copyFrame, newFrameId, normalizeBalls, firstBallPos, newBallId, MAX_BALLS, LEGACY_BALL_ID, MAX_FRAMES, NOTE_MAX_LENGTH, SPEED_LABEL, type BoardAnimation, type BoardFrame, type BoardSpeed, type BoardToken } from '../utils/boardAnimation';
 
 // Delarna i uppställningsvyns sidopanel (bred skärm) eller ark (mobil).
 type LineupPanel = 'lineups' | 'formation' | 'settings' | 'notes';
@@ -919,7 +919,9 @@ export default function LineupBuilder({
   const [tacticalLineWidth, setTacticalLineWidth] = useState<number>(0.8);
   const [tacticalFontSize, setTacticalFontSize] = useState<number>(16);
   const [tacticalColor, setTacticalColor] = useState('#ffffff');
-  const [footballPos, setFootballPos] = useState<{ x: number, y: number } | null>(lineup?.tacticalBoard?.footballPos || null);
+  // Bollarna på taktiktavlan (flera går). footballPos = första bollen, sparas för äldre appversioner.
+  const [footballs, setFootballs] = useState<BoardToken[]>(() => normalizeBalls(lineup?.tacticalBoard));
+  const footballPos = useMemo(() => firstBallPos(footballs), [footballs]);
   const [footballScale, setFootballScale] = useState<number>(lineup?.tacticalBoard?.footballScale || 1);
   const [opponents, setOpponents] = useState<{ id: string, x: number, y: number, number?: number | string, name?: string, role?: string }[]>(lineup?.tacticalBoard?.opponents || []);
   const [showOpponents, setShowOpponents] = useState(lineup?.tacticalBoard?.showOpponents ?? true);
@@ -951,10 +953,11 @@ export default function LineupBuilder({
       players: (tacticalPlayers || []).filter(p => !p.isSubstitute).map(p => ({ ...p, isHolding: false })),
       opponents,
       footballPos,
+      footballs,
       drawings: tacticalDrawings,
     });
     return { ...boardAnimation, frames, current };
-  }, [boardAnimation, activeFrame, tacticalPlayers, opponents, footballPos, tacticalDrawings]);
+  }, [boardAnimation, activeFrame, tacticalPlayers, opponents, footballPos, footballs, tacticalDrawings]);
   // Stegen som de var när taktiktavlan öppnades/sparades (för frågan "Spara taktiktavlan?").
   // undefined = ta nästa värde (efter att en sparad tavla har laddats).
   const animSnapshotRef = useRef<string | undefined>(undefined);
@@ -979,7 +982,7 @@ export default function LineupBuilder({
     drawingsList: any[],
     opponentsList: any[],
     playersList: LineupPlayer[],
-    footballPosition: { x: number; y: number } | null,
+    footballPosition: any, // bollarna (lista)
     scale: number,
     showOpps: boolean,
     showBlue: boolean,
@@ -1021,7 +1024,7 @@ export default function LineupBuilder({
     const currentDrawings = JSON.stringify(tacticalDrawings || []);
     const currentOpponents = JSON.stringify(opponents || []);
     const currentPlayers = JSON.stringify(simplifiedPlayers);
-    const currentFootballPos = JSON.stringify(footballPos);
+    const currentFootballPos = JSON.stringify(footballs);
 
     const snapshot = tacticalSnapshotRef.current;
 
@@ -1063,7 +1066,7 @@ export default function LineupBuilder({
         tacticalDrawings,
         opponents,
         tacticalPlayers.length > 0 ? tacticalPlayers : players,
-        footballPos,
+        footballs,
         footballScale,
         showOpponents,
         showBlueTeam,
@@ -1106,7 +1109,7 @@ export default function LineupBuilder({
       clearLongPress();
       setDraggingBlueId(null);
       setDraggingOpponentId(null);
-      setDraggingBall(false);
+      setDraggingBall(null);
     };
     window.addEventListener('pointerup', handleGlobalRelease);
     window.addEventListener('pointercancel', handleGlobalRelease);
@@ -1115,7 +1118,7 @@ export default function LineupBuilder({
       window.removeEventListener('pointercancel', handleGlobalRelease);
     };
   }, []);
-  const [draggingBall, setDraggingBall] = useState(false);
+  const [draggingBall, setDraggingBall] = useState<string | null>(null); // id på bollen som dras
   const [draggingOpponentId, setDraggingOpponentId] = useState<string | null>(null);
   const [draggingBlueId, setDraggingBlueId] = useState<string | null>(null);
   const [tempTitle, setTempTitle] = useState('');
@@ -1276,6 +1279,7 @@ export default function LineupBuilder({
         players: JSON.parse(JSON.stringify(players)),
         tacticalPlayers: JSON.parse(JSON.stringify(tacticalPlayers)),
         footballPos: footballPos ? { ...footballPos } : null,
+        footballs: footballs.map(b => ({ ...b })),
         footballScale: footballScale || 1,
         opponents: JSON.parse(JSON.stringify(opponents)),
         tacticalDrawings: JSON.parse(JSON.stringify(tacticalDrawings)),
@@ -1316,6 +1320,7 @@ export default function LineupBuilder({
       players: JSON.parse(JSON.stringify(players)),
       tacticalPlayers: JSON.parse(JSON.stringify(tacticalPlayers)),
       footballPos: footballPos ? { ...footballPos } : null,
+      footballs: footballs.map(b => ({ ...b })),
       footballScale: footballScale || 1,
       opponents: JSON.parse(JSON.stringify(opponents)),
       tacticalDrawings: JSON.parse(JSON.stringify(tacticalDrawings)),
@@ -1350,7 +1355,7 @@ export default function LineupBuilder({
     if (last.attackDirection) setAttackDirection(last.attackDirection);
     setPlayers(JSON.parse(JSON.stringify(last.players || [])));
     setTacticalPlayers(JSON.parse(JSON.stringify(last.tacticalPlayers !== undefined ? last.tacticalPlayers : (last.players || []))));
-    setFootballPos(last.footballPos ? { ...last.footballPos } : null);
+    setFootballs(normalizeBalls(last));
     setFootballScale(last.footballScale || 1);
     setOpponents(JSON.parse(JSON.stringify(last.opponents !== undefined ? last.opponents : [])));
     setTacticalDrawings(JSON.parse(JSON.stringify(last.tacticalDrawings || [])));
@@ -1393,6 +1398,7 @@ export default function LineupBuilder({
       players: JSON.parse(JSON.stringify(players)),
       tacticalPlayers: JSON.parse(JSON.stringify(tacticalPlayers)),
       footballPos: footballPos ? { ...footballPos } : null,
+      footballs: footballs.map(b => ({ ...b })),
       footballScale: footballScale || 1,
       opponents: JSON.parse(JSON.stringify(opponents)),
       tacticalDrawings: JSON.parse(JSON.stringify(tacticalDrawings)),
@@ -1427,7 +1433,7 @@ export default function LineupBuilder({
     if (next.attackDirection) setAttackDirection(next.attackDirection);
     setPlayers(JSON.parse(JSON.stringify(next.players || [])));
     setTacticalPlayers(JSON.parse(JSON.stringify(next.tacticalPlayers !== undefined ? next.tacticalPlayers : (next.players || []))));
-    setFootballPos(next.footballPos ? { ...next.footballPos } : null);
+    setFootballs(normalizeBalls(next));
     setFootballScale(next.footballScale || 1);
     setOpponents(JSON.parse(JSON.stringify(next.opponents !== undefined ? next.opponents : [])));
     setTacticalDrawings(JSON.parse(JSON.stringify(next.tacticalDrawings || [])));
@@ -1452,7 +1458,7 @@ export default function LineupBuilder({
       pushHistory();
       setTacticalPlayers(players.map(p => ({ ...p })));
       setTacticalDrawings([]);
-      setFootballPos(null);
+      setFootballs([]);
       setOpponents([]);
       setBoardAnimation(null);
       setActiveFrame(0);
@@ -1582,7 +1588,7 @@ export default function LineupBuilder({
       } else if (type === 'blue' && id) {
         setTacticalPlayers(prev => prev.filter(p => p.id !== id && p.playerId !== id));
       } else if (type === 'ball') {
-        setFootballPos(null);
+        setFootballs(prev => prev.filter(b => b.id !== id));
       }
       setHasUnsavedChanges(true);
       return;
@@ -1590,7 +1596,7 @@ export default function LineupBuilder({
 
     // Prepare dragging for opponent, blue, or ball immediately
     if (type === 'ball') {
-      setDraggingBall(true);
+      setDraggingBall(id || null);
     } else if (type === 'opponent' && id) {
       setDraggingOpponentId(id);
     } else if (type === 'blue' && id) {
@@ -1691,8 +1697,8 @@ export default function LineupBuilder({
       const next = prev.filter(o => !hits(o.x, o.y, 3.5));
       return next.length !== prev.length ? next : prev;
     });
-    if (footballPos && hits(footballPos.x, footballPos.y, 3.5 * footballScale)) {
-      setFootballPos(null);
+    if (footballs.some(b => hits(b.x, b.y, 3.5 * footballScale))) {
+      setFootballs(prev => prev.filter(b => !hits(b.x, b.y, 3.5 * footballScale)));
     }
   };
 
@@ -1705,8 +1711,12 @@ export default function LineupBuilder({
 
     if (tool === 'ball') {
       pushHistory();
-      setFootballPos({ x, y });
-      setDraggingBall(true);
+      // Bollverktyget lägger till en ny boll (högst MAX_BALLS) som går att dra direkt.
+      if (footballs.length >= MAX_BALLS) return;
+      const ballId = newBallId();
+      setFootballs(prev => [...prev, { id: ballId, x, y }]);
+      setDraggingBall(ballId);
+      setHasUnsavedChanges(true);
       return;
     }
     if (tool === 'move') {
@@ -1840,7 +1850,7 @@ export default function LineupBuilder({
     }
 
     if (draggingBall) {
-      setFootballPos({ x, y });
+      setFootballs(prev => prev.map(b => (b.id === draggingBall ? { ...b, x, y } : b)));
       return;
     }
 
@@ -1937,7 +1947,7 @@ export default function LineupBuilder({
 
     if (hasLongPressedRef.current) {
       hasLongPressedRef.current = false;
-      setDraggingBall(false);
+      setDraggingBall(null);
       setDraggingOpponentId(null);
       setDraggingBlueId(null);
       setDraggingId(null);
@@ -1976,7 +1986,7 @@ export default function LineupBuilder({
     }
     setIsTransforming(null);
     setTransformStart(null);
-    setDraggingBall(false);
+    setDraggingBall(null);
     setDraggingOpponentId(null);
     setDraggingBlueId(null);
     if (isMaximized) {
@@ -1988,7 +1998,7 @@ export default function LineupBuilder({
   const clearTactical = () => {
     pushHistory();
     setTacticalDrawings([]);
-    setFootballPos(null);
+    setFootballs([]);
     setOpponents([]);
     setTacticalPlayers(JSON.parse(JSON.stringify(players)));
     setBoardAnimation(null);
@@ -2022,6 +2032,7 @@ export default function LineupBuilder({
       opponents: JSON.parse(JSON.stringify(opponents)),
       players: JSON.parse(JSON.stringify(tacticalPlayers)),
       footballPos: footballPos ? { ...footballPos } : null,
+      footballs: footballs.map(b => ({ ...b })),
       footballScale,
       showOpponents,
       opponentColor,
@@ -2371,7 +2382,7 @@ export default function LineupBuilder({
       setOpponentNotes(lineup.notes?.opponent?.text || '');
       setOpponentMedia(lineup.notes?.opponent?.media || []);
       setTacticalDrawings(lineup.tacticalBoard?.drawings || []);
-      setFootballPos(lineup.tacticalBoard?.footballPos || null);
+      setFootballs(normalizeBalls(lineup.tacticalBoard));
       setFootballScale(lineup.tacticalBoard?.footballScale || 1);
       setOpponents(lineup.tacticalBoard?.opponents || []);
       setShowOpponents(lineup.tacticalBoard?.showOpponents ?? true);
@@ -2464,8 +2475,8 @@ export default function LineupBuilder({
       if (JSON.stringify(prev) !== JSON.stringify(remote)) return remote;
       return prev;
     });
-    setFootballPos(prev => {
-      const remote = lineup.tacticalBoard?.footballPos || null;
+    setFootballs(prev => {
+      const remote = normalizeBalls(lineup.tacticalBoard);
       if (JSON.stringify(prev) !== JSON.stringify(remote)) return remote;
       return prev;
     });
@@ -2547,6 +2558,7 @@ export default function LineupBuilder({
     const currentTactical = {
       drawings: tacticalDrawings,
       footballPos,
+      footballs,
       footballScale,
       opponents,
       showOpponents,
@@ -2609,6 +2621,7 @@ export default function LineupBuilder({
       tacticalBoard: {
         drawings: tacticalDrawings,
         footballPos,
+        footballs,
         footballScale,
         opponents,
         showOpponents,
@@ -2626,6 +2639,7 @@ export default function LineupBuilder({
     const remoteTactical = {
       drawings: lineup.tacticalBoard?.drawings || [],
       footballPos: lineup.tacticalBoard?.footballPos || null,
+      footballs: normalizeBalls(lineup.tacticalBoard),
       footballScale: lineup.tacticalBoard?.footballScale || 1,
       opponents: lineup.tacticalBoard?.opponents || [],
       showOpponents: lineup.tacticalBoard?.showOpponents ?? true,
@@ -2788,7 +2802,7 @@ export default function LineupBuilder({
 
     setTacticalPlayers(newBlue);
     setOpponents(newRed);
-    setFootballPos({ x: 50, y: 50 });
+    setFootballs([{ id: LEGACY_BALL_ID, x: 50, y: 50 }]);
     setShowOpponents(true);
     setShowPositionDescriptions(false);
     setIsDrawingsVisible(true);
@@ -2989,6 +3003,7 @@ export default function LineupBuilder({
       opponents: JSON.parse(JSON.stringify(opponents)),
       players: JSON.parse(JSON.stringify(tacticalPlayers)),
       footballPos: footballPos ? { ...footballPos } : null,
+      footballs: footballs.map(b => ({ ...b })),
       footballScale,
       showOpponents,
       showPositionDescriptions,
@@ -3012,7 +3027,7 @@ export default function LineupBuilder({
       tacticalDrawings,
       opponents,
       tacticalPlayers,
-      footballPos,
+      footballs,
       footballScale,
       showOpponents,
       showBlueTeam,
@@ -3030,7 +3045,7 @@ export default function LineupBuilder({
     const newDrawings = JSON.parse(JSON.stringify(board.drawings || []));
     const newOpponents = JSON.parse(JSON.stringify(board.opponents || []));
     const newPlayers = JSON.parse(JSON.stringify(board.players || []));
-    const newFootballPos = board.footballPos ? { ...board.footballPos } : null;
+    const newFootballs = normalizeBalls(board);
     const newFootballScale = board.footballScale !== undefined ? board.footballScale : footballScale;
     const newShowOpponents = board.showOpponents ?? true;
     const newShowPositionDescriptions = board.showPositionDescriptions ?? false;
@@ -3040,7 +3055,7 @@ export default function LineupBuilder({
     setTacticalDrawings(newDrawings);
     setOpponents(newOpponents);
     setTacticalPlayers(newPlayers);
-    setFootballPos(newFootballPos);
+    setFootballs(newFootballs);
     setFootballScale(newFootballScale);
     setShowOpponents(newShowOpponents);
     setShowPositionDescriptions(newShowPositionDescriptions);
@@ -3057,7 +3072,7 @@ export default function LineupBuilder({
       newDrawings,
       newOpponents,
       newPlayers,
-      newFootballPos,
+      newFootballs,
       newFootballScale,
       newShowOpponents,
       showBlueTeam,
@@ -3116,6 +3131,7 @@ export default function LineupBuilder({
         tacticalBoard: {
           drawings: tacticalDrawings,
           footballPos,
+          footballs,
           footballScale,
           opponents,
           showOpponents,
@@ -3167,6 +3183,7 @@ export default function LineupBuilder({
           tacticalBoard: {
             drawings: tacticalDrawings,
             footballPos,
+            footballs,
             footballScale,
             opponents,
             showOpponents,
@@ -3464,7 +3481,7 @@ export default function LineupBuilder({
     const anim = isMaximized ? animatedBoard : null;
     const shownDrawings: any[] = anim ? anim.drawings : tacticalDrawings;
     const shownOpponents: (typeof opponents[number] & { opacity?: number })[] = anim ? (anim.opponents as any) : opponents;
-    const shownFootball = anim ? anim.footballPos : footballPos;
+    const shownFootballs: (BoardToken & { opacity?: number })[] = anim ? anim.footballs : footballs;
     const shownStarters: (LineupPlayer & { opacity?: number })[] = anim ? (anim.players as any) : starters;
 
     return (
@@ -3541,6 +3558,7 @@ export default function LineupBuilder({
                                 tacticalBoard: {
                                   drawings: tacticalDrawings,
                                   footballPos,
+                                  footballs,
                                   footballScale,
                                   opponents,
                                   showOpponents,
@@ -4151,11 +4169,12 @@ export default function LineupBuilder({
             );
           })}
 
-          {/* Football Icon */}
-          {isMaximized && shownFootball && isDrawingsVisible && (
-            <div 
+          {/* Bollar (flera går). Storleken följer spelarnas storlek gånger Bollens storlek i Mer. */}
+          {isMaximized && isDrawingsVisible && shownFootballs.map(ball => (
+            <div
+              key={`ball-${ball.id}`}
               className={`absolute z-50 transition-none select-none ${isSimplified ? '' : 'cursor-move'}`}
-              onPointerDown={isSimplified ? undefined : (e) => handlePointerDownWithDeletion(e, 'ball')}
+              onPointerDown={isSimplified ? undefined : (e) => handlePointerDownWithDeletion(e, 'ball', ball.id)}
               onPointerUp={isSimplified ? undefined : clearLongPress}
               onPointerCancel={isSimplified ? undefined : clearLongPress}
               onPointerMove={isSimplified ? undefined : () => {
@@ -4164,17 +4183,19 @@ export default function LineupBuilder({
                 }
               }}
               style={{
-                left: `${shownFootball.x}%`,
-                top: `${shownFootball.y}%`,
-                transform: `translate(-50%, -50%) rotate(${getCounterRotation()}) scale(${footballScale})`,
+                left: `${ball.x}%`,
+                top: `${ball.y}%`,
+                width: `${Math.round(playerScale * 22 * footballScale)}px`,
+                height: `${Math.round(playerScale * 22 * footballScale)}px`,
+                transform: `translate(-50%, -50%) rotate(${getCounterRotation()})`,
+                ...(ball.opacity !== undefined ? { opacity: ball.opacity } : {}),
               }}
             >
-              <div className="w-6 h-6 sm:w-8 sm:h-8 shadow-lg">
+              <div className="w-full h-full rounded-full shadow-lg">
                 <SoccerBallIcon className="w-full h-full text-zinc-900" />
               </div>
             </div>
-
-          )}
+          ))}
 
           {/* Main Field Lines Inset */}
           <div className={`absolute top-[2%] bottom-[2%] left-[4%] right-[4%] border-2 pointer-events-none ${pitchType === 'solid-white' ? 'border-zinc-950/20' : 'border-white/50'}`} />
@@ -5342,6 +5363,7 @@ export default function LineupBuilder({
                         tacticalBoard: {
                           drawings: tacticalDrawings,
                           footballPos,
+                          footballs,
                           footballScale,
                           opponents,
                           showOpponents,
@@ -5672,7 +5694,7 @@ export default function LineupBuilder({
       ),
     },
     { id: 'text', label: 'Text', icon: <Type size={22} /> },
-    { id: 'ball', label: 'Boll', icon: <SoccerBallIcon size={22} /> },
+    { id: 'ball', label: 'Boll (tryck på planen för en ny boll)', icon: <SoccerBallIcon size={22} /> },
     {
       id: 'opponent',
       label: 'Motståndare',
@@ -5801,6 +5823,22 @@ export default function LineupBuilder({
   }, [isMaximized, boardMode, exitBoardMode]);
   useEffect(() => () => { if (boardHintTimer.current) clearTimeout(boardHintTimer.current); }, []);
 
+  /* ---------- Taktiktavlan: bollar ---------- */
+
+  // Bollens storlek 50–300 % (gäller alla bollar på tavlan).
+  const changeBallScale = (delta: number) => {
+    setFootballScale(prev => Math.min(3, Math.max(0.5, Math.round(((prev || 1) + delta) * 10) / 10)));
+    lastInteractionTimeRef.current = Date.now();
+    setHasUnsavedChanges(true);
+  };
+  const removeAllBalls = () => {
+    pushHistory();
+    setFootballs([]);
+    lastInteractionTimeRef.current = Date.now();
+    setHasUnsavedChanges(true);
+  };
+  const ballBarVisible = isMaximized && boardMode === 'edit' && !boardReadOnly && !playback && tacticalTool === 'ball';
+
   /* ---------- Taktiktavlan: animation i steg (src/utils/boardAnimation.ts) ---------- */
 
   const stepFrames = animationForSave?.frames || [];
@@ -5831,7 +5869,7 @@ export default function LineupBuilder({
       return [...kept, ...added];
     });
     setOpponents(frame.opponents.map(o => ({ ...o })) as typeof opponents);
-    setFootballPos(frame.footballPos ? { ...frame.footballPos } : null);
+    setFootballs(normalizeBalls(frame));
     setTacticalDrawings(JSON.parse(JSON.stringify(frame.drawings || [])));
     setSelectedDrawingId(null);
     setEditingTextId(null);
@@ -5859,6 +5897,7 @@ export default function LineupBuilder({
         players: (tacticalPlayers || []).filter(p => !p.isSubstitute).map(p => ({ ...p, isHolding: false })),
         opponents,
         footballPos,
+        footballs,
         drawings: tacticalDrawings,
         note: '',
       };
@@ -6343,6 +6382,27 @@ export default function LineupBuilder({
             </div>
           )}
 
+          {/* Bollverktyget: tips, storlek och ta bort alla */}
+          {ballBarVisible && (
+            <div className="fixed left-2 right-2 z-[60] flex justify-center pointer-events-none top-[calc(4.25rem+env(safe-area-inset-top,0px))] sm:top-[calc(4.75rem+env(safe-area-inset-top,0px))]">
+              <div className={`${boardBarClass} pointer-events-auto max-w-full overflow-x-auto touch-pan-x scrollbar-none`}>
+                <span className="hidden sm:inline px-2 text-sm font-semibold text-zinc-600 dark:text-zinc-300 whitespace-nowrap">
+                  {footballs.length >= MAX_BALLS ? `Högst ${MAX_BALLS} bollar` : 'Tryck på planen för en ny boll'}
+                </span>
+                <span className={`hidden sm:block ${boardDividerClass}`} />
+                <IconButton label="Mindre bollar" onClick={() => changeBallScale(-0.1)} disabled={footballScale <= 0.5}><Minus size={20} /></IconButton>
+                <span className="px-1 min-w-[4.5rem] text-center text-sm font-bold tabular-nums whitespace-nowrap" aria-live="polite">
+                  {Math.round(footballScale * 100)} %
+                </span>
+                <IconButton label="Större bollar" onClick={() => changeBallScale(0.1)} disabled={footballScale >= 3}><Plus size={20} /></IconButton>
+                <span className={boardDividerClass} />
+                <IconButton label="Ta bort alla bollar" className="text-red-600 dark:text-red-400" onClick={removeAllBalls} disabled={footballs.length === 0}>
+                  <Trash2 size={20} />
+                </IconButton>
+              </div>
+            </div>
+          )}
+
           {/* Verktyg för en vald ritning (i flyttläget) */}
           {boardMode === 'edit' && tacticalTool === 'move' && selectedDrawing && !isTransforming && !editingTextId && (
             <div className={`fixed left-2 right-2 z-[60] flex justify-center pointer-events-none ${boardVertical
@@ -6555,8 +6615,8 @@ export default function LineupBuilder({
                 </div>
                 <MenuItem icon={<Layout size={18} />} label="Motståndarnas formation" onClick={() => { setShowBoardMore(false); setShowOpponentFormationModal(true); }} />
                 {renderBoardStepper('Bollens storlek', `${Math.round(footballScale * 100)} %`,
-                  () => setFootballScale(Math.max(0.5, Math.round((footballScale - 0.1) * 10) / 10)),
-                  () => setFootballScale(Math.min(3, Math.round((footballScale + 0.1) * 10) / 10)))}
+                  () => changeBallScale(-0.1),
+                  () => changeBallScale(0.1))}
               </section>
 
               <section className="flex flex-col gap-1">

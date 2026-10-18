@@ -187,6 +187,13 @@ npm run set-password -- e@post.se            # lokalt konto/lösenord
   redigeras i tavlans vanliga state (tacticalPlayers, opponents …); `animationForSave` lägger in det i
   `frames` vid sparning. Tavlans vanliga fält sparas som det valda steget, så äldre appversioner visar
   en stillbild. Max 20 steg. Ångra/Gör om omfattar stegen.
+  **Bollar** (okt 2026): flera bollar går (högst 10). Med verktyget Boll lägger ett tryck på planen till
+  en ny boll; en rad överst visar tips, Bollens storlek −/+ (50–300 %, samma som i Mer) och Ta bort alla
+  bollar. Suddet tar bort enskilda bollar. Bollens storlek följer spelarnas storlek (22 px × spelarstorlek
+  × bollstorlek). Sparas som `footballs: [{ id, x, y }]` både på tavlan och i varje steg; `footballPos`
+  (första bollen) sparas också för äldre appversioner, och gamla tavlor med bara `footballPos` läses
+  som en boll med id `ball-1` (`normalizeBalls` i boardAnimation.ts). I stegen glider bollar med samma
+  id, och en boll som bara finns i ett av stegen tonas in/ut.
   Taktiktavlans rutor är ark (`Sheet`): Text på tavlan, Nummer och roll (dubbeltryck på spelare),
   Sparade taktiktavlor, Spara taktiktavlan? (vid Stäng), Spara som formation och Motståndarnas
   formation. Formationsrutan (blått/rött lag) har kvar sin egen ram men nya flikar och typografi.
