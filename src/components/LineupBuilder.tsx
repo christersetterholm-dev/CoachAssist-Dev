@@ -4,7 +4,7 @@ import { motion, AnimatePresence, useDragControls } from 'motion/react';
 import { SquadPlayer, Lineup, LineupPlayer, FormationVariant, TacticalSavedBoard, TrainingSession } from '../types';
 import { User as FirebaseUser } from '../lib/firebase';
 import { CachedImage } from './CachedImage';
-import { Plus, Minus, X, Trash2, Image as ImageIcon, User, Save, Settings, ClipboardList, ClipboardPaste, ClipboardCheck, Camera, Check, Edit2, Undo2, Redo2, Maximize2, Minimize2, Copy, Trophy, Upload, Pencil, ArrowUpRight, Eraser, RotateCcw, Shirt, Pin, PinOff, Smartphone, Monitor, ChevronDown, ChevronUp, RefreshCw, GripVertical, Footprints, Archive, ArchiveRestore, Layout, Eye, EyeOff, Target, Play, Move, Type, FolderOpen, Cloud, CloudOff, Bookmark, Network, UserCheck, Link, Unlink, Calendar, Users, Info, MoreHorizontal, Slash, ChevronLeft } from 'lucide-react';
+import { Plus, Minus, X, Trash2, Image as ImageIcon, User, Save, Settings, ClipboardList, ClipboardPaste, ClipboardCheck, Camera, Check, Edit2, Undo2, Redo2, Maximize2, Minimize2, Copy, Trophy, Upload, Pencil, ArrowUpRight, Eraser, RotateCcw, Shirt, Pin, PinOff, Smartphone, Monitor, ChevronDown, ChevronUp, RefreshCw, GripVertical, Footprints, Archive, ArchiveRestore, Layout, Eye, EyeOff, Target, Play, Move, Type, FolderOpen, Cloud, CloudOff, Bookmark, Network, UserCheck, Link, Unlink, Calendar, Users, Info, MoreHorizontal, Slash, ChevronLeft, ChevronRight, Pause, Clapperboard } from 'lucide-react';
 
 import { FORMATION_TEMPLATES } from '../lib/formations';
 import { findSquadMatch } from '../lib/teamUtils';
@@ -12,6 +12,7 @@ import { isMatchSession } from '../utils/sessionCategory';
 import { Reorder } from 'motion/react';
 import ImageCropper from './ImageCropper';
 import { Button, IconButton, Card, SegmentedTabs, Badge, Sheet, MenuItem, type TabItem } from './ui';
+import { normalizeAnimation, frameAt, trailsUpTo, playbackPosition, scaledStepMs, normalizePlaybackRate, nextPlaybackRate, playbackRateLabel, insertFrameAfter, removeFrame, moveFrame, copyFrame, newFrameId, MAX_FRAMES, NOTE_MAX_LENGTH, SPEED_LABEL, type BoardAnimation, type BoardFrame, type BoardSpeed } from '../utils/boardAnimation';
 
 // Delarna i uppställningsvyns sidopanel (bred skärm) eller ark (mobil).
 type LineupPanel = 'lineups' | 'formation' | 'settings' | 'notes';
@@ -34,6 +35,7 @@ const BOARD_COLORS = ['#ffffff', '#facc15', '#ef4444', '#3b82f6', '#18181b', '#f
 const BOARD_COLOR_NAMES: Record<string, string> = {
   '#ffffff': 'Vit', '#facc15': 'Gul', '#ef4444': 'Röd', '#3b82f6': 'Blå', '#18181b': 'Svart', '#f97316': 'Orange',
 };
+const PLAYBACK_RATE_KEY = 'coachassist.boardPlaybackRate';
 const BOARD_INPUT = 'w-full h-12 px-4 rounded-xl bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 text-base font-semibold text-zinc-900 dark:text-white placeholder:text-zinc-400 placeholder:font-normal focus:outline-none focus:ring-2 focus:ring-indigo-500/60';
 const BOARD_LABEL = 'text-sm font-semibold text-zinc-700 dark:text-zinc-200';
 const markerKey = (color: string) => String(color || '#ffffff').replace(/[^a-zA-Z0-9]/g, '');
@@ -927,6 +929,39 @@ export default function LineupBuilder({
   const [showPositionDescriptions, setShowPositionDescriptions] = useState<boolean>(lineup?.tacticalBoard?.showPositionDescriptions ?? false);
   const dragHistoryPushedRef = useRef<boolean>(false);
 
+  // Animation i steg (src/utils/boardAnimation.ts). Det valda steget visas och redigeras i tavlans
+  // vanliga state ovan (tacticalPlayers, opponents, footballPos, tacticalDrawings); i
+  // boardAnimation.frames är just det steget inaktuellt tills det sparas eller man byter steg.
+  const [boardAnimation, setBoardAnimation] = useState<BoardAnimation | null>(() => normalizeAnimation(lineup?.tacticalBoard?.animation));
+  const [activeFrame, setActiveFrame] = useState<number>(() => normalizeAnimation(lineup?.tacticalBoard?.animation)?.current || 0);
+  // Uppspelning: övergången från steg fromIndex till nästa (progress 0–1). null = ingen uppspelning.
+  const [playback, setPlayback] = useState<{ fromIndex: number; progress: number; playing: boolean } | null>(null);
+  const [showStepSheet, setShowStepSheet] = useState(false);
+  // Uppspelningstempo (0,25×–1,5×). Sparas per enhet i webbläsaren, inte i tavlan.
+  const [playbackRate, setPlaybackRate] = useState<number>(() => {
+    try { return normalizePlaybackRate(localStorage.getItem(PLAYBACK_RATE_KEY)); } catch { return 1; }
+  });
+
+  // Stegen så som de sparas: det valda steget hämtas från tavlan som den ser ut just nu.
+  const animationForSave = useMemo<BoardAnimation | undefined>(() => {
+    if (!boardAnimation) return undefined;
+    const current = Math.min(Math.max(activeFrame, 0), boardAnimation.frames.length - 1);
+    const frames = boardAnimation.frames.map((f, i) => i !== current ? f : {
+      ...f,
+      players: (tacticalPlayers || []).filter(p => !p.isSubstitute).map(p => ({ ...p, isHolding: false })),
+      opponents,
+      footballPos,
+      drawings: tacticalDrawings,
+    });
+    return { ...boardAnimation, frames, current };
+  }, [boardAnimation, activeFrame, tacticalPlayers, opponents, footballPos, tacticalDrawings]);
+  // Stegen som de var när taktiktavlan öppnades/sparades (för frågan "Spara taktiktavlan?").
+  // undefined = ta nästa värde (efter att en sparad tavla har laddats).
+  const animSnapshotRef = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    if (animSnapshotRef.current === undefined) animSnapshotRef.current = JSON.stringify(animationForSave ?? null);
+  }, [animationForSave]);
+
   const tacticalSnapshotRef = useRef<{
     drawings: string;
     opponents: string;
@@ -1000,6 +1035,7 @@ export default function LineupBuilder({
     const hasNewShowPosDesc = showPositionDescriptions !== snapshot.showPositionDescriptions;
     const hasNewOpponentColor = opponentColor !== snapshot.opponentColor;
     const hasNewPitchType = pitchType !== snapshot.pitchType;
+    const hasNewSteps = animSnapshotRef.current !== undefined && animSnapshotRef.current !== JSON.stringify(animationForSave ?? null);
 
     return (
       hasNewDrawings ||
@@ -1011,7 +1047,8 @@ export default function LineupBuilder({
       hasNewShowBlueTeam ||
       hasNewShowPosDesc ||
       hasNewOpponentColor ||
-      hasNewPitchType
+      hasNewPitchType ||
+      hasNewSteps
     );
   };
 
@@ -1034,6 +1071,7 @@ export default function LineupBuilder({
         opponentColor,
         pitchType
       );
+      animSnapshotRef.current = JSON.stringify(animationForSave ?? null);
     } else {
       tacticalSnapshotRef.current = null;
     }
@@ -1245,14 +1283,16 @@ export default function LineupBuilder({
         showBlueTeam,
         showPositionDescriptions,
         opponentColor,
-        formation: currentFormation
+        formation: currentFormation,
+        boardAnimation: boardAnimation ? JSON.parse(JSON.stringify(boardAnimation)) : null,
+        activeFrame
       };
       const newHistory = [...currentHistory, snapshot];
       if (newHistory.length > 50) return { ...prev, [currentId]: newHistory.slice(newHistory.length - 50) };
       return { ...prev, [currentId]: newHistory };
     });
     setLineupFutures(prev => ({ ...prev, [currentId]: [] })); // Clear future for this specific lineup
-  }, [currentId, lineupName, teamName, playerScale, nameTagStyle, nameDisplayMode, showNameBackground, nameBackgroundType, showPhoto, showName, showNumber, teamLogoUrl, pitchType, orientation, attackDirection, players, tacticalPlayers, footballPos, footballScale, opponents, tacticalDrawings, showOpponents, showBlueTeam, showPositionDescriptions, opponentColor, currentFormation]);
+  }, [currentId, lineupName, teamName, playerScale, nameTagStyle, nameDisplayMode, showNameBackground, nameBackgroundType, showPhoto, showName, showNumber, teamLogoUrl, pitchType, orientation, attackDirection, players, tacticalPlayers, footballPos, footballScale, opponents, tacticalDrawings, showOpponents, showBlueTeam, showPositionDescriptions, opponentColor, currentFormation, boardAnimation, activeFrame]);
 
   const handleUndo = useCallback(() => {
     if (history.length === 0 || isRestoringHistory.current) return;
@@ -1283,7 +1323,9 @@ export default function LineupBuilder({
       showBlueTeam,
       showPositionDescriptions,
       opponentColor,
-      formation: currentFormation
+      formation: currentFormation,
+      boardAnimation: boardAnimation ? JSON.parse(JSON.stringify(boardAnimation)) : null,
+      activeFrame
     };
     
     const last = history[history.length - 1];
@@ -1317,13 +1359,16 @@ export default function LineupBuilder({
     setShowPositionDescriptions(last.showPositionDescriptions ?? false);
     setOpponentColor(last.opponentColor || '#ef4444');
     setCurrentFormation(last.formation);
+    setBoardAnimation(last.boardAnimation ? JSON.parse(JSON.stringify(last.boardAnimation)) : null);
+    setActiveFrame(last.activeFrame || 0);
+    setPlayback(null);
     setHasUnsavedChanges(true);
 
     // Reset the flag after state updates have settled
     setTimeout(() => {
       isRestoringHistory.current = false;
     }, 100);
-  }, [currentId, history, lineupName, teamName, playerScale, nameTagStyle, nameDisplayMode, showNameBackground, nameBackgroundType, showPhoto, showName, showNumber, teamLogoUrl, pitchType, orientation, attackDirection, players, tacticalPlayers, footballPos, footballScale, opponents, tacticalDrawings, showOpponents, showBlueTeam, showPositionDescriptions, opponentColor, currentFormation]);
+  }, [currentId, history, lineupName, teamName, playerScale, nameTagStyle, nameDisplayMode, showNameBackground, nameBackgroundType, showPhoto, showName, showNumber, teamLogoUrl, pitchType, orientation, attackDirection, players, tacticalPlayers, footballPos, footballScale, opponents, tacticalDrawings, showOpponents, showBlueTeam, showPositionDescriptions, opponentColor, currentFormation, boardAnimation, activeFrame]);
 
   const handleRedo = useCallback(() => {
     const futures = lineupFutures[currentId] || [];
@@ -1355,7 +1400,9 @@ export default function LineupBuilder({
       showBlueTeam,
       showPositionDescriptions,
       opponentColor,
-      formation: currentFormation
+      formation: currentFormation,
+      boardAnimation: boardAnimation ? JSON.parse(JSON.stringify(boardAnimation)) : null,
+      activeFrame
     };
     
     const next = futures[0];
@@ -1389,13 +1436,16 @@ export default function LineupBuilder({
     setShowPositionDescriptions(next.showPositionDescriptions ?? false);
     setOpponentColor(next.opponentColor || '#ef4444');
     setCurrentFormation(next.formation);
+    setBoardAnimation(next.boardAnimation ? JSON.parse(JSON.stringify(next.boardAnimation)) : null);
+    setActiveFrame(next.activeFrame || 0);
+    setPlayback(null);
     setHasUnsavedChanges(true);
 
     // Reset the flag after state updates have settled
     setTimeout(() => {
       isRestoringHistory.current = false;
     }, 100);
-  }, [currentId, lineupFutures, lineupName, teamName, playerScale, nameTagStyle, nameDisplayMode, showNameBackground, nameBackgroundType, showPhoto, showName, showNumber, teamLogoUrl, pitchType, orientation, attackDirection, players, tacticalPlayers, footballPos, footballScale, opponents, tacticalDrawings, showOpponents, showBlueTeam, showPositionDescriptions, opponentColor, currentFormation]);
+  }, [currentId, lineupFutures, lineupName, teamName, playerScale, nameTagStyle, nameDisplayMode, showNameBackground, nameBackgroundType, showPhoto, showName, showNumber, teamLogoUrl, pitchType, orientation, attackDirection, players, tacticalPlayers, footballPos, footballScale, opponents, tacticalDrawings, showOpponents, showBlueTeam, showPositionDescriptions, opponentColor, currentFormation, boardAnimation, activeFrame]);
 
   const handleSelectLineupWithHistory = useCallback((id: string) => {
     if (id === lineup?.id) {
@@ -1404,6 +1454,9 @@ export default function LineupBuilder({
       setTacticalDrawings([]);
       setFootballPos(null);
       setOpponents([]);
+      setBoardAnimation(null);
+      setActiveFrame(0);
+      setPlayback(null);
       setHasUnsavedChanges(true);
       return;
     }
@@ -1497,7 +1550,8 @@ export default function LineupBuilder({
   }, [numberEditTarget, pushHistory]);
 
   const handlePointerDownWithDeletion = (e: React.PointerEvent, type: 'opponent' | 'blue' | 'ball', id?: string) => {
-    if (boardReadOnly) return;
+    // Medan stegen spelas upp (eller är pausade mitt i) går tavlan inte att ändra.
+    if (boardReadOnly || (isMaximized && playback)) return;
     const tool = isMaximized ? resolveTool(e) : tacticalTool;
     if (isMaximized && DRAW_TOOLS.includes(tool)) {
       // Med ett ritverktyg går trycket vidare till planen, så att en pil kan börja vid en spelare.
@@ -1643,7 +1697,7 @@ export default function LineupBuilder({
   };
 
   const handleTacticalStart = (e: React.PointerEvent) => {
-    if (!isMaximized || !fieldRef.current || boardMode === 'snapshot' || boardReadOnly) return;
+    if (!isMaximized || !fieldRef.current || boardMode === 'snapshot' || boardReadOnly || playback) return;
     const tool = resolveTool(e);
     activeToolRef.current = tool;
     setShowBoardColors(false);
@@ -1937,6 +1991,9 @@ export default function LineupBuilder({
     setFootballPos(null);
     setOpponents([]);
     setTacticalPlayers(JSON.parse(JSON.stringify(players)));
+    setBoardAnimation(null);
+    setActiveFrame(0);
+    setPlayback(null);
     setHasUnsavedChanges(true);
   };
 
@@ -1969,6 +2026,7 @@ export default function LineupBuilder({
       showOpponents,
       opponentColor,
       pitchType,
+      ...(animationForSave ? { animation: JSON.parse(JSON.stringify(animationForSave)) } : {}),
     };
 
     const currentSaved = lineup.savedTacticalBoards || [];
@@ -2325,6 +2383,10 @@ export default function LineupBuilder({
         squadPlayers
       );
       setTacticalPlayers(sanitizedTactical);
+      const loadedAnimation = normalizeAnimation(lineup.tacticalBoard?.animation);
+      setBoardAnimation(loadedAnimation);
+      setActiveFrame(loadedAnimation?.current || 0);
+      setPlayback(null);
 
       currentIdRef.current = lineup.id;
       lastPushedDateRef.current = lineup.date || Date.now();
@@ -2422,6 +2484,12 @@ export default function LineupBuilder({
       if (prev !== remote) return remote;
       return prev;
     });
+    if (JSON.stringify(lineup.tacticalBoard?.animation) !== JSON.stringify(animationForSave)) {
+      const remoteAnimation = normalizeAnimation(lineup.tacticalBoard?.animation);
+      setBoardAnimation(remoteAnimation);
+      setActiveFrame(remoteAnimation?.current || 0);
+      setPlayback(null);
+    }
 
     setTeamNotes(prev => {
       const remote = lineup.notes?.team?.text || '';
@@ -2484,7 +2552,8 @@ export default function LineupBuilder({
       showOpponents,
       showPositionDescriptions,
       opponentColor,
-      players: tacticalPlayers
+      players: tacticalPlayers,
+      ...(animationForSave ? { animation: animationForSave } : {})
     };
 
     const isStillDifferent = 
@@ -2508,7 +2577,7 @@ export default function LineupBuilder({
     if (!isStillDifferent) {
       setHasUnsavedChanges(false);
     }
-  }, [lineup, lineupName, teamName, players, playerScale, nameTagStyle, nameDisplayMode, showNameBackground, nameBackgroundType, currentFormation, showPhoto, showName, showNumber, teamLogoUrl, pitchType, orientation, attackDirection, tacticalDrawings, footballPos, footballScale, opponents, showOpponents, showPositionDescriptions, opponentColor, tacticalPlayers, teamNotes, teamMedia, opponentNotes, opponentMedia, hasUnsavedChanges]);
+  }, [lineup, lineupName, teamName, players, playerScale, nameTagStyle, nameDisplayMode, showNameBackground, nameBackgroundType, currentFormation, showPhoto, showName, showNumber, teamLogoUrl, pitchType, orientation, attackDirection, tacticalDrawings, footballPos, footballScale, opponents, showOpponents, showPositionDescriptions, opponentColor, tacticalPlayers, animationForSave, teamNotes, teamMedia, opponentNotes, opponentMedia, hasUnsavedChanges]);
 
   // Auto-save changes back to the parent
   useEffect(() => {
@@ -2545,7 +2614,8 @@ export default function LineupBuilder({
         showOpponents,
         showPositionDescriptions,
         opponentColor,
-        players: tacticalPlayers
+        players: tacticalPlayers,
+        ...(animationForSave ? { animation: animationForSave } : {})
       }
     };
 
@@ -2561,7 +2631,8 @@ export default function LineupBuilder({
       showOpponents: lineup.tacticalBoard?.showOpponents ?? true,
       showPositionDescriptions: lineup.tacticalBoard?.showPositionDescriptions ?? false,
       opponentColor: lineup.tacticalBoard?.opponentColor || '#ef4444',
-      players: lineup.tacticalBoard?.players || []
+      players: lineup.tacticalBoard?.players || [],
+      ...(lineup.tacticalBoard?.animation ? { animation: lineup.tacticalBoard.animation } : {})
     };
 
     const remoteNotes = {
@@ -2631,7 +2702,7 @@ export default function LineupBuilder({
         setHasUnsavedChanges(false);
       }
     };
-  }, [lineupName, teamName, players, tacticalPlayers, playerScale, nameTagStyle, nameDisplayMode, showNameBackground, nameBackgroundType, currentFormation, showPhoto, showName, showNumber, teamLogoUrl, pitchType, orientation, attackDirection, tacticalDrawings, footballPos, footballScale, opponents, showOpponents, showPositionDescriptions, opponentColor, teamNotes, teamMedia, opponentNotes, opponentMedia, lineup?.id, hasUnsavedChanges]);
+  }, [lineupName, teamName, players, tacticalPlayers, playerScale, nameTagStyle, nameDisplayMode, showNameBackground, nameBackgroundType, currentFormation, showPhoto, showName, showNumber, teamLogoUrl, pitchType, orientation, attackDirection, tacticalDrawings, footballPos, footballScale, opponents, showOpponents, showPositionDescriptions, opponentColor, animationForSave, teamNotes, teamMedia, opponentNotes, opponentMedia, lineup?.id, hasUnsavedChanges]);
 
   const applyFormation = (variant: FormationVariant) => {
     pushHistory();
@@ -2923,6 +2994,7 @@ export default function LineupBuilder({
       showPositionDescriptions,
       opponentColor,
       pitchType,
+      ...(animationForSave ? { animation: JSON.parse(JSON.stringify(animationForSave)) } : {}),
     };
 
     const currentSaved = lineup.savedTacticalBoards || [];
@@ -2933,6 +3005,7 @@ export default function LineupBuilder({
 
     onUpdateLineup(updatedLineup);
     setNewSavedBoardName('');
+    animSnapshotRef.current = JSON.stringify(animationForSave ?? null);
     
     // Update the snapshot so they can exit without prompt immediately after saving
     updateTacticalSnapshot(
@@ -2973,6 +3046,11 @@ export default function LineupBuilder({
     setShowPositionDescriptions(newShowPositionDescriptions);
     setOpponentColor(newOpponentColor);
     if (newPitchType) setPitchType(newPitchType as any);
+    const newAnimation = normalizeAnimation(board.animation);
+    setBoardAnimation(newAnimation);
+    setActiveFrame(newAnimation?.current || 0);
+    setPlayback(null);
+    animSnapshotRef.current = undefined;
     
     // Update the snapshot so they can exit without prompt if they make no new modifications
     updateTacticalSnapshot(
@@ -3042,7 +3120,8 @@ export default function LineupBuilder({
           opponents,
           showOpponents,
           opponentColor,
-          players: tacticalPlayers
+          players: tacticalPlayers,
+          ...(animationForSave ? { animation: animationForSave } : {})
         }
       };
       onSaveLineup(newLineup);
@@ -3092,7 +3171,8 @@ export default function LineupBuilder({
             opponents,
             showOpponents,
             opponentColor,
-            players: tacticalPlayers
+            players: tacticalPlayers,
+            ...(animationForSave ? { animation: animationForSave } : {})
           },
           date: now
         });
@@ -3380,6 +3460,12 @@ export default function LineupBuilder({
     const R = pitchRatioH / pitchRatioW; // 1.5441176470588236
     const invR = pitchRatioW / pitchRatioH; // 0.6476190476190476
     const isFieldMaximized = isMaximized && !isSimplified;
+    // Under uppspelning av stegen visas den animerade tavlan i stället för den sparade.
+    const anim = isMaximized ? animatedBoard : null;
+    const shownDrawings: any[] = anim ? anim.drawings : tacticalDrawings;
+    const shownOpponents: (typeof opponents[number] & { opacity?: number })[] = anim ? (anim.opponents as any) : opponents;
+    const shownFootball = anim ? anim.footballPos : footballPos;
+    const shownStarters: (LineupPlayer & { opacity?: number })[] = anim ? (anim.players as any) : starters;
 
     return (
       <div 
@@ -3459,7 +3545,8 @@ export default function LineupBuilder({
                                   opponents,
                                   showOpponents,
                                   opponentColor,
-                                  players: tacticalPlayers
+                                  players: tacticalPlayers,
+                                  ...(animationForSave ? { animation: animationForSave } : {})
                                 },
                                 date: pushTime
                               };
@@ -3656,7 +3743,7 @@ export default function LineupBuilder({
             >
               <defs>
                 {/* En pilspets per färg, så att spetsen alltid har samma färg som pilen. */}
-                {Array.from(new Set<string>([...BOARD_COLORS, tacticalColor, ...tacticalDrawings.map((d: any) => d.color || '#ffffff')])).map(color => (
+                {Array.from(new Set<string>([...BOARD_COLORS, tacticalColor, ...shownDrawings.map((d: any) => d.color || '#ffffff')])).map(color => (
                   <marker key={color} id={`arrowhead-${markerKey(color)}-${markerSuffix}`} markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
                     <path d="M0,0 L6,3 L0,6 Z" fill={color} />
                   </marker>
@@ -3664,7 +3751,7 @@ export default function LineupBuilder({
               </defs>
               
               {/* Previous Drawings */}
-              {tacticalDrawings.map((draw, idx) => (
+              {shownDrawings.map((draw, idx) => (
                 <g key={`draw-${draw.id || idx}-${idx}`}>
                   {draw.type === 'circle' ? (
                     <ellipse
@@ -3853,8 +3940,8 @@ export default function LineupBuilder({
               })()}
 
               {/* Automatically generated Delaunay Network (Passningsmöjligheter) */}
-              {showDelaunayNetwork && starters.length >= 2 && (() => {
-                const pointsList = starters.map(p => {
+              {showDelaunayNetwork && shownStarters.length >= 2 && (() => {
+                const pointsList = shownStarters.map(p => {
                   const isDragging = draggingId === p.id;
                   const displayX = isDragging && dragPos ? dragPos.x : p.x;
                   const displayY = isDragging && dragPos ? dragPos.y : p.y;
@@ -3962,8 +4049,42 @@ export default function LineupBuilder({
             </svg>
           )}
 
+          {/* Spår efter spelarna när stegen spelas upp */}
+          {isMaximized && animationTrails && isDrawingsVisible && (
+            <svg className="absolute inset-0 z-30 pointer-events-none" viewBox="0 0 100 100" preserveAspectRatio="none" style={{ width: '100%', height: '100%' }}>
+              {[...animationTrails.players].map(([id, pts]) => (
+                <polyline
+                  key={`trail-p-${id}`}
+                  points={pts.map(pt => `${pt.x},${pt.y}`).join(' ')}
+                  fill="none"
+                  stroke={pitchType === 'solid-white' ? '#18181b' : '#ffffff'}
+                  strokeOpacity={0.7}
+                  strokeWidth={2.5}
+                  strokeDasharray="6 5"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  vectorEffect="non-scaling-stroke"
+                />
+              ))}
+              {showOpponents && [...animationTrails.opponents].map(([id, pts]) => (
+                <polyline
+                  key={`trail-o-${id}`}
+                  points={pts.map(pt => `${pt.x},${pt.y}`).join(' ')}
+                  fill="none"
+                  stroke={opponentColor || '#ef4444'}
+                  strokeOpacity={0.75}
+                  strokeWidth={2.5}
+                  strokeDasharray="6 5"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  vectorEffect="non-scaling-stroke"
+                />
+              ))}
+            </svg>
+          )}
+
           {/* Opponents Layer (Red Team / Motståndare) */}
-          {isMaximized && showOpponents && isDrawingsVisible && opponents.map((opp, idx) => {
+          {isMaximized && showOpponents && isDrawingsVisible && shownOpponents.map((opp, idx) => {
             const oppNum = opp.number !== undefined && opp.number !== null && opp.number !== '' ? opp.number : (idx + 1);
             const oppName = opp.name || (CLASSIC_POSITIONS[Number(oppNum)]?.name ? `${oppNum}. ${CLASSIC_POSITIONS[Number(oppNum)]?.name}` : `Spelare ${oppNum}`);
             const oppDesc = showPositionDescriptions ? (CLASSIC_POSITIONS[Number(oppNum)]?.desc || '') : '';
@@ -3981,6 +4102,7 @@ export default function LineupBuilder({
                   transform: `translate(-50%, -50%) rotate(${getCounterRotation()})`,
                   width: `${playerScale * 50}px`,
                   height: `${playerScale * 50}px`,
+                  ...(opp.opacity !== undefined ? { opacity: opp.opacity } : {}),
                 }}
               >
                 <div className="w-full h-full flex flex-col items-center justify-center relative">
@@ -4030,7 +4152,7 @@ export default function LineupBuilder({
           })}
 
           {/* Football Icon */}
-          {isMaximized && footballPos && isDrawingsVisible && (
+          {isMaximized && shownFootball && isDrawingsVisible && (
             <div 
               className={`absolute z-50 transition-none select-none ${isSimplified ? '' : 'cursor-move'}`}
               onPointerDown={isSimplified ? undefined : (e) => handlePointerDownWithDeletion(e, 'ball')}
@@ -4042,8 +4164,8 @@ export default function LineupBuilder({
                 }
               }}
               style={{
-                left: `${footballPos.x}%`,
-                top: `${footballPos.y}%`,
+                left: `${shownFootball.x}%`,
+                top: `${shownFootball.y}%`,
                 transform: `translate(-50%, -50%) rotate(${getCounterRotation()}) scale(${footballScale})`,
               }}
             >
@@ -4124,7 +4246,7 @@ export default function LineupBuilder({
 
           {/* Draggable Players on Field */}
           <AnimatePresence>
-            {starters.map((p, idx) => {
+            {shownStarters.map((p, idx) => {
               const sp = getSquadPlayer(p.playerId) || {
                 id: p.playerId || p.id,
                 name: p.customName || `Spelare ${idx + 1}`,
@@ -4167,7 +4289,8 @@ export default function LineupBuilder({
                     transform: `translate(-50%, -50%) rotate(${getCounterRotation()})`,
                     width: isMaximized ? `${playerScale * 50}px` : undefined,
                     height: isMaximized ? `${playerScale * 50}px` : undefined,
-                    transition: (isDragging || isSimplified || isMaximized || (Date.now() - lastInteractionTimeRef.current < 50)) ? 'none' : 'left 0.5s cubic-bezier(0.19, 1, 0.22, 1), top 0.5s cubic-bezier(0.19, 1, 0.22, 1), opacity 0.3s ease, transform 0.3s ease'
+                    transition: (isDragging || isSimplified || isMaximized || (Date.now() - lastInteractionTimeRef.current < 50)) ? 'none' : 'left 0.5s cubic-bezier(0.19, 1, 0.22, 1), top 0.5s cubic-bezier(0.19, 1, 0.22, 1), opacity 0.3s ease, transform 0.3s ease',
+                    ...(p.opacity !== undefined ? { opacity: p.opacity } : {})
                   }}
                   onPointerDown={isSimplified ? undefined : (e) => {
                     if (isMaximized) {
@@ -5223,7 +5346,8 @@ export default function LineupBuilder({
                           opponents,
                           showOpponents,
                           opponentColor,
-                          players: tacticalPlayers
+                          players: tacticalPlayers,
+                          ...(animationForSave ? { animation: animationForSave } : {})
                         },
                         date: pushTime
                       };
@@ -5677,13 +5801,308 @@ export default function LineupBuilder({
   }, [isMaximized, boardMode, exitBoardMode]);
   useEffect(() => () => { if (boardHintTimer.current) clearTimeout(boardHintTimer.current); }, []);
 
+  /* ---------- Taktiktavlan: animation i steg (src/utils/boardAnimation.ts) ---------- */
+
+  const stepFrames = animationForSave?.frames || [];
+  const stepCount = stepFrames.length;
+  const isPlaying = !!playback?.playing;
+  const playbackRef = useRef(playback);
+  playbackRef.current = playback;
+
+  const markBoardChanged = () => {
+    if (boardReadOnly) return;
+    lastInteractionTimeRef.current = Date.now();
+    setHasUnsavedChanges(true);
+  };
+
+  // Lägger ett steg på tavlan. Spelare som inte är med i steget går till bänken.
+  const loadFrameIntoBoard = (frame: BoardFrame) => {
+    const byId = new Map(frame.players.map(p => [p.id, p]));
+    setTacticalPlayers(prev => {
+      const prevIds = new Set(prev.map(p => p.id));
+      const kept = prev.map(p => {
+        const f = byId.get(p.id);
+        if (f) return { ...p, ...f, isSubstitute: false, isHolding: false } as LineupPlayer;
+        return p.isSubstitute ? p : { ...p, isSubstitute: true, isHolding: false };
+      });
+      const added = frame.players
+        .filter(p => !prevIds.has(p.id))
+        .map(p => ({ ...p, isSubstitute: false, isHolding: false }) as LineupPlayer);
+      return [...kept, ...added];
+    });
+    setOpponents(frame.opponents.map(o => ({ ...o })) as typeof opponents);
+    setFootballPos(frame.footballPos ? { ...frame.footballPos } : null);
+    setTacticalDrawings(JSON.parse(JSON.stringify(frame.drawings || [])));
+    setSelectedDrawingId(null);
+    setEditingTextId(null);
+  };
+
+  const goToFrame = (index: number) => {
+    if (!animationForSave) return;
+    const i = Math.min(Math.max(index, 0), stepCount - 1);
+    setPlayback(null);
+    if (i === activeFrame) return;
+    setBoardAnimation({ ...animationForSave, current: i });
+    setActiveFrame(i);
+    loadFrameIntoBoard(animationForSave.frames[i]);
+    markBoardChanged();
+  };
+
+  // Nytt steg efter det valda. Det börjar som en kopia, så att tränaren bara flyttar det som ändras.
+  const addStep = () => {
+    if (boardReadOnly) return;
+    setPlayback(null);
+    if (!animationForSave) {
+      pushHistory();
+      const first: BoardFrame = {
+        id: newFrameId(),
+        players: (tacticalPlayers || []).filter(p => !p.isSubstitute).map(p => ({ ...p, isHolding: false })),
+        opponents,
+        footballPos,
+        drawings: tacticalDrawings,
+        note: '',
+      };
+      setBoardAnimation({ frames: [first, copyFrame(first)], speed: 'normal', showTrails: true, current: 1 });
+      setActiveFrame(1);
+    } else {
+      if (stepCount >= MAX_FRAMES) return;
+      pushHistory();
+      const r = insertFrameAfter(animationForSave.frames, activeFrame);
+      setBoardAnimation({ ...animationForSave, frames: r.frames, current: r.index });
+      setActiveFrame(r.index);
+    }
+    markBoardChanged();
+  };
+
+  const deleteStep = () => {
+    if (!animationForSave || boardReadOnly) return;
+    pushHistory();
+    setPlayback(null);
+    setShowStepSheet(false);
+    if (stepCount <= 2) {
+      // Ett steg kvar: tavlan blir en vanlig taktiktavla med det steget.
+      const keep = animationForSave.frames[activeFrame === 0 ? 1 : 0];
+      setBoardAnimation(null);
+      setActiveFrame(0);
+      loadFrameIntoBoard(keep);
+    } else {
+      const r = removeFrame(animationForSave.frames, activeFrame);
+      setBoardAnimation({ ...animationForSave, frames: r.frames, current: r.index });
+      setActiveFrame(r.index);
+      loadFrameIntoBoard(r.frames[r.index]);
+    }
+    markBoardChanged();
+  };
+
+  const moveStep = (dir: -1 | 1) => {
+    if (!animationForSave || boardReadOnly) return;
+    const to = activeFrame + dir;
+    if (to < 0 || to >= stepCount) return;
+    pushHistory();
+    setBoardAnimation({ ...animationForSave, frames: moveFrame(animationForSave.frames, activeFrame, to), current: to });
+    setActiveFrame(to);
+    markBoardChanged();
+  };
+
+  const setStepNote = (text: string) => {
+    setBoardAnimation(a => a && {
+      ...a,
+      frames: a.frames.map((f, i) => (i === activeFrame ? { ...f, note: text.slice(0, NOTE_MAX_LENGTH) } : f)),
+    });
+    markBoardChanged();
+  };
+
+  // Tar bort stegen men behåller det valda steget som tavla.
+  const removeAnimation = () => {
+    if (boardReadOnly) return;
+    pushHistory();
+    setPlayback(null);
+    setBoardAnimation(null);
+    setActiveFrame(0);
+    markBoardChanged();
+  };
+
+  const updateAnimationSettings = (patch: Partial<BoardAnimation>) => {
+    setBoardAnimation(a => a && { ...a, ...patch });
+    markBoardChanged();
+  };
+
+  const startPlayback = () => {
+    if (!animationForSave || stepCount < 2) return;
+    closeBoardPopups();
+    setShowStepSheet(false);
+    setBoardAnimation(animationForSave);
+    if (playback && !playback.playing && playback.fromIndex < stepCount - 1) {
+      setPlayback({ ...playback, playing: true });
+      return;
+    }
+    // Från det valda steget, eller från början om det sista steget är valt.
+    setPlayback({ fromIndex: activeFrame >= stepCount - 1 ? 0 : activeFrame, progress: 0, playing: true });
+  };
+  const pausePlayback = () => setPlayback(p => p && { ...p, playing: false });
+
+  const stepPrev = () => {
+    if (playback) goToFrame(playback.progress > 0.02 ? playback.fromIndex : playback.fromIndex - 1);
+    else goToFrame(activeFrame - 1);
+  };
+  const stepNext = () => goToFrame((playback ? playback.fromIndex : activeFrame) + 1);
+
+  // Själva uppspelningen: en bildruta i taget med requestAnimationFrame.
+  useEffect(() => {
+    if (!isPlaying || !boardAnimation) return;
+    const frames = boardAnimation.frames;
+    const stepMs = scaledStepMs(boardAnimation.speed, playbackRate);
+    const startAt = (playbackRef.current?.fromIndex || 0) + (playbackRef.current?.progress || 0);
+    const t0 = performance.now();
+    let raf = 0;
+    const tick = (now: number) => {
+      const pos = playbackPosition(frames.length, 0, startAt * stepMs + (now - t0), stepMs);
+      if (pos.done) {
+        const last = frames.length - 1;
+        setPlayback(null);
+        setActiveFrame(last);
+        setBoardAnimation(a => a && { ...a, current: last });
+        loadFrameIntoBoard(frames[last]);
+        return;
+      }
+      setPlayback({ fromIndex: pos.fromIndex, progress: pos.progress, playing: true });
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isPlaying, boardAnimation, playbackRate]);
+
+  // Byter tempo; under uppspelning fortsätter den från samma ställe i det nya tempot.
+  const cyclePlaybackRate = () => {
+    const next = nextPlaybackRate(playbackRate);
+    setPlaybackRate(next);
+    try { localStorage.setItem(PLAYBACK_RATE_KEY, String(next)); } catch {}
+  };
+
+  useEffect(() => {
+    if (!isMaximized) {
+      setPlayback(null);
+      setShowStepSheet(false);
+    }
+  }, [isMaximized]);
+
+  // Spelare börjar alltid på steg 1 (utgångsläget), oavsett vilket steg tränaren hade valt.
+  useEffect(() => {
+    if (!boardReadOnly || !animationForSave || activeFrame === 0) return;
+    setBoardAnimation({ ...animationForSave, current: 0 });
+    setActiveFrame(0);
+    loadFrameIntoBoard(animationForSave.frames[0]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lineup?.id, boardReadOnly]);
+
+  // Det som visas på planen under uppspelningen (i stället för tavlans vanliga state).
+  const animatedBoard = useMemo(
+    () => (playback && boardAnimation ? frameAt(boardAnimation.frames, playback.fromIndex, playback.progress) : null),
+    [playback, boardAnimation]
+  );
+  const animationTrails = useMemo(() => {
+    if (!playback || !boardAnimation || boardAnimation.showTrails === false) return null;
+    return {
+      players: trailsUpTo(boardAnimation.frames, 'players', playback.fromIndex, playback.progress),
+      opponents: trailsUpTo(boardAnimation.frames, 'opponents', playback.fromIndex, playback.progress),
+    };
+  }, [playback, boardAnimation]);
+
+  const shownStep = playback
+    ? Math.min(playback.fromIndex + (playback.progress >= 0.5 ? 1 : 0), Math.max(stepCount - 1, 0))
+    : activeFrame;
+  const shownStepNote = animatedBoard ? animatedBoard.note : (boardAnimation?.frames[activeFrame]?.note || '');
+  const canEditSteps = !boardReadOnly && boardMode === 'edit';
+  const stepBarVisible = isMaximized && boardMode !== 'snapshot' && stepCount >= 2
+    && !(boardVertical && boardMode === 'edit' && tacticalTool === 'move' && !!selectedDrawing);
+  const boardBarSize = viewport.w < 640 ? 64 : 72;
+
+  // Stegraden: föregående/spela/nästa och stegen. Ligger ovanför verktygsraden.
+  const renderStepBar = () => {
+    const toolbarAtBottom = boardToolbarVisible && !boardVertical;
+    const present = boardMode === 'present';
+    const bottom = 8 + (toolbarAtBottom ? boardBarSize : 0) + (present && !toolbarAtBottom && viewport.w < 640 ? 64 : 0);
+    return (
+      <div
+        className={`fixed z-[60] flex pointer-events-none ${present && !toolbarAtBottom
+          ? 'left-[calc(0.75rem+env(safe-area-inset-left,0px))] right-2 justify-start'
+          : `${boardVertical && boardToolbarVisible ? 'left-[calc(5.5rem+env(safe-area-inset-left,0px))]' : 'left-2'} right-2 justify-center`}`}
+        style={{ bottom: `calc(env(safe-area-inset-bottom, 0px) + ${bottom}px)` }}
+      >
+        <div className={`${boardBarClass} pointer-events-auto max-w-full`}>
+          <IconButton label="Föregående steg" className={boardBtnClass} onClick={stepPrev} disabled={!playback && activeFrame === 0}>
+            <ChevronLeft size={22} />
+          </IconButton>
+          <IconButton
+            label={isPlaying ? 'Pausa' : 'Spela upp'}
+            tone="primary"
+            active
+            className={boardBtnClass}
+            onClick={isPlaying ? pausePlayback : startPlayback}
+          >
+            {isPlaying ? <Pause size={22} /> : <Play size={22} />}
+          </IconButton>
+          <IconButton label="Nästa steg" className={boardBtnClass} onClick={stepNext} disabled={!playback && activeFrame >= stepCount - 1}>
+            <ChevronRight size={22} />
+          </IconButton>
+          <button
+            type="button"
+            onClick={cyclePlaybackRate}
+            title={`Tempo: ${playbackRateLabel(playbackRate)} (tryck för att byta)`}
+            aria-label={`Tempo ${playbackRateLabel(playbackRate)}, tryck för att byta`}
+            className={`shrink-0 h-11 sm:h-12 min-w-11 sm:min-w-12 px-1.5 rounded-xl text-sm font-bold tabular-nums cursor-pointer transition-colors ${playbackRate !== 1
+              ? 'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-200'
+              : 'text-zinc-700 dark:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800'}`}
+          >
+            {playbackRateLabel(playbackRate)}
+          </button>
+          <span className={boardDividerClass} />
+          {present ? (
+            <span className="px-2 text-sm font-bold tabular-nums whitespace-nowrap">Steg {shownStep + 1} av {stepCount}</span>
+          ) : (
+            <div className="flex items-center gap-1 min-w-0 overflow-x-auto touch-pan-x scrollbar-none">
+              {stepFrames.map((f, i) => (
+                <button
+                  key={f.id}
+                  type="button"
+                  title={f.note ? `Steg ${i + 1}: ${f.note}` : `Steg ${i + 1}`}
+                  aria-label={f.note ? `Steg ${i + 1}: ${f.note}` : `Steg ${i + 1}`}
+                  aria-current={i === shownStep ? 'step' : undefined}
+                  onClick={() => (i === activeFrame && !playback && canEditSteps ? setShowStepSheet(true) : goToFrame(i))}
+                  className={`shrink-0 min-w-10 h-10 sm:h-11 px-2 rounded-xl text-sm font-bold tabular-nums cursor-pointer transition-colors ${i === shownStep
+                    ? 'bg-indigo-600 text-white'
+                    : 'text-zinc-700 dark:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800'}`}
+                >
+                  {i + 1}
+                </button>
+              ))}
+            </div>
+          )}
+          {canEditSteps && (
+            <>
+              <span className={boardDividerClass} />
+              <IconButton label="Nytt steg (kopia av det valda)" className={boardBtnClass} onClick={addStep} disabled={stepCount >= MAX_FRAMES || !!playback}>
+                <Plus size={22} />
+              </IconButton>
+              <IconButton label={`Steg ${activeFrame + 1}: text, flytta, ta bort`} className={boardBtnClass} onClick={() => { setPlayback(null); setShowStepSheet(true); }}>
+                <Edit2 size={20} />
+              </IconButton>
+            </>
+          )}
+        </div>
+      </div>
+    );
+  };
+
   // Plats som verktygsraderna tar, så att planen krymper i stället för att hamna under dem.
   const boardReserve = (() => {
     if (!isMaximized || boardMode === 'snapshot') return { top: 0, left: 0, bottom: 0 };
-    const bar = viewport.w < 640 ? 64 : 72;
+    const bar = boardBarSize;
     const top = boardMode === 'edit' ? bar : 0;
-    if (!boardToolbarVisible) return { top, left: 0, bottom: 0 };
-    return boardVertical ? { top, left: bar + 8, bottom: 0 } : { top, left: 0, bottom: bar };
+    const steps = stepBarVisible && boardMode === 'edit' ? bar : 0;
+    if (!boardToolbarVisible) return { top, left: 0, bottom: steps };
+    return boardVertical ? { top, left: bar + 8, bottom: steps } : { top, left: 0, bottom: bar + steps };
   })();
 
   // Verktygsraden under planen.
@@ -5869,6 +6288,11 @@ export default function LineupBuilder({
                 >
                   <Users size={22} />
                 </IconButton>
+                {!boardAnimation && (
+                  <IconButton label="Animera i steg (visa hur spelarna rör sig)" className={boardBtnClass} onClick={addStep}>
+                    <Clapperboard size={22} />
+                  </IconButton>
+                )}
                 {boardMode === 'present' && (
                   <IconButton label="Fäll in verktygen" className={boardBtnClass} onClick={() => { setBoardToolbarOpen(false); setShowBoardColors(false); }}>
                     {boardVertical ? <ChevronLeft size={22} /> : <ChevronDown size={22} />}
@@ -5883,7 +6307,7 @@ export default function LineupBuilder({
             <div
               className={boardVertical
                 ? 'fixed left-[calc(5rem+env(safe-area-inset-left,0px))] top-1/2 -translate-y-1/2 z-[61]'
-                : 'fixed left-1/2 -translate-x-1/2 bottom-[calc(5rem+env(safe-area-inset-bottom,0px))] z-[61]'}
+                : `fixed left-1/2 -translate-x-1/2 z-[61] ${stepBarVisible ? 'bottom-[calc(9.5rem+env(safe-area-inset-bottom,0px))]' : 'bottom-[calc(5rem+env(safe-area-inset-bottom,0px))]'}`}
             >
               <div className={`${boardBarClass} ${boardVertical ? 'flex-col' : ''}`}>
                 {BOARD_COLORS.map(color => (
@@ -5901,6 +6325,20 @@ export default function LineupBuilder({
                     <span className={`w-7 h-7 rounded-full border-2 ${tacticalColor === color ? 'border-indigo-600 dark:border-indigo-400' : 'border-zinc-300 dark:border-zinc-600'}`} style={{ backgroundColor: color }} />
                   </button>
                 ))}
+              </div>
+            </div>
+          )}
+
+          {/* Stegraden (animation) */}
+          {stepBarVisible && renderStepBar()}
+
+          {/* Stegets text, medan stegen spelas upp och i helskärm/läsläge */}
+          {stepCount >= 2 && shownStepNote && boardMode !== 'snapshot' && (playback || boardMode === 'present' || boardReadOnly) && (
+            <div className={`fixed left-2 right-2 z-[59] flex justify-center pointer-events-none ${boardMode === 'edit'
+              ? 'top-[calc(4.5rem+env(safe-area-inset-top,0px))] sm:top-[calc(5rem+env(safe-area-inset-top,0px))]'
+              : 'top-[calc(0.75rem+env(safe-area-inset-top,0px))]'}`}>
+              <div className="max-w-[min(92vw,40rem)] px-4 py-2 rounded-2xl bg-zinc-900/85 text-white text-base sm:text-lg font-semibold text-center shadow-xl backdrop-blur-sm" aria-live="polite">
+                {shownStepNote}
               </div>
             </div>
           )}
@@ -6122,6 +6560,44 @@ export default function LineupBuilder({
               </section>
 
               <section className="flex flex-col gap-1">
+                <h3 className={boardSectionClass}>Animation</h3>
+                {!boardAnimation ? (
+                  <MenuItem
+                    icon={<Clapperboard size={18} />}
+                    label="Animera i steg"
+                    description="Visa hur spelarna rör sig, t.ex. en press eller en omställning"
+                    onClick={() => { setShowBoardMore(false); addStep(); }}
+                  />
+                ) : (
+                  <>
+                    <div className="flex items-center justify-between gap-3 px-3 py-2">
+                      <span className="text-sm font-semibold text-zinc-800 dark:text-zinc-100">Hastighet</span>
+                      <SegmentedTabs<BoardSpeed>
+                        size="sm"
+                        tabs={(['slow', 'normal', 'fast'] as const).map(id => ({ id, label: SPEED_LABEL[id] }))}
+                        value={boardAnimation.speed || 'normal'}
+                        onChange={(speed) => updateAnimationSettings({ speed })}
+                      />
+                    </div>
+                    <MenuItem
+                      icon={<Footprints size={18} />}
+                      label="Visa spår"
+                      description="Streckade linjer efter spelarna under uppspelningen"
+                      onClick={() => updateAnimationSettings({ showTrails: boardAnimation.showTrails === false })}
+                      trailing={renderBoardSwitch(boardAnimation.showTrails !== false)}
+                    />
+                    <MenuItem
+                      icon={<Trash2 size={18} />}
+                      tone="danger"
+                      label="Ta bort stegen"
+                      description={`Tavlan behåller steg ${activeFrame + 1}`}
+                      onClick={() => { setShowBoardMore(false); removeAnimation(); }}
+                    />
+                  </>
+                )}
+              </section>
+
+              <section className="flex flex-col gap-1">
                 <h3 className={boardSectionClass}>Planen</h3>
                 <MenuItem
                   icon={<Network size={18} />}
@@ -6183,13 +6659,64 @@ export default function LineupBuilder({
             </div>
           </Sheet>
 
+          {/* Ett steg i animationen: text, flytta, ta bort */}
+          <Sheet
+            open={showStepSheet && !!boardAnimation && canEditSteps}
+            onClose={() => setShowStepSheet(false)}
+            title={`Steg ${activeFrame + 1} av ${stepCount}`}
+            footer={
+              <div className="flex justify-end">
+                <Button icon={<Check size={18} />} onClick={() => setShowStepSheet(false)}>Klar</Button>
+              </div>
+            }
+          >
+            <div className="flex flex-col gap-4 px-2 pb-2">
+              <label className="flex flex-col gap-1.5 px-1">
+                <span className="text-sm font-semibold text-zinc-800 dark:text-zinc-100">Text som visas under steget</span>
+                <input
+                  type="text"
+                  className={BOARD_INPUT}
+                  maxLength={NOTE_MAX_LENGTH}
+                  placeholder={activeFrame === 0 ? 'T.ex. Utgångsläge: de har bollen' : 'T.ex. Nian pressar mittbacken'}
+                  value={boardAnimation?.frames[activeFrame]?.note || ''}
+                  onChange={(e) => setStepNote(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter') setShowStepSheet(false); }}
+                />
+                <span className="text-xs text-zinc-500 dark:text-zinc-400">
+                  Flytta spelare, motståndare och boll på planen för att visa hur steget ser ut. Ritningarna hör bara till det här steget.
+                </span>
+              </label>
+              <div className="flex flex-col gap-1">
+                <MenuItem
+                  icon={<Plus size={18} />}
+                  label="Nytt steg efter det här"
+                  description="Börjar som en kopia av steget"
+                  onClick={() => { setShowStepSheet(false); addStep(); }}
+                />
+                {activeFrame > 0 && (
+                  <MenuItem icon={<ChevronLeft size={18} />} label="Flytta steget tidigare" onClick={() => moveStep(-1)} />
+                )}
+                {activeFrame < stepCount - 1 && (
+                  <MenuItem icon={<ChevronRight size={18} />} label="Flytta steget senare" onClick={() => moveStep(1)} />
+                )}
+                <MenuItem
+                  icon={<Trash2 size={18} />}
+                  tone="danger"
+                  label="Ta bort steget"
+                  description={stepCount <= 2 ? 'Tavlan blir en vanlig taktiktavla igen' : undefined}
+                  onClick={deleteStep}
+                />
+              </div>
+            </div>
+          </Sheet>
+
           {/* Rensa allt: fråga först och låt tränaren välja hur mycket */}
           <Sheet open={showBoardClear} onClose={() => setShowBoardClear(false)} title="Rensa taktiktavlan">
             <div className="flex flex-col gap-1 px-2 pb-2">
               <MenuItem
                 icon={<Eraser size={18} />}
                 label="Bara ritningar"
-                description="Pilar, linjer, zoner och text tas bort"
+                description={boardAnimation ? `Pilar, linjer, zoner och text i steg ${activeFrame + 1} tas bort` : 'Pilar, linjer, zoner och text tas bort'}
                 onClick={() => {
                   pushHistory();
                   setTacticalDrawings([]);
@@ -6202,7 +6729,7 @@ export default function LineupBuilder({
                 icon={<Trash2 size={18} />}
                 tone="danger"
                 label="Allt"
-                description="Även motståndare och boll tas bort"
+                description={boardAnimation ? 'Även motståndare, boll och alla steg tas bort' : 'Även motståndare och boll tas bort'}
                 onClick={() => {
                   clearTactical();
                   setSelectedDrawingId(null);

@@ -71,6 +71,7 @@ function boardToLineup(board: TeamTacticalBoard, squad: SquadPlayer[]): Lineup {
       showPositionDescriptions: st.showPositionDescriptions ?? false,
       opponentColor: st.opponentColor || '#ef4444',
       players,
+      ...(st.animation ? { animation: st.animation } : {}),
     },
   };
 }
@@ -93,6 +94,7 @@ function lineupToState(l: Lineup): TeamTacticalBoard['state'] {
     attackDirection: l.attackDirection,
     playerScale: l.playerScale,
     formation: l.formation,
+    ...(tb?.animation ? { animation: tb.animation } : {}),
   };
 }
 

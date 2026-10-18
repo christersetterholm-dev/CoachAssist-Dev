@@ -1,3 +1,4 @@
+import type { BoardAnimation } from './utils/boardAnimation';
 export interface SquadPlayer {
   id: string;
   name: string;
@@ -69,6 +70,8 @@ export interface Lineup {
     showPositionDescriptions?: boolean;
     opponentColor?: string;
     players?: LineupPlayer[];
+    // Animation i steg (se src/utils/boardAnimation.ts). Saknas på tavlor utan steg.
+    animation?: BoardAnimation;
   };
   savedTacticalBoards?: TacticalSavedBoard[];
 }
@@ -96,6 +99,7 @@ export interface TeamTacticalBoard {
     attackDirection?: 'up' | 'down' | 'left' | 'right';
     playerScale?: number;
     formation?: string;
+    animation?: BoardAnimation;
   };
 }
 
@@ -118,6 +122,7 @@ export interface TacticalSavedBoard {
   pitchSize?: 'full' | 'half';
   orientation?: 'vertical' | 'landscape';
   attackDirection?: 'up' | 'down' | 'left' | 'right';
+  animation?: BoardAnimation;
 }
 
 export interface Team {

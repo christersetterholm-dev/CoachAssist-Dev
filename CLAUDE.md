@@ -33,6 +33,7 @@ Läs den här filen först i varje nytt samtal. Håll den uppdaterad när något
 | Medlemsregister, behörigheter, svar på kallelser | `server/registry.ts` |
 | Inbjudningslänkar | `server/invites.ts` |
 | Lagets taktiktavlor (menyposten Taktiktavla) | `server/tacticalBoards.ts`, `src/components/TacticalBoardsView.tsx` |
+| Animationer i steg på taktiktavlan (räknandet, ingen React) | `src/utils/boardAnimation.ts` (tester i `tests/boardAnimation.test.mjs`) |
 | Startfil på webbhotellet (Passenger) | `app.cjs` → `dist/server.cjs` |
 | React-appen | `src/` (`App.tsx` och `LineupBuilder.tsx` är mycket stora) |
 | Appens skal (sidomeny, bottenmeny, toppfält, kontomeny) | `src/components/shell/AppShell.tsx` |
@@ -148,6 +149,22 @@ npm run set-password -- e@post.se            # lokalt konto/lösenord
   Apple Pencil: med "Pennan ritar alltid" (på) ritar pennan och fingret flyttar – först när en penna
   har använts (`pointerType === 'pen'`). Med ett ritverktyg går tryck på en spelare vidare till
   planen, så en pil kan börja vid spelaren.
+  **Animation i steg** (okt 2026): knappen Animera (klappa, sist i verktygsraden) eller Mer → Animation
+  gör tavlan till steg: steg 1 = utgångsläget, ett nytt steg börjar som kopia av det valda. Stegraden
+  (Föregående/Spela/Nästa, stegnummer, Nytt steg, Redigera) ligger ovanför verktygsraden; tryck på det
+  valda steget eller pennan öppnar arket med stegets text, flytta tidigare/senare och ta bort. Spelare,
+  motståndare och boll glider mellan stegen (Långsam 2,5 s / Normal 1,5 s / Snabb 0,9 s per steg i Mer);
+  ritningarna hör till sitt steg och byts när spelarna är framme. Valfria streckade spår. Tempoknappen
+  bredvid Spela (0,25× / 0,5× / 1× / 1,5×, alla – även spelare och i helskärm) skalar uppspelningen
+  ovanpå tavlans hastighet; den sparas per enhet i `localStorage` (`coachassist.boardPlaybackRate`),
+  inte i tavlan, och kan bytas mitt i en uppspelning. Under
+  uppspelning går tavlan inte att ändra. Spelare (`boardReadOnly`) får bara uppspelningen och börjar på
+  steg 1; i helskärm visas en kompakt rad "Steg 2 av 5" nere till vänster och stegets text överst.
+  Datamodell: `tacticalBoard.animation` / tavlans `state.animation` = `{ frames: [{ id, players,
+  opponents, footballPos, drawings, note }], speed, showTrails, current }`. Det valda steget visas och
+  redigeras i tavlans vanliga state (tacticalPlayers, opponents …); `animationForSave` lägger in det i
+  `frames` vid sparning. Tavlans vanliga fält sparas som det valda steget, så äldre appversioner visar
+  en stillbild. Max 20 steg. Ångra/Gör om omfattar stegen.
   Taktiktavlans rutor är ark (`Sheet`): Text på tavlan, Nummer och roll (dubbeltryck på spelare),
   Sparade taktiktavlor, Spara taktiktavlan? (vid Stäng), Spara som formation och Motståndarnas
   formation. Formationsrutan (blått/rött lag) har kvar sin egen ram men nya flikar och typografi.
@@ -194,6 +211,8 @@ npm run set-password -- e@post.se            # lokalt konto/lösenord
   troligen används pass som sparats i webbläsaren i stället för serverns. Utred synkningen.
 - I poängräkningen (`view === 'exercise'` i App.tsx) är timerpanelen och jokerraden ovanför
   poängkorten fortfarande i gammal stil (VERSALER).
+- Taktiktavlans animationer, etapp 4 (stäm av med Christer): spara som video/GIF. Animationen finns
+  inte heller i övningarnas taktiktavla (`TacticalBoardModal`).
 - E-post via SMTP (inbjudningar, glömt lösenord) om det behövs senare.
 - iOS-app och notiser (pausat, utrett okt 2026): steg 1 webbnotiser (Web Push/PWA, egen server,
   ingen Firebase); steg 2 Capacitor-skal runt befintliga appen för riktiga notiser via APNs och
