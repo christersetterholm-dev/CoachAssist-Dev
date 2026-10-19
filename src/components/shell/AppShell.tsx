@@ -206,8 +206,10 @@ export const AppShell: React.FC<AppShellProps> = props => {
     scrollTops.current.set(el, top);
     const d = top - prev;
     // Strax efter ett byte ändras ytans höjd, och då hoppar skrollningen lite – det räknas inte.
-    if (!d || Date.now() - lastToggle.current < 350) return;
+    if (!d || Date.now() - lastToggle.current < 500) return;
     if (top < 24) { setBars(false); return; }
+    // Längst ner: när menyerna glider undan blir ytan högre och skrollningen hoppar uppåt av sig själv.
+    if (d < 0 && top + el.clientHeight >= el.scrollHeight - 4) return;
     scrollAcc.current = Math.sign(d) === Math.sign(scrollAcc.current) ? scrollAcc.current + d : d;
     if (scrollAcc.current > 30) setBars(true);
     else if (scrollAcc.current < -30) setBars(false);
