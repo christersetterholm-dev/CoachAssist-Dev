@@ -4,6 +4,10 @@ Läs den här filen först i varje nytt samtal. Håll den uppdaterad när något
 
 ## Om projektet och ägaren
 
+- Appen heter **Truppio** (sedan okt 2026; hette CoachAssist/KSK-appen). Repo, mappar och interna
+  nycklar (`coachassist.*` i localStorage, databasfilen) heter fortfarande coachassist – byt inte dem.
+  Hemskärmens namn och ikon kan föreningen sätta själv i Administration (PWA-ikoner, `system/pwa_icons`);
+  det sparade värdet går före standardnamnet Truppio.
 - Fotbollsapp för tränare och spelare: träningsplanering med tävlingsmoment och poängliga,
   trupp/medlemsregister, kalender med kallelser och närvaro, laguppställningar, taktiktavla.
 - Ägare: Christer Setterholm (root-admin), tränare i Kungsgårdens SK, lag "Seniorer (Herrar)".

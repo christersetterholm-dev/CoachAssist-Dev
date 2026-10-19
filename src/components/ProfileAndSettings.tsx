@@ -538,7 +538,7 @@ export default function ProfileAndSettings({
       setGoogleLinked(true);
       setGoogleEmail(res.googleEmail || auth.currentUser?.googleEmail || '');
       setGoogleLinkStatus('success');
-      setGoogleLinkMsg(res.message || 'Ditt Google-konto har kopplats samman med ditt CoachAssist-konto!');
+      setGoogleLinkMsg(res.message || 'Ditt Google-konto har kopplats samman med ditt Truppio-konto!');
       setTimeout(() => setGoogleLinkStatus('idle'), 5000);
     } catch (err: any) {
       setGoogleLinkStatus('error');
@@ -547,7 +547,7 @@ export default function ProfileAndSettings({
   };
 
   const handleUnlinkGoogle = async () => {
-    if (!window.confirm('Är du säker på att du vill koppla bort Google-kontot från ditt CoachAssist-konto?')) {
+    if (!window.confirm('Är du säker på att du vill koppla bort Google-kontot från ditt Truppio-konto?')) {
       return;
     }
     setGoogleLinkStatus('unlinking');

@@ -542,14 +542,14 @@ function applyCustomPwaIconsToDisk(iconsObj: { appName?: string; themeColor?: st
 
   // 2. Synchronize Web App Manifest across all locations
   const v = iconsObj.updatedAt || Date.now();
-  const manifestAppName = (iconsObj.appName || 'KSK-appen').trim();
+  const manifestAppName = (iconsObj.appName || 'Truppio').trim();
   const themeColor = iconsObj.themeColor || '#4f46e5';
 
   const manifestObj = {
     id: '/',
     name: manifestAppName,
     short_name: manifestAppName.length > 12 ? manifestAppName.slice(0, 12) : manifestAppName,
-    description: `${manifestAppName} - Komplett tränings- och matchverktyg för fotbollscoachen.`,
+    description: `${manifestAppName} - Komplett tränings- och matchverktyg för fotbollslaget.`,
     start_url: '/',
     scope: '/',
     display: 'standalone',
@@ -668,7 +668,7 @@ async function loadAndApplyPwaIcons() {
       const parsed = typeof row.data === 'string' ? JSON.parse(row.data) : row.data;
       if (parsed && parsed.files && Object.keys(parsed.files).length > 0) {
         customPwaIcons = {
-          appName: parsed.appName || 'KSK-appen',
+          appName: parsed.appName || 'Truppio',
           themeColor: parsed.themeColor || '#4f46e5',
           updatedAt: parsed.updatedAt || Date.now(),
           files: parsed.files,
@@ -760,7 +760,7 @@ async function startServer() {
 
   // Helper to inject current PWA app name, theme color, and versioned favicons into server-rendered HTML
   function injectPwaMetaToHtml(html: string): string {
-    const appName = customPwaIcons?.appName || 'CoachAssist';
+    const appName = customPwaIcons?.appName || 'Truppio';
     const themeColor = customPwaIcons?.themeColor || '#4f46e5';
     const v = customPwaIcons?.updatedAt || 1;
 
@@ -858,14 +858,14 @@ async function startServer() {
       cleanPath.endsWith('.webmanifest') ||
       cleanPath.includes('manifest')
     ) {
-      const appName = (customPwaIcons?.appName || 'KSK-appen').trim();
+      const appName = (customPwaIcons?.appName || 'Truppio').trim();
       const themeColor = customPwaIcons?.themeColor || '#4f46e5';
       const v = customPwaIcons?.updatedAt || 1;
       const manifestObj = {
         id: '/',
         name: appName,
         short_name: appName.length > 12 ? appName.slice(0, 12) : appName,
-        description: `${appName} - Komplett tränings- och matchverktyg för fotbollscoachen.`,
+        description: `${appName} - Komplett tränings- och matchverktyg för fotbollslaget.`,
         start_url: '/',
         scope: '/',
         display: 'standalone',
@@ -1232,7 +1232,7 @@ async function startServer() {
       let existingByEmail = db.prepare('SELECT id, email FROM users WHERE LOWER(email) = ?').get(trimmedEmail);
       if (existingByEmail) {
         return res.status(400).json({
-          error: `E-postadressen '${trimmedEmail}' är redan registrerad i CoachAssist. Vänligen logga in eller återställ ditt lösenord om du glömt det.`
+          error: `E-postadressen '${trimmedEmail}' är redan registrerad i Truppio. Vänligen logga in eller återställ ditt lösenord om du glömt det.`
         });
       }
 
@@ -1370,11 +1370,11 @@ async function startServer() {
         await transporter.sendMail({
           from: smtpFrom,
           to: email,
-          subject: 'Återställ ditt lösenord - CoachAssist',
+          subject: 'Återställ ditt lösenord - Truppio',
           html: `
             <div style="font-family: sans-serif; max-width: 500px; margin: 0 auto; padding: 20px; border: 1px solid #e4e4e7; rounded: 12px;">
               <h2 style="color: #18181b; margin-bottom: 8px;">Återställning av lösenord</h2>
-              <p style="color: #71717a; font-size: 14px;">Du har begärt att återställa lösenordet för ditt CoachAssist-konto.</p>
+              <p style="color: #71717a; font-size: 14px;">Du har begärt att återställa lösenordet för ditt Truppio-konto.</p>
               <div style="background-color: #f4f4f5; padding: 16px; text-align: center; border-radius: 8px; margin: 24px 0;">
                 <span style="font-size: 32px; font-weight: bold; letter-spacing: 6px; color: #4f46e5;">${code}</span>
               </div>
@@ -1729,7 +1729,7 @@ async function startServer() {
       let existingWithGoogle: any = db.prepare('SELECT id, email FROM users WHERE google_id = ? AND id != ?').get(googleId, userId);
       if (existingWithGoogle) {
         return res.status(400).json({
-          error: `Detta Google-konto (${googleEmail}) är redan kopplat till ett annat konto i CoachAssist.`
+          error: `Detta Google-konto (${googleEmail}) är redan kopplat till ett annat konto i Truppio.`
         });
       }
 
@@ -3630,7 +3630,7 @@ async function startServer() {
 
       const now = Date.now();
       customPwaIcons = {
-        appName: (appName || 'KSK-appen').trim(),
+        appName: (appName || 'Truppio').trim(),
         themeColor: themeColor || '#4f46e5',
         updatedAt: now,
         files: filesMap,
@@ -3922,7 +3922,7 @@ async function startServer() {
       let icsLines = [
         'BEGIN:VCALENDAR',
         'VERSION:2.0',
-        'PRODID:-//CoachAssist//NONSGML Team Calendar//SE',
+        'PRODID:-//Truppio//NONSGML Team Calendar//SE',
         'CALSCALE:GREGORIAN',
         'METHOD:PUBLISH',
         `X-WR-CALNAME:${escapeIcal(calendarName)}`,

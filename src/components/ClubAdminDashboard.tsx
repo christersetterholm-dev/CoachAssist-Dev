@@ -4029,7 +4029,7 @@ export default function ClubAdminDashboard({
 
       {activeTab === 'pwa_icons' && (
         <PwaIconGenerator
-          clubName={selectedClub?.name || 'CoachAssist'}
+          clubName={selectedClub?.name || 'Truppio'}
         />
       )}
 

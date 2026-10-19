@@ -33,7 +33,7 @@ const ICON_SPECS: IconSpec[] = [
 ];
 
 const PRESET_COLORS = [
-  { name: 'Indigo (CoachAssist)', hex: '#4f46e5' },
+  { name: 'Indigo (Truppio)', hex: '#4f46e5' },
   { name: 'Mörk Zink', hex: '#18181b' },
   { name: 'Svart', hex: '#000000' },
   { name: 'Vit', hex: '#ffffff' },
@@ -44,7 +44,7 @@ const PRESET_COLORS = [
   { name: 'Lila', hex: '#9333ea' },
 ];
 
-export default function PwaIconGenerator({ initialLogoUrl, clubName = 'CoachAssist' }: PwaIconGeneratorProps) {
+export default function PwaIconGenerator({ initialLogoUrl, clubName = 'Truppio' }: PwaIconGeneratorProps) {
   const [logoImage, setLogoImage] = useState<HTMLImageElement | null>(null);
   const [logoSrc, setLogoSrc] = useState<string>(initialLogoUrl || '/icon.svg');
   const [bgColor, setBgColor] = useState<string>('#4f46e5');
@@ -85,8 +85,8 @@ export default function PwaIconGenerator({ initialLogoUrl, clubName = 'CoachAssi
 
   // Sync if clubName changes from props
   useEffect(() => {
-    if (clubName && clubName !== 'CoachAssist') {
-      setAppName(prev => (prev === 'CoachAssist' ? clubName : prev));
+    if (clubName && clubName !== 'Truppio') {
+      setAppName(prev => (prev === 'Truppio' ? clubName : prev));
     }
   }, [clubName]);
 
@@ -289,7 +289,7 @@ export default function PwaIconGenerator({ initialLogoUrl, clubName = 'CoachAssi
       const url = URL.createObjectURL(content);
       const a = document.createElement('a');
       a.href = url;
-      const cleanAppName = appName.replace(/[^a-zA-Z0-9åäöÅÄÖ _\-]/g, '').trim() || 'CoachAssist';
+      const cleanAppName = appName.replace(/[^a-zA-Z0-9åäöÅÄÖ _\-]/g, '').trim() || 'Truppio';
       const zipFileName = `pwa-icons-${cleanAppName.toLowerCase().replace(/\s+/g, '-')}.zip`;
       a.download = zipFileName;
       a.click();
@@ -332,7 +332,7 @@ export default function PwaIconGenerator({ initialLogoUrl, clubName = 'CoachAssi
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
-          appName: (appName || 'CoachAssist').trim(),
+          appName: (appName || 'Truppio').trim(),
           themeColor: /^#[0-9a-fA-F]{6}$/.test(bgColor) ? bgColor.toLowerCase() : '#4f46e5',
           icons: iconsPayload,
           logoSrc: typeof logoSrc === 'string' && logoSrc.length < 500000 ? logoSrc : undefined
@@ -352,7 +352,7 @@ export default function PwaIconGenerator({ initialLogoUrl, clubName = 'CoachAssi
       }
 
       if (response.ok && data.success) {
-        const cleanName = (appName || 'CoachAssist').trim();
+        const cleanName = (appName || 'Truppio').trim();
         const cleanColor = /^#[0-9a-fA-F]{6}$/.test(bgColor) ? bgColor.toLowerCase() : '#4f46e5';
         const timestamp = Date.now();
 
@@ -391,7 +391,7 @@ export default function PwaIconGenerator({ initialLogoUrl, clubName = 'CoachAssi
         }
         manifestLink.href = `/manifest.webmanifest?v=${timestamp}`;
 
-        // CRITICAL: Remove static SVG favicon link so browser does not prioritize the default CoachAssist SVG
+        // CRITICAL: Remove static SVG favicon link so browser does not prioritize the default Truppio SVG
         const svgIconLinks = document.querySelectorAll('link[type="image/svg+xml"]');
         svgIconLinks.forEach(el => el.remove());
 
@@ -622,11 +622,11 @@ export default function PwaIconGenerator({ initialLogoUrl, clubName = 'CoachAssi
               type="text"
               value={appName}
               onChange={(e) => setAppName(e.target.value)}
-              placeholder="Ex. KSK-appen, Kungsgårdens SK eller CoachAssist"
+              placeholder="Ex. Truppio eller Kungsgårdens SK"
               className="w-full px-4 py-3 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-2xl text-sm font-bold text-zinc-900 dark:text-white focus:outline-none focus:border-indigo-500"
             />
             <p className="text-[11px] text-zinc-500 dark:text-zinc-400 leading-relaxed">
-              Detta namn visas direkt under ikonen på mobilens hemskärm (iPhone & Android) samt i webbläsarens titel. Varje förening (t.ex. Kungsgårdens SK eller KSK-appen) kan sätta sitt eget anpassade namnet här.
+              Detta namn visas direkt under ikonen på mobilens hemskärm (iPhone & Android) samt i webbläsarens titel. Varje förening (t.ex. Kungsgårdens SK) kan sätta sitt eget anpassade namnet här.
             </p>
           </div>
 

@@ -3863,7 +3863,7 @@ export default function App() {
   };
   // Övningsbanken är Kalenderns flik Övningar men har en egen menyrad.
   const isExerciseBank = view === 'training' && trainingTab === 'bank';
-  const shellTitle = isExerciseBank ? 'Övningsbanken' : shellTitles[view] || 'CoachAssist';
+  const shellTitle = isExerciseBank ? 'Övningsbanken' : shellTitles[view] || 'Truppio';
 
   const roleLabel = isRootAdmin
     ? 'Huvudadministratör'

@@ -322,7 +322,7 @@ export const AppShell: React.FC<AppShellProps> = props => {
               <span className="flex items-center gap-3 lg:px-1">
                 <TeamMark clubName={clubName} />
                 <span className="hidden lg:block min-w-0">
-                  <span className="block text-sm font-bold truncate">{clubName || 'CoachAssist'}</span>
+                  <span className="block text-sm font-bold truncate">{clubName || 'Truppio'}</span>
                   {teamName && <span className="block text-xs text-zinc-500 dark:text-zinc-400 truncate">{teamName}</span>}
                 </span>
               </span>

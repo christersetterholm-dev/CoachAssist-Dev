@@ -163,7 +163,7 @@ export default function VersionFooter({ className = '', variant = 'footer' }: Ve
                 {checkStatus === 'latest' && (
                   <p className="text-center text-[11px] text-emerald-600 dark:text-emerald-400 font-bold flex items-center justify-center gap-1">
                     <CheckCircle2 size={13} />
-                    Du kör redan den absolut senaste versionen av CoachAssist!
+                    Du kör redan den absolut senaste versionen av Truppio!
                   </p>
                 )}
 

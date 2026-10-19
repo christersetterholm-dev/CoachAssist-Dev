@@ -11,7 +11,7 @@ try {
   require('./dist/server.cjs');
 } catch (err) {
   const message = String((err && err.stack) || err);
-  console.error('CoachAssist kunde inte starta:', message);
+  console.error('Truppio kunde inte starta:', message);
   try {
     fs.writeFileSync(path.join(__dirname, 'server-crash.log'), new Date().toISOString() + '\n' + message);
   } catch (_) {}
@@ -19,9 +19,9 @@ try {
   const escape = (s) => s.replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
   http.createServer((_req, res) => {
     res.writeHead(500, { 'Content-Type': 'text/html; charset=utf-8' });
-    res.end(`<!doctype html><meta charset="utf-8"><title>CoachAssist kunde inte starta</title>
+    res.end(`<!doctype html><meta charset="utf-8"><title>Truppio kunde inte starta</title>
 <body style="font-family:system-ui;max-width:760px;margin:40px auto;padding:0 16px">
-<h1>CoachAssist kunde inte starta</h1>
+<h1>Truppio kunde inte starta</h1>
 <p>Kontrollera att <code>dist/</code> är uppladdad och att "Run NPM Install" har körts i cPanel.</p>
 <pre style="white-space:pre-wrap;background:#f4f4f5;padding:12px;border-radius:8px">${escape(message)}</pre>
 </body>`);

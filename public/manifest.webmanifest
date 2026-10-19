@@ -1,8 +1,8 @@
 {
   "id": "/",
-  "name": "KSK-appen",
-  "short_name": "KSK-appen",
-  "description": "KSK-appen - Komplett tränings- och matchverktyg för fotbollscoachen.",
+  "name": "Truppio",
+  "short_name": "Truppio",
+  "description": "Truppio - Komplett tränings- och matchverktyg för fotbollslaget.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",

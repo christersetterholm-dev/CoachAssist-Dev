@@ -17,7 +17,7 @@ export default function WelcomeScreen({ onLogin, clubName }: { onLogin: () => vo
         <div className="w-16 h-16 rounded-2xl bg-indigo-600 text-white flex items-center justify-center text-xl font-extrabold tracking-tight shadow-lg">
           CA
         </div>
-        <h1 className="mt-6 text-3xl font-bold tracking-tight">CoachAssist</h1>
+        <h1 className="mt-6 text-3xl font-bold tracking-tight">Truppio</h1>
         <p className="mt-2 text-zinc-500 dark:text-zinc-400 leading-relaxed">
           {clubName ? `${clubName} – ` : ''}lagets app för träningar, matcher och tävlingar.
         </p>

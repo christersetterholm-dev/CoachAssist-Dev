@@ -209,7 +209,7 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
           <div className="flex items-center justify-between mb-2">
             <div className="flex items-center gap-2 text-indigo-200 text-xs font-black uppercase tracking-widest">
               <ShieldAlert size={16} />
-              <span>CoachAssist Medlemskap</span>
+              <span>Truppio Medlemskap</span>
             </div>
             <button
               onClick={onLogout}

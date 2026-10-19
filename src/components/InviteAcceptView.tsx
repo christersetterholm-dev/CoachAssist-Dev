@@ -79,7 +79,7 @@ export default function InviteAcceptView({ token }: { token: string }) {
       <div className="w-full max-w-md bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-3xl shadow-2xl p-6 sm:p-8 flex flex-col gap-5">
         <div className="flex items-center gap-2">
           <div className="p-2 bg-indigo-50 dark:bg-zinc-800 rounded-xl text-indigo-600 dark:text-indigo-400"><Users size={20} /></div>
-          <h1 className="text-lg font-black text-zinc-900 dark:text-white uppercase tracking-wide">CoachAssist</h1>
+          <h1 className="text-lg font-black text-zinc-900 dark:text-white uppercase tracking-wide">Truppio</h1>
         </div>
 
         {!info && (
