@@ -142,13 +142,16 @@ export const CustomizeNavSheet: React.FC<{
   open: boolean;
   onClose: () => void;
   current: ShellView[];
+  hideLineupTopBar: boolean;
+  canViewLineup: boolean;
   /** Alla funktioner man kan välja (utom Översikt). */
   choices: NavItem[];
   defaults: ShellView[];
-  onSave: (ids: ShellView[]) => void;
-}> = ({ open, onClose, current, choices, defaults, onSave }) => {
+  onSave: (ids: ShellView[], hideLineupTopBar: boolean) => void;
+}> = ({ open, onClose, current, hideLineupTopBar, canViewLineup, choices, defaults, onSave }) => {
   const [draft, setDraft] = useState<ShellView[]>(current);
-  useEffect(() => { if (open) setDraft(current); }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
+  const [hideTop, setHideTop] = useState(hideLineupTopBar);
+  useEffect(() => { if (open) { setDraft(current); setHideTop(hideLineupTopBar); } }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const byId = new Map(choices.map((c) => [c.id, c]));
   const move = (i: number, d: number) => setDraft((x) => {
@@ -171,7 +174,7 @@ export const CustomizeNavSheet: React.FC<{
           <Button variant="ghost" icon={<RotateCcw size={16} />} onClick={() => setDraft(defaults)}>Återställ</Button>
           <span className="flex-1" />
           <Button variant="secondary" onClick={onClose}>Avbryt</Button>
-          <Button onClick={() => { onSave(draft); onClose(); }}>Spara</Button>
+          <Button onClick={() => { onSave(draft, hideTop); onClose(); }}>Spara</Button>
         </div>
       }
     >
@@ -217,6 +220,26 @@ export const CustomizeNavSheet: React.FC<{
             );
           })}
         </div>
+
+        {canViewLineup && (
+          <>
+            <div className="px-1 pt-4 pb-1 text-xs font-semibold text-zinc-500">Uppställning</div>
+            <label className="flex items-start gap-3 px-3 py-2.5 rounded-xl hover:bg-zinc-100 dark:hover:bg-zinc-800 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={hideTop}
+                onChange={(e) => setHideTop(e.target.checked)}
+                className="mt-0.5 w-5 h-5 accent-indigo-600 shrink-0"
+              />
+              <span className="min-w-0">
+                <span className="block text-sm font-semibold">Dölj toppfältet i Uppställning</span>
+                <span className="block text-xs text-zinc-500 dark:text-zinc-400">
+                  Ger planen mer plats. Knappen för storskärm ligger då nere i hörnet. (Annars glider toppfältet undan när du skrollar.)
+                </span>
+              </span>
+            </label>
+          </>
+        )}
       </div>
     </Sheet>
   );

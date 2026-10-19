@@ -57,7 +57,9 @@ export interface AppShellProps {
   unreadChats?: number;
   /** De knappar personen valt i mobilens bottenmeny (utöver Översikt och Mer). */
   mobileNav?: string[];
-  onChangeMobileNav?: (ids: ShellView[]) => void;
+  /** Inställning: toppfältet visas aldrig i Uppställning på mobil. */
+  hideLineupTopBar?: boolean;
+  onSaveMobilePrefs?: (prefs: { mobileNav: ShellView[]; hideLineupTopBar: boolean }) => void;
   isCoachOrAdmin: boolean;
   title: string;
   /** Knappar som hör till den aktuella sidan, visas till höger i toppfältet. */
@@ -172,13 +174,49 @@ const ExitPresentingButton: React.FC<{ onExit: () => void }> = ({ onExit }) => {
 
 export const AppShell: React.FC<AppShellProps> = props => {
   const {
-    view, onNavigate, canViewLineup, unreadPosts, unreadChats, mobileNav, onChangeMobileNav, isCoachOrAdmin, title, actions, clubName, teamName, account,
+    view, onNavigate, canViewLineup, unreadPosts, unreadChats, mobileNav, hideLineupTopBar, onSaveMobilePrefs, isCoachOrAdmin, title, actions, clubName, teamName, account,
     pendingRequests, syncState, onSaveNow, onRefresh, theme, onToggleTheme, onLogout, onLogin,
     onOpenShakeInfo, onOpenPendingRequests, chromeHidden, hideTopBar, presenting, onExitPresenting, banner, children,
   } = props;
   const [accountOpen, setAccountOpen] = React.useState(false);
   const [moreOpen, setMoreOpen] = React.useState(false);
   const [customizeOpen, setCustomizeOpen] = React.useState(false);
+
+  // Mobil: toppfält och bottenmeny glider undan när man skrollar neråt och kommer tillbaka när man
+  // skrollar uppåt (eller är nära toppen). Gäller alla skrollbara ytor i sidan, utom ark/dialoger och
+  // helskärmslägen som har egen rubrik (märkta data-keep-bars, t.ex. en öppen chatt).
+  const [barsHidden, setBarsHidden] = React.useState(false);
+  const barsHiddenRef = React.useRef(false);
+  const scrollTops = React.useRef(new WeakMap<EventTarget, number>());
+  const scrollAcc = React.useRef(0);
+  const lastToggle = React.useRef(0);
+  const setBars = (hidden: boolean) => {
+    if (barsHiddenRef.current === hidden) return;
+    barsHiddenRef.current = hidden;
+    lastToggle.current = Date.now();
+    scrollAcc.current = 0;
+    setBarsHidden(hidden);
+  };
+  React.useEffect(() => { setBars(false); }, [view]); // eslint-disable-line react-hooks/exhaustive-deps
+  const onMainScroll = (e: React.UIEvent<HTMLElement>) => {
+    const el = e.target;
+    if (!(el instanceof HTMLElement) || window.innerWidth >= 768 || el.closest('[role="dialog"], [data-keep-bars]')) return;
+    const top = el.scrollTop;
+    const prev = scrollTops.current.get(el) ?? top;
+    scrollTops.current.set(el, top);
+    const d = top - prev;
+    // Strax efter ett byte ändras ytans höjd, och då hoppar skrollningen lite – det räknas inte.
+    if (!d || Date.now() - lastToggle.current < 350) return;
+    if (top < 24) { setBars(false); return; }
+    scrollAcc.current = Math.sign(d) === Math.sign(scrollAcc.current) ? scrollAcc.current + d : d;
+    if (scrollAcc.current > 30) setBars(true);
+    else if (scrollAcc.current < -30) setBars(false);
+  };
+  const lineupTopBarOff = view === 'lineup' && !!hideLineupTopBar;
+  const topCollapsed = barsHidden || lineupTopBarOff;
+  // Fäller ihop en rad på mobil (höjden animeras); från 768 px visas den alltid.
+  const collapse = (hidden: boolean) =>
+    `grid transition-[grid-template-rows] duration-300 ease-out md:grid-rows-[1fr] ${hidden ? 'grid-rows-[0fr]' : 'grid-rows-[1fr]'}`;
   const { primary, secondary } = buildNavItems({ canViewLineup, unreadPosts, unreadChats });
   const adminItem: NavItem | null = isCoachOrAdmin && account
     ? { id: 'clubadmin', label: 'Administration', shortLabel: 'Admin', icon: ShieldCheck, badge: pendingRequests || undefined }
@@ -296,7 +334,9 @@ export const AppShell: React.FC<AppShellProps> = props => {
 
       <div className="flex-1 min-w-0 flex flex-col">
         {!chromeHidden && !hideTopBar && (
-          <header className="shrink-0 bg-white/90 dark:bg-zinc-900/90 backdrop-blur-md border-b border-zinc-200/80 dark:border-zinc-800 pt-safe z-30">
+          <header className={`shrink-0 bg-white/90 dark:bg-zinc-900/90 backdrop-blur-md pt-safe z-30 ${topCollapsed ? 'md:border-b' : 'border-b'} border-zinc-200/80 dark:border-zinc-800`}>
+            <div className={collapse(topCollapsed)}>
+            <div className="min-h-0 overflow-hidden">
             <div className="h-14 sm:h-16 px-4 sm:px-6 flex items-center gap-3">
               {/* Mobil: den inloggades profilbild (öppnar Mer); utloggad: föreningens märke. */}
               <div className="md:hidden">
@@ -326,19 +366,31 @@ export const AppShell: React.FC<AppShellProps> = props => {
                 {!account && <div className="md:hidden ml-1">{accountButton}</div>}
               </div>
             </div>
+            </div>
+            </div>
           </header>
+        )}
+        {/* Toppfältet är avstängt i Uppställning: sidans knappar (t.ex. storskärm) ligger i hörnet. */}
+        {!chromeHidden && !hideTopBar && lineupTopBarOff && actions && (
+          <div className={`md:hidden fixed right-3 z-40 flex gap-1 p-1 rounded-2xl bg-white/90 dark:bg-zinc-900/90 backdrop-blur-md shadow-lg border border-zinc-200/80 dark:border-zinc-800 transition-all duration-300 ${
+            barsHidden ? 'bottom-[calc(env(safe-area-inset-bottom,0px)+12px)]' : 'bottom-[calc(env(safe-area-inset-bottom,0px)+72px)]'
+          }`}>
+            {actions}
+          </div>
         )}
 
         {!chromeHidden && banner}
 
-        <main className="flex-1 min-h-0 flex flex-col overflow-hidden relative">{children}</main>
+        <main onScrollCapture={onMainScroll} className="flex-1 min-h-0 flex flex-col overflow-hidden relative">{children}</main>
 
         {/* Bottenmeny för mobil */}
         {!chromeHidden && (
           <nav
             aria-label="Huvudmeny"
-            className="md:hidden shrink-0 bg-white/95 dark:bg-zinc-900/95 backdrop-blur-md border-t border-zinc-200/80 dark:border-zinc-800 pb-safe z-30"
+            className={`md:hidden shrink-0 bg-white/95 dark:bg-zinc-900/95 backdrop-blur-md border-zinc-200/80 dark:border-zinc-800 pb-safe z-30 ${barsHidden ? '' : 'border-t'}`}
           >
+            <div className={collapse(barsHidden)}>
+            <div className="min-h-0 overflow-hidden">
             <div className="flex items-stretch justify-around px-1">
               {bottomItems.map(item => {
                 const active = view === item.id || (item.id === 'home' && view === 'posts');
@@ -382,6 +434,8 @@ export const AppShell: React.FC<AppShellProps> = props => {
                 <span className={`text-[11px] leading-tight ${moreActive ? 'font-bold' : 'font-medium'}`}>Mer</span>
               </button>
             </div>
+            </div>
+            </div>
           </nav>
         )}
       </div>
@@ -412,9 +466,11 @@ export const AppShell: React.FC<AppShellProps> = props => {
         open={customizeOpen}
         onClose={() => setCustomizeOpen(false)}
         current={mobileIds}
+        hideLineupTopBar={!!hideLineupTopBar}
+        canViewLineup={canViewLineup}
         choices={choiceItems}
         defaults={defaultMobileNav(isCoachOrAdmin).filter(id => choiceItems.some(c => c.id === id))}
-        onSave={(ids) => onChangeMobileNav?.(ids)}
+        onSave={(ids, hideTop) => onSaveMobilePrefs?.({ mobileNav: ids, hideLineupTopBar: hideTop })}
       />
 
       {/* Kontomeny */}

@@ -438,6 +438,8 @@ export interface UserProfile {
   requestedTeamId?: string;
   /** Knapparna i mobilens bottenmeny mellan Översikt och Mer (vy-id:n, högst 3). */
   mobileNav?: string[];
+  /** Mobil: toppfältet visas aldrig i Uppställning. */
+  hideLineupTopBar?: boolean;
 }
 
 export interface PendingUserRequest {

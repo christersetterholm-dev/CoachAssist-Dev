@@ -5113,9 +5113,10 @@ export default function App() {
         unreadPosts={postsState.unreadCount}
         unreadChats={chatSummary.unreadChats}
         mobileNav={userProfile.mobileNav}
-        onChangeMobileNav={(ids) => {
-          setUserProfile(prev => ({ ...prev, mobileNav: ids }));
-          if (user) setDoc(doc(db, 'users', user.uid, 'data', 'profile'), { mobileNav: ids }, { merge: true }).catch(() => {});
+        hideLineupTopBar={userProfile.hideLineupTopBar}
+        onSaveMobilePrefs={(prefs) => {
+          setUserProfile(prev => ({ ...prev, ...prefs }));
+          if (user) setDoc(doc(db, 'users', user.uid, 'data', 'profile'), prefs, { merge: true }).catch(() => {});
         }}
         isCoachOrAdmin={isCoachOrAdmin}
         title={shellTitle}

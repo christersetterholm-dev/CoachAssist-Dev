@@ -152,7 +152,7 @@ export const ChatView: React.FC<{
           {thread || <EmptyState icon={<MessageCircle size={26} />} title="Välj en chatt" text="Eller starta en ny med knappen Ny chatt." className="flex-1" />}
         </div>
       ) : (
-        thread && <div className="fixed inset-0 z-[60] flex flex-col bg-zinc-50 dark:bg-zinc-950">{thread}</div>
+        thread && <div data-keep-bars className="fixed inset-0 z-[60] flex flex-col bg-zinc-50 dark:bg-zinc-950">{thread}</div>
       )}
 
       <NewChatSheet
