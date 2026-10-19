@@ -21,6 +21,7 @@ SSH="ssh -i $SSH_KEY -o ConnectTimeout=15"
 $SSH "$SERVER" "test -d ~/$REMOTE_DIR" || { echo "❌ Hittar inte ~/$REMOTE_DIR på servern"; exit 1; }
 
 echo "▶ Laddar upp informationssidan"
-rsync -az --chmod=F644,D755 -e "$SSH" site/ "$SERVER:$REMOTE_DIR/"
+# site/* (inte site/) så att mappens egna rättigheter, som cPanel satt, lämnas orörda
+rsync -az -e "$SSH" site/* "$SERVER:$REMOTE_DIR/"
 
 echo "🎉 Klart! Sidan finns på $SITE_URL"
