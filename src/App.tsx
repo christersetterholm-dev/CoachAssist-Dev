@@ -4317,6 +4317,11 @@ export default function App() {
                 onUpdateSessions={(newSessions) => {
                   onReplaceAllSessions(newSessions, true);
                 }}
+                onClubMetadataChanged={(meta) => {
+                  if (meta.id !== userProfile.activeClubId) return;
+                  const team = meta.teams.find(t => t.id === userProfile.activeTeamId);
+                  setActiveClubInfo({ clubName: meta.name, teamName: team?.name || (userProfile.activeTeamId === 'club_global' ? 'Hela Föreningen' : 'Lag') });
+                }}
               />
             </motion.div>
           )}

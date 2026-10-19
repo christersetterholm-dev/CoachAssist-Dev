@@ -1,10 +1,10 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { Landmark, Trash2, Edit3, Users, Shield, ShieldAlert, Check, PlusCircle, Search, Mail, Phone, Fingerprint, Settings, UserPlus, Save, Smartphone, X, Database, HardDrive, RefreshCw, Download, Upload, Globe, CheckCircle2, AlertTriangle, AlertCircle, Calendar, Link, Copy, ExternalLink, FileSpreadsheet, FileText, Camera, Loader2, Key, UserCheck, Sparkles, Filter, ArrowUpDown, RotateCcw } from 'lucide-react';
+import { Landmark, Trash2, Edit3, Users, Shield, ShieldAlert, Check, PlusCircle, Search, Mail, Phone, Fingerprint, Settings, UserPlus, Save, Smartphone, X, Database, HardDrive, RefreshCw, Download, Upload, Globe, CheckCircle2, AlertTriangle, AlertCircle, Calendar, Link, Copy, ExternalLink, FileSpreadsheet, FileText, Camera, Loader2, Key, UserCheck, Sparkles, Filter, ArrowUpDown, RotateCcw, Pencil } from 'lucide-react';
 import { Club, ClubMetadata, ClubTeam, ClubMember, SquadPlayer, TrainingSettings, TrainingSession } from '../types';
 import { db, storage, getApiUrl, getAuthHeader, ref, uploadBytes, getDownloadURL, doc, getDoc, setDoc } from '../lib/firebase';
 import PwaIconGenerator from './PwaIconGenerator';
 import ImageCropper from './ImageCropper';
-import { Badge, Button, TextArea, TextInput } from './ui';
+import { Badge, Button, Sheet, TextArea, TextInput } from './ui';
 import { CachedImage } from './CachedImage';
 import { syncTeamCalendar } from '../utils/calendarSync';
 import { deduplicateClubMembers, deduplicateSquad } from '../lib/clubUtils';
@@ -33,6 +33,8 @@ interface ClubAdminDashboardProps {
   onUpdateSettings?: (settings: TrainingSettings) => void;
   sessions?: TrainingSession[];
   onUpdateSessions?: (sessions: TrainingSession[]) => void;
+  /** Förenings- eller lagnamn har ändrats (så att appens rubriker kan uppdateras). */
+  onClubMetadataChanged?: (meta: ClubMetadata) => void;
 }
 
 export default function ClubAdminDashboard({
@@ -57,6 +59,7 @@ export default function ClubAdminDashboard({
   onUpdateSettings,
   sessions,
   onUpdateSessions,
+  onClubMetadataChanged,
 }: ClubAdminDashboardProps) {
   const isAuthorized = isRootAdmin || isCoachOrAdmin || userRoles.includes('admin') || userRoles.includes('coach');
 
@@ -1516,6 +1519,56 @@ export default function ClubAdminDashboard({
     }
   };
 
+  // Byt namn på ett lag eller en förening. Namnen ligger i föreningens metadata, som bara
+  // huvudadministratören och föreningsadmin får ändra (servern kontrollerar också).
+  const canRename = isRootAdmin || userRoles.includes('admin');
+  const [renameTarget, setRenameTarget] = useState<{ kind: 'team' | 'club'; clubId: string; id: string; name: string } | null>(null);
+  const [renameValue, setRenameValue] = useState('');
+  const [renameError, setRenameError] = useState<string | null>(null);
+  const [renameSaving, setRenameSaving] = useState(false);
+
+  const openRename = (target: { kind: 'team' | 'club'; clubId: string; id: string; name: string }) => {
+    setRenameTarget(target);
+    setRenameValue(target.name);
+    setRenameError(null);
+  };
+
+  const saveRename = async () => {
+    if (!renameTarget) return;
+    const name = renameValue.replace(/\s+/g, ' ').trim();
+    if (!name) { setRenameError('Namnet får inte vara tomt.'); return; }
+    if (name.length > 80) { setRenameError('Namnet får vara högst 80 tecken.'); return; }
+    setRenameSaving(true);
+    setRenameError(null);
+    try {
+      const metadataRef = doc(db, 'clubs', renameTarget.clubId, 'teams', 'club_global', 'data', 'metadata');
+      const snap = await getDoc(metadataRef);
+      const current: any = snap.exists() ? snap.data() : (clubMetadata && clubMetadata.id === renameTarget.clubId ? clubMetadata : null);
+      if (!current) throw new Error('Föreningen hittades inte.');
+      let updated: any;
+      if (renameTarget.kind === 'team') {
+        const teams = (current.teams || []).map((t: ClubTeam) => (t.id === renameTarget.id ? { ...t, name } : t));
+        updated = { ...current, teams };
+      } else {
+        // Äldre föreningar kan ha namnet i fältet clubName – uppdatera båda.
+        updated = { ...current, name, ...(current.clubName !== undefined ? { clubName: name } : {}) };
+      }
+      await setDoc(metadataRef, updated);
+      if (clubMetadata && clubMetadata.id === renameTarget.clubId) setClubMetadata(updated);
+      if (renameTarget.kind === 'club') {
+        setClubs(prev => prev.map(c => (c.id === renameTarget.clubId ? { ...c, name } : c)));
+        setSelectedClub(prev => (prev && prev.id === renameTarget.clubId ? { ...prev, name } : prev));
+      }
+      onClubMetadataChanged?.({ id: renameTarget.clubId, name: updated.name || updated.clubName || name, teams: updated.teams || [] });
+      setRenameTarget(null);
+    } catch (err: any) {
+      console.error('Failed to rename:', err);
+      setRenameError(/403|behörighet|nekad/i.test(err?.message || '') ? 'Du har inte behörighet att byta namn.' : 'Kunde inte spara namnet. Försök igen.');
+    } finally {
+      setRenameSaving(false);
+    }
+  };
+
   // Open member dialog for creating or editing
   const openMemberForm = (member: ClubMember | null = null) => {
     setActionStatus({ type: 'save', status: 'idle' });
@@ -2005,6 +2058,17 @@ export default function ClubAdminDashboard({
                         </div>
                       </div>
                       <div className="flex items-center gap-2">
+                        {canRename && (
+                          <button
+                            type="button"
+                            onClick={(e) => { e.stopPropagation(); openRename({ kind: 'club', clubId: c.id, id: c.id, name: c.name }); }}
+                            className="text-zinc-600 dark:text-zinc-300 hover:text-indigo-600 dark:hover:text-indigo-400 font-bold text-xs bg-zinc-100 dark:bg-zinc-800 px-3 py-1 rounded-full transition-all cursor-pointer inline-flex items-center gap-1"
+                            title="Byt namn på föreningen"
+                          >
+                            <Pencil size={12} />
+                            <span>Byt namn</span>
+                          </button>
+                        )}
                         {isActive ? (
                           <span className="text-emerald-600 dark:text-emerald-400 font-semibold text-xs flex items-center gap-1.5 bg-emerald-50 dark:bg-emerald-950/40 px-3 py-1 rounded-full border border-emerald-100 dark:border-emerald-950/40">
                             <Check size={12} />
@@ -2041,6 +2105,17 @@ export default function ClubAdminDashboard({
       {activeTab === 'teams' && selectedClub && (
         <div className="grid grid-cols-1 md:grid-cols-12 gap-6">
           <div className="md:col-span-5 bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-200/80 dark:border-zinc-800 shadow-[0_1px_2px_rgba(16,24,40,0.04)] p-6">
+            {canRename && (
+              <div className="flex items-center justify-between gap-3 mb-5 pb-4 border-b border-zinc-100 dark:border-zinc-800">
+                <div className="min-w-0">
+                  <div className="text-xs font-bold text-zinc-400">Förening</div>
+                  <div className="font-semibold text-sm text-zinc-900 dark:text-white truncate">{selectedClub.name}</div>
+                </div>
+                <Button size="sm" variant="secondary" icon={<Pencil size={14} />} onClick={() => openRename({ kind: 'club', clubId: selectedClub.id, id: selectedClub.id, name: selectedClub.name })}>
+                  Byt namn
+                </Button>
+              </div>
+            )}
             <h2 className="text-lg font-bold text-zinc-900 dark:text-white mb-2">Nytt lag i {selectedClub.name}</h2>
             <p className="text-xs text-zinc-500 mb-5 font-medium leading-relaxed">Varje förening kan rymma flera olika åldersgrupper eller representationslag.</p>
 
@@ -2074,18 +2149,18 @@ export default function ClubAdminDashboard({
                 {clubMetadata.teams.map(team => (
                   <div
                     key={team.id}
-                    className="flex flex-col sm:flex-row sm:items-center justify-between p-3.5 sm:p-4 rounded-2xl border border-zinc-150 dark:border-zinc-800 bg-zinc-55/30 dark:bg-zinc-950 gap-3 min-w-0"
+                    className="flex flex-col xl:flex-row xl:items-center justify-between p-3.5 sm:p-4 rounded-2xl border border-zinc-150 dark:border-zinc-800 bg-zinc-55/30 dark:bg-zinc-950 gap-3 min-w-0"
                   >
                     <div className="flex items-center gap-3 sm:gap-3.5 min-w-0 flex-1">
                       <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-emerald-55/10 dark:bg-emerald-950/20 text-emerald-600 dark:text-emerald-400 flex items-center justify-center shrink-0">
-                        <Settings size={18} />
+                        <Users size={18} />
                       </div>
                       <div className="min-w-0 flex-1">
                         <h3 className="font-semibold text-sm text-zinc-900 dark:text-white truncate">{team.name}</h3>
                         <p className="text-xs text-zinc-400 font-bold mt-0.5 truncate">ID: {team.id}</p>
                       </div>
                     </div>
-                    <div className="flex items-center justify-between sm:justify-end gap-2 w-full sm:w-auto shrink-0 border-t sm:border-t-0 pt-2 sm:pt-0 border-zinc-100 dark:border-zinc-800/60">
+                    <div className="flex items-center justify-end gap-2 w-full xl:w-auto shrink-0 border-t xl:border-t-0 pt-2 xl:pt-0 border-zinc-100 dark:border-zinc-800/60">
                       {selectedClub.id === activeClubId && team.id === activeTeamId ? (
                         <span className="text-emerald-600 dark:text-emerald-400 text-xs font-bold bg-emerald-50 dark:bg-emerald-950/40 px-3 py-1.5 rounded-xl border border-emerald-200 dark:border-emerald-800 flex items-center gap-1.5">
                           <Check size={14} />
@@ -2101,6 +2176,17 @@ export default function ClubAdminDashboard({
                             Välj som aktivt lag
                           </button>
                         )
+                      )}
+                      {canRename && (
+                        <button
+                          type="button"
+                          onClick={() => openRename({ kind: 'team', clubId: selectedClub.id, id: team.id, name: team.name })}
+                          className="text-xs font-bold text-zinc-600 dark:text-zinc-300 hover:text-indigo-600 dark:hover:text-indigo-400 bg-zinc-100 dark:bg-zinc-800 hover:bg-indigo-50 dark:hover:bg-indigo-950/40 px-3 py-1.5 rounded-xl transition-all cursor-pointer inline-flex items-center gap-1.5"
+                          title="Byt namn på laget"
+                        >
+                          <Pencil size={14} />
+                          <span>Byt namn</span>
+                        </button>
                       )}
                       <button
                         onClick={() => handleDeleteTeam(team.id)}
@@ -3989,6 +4075,41 @@ export default function ClubAdminDashboard({
           aspect={1}
         />
       )}
+
+      {/* Byt namn på lag eller förening */}
+      <Sheet
+        open={!!renameTarget}
+        onClose={() => !renameSaving && setRenameTarget(null)}
+        title={renameTarget?.kind === 'club' ? 'Byt namn på föreningen' : 'Byt namn på laget'}
+        footer={
+          <div className="flex gap-2 justify-end">
+            <Button variant="secondary" onClick={() => setRenameTarget(null)} disabled={renameSaving}>Avbryt</Button>
+            <Button onClick={saveRename} disabled={renameSaving}>{renameSaving ? 'Sparar…' : 'Spara'}</Button>
+          </div>
+        }
+      >
+        {renameTarget && (
+          <div className="px-2 pb-2">
+            <label htmlFor="rename-input" className="block text-sm font-semibold mb-1">Nytt namn</label>
+            <TextInput
+              id="rename-input"
+              value={renameValue}
+              onChange={(e) => setRenameValue(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); saveRename(); } }}
+              maxLength={80}
+              autoFocus
+              onFocus={(e) => e.currentTarget.select()}
+              className="w-full h-11 px-3 rounded-xl bg-zinc-100 dark:bg-zinc-800 text-base text-zinc-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500/60"
+            />
+            <p className="mt-2 text-xs text-zinc-500 dark:text-zinc-400">
+              {renameTarget.kind === 'club'
+                ? 'Namnet ändras överallt i appen. Föreningens id och all data är oförändrade.'
+                : 'Namnet ändras överallt i appen. Lagets id, trupp, kalender och historik är oförändrade.'}
+            </p>
+            {renameError && <p className="mt-2 text-sm text-red-600 dark:text-red-400">{renameError}</p>}
+          </div>
+        )}
+      </Sheet>
     </div>
   );
 }
