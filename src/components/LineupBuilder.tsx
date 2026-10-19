@@ -711,7 +711,10 @@ export default function LineupBuilder({
   const [logoToCrop, setLogoToCrop] = useState<string | null>(null);
   const logoInputRef = useRef<HTMLInputElement>(null);
 
-  const [previewZoom, setPreviewZoom] = useState(1);
+  // Zoom på planen i vyn. Standard 95 % på iPad/dator (så att bänkens namn får plats under planen),
+  // 100 % på mobil (planen fyller bredden).
+  const defaultPreviewZoom = typeof window !== 'undefined' && window.innerWidth >= 768 ? 0.95 : 1;
+  const [previewZoom, setPreviewZoom] = useState(defaultPreviewZoom);
   const [hoveredPlayerId, setHoveredPlayerId] = useState<string | null>(null);
   const [isEditMode, setIsEditMode] = useState(false);
   const [teamNotes, setTeamNotes] = useState(lineup?.notes?.team?.text || '');
@@ -4878,11 +4881,11 @@ export default function LineupBuilder({
               >
                 <Plus size={14} />
               </button>
-              {previewZoom !== 1 && (
+              {previewZoom !== defaultPreviewZoom && (
                 <button 
-                  onClick={() => setPreviewZoom(1)}
+                  onClick={() => setPreviewZoom(defaultPreviewZoom)}
                   className="w-10 h-10 flex items-center justify-center bg-white dark:bg-zinc-900 hover:bg-zinc-200 dark:hover:bg-zinc-800 rounded-lg text-zinc-600 dark:text-zinc-400 hover:text-indigo-600 transition-all border border-zinc-200 dark:border-zinc-800/80"
-                  title="Återställ zoom (100%)"
+                  title={`Återställ zoom (${Math.round(defaultPreviewZoom * 100)}%)`}
                 >
                   <RotateCcw size={12} />
                 </button>
