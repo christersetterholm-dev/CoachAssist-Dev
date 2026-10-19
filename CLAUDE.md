@@ -165,8 +165,8 @@ npm run set-password -- e@post.se            # lokalt konto/lösenord
 - Navigering: sidomeny från 768 px bredd (iPad/dator) med alla funktioner; avataren längst ner i
   sidomenyn öppnar kontomenyn. På mobil: bottenmeny med Översikt (alltid först) + tre valfria +
   **Mer** (`LayoutGrid`). Mer (`src/components/shell/MoreSheet.tsx`) visar övriga funktioner som
-  rutor, Anpassa menyn, lag, tema, Hämta senaste, Skakskydd och Logga ut; avataren i toppfältet
-  finns inte på mobil. Valet sparas i profilen (`mobileNav`, följer kontot); standard för tränare
+  rutor, Anpassa menyn, lag, tema, Hämta senaste, Skakskydd och Logga ut. Uppe till vänster i
+  toppfältet visas den inloggades profilbild (öppnar Mer). Valet sparas i profilen (`mobileNav`, följer kontot); standard för tränare
   Kalender/Uppställning/Chatt, för spelare Kalender/Chatt/Poängliga (`defaultMobileNav`). Märket på
   Mer = olästa chattar och väntande ansökningar som inte har egen knapp.
 - Startvy är `home` (Översikt). Poängräkning (`exercise`) och skapa tävlingsmoment (`setup`)

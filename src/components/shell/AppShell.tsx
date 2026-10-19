@@ -291,8 +291,21 @@ export const AppShell: React.FC<AppShellProps> = props => {
         {!chromeHidden && !hideTopBar && (
           <header className="shrink-0 bg-white/90 dark:bg-zinc-900/90 backdrop-blur-md border-b border-zinc-200/80 dark:border-zinc-800 pt-safe z-30">
             <div className="h-14 sm:h-16 px-4 sm:px-6 flex items-center gap-3">
+              {/* Mobil: den inloggades profilbild (öppnar Mer); utloggad: föreningens märke. */}
               <div className="md:hidden">
-                <TeamMark clubName={clubName} size={32} />
+                {account ? (
+                  <button
+                    type="button"
+                    onClick={() => setMoreOpen(true)}
+                    title="Konto och mer"
+                    aria-label="Konto och mer"
+                    className="block rounded-full cursor-pointer ring-2 ring-transparent hover:ring-indigo-300 dark:hover:ring-indigo-700 transition-all"
+                  >
+                    <Avatar name={account.name} photoUrl={account.photoUrl} size={36} />
+                  </button>
+                ) : (
+                  <TeamMark clubName={clubName} size={32} />
+                )}
               </div>
               <div className="min-w-0 flex-1">
                 <h1 className="text-lg sm:text-xl font-bold tracking-tight truncate">{title}</h1>
