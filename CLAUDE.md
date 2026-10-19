@@ -169,6 +169,10 @@ npm run set-password -- e@post.se            # lokalt konto/lösenord
   toppfältet visas den inloggades profilbild (öppnar Mer). Valet sparas i profilen (`mobileNav`, följer kontot); standard för tränare
   Kalender/Uppställning/Chatt, för spelare Kalender/Chatt/Poängliga (`defaultMobileNav`). Märket på
   Mer = olästa chattar och väntande ansökningar som inte har egen knapp.
+  På mobil glider toppfält och bottenmeny undan när man skrollar neråt och kommer tillbaka uppåt
+  (`onMainScroll` i AppShell; ark och ytor märkta `data-keep-bars` räknas inte). Inställningen
+  "Dölj toppfältet i Uppställning" (Anpassa menyn, profilfältet `hideLineupTopBar`) tar bort
+  toppfältet där helt; sidans knappar (storskärm) ligger då i en rund ruta nere till höger.
 - Startvy är `home` (Översikt). Poängräkning (`exercise`) och skapa tävlingsmoment (`setup`)
   är "fokusvyer" utan meny, med eget sidhuvud och tillbakaknapp (`handleFocusBack`).
 - Storskärmsläge (`isPresenting` i App.tsx): knappen "Visa på storskärm" på Uppställning och
