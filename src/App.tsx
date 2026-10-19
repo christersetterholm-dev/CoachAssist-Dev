@@ -3698,6 +3698,8 @@ export default function App() {
   };
 
   const isCoachOrAdmin = user ? (isRootAdmin || userRoles.includes('admin') || userRoles.includes('coach')) : true;
+  // Huvudadministratören räknas som tränare i kalendern och passvyerna (de kollar rollen 'root_admin').
+  const effectiveUserRoles = isRootAdmin && !userRoles.includes('root_admin') ? [...userRoles, 'root_admin'] : userRoles;
   const activeLineup = lineups.find(l => l.id === activeLineupId) || (lineups.length > 0 ? lineups[0] : null);
   const publishedLineups = lineups.filter(l => l.isPublishedToPlayers && !l.isArchived);
   const effectiveActiveLineup = isCoachOrAdmin ? activeLineup : (publishedLineups.find(l => l.id === activeLineupId) || publishedLineups[0] || null);
@@ -4010,7 +4012,7 @@ export default function App() {
                   onUpdateBankExercise={updateBankExercise}
                   onRemoveBankExercise={removeBankExercise}
                   user={user}
-                  userRoles={userRoles}
+                  userRoles={effectiveUserRoles}
                   calendarMonth={calendarMonth}
                   onCalendarMonthChange={handleCalendarMonthChange}
                   onSelectExercise={handleSelectExercise} 
@@ -4762,7 +4764,7 @@ export default function App() {
             initialTab={sessionEditorTab}
             adminUrl={adminUrl}
             user={user}
-            userRoles={userRoles}
+            userRoles={effectiveUserRoles}
             userProfile={userProfile}
             isRootAdmin={isRootAdmin}
             onClose={() => {

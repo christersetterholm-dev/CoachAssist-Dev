@@ -238,7 +238,7 @@ export const SessionRsvpView: React.FC<SessionRsvpViewProps> = ({
 
   const isCoachOrAdmin = useMemo(() => {
     if (!user) return true; // Offline / admin fallback
-    return userRoles.includes('admin') || userRoles.includes('coach');
+    return userRoles.includes('admin') || userRoles.includes('coach') || userRoles.includes('root_admin');
   }, [user, userRoles]);
 
   const safeSquad = useMemo(() => {

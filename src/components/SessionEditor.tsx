@@ -749,7 +749,7 @@ export default function SessionEditor({
 }: SessionEditorProps) {
   const isCoachOrAdmin = useMemo(() => {
     if (!user) return true; // Offline or fallback mode
-    return !!isRootAdmin || userRoles?.includes('admin') || userRoles?.includes('coach') || false;
+    return !!isRootAdmin || userRoles?.includes('admin') || userRoles?.includes('coach') || userRoles?.includes('root_admin') || false;
   }, [user, userRoles, isRootAdmin]);
 
   // Spelare landar på kallelsen; tränare där de valde.
