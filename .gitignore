@@ -12,3 +12,6 @@ coachassist_db.json*
 uploads/
 chat_files/
 public/uploads/
+
+# Claudes egna behörigheter på den här datorn
+.claude/settings.local.json
