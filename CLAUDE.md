@@ -162,7 +162,7 @@ npm run set-password -- e@post.se            # lokalt konto/lösenord
 
 ## Gränssnittet (ombyggt okt 2026, gren `ux-ombyggnad`)
 
-- Navigering: sidomeny från 768 px bredd (iPad/dator) med alla funktioner; avataren längst ner i
+- Navigering: sidomeny från 768 px bredd (iPad/dator) med alla funktioner; profilbilden överst i
   sidomenyn öppnar kontomenyn. På mobil: bottenmeny med Översikt (alltid först) + tre valfria +
   **Mer** (`LayoutGrid`). Mer (`src/components/shell/MoreSheet.tsx`) visar övriga funktioner som
   rutor, Anpassa menyn, lag, tema, Hämta senaste, Skakskydd och Logga ut. Uppe till vänster i

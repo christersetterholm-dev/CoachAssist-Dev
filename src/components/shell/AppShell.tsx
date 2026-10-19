@@ -253,12 +253,34 @@ export const AppShell: React.FC<AppShellProps> = props => {
       {/* Sidomeny för iPad och dator */}
       {!chromeHidden && (
         <aside className="hidden md:flex flex-col shrink-0 md:w-[76px] lg:w-60 border-r border-zinc-200/80 dark:border-zinc-800 bg-white dark:bg-zinc-900 pt-safe">
-          <div className="flex items-center gap-3 h-16 md:justify-center lg:justify-start lg:px-4 border-b border-zinc-100 dark:border-zinc-800/80">
-            <TeamMark clubName={clubName} />
-            <div className="hidden lg:block min-w-0">
-              <div className="text-sm font-bold truncate">{clubName || 'CoachAssist'}</div>
-              {teamName && <div className="text-xs text-zinc-500 dark:text-zinc-400 truncate">{teamName}</div>}
-            </div>
+          {/* Överst: den inloggades profilbild (öppnar kontomenyn); utloggad: föreningens märke. */}
+          <div className="flex items-center h-16 md:justify-center lg:justify-start px-2 lg:px-3 border-b border-zinc-100 dark:border-zinc-800/80">
+            {account ? (
+              <button
+                type="button"
+                onClick={() => setAccountOpen(true)}
+                title="Konto och inställningar"
+                aria-label="Konto och inställningar"
+                className="relative flex items-center gap-3 p-1 lg:pr-2 rounded-xl hover:bg-zinc-100 dark:hover:bg-zinc-800 cursor-pointer min-w-0 lg:w-full text-left"
+              >
+                <Avatar name={account.name} photoUrl={account.photoUrl} size={38} />
+                <span className="hidden lg:block min-w-0">
+                  <span className="block text-sm font-bold truncate">{account.name}</span>
+                  <span className="block text-xs text-zinc-500 dark:text-zinc-400 truncate">{teamName || clubName || account.roleLabel}</span>
+                </span>
+                {pendingRequests > 0 && isCoachOrAdmin && (
+                  <span className="absolute top-0.5 left-8 w-3 h-3 rounded-full bg-red-600 ring-2 ring-white dark:ring-zinc-900" />
+                )}
+              </button>
+            ) : (
+              <span className="flex items-center gap-3 lg:px-1">
+                <TeamMark clubName={clubName} />
+                <span className="hidden lg:block min-w-0">
+                  <span className="block text-sm font-bold truncate">{clubName || 'CoachAssist'}</span>
+                  {teamName && <span className="block text-xs text-zinc-500 dark:text-zinc-400 truncate">{teamName}</span>}
+                </span>
+              </span>
+            )}
           </div>
           <nav className="flex-1 flex flex-col gap-1 p-2 lg:p-3 overflow-y-auto" aria-label="Huvudmeny">
             {primary.map(item => <SideLink key={item.id} item={item} />)}
@@ -266,24 +288,9 @@ export const AppShell: React.FC<AppShellProps> = props => {
             {secondary.map(item => <SideLink key={item.id} item={item} />)}
             {adminItem && <SideLink item={adminItem} />}
           </nav>
-          <div className="p-2 lg:p-3 border-t border-zinc-100 dark:border-zinc-800 flex md:flex-col lg:flex-row items-center gap-2">
-            {account ? (
-              <button
-                type="button"
-                onClick={() => setAccountOpen(true)}
-                className="flex-1 w-full flex items-center gap-3 p-1.5 rounded-xl hover:bg-zinc-100 dark:hover:bg-zinc-800 cursor-pointer md:justify-center lg:justify-start"
-                title="Konto och inställningar"
-              >
-                <Avatar name={account.name} photoUrl={account.photoUrl} size={34} />
-                <span className="hidden lg:block min-w-0 text-left">
-                  <span className="block text-sm font-semibold truncate">{account.name}</span>
-                  {account.roleLabel && <span className="block text-xs text-zinc-500 truncate">{account.roleLabel}</span>}
-                </span>
-              </button>
-            ) : (
-              accountButton
-            )}
-          </div>
+          {!account && (
+            <div className="p-2 lg:p-3 border-t border-zinc-100 dark:border-zinc-800 flex justify-center">{accountButton}</div>
+          )}
         </aside>
       )}
 
