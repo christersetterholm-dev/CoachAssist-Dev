@@ -1,6 +1,6 @@
 import { useState } from 'react';
-import { APP_VERSION, APP_BUILD_DATE, APP_NAME } from '../version';
-import { CheckCircle2, RefreshCw, X, ShieldCheck, Info } from 'lucide-react';
+import { APP_VERSION, APP_BUILD_DATE, APP_NAME, APP_RELEASE_NOTES } from '../version';
+import { CheckCircle2, RefreshCw, X, ShieldCheck, Info, Sparkles } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
 interface VersionFooterProps {
@@ -70,7 +70,7 @@ export default function VersionFooter({ className = '', variant = 'footer' }: Ve
               initial={{ scale: 0.95, opacity: 0, y: 10 }}
               animate={{ scale: 1, opacity: 1, y: 0 }}
               exit={{ scale: 0.95, opacity: 0, y: 10 }}
-              className="bg-white dark:bg-zinc-900 rounded-3xl p-6 max-w-sm w-full shadow-2xl border border-zinc-150 dark:border-zinc-800 relative space-y-4"
+              className="bg-white dark:bg-zinc-900 rounded-3xl p-6 max-w-sm w-full max-h-[90vh] overflow-y-auto shadow-2xl border border-zinc-150 dark:border-zinc-800 relative space-y-4"
               onClick={(e) => e.stopPropagation()}
             >
               <button
@@ -118,6 +118,23 @@ export default function VersionFooter({ className = '', variant = 'footer' }: Ve
                   </span>
                 </div>
               </div>
+
+              {/* Nytt i den här versionen */}
+              {APP_RELEASE_NOTES.length > 0 && (
+                <div className="rounded-2xl border border-zinc-100 dark:border-zinc-800 p-4">
+                  <div className="flex items-center gap-1.5 text-sm font-bold text-zinc-900 dark:text-white mb-2">
+                    <Sparkles size={16} className="text-indigo-600 dark:text-indigo-400" />
+                    Nytt i {APP_VERSION.split('.').slice(0, 2).join('.')}
+                  </div>
+                  <ul className="space-y-2">
+                    {APP_RELEASE_NOTES.map(n => (
+                      <li key={n.title} className="text-xs leading-relaxed text-zinc-600 dark:text-zinc-300">
+                        <span className="font-semibold text-zinc-900 dark:text-white">{n.title}:</span> {n.text}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
 
               {/* Versioning Logic Explanation */}
               <div className="p-3 bg-indigo-50/50 dark:bg-indigo-950/30 rounded-xl border border-indigo-100 dark:border-indigo-900/40 text-[11px] text-zinc-600 dark:text-zinc-300 space-y-1.5">
