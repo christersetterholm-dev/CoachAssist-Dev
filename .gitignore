@@ -10,4 +10,5 @@ coverage/
 coachassist_db.json*
 *.tmp*
 uploads/
+chat_files/
 public/uploads/
