@@ -78,6 +78,16 @@ Appen läser/skriver JSON-dokument via sökvägar:
 - Tabell `rsvps` (en rad per person och aktivitet). `POST /api/rsvp`, `POST /api/rsvp/clear`.
 - Vid läsning av `sessions` läggs svaren in i varje pass (`overlayRsvps`); vid sparning tas
   de ut (`extractRsvps`) så att samtidiga svar aldrig skriver över varandra.
+- **Svara på flera pass** (`src/components/MultiRsvpSheet.tsx`, okt 2026): ett ark med kommande pass,
+  kryssrutor, snabbval Obesvarade/Alla/Datum (från–till) och Avmarkera, sedan Kommer/Delvis/Kan inte och en
+  gemensam kommentar (t.ex. "Skadad"). Öppnas från Översikt (knappen under svarsknapparna för spelare,
+  "Svara på flera" vid Kommande för tränare) och Kalendern (knapp i verktygsraden för spelare, i plusmenyn för
+  tränare). Spelare svarar för sig själva; tränare väljer "Svaret gäller": sig själva eller någon i truppen
+  (märks "Tränare (namn)", samma rätt som i passvyn). Ligger i App.tsx `overlays` (`isMultiRsvpOpen`).
+  Sparas med `POST /api/rsvp/batch` `{ clubId, teamId, memberId, sessionIds (1–200), status (null = ta bort),
+  comment? }` i en transaktion, allt eller inget (okänt pass ger 404 med `missing`). Kommentaren ersätter de
+  valda passens kommentarer (tom tar bort); utan `comment` behålls varje pass egen. Samma behörighet som
+  `/api/rsvp` (`rsvpContext` i server.ts), men inte för gästspelare.
 
 ### Poängligor
 - `getConsolidatedPeriods` samlar bara från det egna laget/användaren (läckte tidigare mellan lag).

@@ -873,6 +873,19 @@ export const saveRsvp = async (body: { clubId: string; teamId: string; sessionId
   return json;
 };
 
+// Samma svar för en person på flera aktiviteter (allt eller inget). status null tar bort svaren.
+// comment: text sätts på alla valda (tom tar bort), utelämnad behåller varje pass egen kommentar.
+export const saveRsvpBatch = async (body: { clubId: string; teamId: string; sessionIds: string[]; memberId: string; status: string | null; comment?: string }) => {
+  const res = await fetch(getApiUrl('/api/rsvp/batch'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
+    body: JSON.stringify(body),
+  });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(json.error || `Kunde inte spara svaren (${res.status})`);
+  return json as { success: true; rsvps: Record<string, { status: string; comment?: string; updatedAt: number; updatedBy?: string } | null> };
+};
+
 // --- Inbjudningar ---
 const jsonOrError = async (res: Response, fallback: string) => {
   const json = await res.json().catch(() => ({}));

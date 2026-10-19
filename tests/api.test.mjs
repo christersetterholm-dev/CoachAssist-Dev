@@ -180,6 +180,55 @@ test('svar på kallelser: egna svar, tränarens svar och inga förlorade svar', 
   assert.equal(got['m-ny'].status, 'declined');
 });
 
+test('svar på flera pass på en gång: samma regler, allt eller inget', async () => {
+  const sessions = { sessions: [
+    { id: 's1', title: 'Träning', date: 1, startTime: '18:00', moments: [] },
+    { id: 's2', title: 'Träning', date: 2, startTime: '18:00', moments: [] },
+    { id: 's3', title: 'Match', date: 3, startTime: '12:00', moments: [] },
+  ] };
+  await post('clubs/klubb1/teams/lag1/data/sessions', sessions, coachToken);
+  const batch = (token, body) => s.api('POST', '/api/rsvp/batch', { token, body: { clubId: 'klubb1', teamId: 'lag1', ...body } });
+  const rsvpsOf = async (id) => (await get('clubs/klubb1/teams/lag1/data/sessions', coachToken)).json.sessions.find((x) => x.id === id).rsvps || {};
+
+  // Spelaren svarar Kan inte med en gemensam kommentar på två pass
+  const r = await batch(playerToken, { memberId: 'm-player', sessionIds: ['s2', 's3'], status: 'declined', comment: '  Skadad ' });
+  assert.equal(r.status, 200);
+  assert.deepEqual(Object.keys(r.json.rsvps).sort(), ['s2', 's3']);
+  assert.equal((await rsvpsOf('s2'))['m-player'].comment, 'Skadad');
+  assert.equal((await rsvpsOf('s3'))['m-player'].status, 'declined');
+  assert.equal((await rsvpsOf('s1'))['m-player'].status, 'attending', 'pass som inte valdes rörs inte');
+
+  // Utan comment behålls varje pass egen kommentar, tom kommentar tar bort den
+  await batch(playerToken, { memberId: 'm-player', sessionIds: ['s2'], status: 'partial' });
+  assert.deepEqual([(await rsvpsOf('s2'))['m-player'].status, (await rsvpsOf('s2'))['m-player'].comment], ['partial', 'Skadad']);
+  await batch(playerToken, { memberId: 'm-player', sessionIds: ['s2'], status: 'attending', comment: '' });
+  assert.equal((await rsvpsOf('s2'))['m-player'].comment, undefined);
+
+  // Behörigheter som för enstaka svar
+  assert.equal((await batch(playerToken, { memberId: 'm-ny', sessionIds: ['s2'], status: 'declined' })).status, 403, 'spelare svarar inte för andra');
+  assert.equal((await batch(otherToken, { memberId: 'm-player', sessionIds: ['s2'], status: 'declined' })).status, 403, 'annan förening');
+  const byCoach = await batch(coachToken, { memberId: 'm-ny', sessionIds: ['s2', 's3'], status: 'declined', comment: 'Jobbar' });
+  assert.equal(byCoach.status, 200, 'tränare kan svara åt spelare');
+  assert.match(byCoach.json.rsvps.s2.updatedBy, /^Tränare/);
+  assert.equal((await batch(coachToken, { memberId: 'm-coach_leader', sessionIds: ['s2'], status: 'attending' })).status, 200, 'tränaren svarar för sig själv');
+
+  // Felaktiga anrop
+  assert.equal((await batch(playerToken, { memberId: 'm-player', sessionIds: [], status: 'declined' })).status, 400);
+  assert.equal((await batch(playerToken, { memberId: 'm-player', sessionIds: ['s2'], status: 'kanske' })).status, 400);
+  assert.equal((await batch(coachToken, { memberId: 'm-finns-inte', sessionIds: ['s2'], status: 'declined' })).status, 404);
+
+  // Ett okänt pass gör att inget sparas
+  const bad = await batch(playerToken, { memberId: 'm-player', sessionIds: ['s3', 's-finns-inte'], status: 'attending' });
+  assert.equal(bad.status, 404);
+  assert.deepEqual(bad.json.missing, ['s-finns-inte']);
+  assert.equal((await rsvpsOf('s3'))['m-player'].status, 'declined');
+
+  // status null tar bort svaren
+  await batch(playerToken, { memberId: 'm-player', sessionIds: ['s2', 's3'], status: null });
+  assert.equal((await rsvpsOf('s2'))['m-player'], undefined);
+  assert.equal((await rsvpsOf('s3'))['m-player'], undefined);
+});
+
 test('föreningslistan räknas fram ur föreningarna', async () => {
   const r = await get('shared_leaderboards/all_clubs', playerToken);
   assert.deepEqual(r.json.clubs.map((c) => c.id), ['klubb1', 'klubb2']);

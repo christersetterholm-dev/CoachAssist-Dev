@@ -28,6 +28,7 @@ import TeamOverviewModal from './components/TeamOverviewModal';
 
 import ProfileAndSettings from './components/ProfileAndSettings';
 import HomeView from './components/HomeView';
+import MultiRsvpSheet from './components/MultiRsvpSheet';
 import WelcomeScreen from './components/WelcomeScreen';
 import { AppShell, ShellView } from './components/shell/AppShell';
 import { Avatar, Button, IconButton, MenuItem, Sheet } from './components/ui';
@@ -881,6 +882,7 @@ export default function App() {
   useEffect(() => listenForPushOpen(setPushOpen), []);
   useEffect(() => { if (user?.uid) syncPush(user.uid); }, [user?.uid]);
   const [editingPost, setEditingPost] = useState<Post | 'new' | null>(null);
+  const [isMultiRsvpOpen, setIsMultiRsvpOpen] = useState(false); // Svara på flera pass
   const [sessionMode, setSessionMode] = useState<'plan' | 'live'>('plan');
   const [showResetConfirm, setShowResetConfirm] = useState(false);
   const [showFinishConfirm, setShowFinishConfirm] = useState(false);
@@ -3950,6 +3952,7 @@ export default function App() {
                 setView('setup');
               }}
               onUpdateSession={onUpdateSession}
+              onOpenMultiRsvp={() => setIsMultiRsvpOpen(true)}
               posts={postsState.posts}
               canWritePosts={postsState.canEdit}
               onOpenPost={setOpenPostId}
@@ -4041,6 +4044,7 @@ export default function App() {
                   userRoles={effectiveUserRoles}
                   calendarMonth={calendarMonth}
                   onCalendarMonthChange={handleCalendarMonthChange}
+                  onOpenMultiRsvp={() => setIsMultiRsvpOpen(true)}
                   onSelectExercise={handleSelectExercise} 
                   onDeleteExercise={(id) => {
                     setData(prev => ({
@@ -4698,6 +4702,16 @@ export default function App() {
 
   const overlays = (
     <>
+      <MultiRsvpSheet
+        open={isMultiRsvpOpen}
+        onClose={() => setIsMultiRsvpOpen(false)}
+        sessions={sessions}
+        squad={squad}
+        isCoach={isCoachOrAdmin}
+        clubId={userProfile.activeClubId}
+        teamId={userProfile.activeTeamId}
+        onUpdateSession={onUpdateSession}
+      />
       <NotificationsSheet open={isNotificationsOpen} onClose={() => setIsNotificationsOpen(false)} userId={user?.uid || null} />
       <PostDetailSheet
         postId={openPostId}

@@ -6,7 +6,7 @@
 import React, { useMemo, useState } from 'react';
 import {
   Calendar, Clock, MapPin, Check, X, HelpCircle, ChevronRight, Plus, Trophy, Shirt, Users,
-  ClipboardList, Swords, Dumbbell, UserPlus, Medal, Presentation, Megaphone,
+  ClipboardList, Swords, Dumbbell, UserPlus, Medal, Presentation, Megaphone, ListChecks,
 } from 'lucide-react';
 import { Exercise, Period, SquadPlayer, TrainingSession, RsvpStatus, UserProfile } from '../types';
 import { User, saveRsvp } from '../lib/firebase';
@@ -33,6 +33,7 @@ interface HomeViewProps {
   onNewSession: () => void;
   onNewExercise: () => void;
   onUpdateSession: (session: TrainingSession) => void;
+  onOpenMultiRsvp: () => void;
   posts: Post[];
   canWritePosts: boolean;
   onOpenPost: (id: string) => void;
@@ -112,7 +113,7 @@ const KindIcon: React.FC<{ session: TrainingSession; size?: number }> = ({ sessi
 export default function HomeView(props: HomeViewProps) {
   const {
     user, userProfile, isCoachOrAdmin, canViewLineup, squad, sessions, exercises, periods, pendingRequests,
-    onOpenPendingRequests, onOpenSession, onOpenLineupForSession, onNavigate, onNewSession, onNewExercise, onUpdateSession,
+    onOpenPendingRequests, onOpenSession, onOpenLineupForSession, onNavigate, onNewSession, onNewExercise, onUpdateSession, onOpenMultiRsvp,
     posts, canWritePosts, onOpenPost, onNewPost, onShowAllPosts,
   } = props;
   const [rsvpError, setRsvpError] = useState<string | null>(null);
@@ -281,6 +282,9 @@ export default function HomeView(props: HomeViewProps) {
                           {next.rsvps?.[me.id] ? `Ditt svar: ${statusLabel[next.rsvps[me.id].status]}` : 'Kommer du?'}
                         </div>
                         <RsvpButtons value={next.rsvps?.[me.id]?.status || null} onChange={s => answer(next, s)} disabled={savingId === next.id} />
+                        {upcoming.length > 1 && (
+                          <Button variant="secondary" block icon={<ListChecks size={18} />} onClick={onOpenMultiRsvp}>Svara på flera pass</Button>
+                        )}
                       </>
                     )}
                     {isCoachOrAdmin && (() => {
@@ -334,7 +338,11 @@ export default function HomeView(props: HomeViewProps) {
             {/* Kommande */}
             {later.length > 0 && (
               <section>
-                <SectionHeader title="Kommande" />
+                <SectionHeader title="Kommande" action={isCoachOrAdmin ? (
+                  <button type="button" onClick={onOpenMultiRsvp} className="text-sm font-semibold text-indigo-600 dark:text-indigo-300 inline-flex items-center gap-1 cursor-pointer">
+                    <ListChecks size={16} /> Svara på flera
+                  </button>
+                ) : undefined} />
                 <Card padded={false} className="divide-y divide-zinc-100 dark:divide-zinc-800">
                   {later.map(s => {
                     const my = me ? s.rsvps?.[me.id]?.status : undefined;

@@ -2721,6 +2721,25 @@ async function startServer() {
   });
 
   // --- SVAR PÅ KALLELSER ---
+  // Gemensamma regler för svar: spelare svarar för sig själva, lagets tränare för alla i laget.
+  // Returnerar { error, status } eller det som behövs för att spara.
+  const rsvpContext = async (user: any, clubId: string, teamId: string, memberId: string) => {
+    const access = registry.getClubAccess(db, user, clubId, await verifyIsRootAdmin(user));
+    const baseMemberId = memberId.replace(/_leader$/, ''); // ledarrader i truppen har suffixet _leader
+    const isOwn = access.memberIds.includes(baseMemberId);
+    const isCoach = registry.isTeamCoach(access, teamId);
+    if (!isCoach && !(isOwn && registry.isTeamMember(access, teamId))) {
+      return { error: 'Du kan bara svara för dig själv.', status: 403 } as const;
+    }
+    const sessRow: any = db.prepare(`SELECT data FROM clubs_data WHERE clubId = ? AND teamId = ? AND segment = 'sessions'`).get(clubId, teamId);
+    const sessDoc = sessRow ? JSON.parse(sessRow.data) : null;
+    const sessions: any[] = Array.isArray(sessDoc) ? sessDoc : (sessDoc?.sessions || []);
+    const inTeam = !!db.prepare(`SELECT 1 FROM team_roles WHERE member_id = ? AND club_id = ? AND team_id = ?`).get(baseMemberId, clubId, teamId);
+    const me: any = access.memberIds.length ? db.prepare('SELECT full_name FROM members WHERE id = ?').get(access.memberIds[0]) : null;
+    const updatedBy = isOwn ? (me?.full_name || user.email) : `Tränare (${me?.full_name || user.email})`;
+    return { sessions, inTeam, isCoach, updatedBy };
+  };
+
   // En spelare (eller förälder/tränare) svarar för en person på en aktivitet. Varje svar
   // sparas som egen rad så att samtidiga svar inte skriver över varandra.
   app.post('/api/rsvp', requireAuthUser, async (req, res) => {
@@ -2732,30 +2751,69 @@ async function startServer() {
     if (status !== null && !registry.RSVP_STATUSES.includes(status)) {
       return res.status(400).json({ error: 'Ogiltigt svar.' });
     }
-    const access = registry.getClubAccess(db, user, clubId, await verifyIsRootAdmin(user));
-    const baseMemberId = memberId.replace(/_leader$/, ''); // ledarrader i truppen har suffixet _leader
-    const isOwn = access.memberIds.includes(baseMemberId);
-    if (!registry.isTeamCoach(access, teamId) && !(isOwn && registry.isTeamMember(access, teamId))) {
-      return res.status(403).json({ error: 'Du kan bara svara för dig själv.' });
-    }
-    const sessRow: any = db.prepare(`SELECT data FROM clubs_data WHERE clubId = ? AND teamId = ? AND segment = 'sessions'`).get(clubId, teamId);
-    const sessDoc = sessRow ? JSON.parse(sessRow.data) : null;
-    const sessions: any[] = Array.isArray(sessDoc) ? sessDoc : (sessDoc?.sessions || []);
-    const session = sessions.find((s) => s && s.id === sessionId);
+    const ctx = await rsvpContext(user, clubId, teamId, memberId);
+    if ('error' in ctx) return res.status(ctx.status).json({ error: ctx.error });
+    const session = ctx.sessions.find((s) => s && s.id === sessionId);
     if (!session) return res.status(404).json({ error: 'Aktiviteten finns inte.' });
-    const inTeam = db.prepare(`SELECT 1 FROM team_roles WHERE member_id = ? AND club_id = ? AND team_id = ?`).get(baseMemberId, clubId, teamId);
     const isGuest = Array.isArray(session.guestPlayers) && session.guestPlayers.some((g: any) => g && g.id === memberId);
-    if (!inTeam && !(isGuest && registry.isTeamCoach(access, teamId))) return res.status(404).json({ error: 'Personen finns inte i laget.' });
+    if (!ctx.inTeam && !(isGuest && ctx.isCoach)) return res.status(404).json({ error: 'Personen finns inte i laget.' });
 
     if (status === null) {
       db.prepare('DELETE FROM rsvps WHERE club_id = ? AND team_id = ? AND session_id = ? AND member_id = ?').run(clubId, teamId, sessionId, memberId);
       return res.json({ success: true, rsvp: null });
     }
-    const me: any = access.memberIds.length ? db.prepare('SELECT full_name FROM members WHERE id = ?').get(access.memberIds[0]) : null;
-    const updatedBy = isOwn ? (me?.full_name || user.email) : `Tränare (${me?.full_name || user.email})`;
     const updatedAt = Date.now();
+    const updatedBy = ctx.updatedBy;
     registry.upsertRsvp(db, { clubId, teamId, sessionId, memberId, status, comment: typeof comment === 'string' ? comment.slice(0, 500) : null, updatedAt, updatedBy });
     res.json({ success: true, rsvp: { status, ...(comment ? { comment } : {}), updatedAt, updatedBy } });
+  });
+
+  // Samma svar (och kommentar) för en person på flera aktiviteter på en gång, allt eller inget.
+  // status null tar bort svaren. comment: text = sätts på alla (tom tar bort), saknas = behåll varje pass egen.
+  app.post('/api/rsvp/batch', requireAuthUser, async (req, res) => {
+    const user = (req as any).user;
+    const { clubId, teamId, sessionIds, memberId, status, comment } = req.body || {};
+    if (![clubId, teamId, memberId].every((v) => typeof v === 'string' && v)) {
+      return res.status(400).json({ error: 'clubId, teamId och memberId krävs.' });
+    }
+    if (!Array.isArray(sessionIds) || sessionIds.length === 0 || sessionIds.length > 200 || !sessionIds.every((v: any) => typeof v === 'string' && v)) {
+      return res.status(400).json({ error: 'Välj mellan 1 och 200 aktiviteter.' });
+    }
+    if (status !== null && !registry.RSVP_STATUSES.includes(status)) {
+      return res.status(400).json({ error: 'Ogiltigt svar.' });
+    }
+    if (comment !== undefined && comment !== null && typeof comment !== 'string') {
+      return res.status(400).json({ error: 'Ogiltig kommentar.' });
+    }
+    const ctx = await rsvpContext(user, clubId, teamId, memberId);
+    if ('error' in ctx) return res.status(ctx.status).json({ error: ctx.error });
+    if (!ctx.inTeam) return res.status(404).json({ error: 'Personen finns inte i laget.' });
+    const ids: string[] = Array.from(new Set<string>(sessionIds));
+    const known = new Set(ctx.sessions.filter(Boolean).map((s: any) => s.id));
+    const missing = ids.filter((id) => !known.has(id));
+    if (missing.length) return res.status(404).json({ error: 'En eller flera aktiviteter finns inte.', missing });
+
+    const updatedAt = Date.now();
+    const updatedBy = ctx.updatedBy;
+    const newComment = typeof comment === 'string' ? (comment.trim().slice(0, 500) || null) : null;
+    const result: Record<string, any> = {};
+    db.transaction(() => {
+      for (const sessionId of ids) {
+        if (status === null) {
+          db.prepare('DELETE FROM rsvps WHERE club_id = ? AND team_id = ? AND session_id = ? AND member_id = ?').run(clubId, teamId, sessionId, memberId);
+          result[sessionId] = null;
+          continue;
+        }
+        let c = newComment;
+        if (comment === undefined) {
+          const ex: any = db.prepare('SELECT comment FROM rsvps WHERE club_id = ? AND team_id = ? AND session_id = ? AND member_id = ?').get(clubId, teamId, sessionId, memberId);
+          c = ex?.comment || null;
+        }
+        registry.upsertRsvp(db, { clubId, teamId, sessionId, memberId, status, comment: c, updatedAt, updatedBy });
+        result[sessionId] = { status, ...(c ? { comment: c } : {}), updatedAt, updatedBy };
+      }
+    })();
+    res.json({ success: true, rsvps: result });
   });
 
   // Rensar alla svar för en aktivitet (tränare).

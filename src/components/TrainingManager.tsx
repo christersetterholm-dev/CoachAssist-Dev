@@ -54,6 +54,7 @@ interface TrainingManagerProps {
   userRoles?: string[];
   calendarMonth?: Date;
   onCalendarMonthChange?: (month: Date) => void;
+  onOpenMultiRsvp?: () => void; // Svara på flera pass
 }
 
 const isSessionPassed = (session: TrainingSession) => {
@@ -572,7 +573,8 @@ export default function TrainingManager({
   activeTeamId,
   activeClubInfo,
   calendarMonth,
-  onCalendarMonthChange
+  onCalendarMonthChange,
+  onOpenMultiRsvp
 }: TrainingManagerProps) {
   const [sessionToDelete, setSessionToDelete] = useState<string | null>(null);
     const [sessionToPermanentDelete, setSessionToPermanentDelete] = useState<string | null>(null);
@@ -1076,6 +1078,7 @@ export default function TrainingManager({
           icsUrl={effectiveIcsUrl}
           onOpenSettings={() => setShowSettings(true)}
           onOpenSubscribe={activeClubId ? () => setShowSubscribe(true) : undefined}
+          onOpenMultiRsvp={activeClubId ? onOpenMultiRsvp : undefined}
           currentMonth={calendarMonth}
           onMonthChange={onCalendarMonthChange}
         />

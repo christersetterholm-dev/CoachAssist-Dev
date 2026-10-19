@@ -5,7 +5,7 @@ import { TrainingSession, SquadPlayer } from '../types';
 import { categorizeSession } from '../utils/sessionCategory';
 import { Button } from './ui';
 import MonthGrid from './calendar/MonthGrid';
-import { CalendarDays, CalendarPlus, List as ListIcon, Rows3 } from 'lucide-react';
+import { CalendarDays, CalendarPlus, List as ListIcon, ListChecks, Rows3 } from 'lucide-react';
 
 const SWEDISH_WEEKDAYS = ['Sön', 'Mån', 'Tis', 'Ons', 'Tor', 'Fre', 'Lör'];
 
@@ -85,6 +85,7 @@ interface MobileCalendarViewProps {
   icsUrl?: string;
   onOpenSettings?: () => void;
   onOpenSubscribe?: () => void;
+  onOpenMultiRsvp?: () => void; // Svara på flera pass
   currentMonth?: Date;
   onMonthChange?: (month: Date) => void;
 }
@@ -109,6 +110,7 @@ export default function MobileCalendarView({
   icsUrl: _icsUrl,
   onOpenSettings: _onOpenSettings,
   onOpenSubscribe,
+  onOpenMultiRsvp,
   currentMonth: propCurrentMonth,
   onMonthChange
 }: MobileCalendarViewProps) {
@@ -504,10 +506,38 @@ export default function MobileCalendarView({
                           <span>Skapa serie träningspass</span>
                         </button>
                       )}
+                      {onOpenMultiRsvp && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setShowPlanMenu(false);
+                            onOpenMultiRsvp();
+                          }}
+                          className="w-full text-left px-4 py-2.5 text-xs font-bold text-zinc-700 dark:text-zinc-200 hover:bg-zinc-50 dark:hover:bg-zinc-800 flex items-center gap-2 cursor-pointer transition-colors border-t border-zinc-100 dark:border-zinc-800"
+                        >
+                          <ListChecks size={14} className="text-zinc-400" />
+                          <span>Svara på flera pass</span>
+                        </button>
+                      )}
                     </motion.div>
                   )}
                 </AnimatePresence>
               </div>
+            )}
+
+            {/* Svara på kallelser till flera pass på en gång (tränare har den i plusmenyn, raden blir annars för bred på mobil) */}
+            {onOpenMultiRsvp && !((onNewSession || onOpenSeriesCreator) && isCoachOrAdmin) && (
+              <button
+                type="button"
+                onClick={onOpenMultiRsvp}
+                className="h-10 min-w-10 px-2.5 sm:px-3 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-zinc-600 dark:text-zinc-300 hover:text-indigo-600 dark:hover:text-indigo-400 inline-flex items-center justify-center gap-1.5 text-sm font-semibold transition-all cursor-pointer active:scale-95"
+                title="Svara på flera pass på en gång"
+                aria-label="Svara på flera pass"
+              >
+                <ListChecks size={18} />
+                <span className="hidden lg:inline">Svara på flera</span>
+              </button>
             )}
 
             {/* Prenumerera på lagets kalender (för alla i laget) */}
