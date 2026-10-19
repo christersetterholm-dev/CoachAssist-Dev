@@ -4,6 +4,7 @@
  */
 import React from 'react';
 import {
+  Bell,
   House, Calendar, Users, Shirt, Trophy, Globe, ShieldCheck, User as UserIcon, Sun, Moon,
   RefreshCw, LogOut, Building2, ChevronRight, Cloud, CloudOff, Loader2, VibrateOff, Minimize2, Presentation, Megaphone, MessageCircle,
   LayoutGrid, Library,
@@ -80,6 +81,7 @@ export interface AppShellProps {
   onLogout: () => void;
   onLogin: () => void;
   onOpenShakeInfo: () => void;
+  onOpenNotifications: () => void;
   onOpenPendingRequests: () => void;
   /** Dölj meny och toppfält (storskärmsläge eller vyer som tar hela skärmen). */
   chromeHidden?: boolean;
@@ -180,7 +182,7 @@ export const AppShell: React.FC<AppShellProps> = props => {
   const {
     view, onNavigate, canViewLineup, unreadPosts, unreadChats, mobileNav, hideLineupTopBar, onSaveMobilePrefs, isCoachOrAdmin, title, actions, clubName, teamName, account,
     pendingRequests, syncState, onSaveNow, onRefresh, theme, onToggleTheme, onLogout, onLogin,
-    onOpenShakeInfo, onOpenPendingRequests, chromeHidden, hideTopBar, presenting, onExitPresenting, banner, children,
+    onOpenShakeInfo, onOpenNotifications, onOpenPendingRequests, chromeHidden, hideTopBar, presenting, onExitPresenting, banner, children,
   } = props;
   const [accountOpen, setAccountOpen] = React.useState(false);
   const [moreOpen, setMoreOpen] = React.useState(false);
@@ -465,6 +467,7 @@ export const AppShell: React.FC<AppShellProps> = props => {
         onToggleTheme={onToggleTheme}
         onRefresh={onRefresh}
         onOpenShakeInfo={onOpenShakeInfo}
+        onOpenNotifications={onOpenNotifications}
         onOpenPendingRequests={onOpenPendingRequests}
         onLogout={onLogout}
       />
@@ -530,6 +533,7 @@ export const AppShell: React.FC<AppShellProps> = props => {
             onClick={onToggleTheme}
           />
           <MenuItem icon={<RefreshCw size={18} />} label="Hämta senaste" description="Läs in lagets data på nytt" onClick={() => { setAccountOpen(false); onRefresh(); }} />
+          <MenuItem icon={<Bell size={18} />} label="Notiser" description="Chatt och inlägg på den här enheten" onClick={() => { setAccountOpen(false); onOpenNotifications(); }} />
           <MenuItem icon={<VibrateOff size={18} />} label="Skakskydd (iPhone)" description="Undvik att iOS frågar om att ångra" onClick={() => { setAccountOpen(false); onOpenShakeInfo(); }} />
           <div className="my-2 border-t border-zinc-100 dark:border-zinc-800" />
           <MenuItem icon={<LogOut size={18} />} label="Logga ut" tone="danger" onClick={() => { setAccountOpen(false); onLogout(); }} />

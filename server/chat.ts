@@ -6,7 +6,8 @@
 // - Privata chattar är privata – inte ens root-admin läser dem. Olämpliga meddelanden kan
 //   anmälas; då ser föreningsadmin och tränare i avsändarens lag just det meddelandet.
 // - Bilder och filer sparas i mappen chat_files/ och lämnas bara ut till dem som är med.
-// - Inga notiser finns: appen frågar efter nya meddelanden med jämna mellanrum. Varje ändring
+// - Nya meddelanden ger notis (server/push.ts) till dem som slagit på det. Appen frågar annars
+//   efter nya meddelanden med jämna mellanrum. Varje ändring
 //   (nytt, ändrat, borttaget meddelande eller reaktion) får ett nytt rev-nummer, så appen kan
 //   fråga efter "allt som ändrats sedan rev X".
 import crypto from 'crypto';
@@ -17,6 +18,7 @@ import type express from 'express';
 import type { Db } from './database.ts';
 import * as registry from './registry.ts';
 import { normalizeEmoji, REACTIONS } from './posts.ts';
+import * as push from './push.ts';
 
 export const LIMITS = {
   body: 4000,
@@ -557,7 +559,29 @@ export function sendMessage(db: Db, a: ConvAccess, input: any): MessageView {
     db.prepare('UPDATE chat_participants SET last_read_seq = ? WHERE conversation_id = ? AND user_id = ?').run(s, a.conv.id, me);
     return s;
   })();
-  return messageViews(db, [getMsg(db, a.conv.id, seq)!], me)[0];
+  const msg = getMsg(db, a.conv.id, seq)!;
+  try { notifyMessage(db, a, msg); } catch (e) { console.warn('[Notiser] Chatt:', e); }
+  return messageViews(db, [msg], me)[0];
+}
+
+// Notis till alla andra i chatten (inte till den som har chatten öppen just nu).
+function notifyMessage(db: Db, a: ConvAccess, m: MsgRow) {
+  const me = a.ctx.me.userId;
+  const ids: string[] = a.conv.kind === 'team'
+    ? Array.from(clubPeople(db, a.ctx.clubId).values()).filter((p) => p.teams.includes(a.conv.team_id!)).map((p) => p.userId)
+    : (db.prepare('SELECT user_id FROM chat_participants WHERE conversation_id = ? AND left_at IS NULL').all(a.conv.id) as { user_id: string }[]).map((r) => r.user_id);
+  const recipients = ids.filter((id) => id !== me);
+  if (!recipients.length) return;
+  const text = preview(m);
+  const title = a.conv.kind === 'team' ? (teamNames(db, a.ctx.clubId).get(a.conv.team_id!) || 'Lagchatt')
+    : a.conv.kind === 'direct' ? a.ctx.me.name
+    : (a.conv.name || 'Gruppchatt');
+  push.notifyUsers(recipients, 'chat', {
+    title,
+    body: a.conv.kind === 'direct' ? text : `${firstName(a.ctx.me.name)}: ${text}`,
+    tag: `chat-${a.conv.id}`,
+    open: { view: 'chat', clubId: a.ctx.clubId, conversationId: a.conv.id },
+  }, { conversationId: a.conv.id });
 }
 
 export function editMessage(db: Db, a: ConvAccess, seq: unknown, input: any): MessageView {
@@ -831,8 +855,11 @@ export function registerChatRoutes(app: express.Express, db: Db, deps: {
     return { conversation: conversationDetail(db, conv(req, user, isRoot)) };
   }));
 
-  app.get('/api/chat/:id/messages', requireAuthUser, route((req, _res, user, isRoot) =>
-    getMessages(db, conv(req, user, isRoot), { before: req.query.before, after: req.query.after })));
+  app.get('/api/chat/:id/messages', requireAuthUser, route((req, _res, user, isRoot) => {
+    const a = conv(req, user, isRoot);
+    push.markActive(a.ctx.me.userId, a.conv.id); // chatten är öppen: ingen notis för den
+    return getMessages(db, a, { before: req.query.before, after: req.query.after });
+  }));
 
   app.post('/api/chat/:id/messages', requireAuthUser, route((req, _res, user, isRoot) =>
     ({ message: sendMessage(db, conv(req, user, isRoot), req.body) })));

@@ -331,6 +331,21 @@ export const SCHEMA = `
     action TEXT
   );
   CREATE INDEX IF NOT EXISTS idx_chat_reports_club ON chat_reports(club_id, handled_at);
+
+  -- Notiser (se server/push.ts): en rad per enhet som slagit på notiser.
+  CREATE TABLE IF NOT EXISTS push_subscriptions (
+    endpoint TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    p256dh TEXT NOT NULL,
+    auth TEXT NOT NULL,
+    chat INTEGER NOT NULL DEFAULT 1,
+    posts INTEGER NOT NULL DEFAULT 1,
+    user_agent TEXT,
+    created_at INTEGER NOT NULL,
+    last_used_at INTEGER,
+    fail_count INTEGER NOT NULL DEFAULT 0
+  );
+  CREATE INDEX IF NOT EXISTS idx_push_user ON push_subscriptions(user_id);
 `;
 
 const USER_COLUMNS = [

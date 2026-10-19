@@ -36,6 +36,7 @@ Läs den här filen först i varje nytt samtal. Håll den uppdaterad när något
 | Animationer i steg på taktiktavlan (räknandet, ingen React) | `src/utils/boardAnimation.ts` (tester i `tests/boardAnimation.test.mjs`) |
 | Inlägg (tränarnas meddelanden till laget) | `server/posts.ts`, `src/lib/posts.ts`, `src/components/PostsView.tsx` |
 | Chatt (lagchatt, grupper, en-till-en) | `server/chat.ts` (tester i `tests/chat.test.mjs`), `src/lib/chat.ts`, `src/components/chat/` |
+| Notiser (Web Push för chatt och inlägg) | `server/push.ts` (tester i `tests/push.test.mjs`), `src/lib/push.ts`, `public/sw.js`, `src/components/NotificationsSheet.tsx` |
 | Startfil på webbhotellet (Passenger) | `app.cjs` → `dist/server.cjs` |
 | React-appen | `src/` (`App.tsx` och `LineupBuilder.tsx` är mycket stora) |
 | Appens skal (sidomeny, bottenmeny, toppfält, kontomeny, Mer) | `src/components/shell/AppShell.tsx`, `src/components/shell/MoreSheet.tsx` |
@@ -118,11 +119,30 @@ Appen läser/skriver JSON-dokument via sökvägar:
   `FILE_TYPES`. `deploy.sh` packar `chat_files/` till `backups/` (3 senaste).
 - Gränser (`LIMITS`): 4000 tecken, 30 meddelanden/min, 20 grupper/dygn, 100 i en grupp, 10 MB/fil,
   5 filer/meddelande, 1 GB/förening, ändra inom 15 min.
-- Ingen push: appen frågar `?after=<rev>` var 3:e s i en öppen chatt (10 s efter 2 min utan aktivitet),
+- Utöver notiserna (se nedan) frågar appen `?after=<rev>` var 3:e s i en öppen chatt (10 s efter 2 min utan aktivitet),
   `/api/chat/summary` var 30:e s för märket, listan var 15:e s, inget när appen ligger i bakgrunden.
   (Websocket/SSE passar inte Passenger på webbhotellet.)
 - Appen: `useChatSummary` i App.tsx (märket), `view === 'chat'` → `ChatView` (lista; på mobil täcker en
   öppen chatt hela skärmen, från 768 px lista + chatt bredvid). Skrivfältet är en ostyrd `TextArea`.
+
+### Notiser (`/api/push`, `server/push.ts`, okt 2026)
+- Web Push med egna VAPID-nycklar (paketet `web-push`, ingen Firebase). Nycklarna skapas första gången
+  och sparas i `system_docs` (`system/vapid_keys`), eller sätts med `VAPID_PUBLIC_KEY`/`VAPID_PRIVATE_KEY`.
+  Avsändaradress `VAPID_SUBJECT` (standard `mailto:` + första i `ADMIN_EMAILS`). Byts nycklarna måste alla slå på igen.
+- Tabell `push_subscriptions` (en rad per enhet: adress, nycklar, konto, `chat`/`posts` på/av). Högst 10
+  enheter per konto. Samma enhet med nytt konto tillhör det nya kontot. 404/410 från push-tjänsten tar bort raden.
+  Bara adresser hos de vanliga push-tjänsterna godtas (`PUSH_HOSTS`); `PUSH_ALLOW_ANY_ENDPOINT=1` bara i testerna.
+- Skickas: nytt chattmeddelande (till alla andra i chatten, inte den som har chatten öppen – `markActive` när
+  appen hämtar meddelanden, 15 s) och nytt inlägg (till alla med roll i laget utom författaren). Ändringar,
+  reaktioner och kommentarer ger ingen notis. Skickas i bakgrunden efter svaret.
+- `public/sw.js` är appens servicearbetare: visar notisen och vid tryck skickar `{ type: 'coachassist-open', open }`
+  till ett öppet fönster, annars öppnas `/?open=<json>`. Den cachar ingenting. App.tsx (`pushOpen`) öppnar chatten
+  (`openChatId`) eller inlägget (`openPostId`).
+- Appen: menyposten **Notiser** (Mer och kontomenyn) öppnar `NotificationsSheet` – slå på, välj Chatt/Inlägg,
+  testnotis, stäng av. Gäller en enhet. iPhone/iPad: bara när appen är tillagd på hemskärmen (iOS 16.4+).
+  `syncPush` vid start förnyar enhetens adress om samma konto slagit på notiser (`coachassist.push` i localStorage).
+  Utloggning stänger av notiserna på enheten.
+- Claudes webbläsare (i Claude-appen) kan inte registrera servicearbetare – prova notiser i Safari/Chrome eller på telefonen.
 
 ## Köra, testa, driftsätta
 
@@ -274,9 +294,11 @@ npm run set-password -- e@post.se            # lokalt konto/lösenord
 
 ## Kvar att göra / idéer
 
-- Chatt, senare: svara på/citera ett meddelande, sök i meddelanden, tysta en chatt, blockera,
-  @-omnämnanden, föräldrar, webbnotiser (Web Push).
-- Inlägg: visa kopplade inlägg även i passvyn (`SessionRsvpView`); notiser när nytt inlägg kommer.
+- Chatt, senare: svara på/citera ett meddelande, sök i meddelanden, tysta en chatt (även dess notiser),
+  blockera, @-omnämnanden, föräldrar.
+- Inlägg: visa kopplade inlägg även i passvyn (`SessionRsvpView`).
+- Notiser, senare: kommentarer på egna inlägg, kallelser/påminnelser (kräver cron-jobb i cPanel), märke med
+  antal olästa på appikonen (`setAppBadge`), notis från annan förening byter inte förening (öppnar bara chattlistan).
 - `isProduction` i server.ts blir sant om mappens sökväg innehåller "dist" (t.ex. en worktree som
   heter `distracted-...`) – då letar `npm run dev` efter `dist/index.html`. Kontrollera hellre mappnamnet exakt.
 
@@ -297,6 +319,5 @@ npm run set-password -- e@post.se            # lokalt konto/lösenord
 - Taktiktavlans animationer, etapp 4 (stäm av med Christer): spara som video/GIF. Animationen finns
   inte heller i övningarnas taktiktavla (`TacticalBoardModal`).
 - E-post via SMTP (inbjudningar, glömt lösenord) om det behövs senare.
-- iOS-app och notiser (pausat, utrett okt 2026): steg 1 webbnotiser (Web Push/PWA, egen server,
-  ingen Firebase); steg 2 Capacitor-skal runt befintliga appen för riktiga notiser via APNs och
+- iOS-app (pausat, utrett okt 2026): steg 1 webbnotiser är klart (se Notiser); steg 2 Capacitor-skal runt befintliga appen för riktiga notiser via APNs och
   låst stående läge i t.ex. poängräkningen. Påminnelser kräver cron-jobb i cPanel (Passenger kan sova).

@@ -19,7 +19,8 @@ import * as registry from './server/registry.ts';
 import * as invites from './server/invites.ts';
 import * as tacticalBoards from './server/tacticalBoards.ts';
 import * as posts from './server/posts.ts';
-import { registerChatRoutes } from './server/chat.ts';
+import { registerChatRoutes, teamNames } from './server/chat.ts';
+import * as push from './server/push.ts';
 
 const customRequire = typeof require !== 'undefined' ? require : createRequire(import.meta.url);
 
@@ -103,6 +104,14 @@ if (!JWT_SECRET) {
     );
   } catch (_) {}
 }
+
+// Notiser (Web Push). Apple kräver en giltig kontaktadress (mailto: eller https:) i VAPID-nyckeln.
+push.initPush(db, {
+  subject: (process.env.VAPID_SUBJECT || '').trim()
+    || 'mailto:' + ((process.env.ADMIN_EMAILS || 'christer.setterholm@gmail.com').split(',')[0].trim() || 'christer.setterholm@gmail.com'),
+  // Bara för testerna (låtsas-push-tjänst på http://127.0.0.1).
+  allowAnyEndpoint: process.env.PUSH_ALLOW_ANY_ENDPOINT === '1',
+});
 
 export const JWT_EXPIRES_IN = (process.env.JWT_EXPIRES_IN || '30d') as jwt.SignOptions['expiresIn'];
 
@@ -2575,6 +2584,20 @@ async function startServer() {
     if ('error' in v) return res.status(400).json({ error: v.error });
     const row = posts.createPost(db, a.clubId, a.teamId, v.value, { userId: a.user.id, name: a.name });
     res.json(posts.getPost(db, row, a.user.id, true));
+    // Notis till alla i laget (utom den som skrev)
+    try {
+      const ids = db.prepare(
+        `SELECT DISTINCT m.user_id FROM team_roles tr JOIN members m ON m.id = tr.member_id
+         WHERE tr.club_id = ? AND tr.team_id = ? AND m.user_id IS NOT NULL AND m.user_id != ''`
+      ).all(a.clubId, a.teamId).map((r: any) => String(r.user_id)).filter((id: string) => id !== String(a.user.id));
+      const teamName = teamNames(db, a.clubId).get(a.teamId) || 'laget';
+      push.notifyUsers(ids, 'posts', {
+        title: `Nytt inlägg · ${teamName}`,
+        body: [row.title, row.body].filter(Boolean).join(' – ').replace(/\s+/g, ' ').trim() || `${a.name} har skrivit ett inlägg`,
+        tag: `post-${row.id}`,
+        open: { view: 'post', clubId: a.clubId, teamId: a.teamId, postId: row.id },
+      });
+    } catch (e) { console.warn('[Notiser] Inlägg:', e); }
   });
 
   app.get('/api/posts/:id', requireAuthUser, async (req, res) => {
@@ -2635,6 +2658,8 @@ async function startServer() {
 
   // Chatt: lagchattar, grupper och en-till-en (se server/chat.ts). Filerna ligger i chat_files/.
   registerChatRoutes(app, db, { requireAuthUser, isRootAdmin: verifyIsRootAdmin, filesDir: path.join(DATA_DIR, 'chat_files') });
+  // Notiser: enheter som slår på/av notiser (se server/push.ts).
+  push.registerPushRoutes(app, db, { requireAuthUser });
 
   // Öppna inbjudningar i föreningen (för att visa "Inbjuden" i listor).
   app.get('/api/invites', requireAuthUser, async (req, res) => {

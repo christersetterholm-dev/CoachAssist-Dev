@@ -15,7 +15,7 @@ export const ROOT_PASSWORD = 'RootLosen123';
 let ipCounter = 1;
 const nextIp = () => `10.99.${Math.floor(ipCounter / 250)}.${(ipCounter++ % 250) + 1}`;
 
-export async function startServer({ seedJson } = {}) {
+export async function startServer({ seedJson, env: extraEnv = {} } = {}) {
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'coachassist-test-'));
   if (seedJson) fs.writeFileSync(path.join(dataDir, 'coachassist_db.json'), JSON.stringify(seedJson));
   const port = 4100 + Math.floor(Math.random() * 800);
@@ -27,6 +27,7 @@ export async function startServer({ seedJson } = {}) {
     JWT_SECRET: 'test-' + Math.random().toString(36).slice(2),
     ADMIN_EMAILS: ROOT_EMAIL,
     NODE_NO_WARNINGS: '1',
+    ...extraEnv,
   };
   const proc = spawn(process.execPath, [...runnerArgs, path.join(root, 'server.ts')], { cwd: root, env, stdio: ['ignore', 'pipe', 'pipe'] });
   let log = '';

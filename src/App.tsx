@@ -18,6 +18,8 @@ import PostsView, { PostDetailSheet, PostEditorSheet } from './components/PostsV
 import { usePosts, type Post } from './lib/posts';
 import ChatView from './components/chat/ChatView';
 import { useChatSummary } from './lib/chat';
+import { disablePush, listenForPushOpen, syncPush, type PushOpen } from './lib/push';
+import { NotificationsSheet } from './components/NotificationsSheet';
 
 import TeamPage from './components/TeamPage';
 import TrainingManager from './components/TrainingManager';
@@ -873,6 +875,11 @@ export default function App() {
   const [openChatId, setOpenChatId] = useState<string | null>(null);
   useEffect(() => { setOpenChatId(null); }, [userProfile.activeClubId]);
   const [openPostId, setOpenPostId] = useState<string | null>(null);
+  // Notiser: arket med inställningar, och vad som ska öppnas när man trycker på en notis.
+  const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
+  const [pushOpen, setPushOpen] = useState<PushOpen | null>(null);
+  useEffect(() => listenForPushOpen(setPushOpen), []);
+  useEffect(() => { if (user?.uid) syncPush(user.uid); }, [user?.uid]);
   const [editingPost, setEditingPost] = useState<Post | 'new' | null>(null);
   const [sessionMode, setSessionMode] = useState<'plan' | 'live'>('plan');
   const [showResetConfirm, setShowResetConfirm] = useState(false);
@@ -885,6 +892,18 @@ export default function App() {
   const lastSyncedAtRef = useRef<number>(0);
   const [isInitialSyncDone, setIsInitialSyncDone] = useState(false);
   const [isProfileLoaded, setIsProfileLoaded] = useState(false);
+  // Tryck på en notis: öppna chatten eller inlägget när profilen är inläst.
+  useEffect(() => {
+    if (!pushOpen || !user || !isProfileLoaded) return;
+    setPushOpen(null);
+    if (pushOpen.view === 'chat') {
+      setView('chat');
+      // Chattar hör till en förening; en notis från en annan förening öppnar bara chattlistan.
+      if (pushOpen.clubId === userProfile.activeClubId) setOpenChatId(pushOpen.conversationId);
+    } else if (pushOpen.view === 'post') {
+      setOpenPostId(pushOpen.postId);
+    }
+  }, [pushOpen, user, isProfileLoaded]); // eslint-disable-line react-hooks/exhaustive-deps
   const [hasPulledFromCloud, setHasPulledFromCloud] = useState(false);
   const sessionActionCountRef = useRef(0);
   const pendingCloudUpdateRef = useRef<{ lineups: Lineup[], activeLineupId: string | null } | null>(null);
@@ -3649,6 +3668,8 @@ export default function App() {
   };
 
   const handleLogout = async () => {
+    // Nästa person som loggar in på enheten ska inte få den här personens notiser.
+    await Promise.race([disablePush().catch(() => {}), new Promise(r => setTimeout(r, 3000))]);
     try {
       await signOut(auth);
     } catch (error) {
@@ -4677,6 +4698,7 @@ export default function App() {
 
   const overlays = (
     <>
+      <NotificationsSheet open={isNotificationsOpen} onClose={() => setIsNotificationsOpen(false)} userId={user?.uid || null} />
       <PostDetailSheet
         postId={openPostId}
         postsState={postsState}
@@ -5156,6 +5178,7 @@ export default function App() {
         onLogout={handleLogout}
         onLogin={handleLogin}
         onOpenShakeInfo={() => setIsShakeInfoModalOpen(true)}
+        onOpenNotifications={() => setIsNotificationsOpen(true)}
         onOpenPendingRequests={() => setIsPendingRequestsModalOpen(true)}
         chromeHidden={isPresenting || (view === 'lineup' && isLineupMaximized) || (view === 'tacticalboards' && isTeamBoardOpen)}
         hideTopBar={view === 'teampage'}

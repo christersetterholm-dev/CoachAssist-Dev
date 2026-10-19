@@ -4,7 +4,7 @@
  */
 import React, { useEffect, useState } from 'react';
 import {
-  ArrowDown, ArrowUp, Building2, ChevronRight, LogOut, Moon, Plus, RefreshCw, RotateCcw, SlidersHorizontal, Sun, Users,
+  ArrowDown, ArrowUp, Bell, Building2, ChevronRight, LogOut, Moon, Plus, RefreshCw, RotateCcw, SlidersHorizontal, Sun, Users,
   VibrateOff, X,
 } from 'lucide-react';
 import { Avatar, Button, IconButton, MenuItem, Sheet } from '../ui';
@@ -68,6 +68,7 @@ export const MoreSheet: React.FC<{
   onToggleTheme: () => void;
   onRefresh: () => void;
   onOpenShakeInfo: () => void;
+  onOpenNotifications: () => void;
   onOpenPendingRequests: () => void;
   onLogout: () => void;
 }> = (p) => {
@@ -130,6 +131,7 @@ export const MoreSheet: React.FC<{
           onClick={p.onToggleTheme}
         />
         <MenuItem icon={<RefreshCw size={18} />} label="Hämta senaste" description="Läs in lagets data på nytt" onClick={() => { p.onClose(); p.onRefresh(); }} />
+        <MenuItem icon={<Bell size={18} />} label="Notiser" description="Chatt och inlägg på den här enheten" onClick={() => { p.onClose(); p.onOpenNotifications(); }} />
         <MenuItem icon={<VibrateOff size={18} />} label="Skakskydd (iPhone)" description="Undvik att iOS frågar om att ångra" onClick={() => { p.onClose(); p.onOpenShakeInfo(); }} />
         <div className="my-2 border-t border-zinc-100 dark:border-zinc-800" />
         <MenuItem icon={<LogOut size={18} />} label="Logga ut" tone="danger" onClick={() => { p.onClose(); p.onLogout(); }} />
