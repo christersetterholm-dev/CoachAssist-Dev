@@ -3715,11 +3715,9 @@ export default function LineupBuilder({
                 ? (orientation === 'landscape' ? `min(calc(98vw - var(--board-rx, 0px)), calc((100vh - 24px - var(--board-ry, 0px)) * ${R}))` : `min(calc(98vw - var(--board-rx, 0px)), calc((100vh - 24px - var(--board-ry, 0px)) * ${invR}))`)
                 : isSimplified
                   ? '100%' // bildläget: fast storlek som sedan skalas till skärmen
-                  // Höjden räknas från skärmhöjden minus toppfält, lagrubrik och bänken med namn,
-                  // så att bänkens namn syns utan att man behöver skrolla (vid zoom 100 %).
                   : (orientation === 'landscape'
-                    ? `min(100%, 1024px, calc((100vh - 210px) * ${R}))`
-                    : `min(100%, 680px, calc((100dvh - 250px) * ${invR}))`),
+                    ? `min(100%, 1024px, calc((100vh - 160px) * ${R}))`
+                    : `min(100%, 680px, calc((100dvh - 200px) * ${invR}))`),
               height: isFieldMaximized
                 ? (orientation === 'landscape' ? `min(calc((98vw - var(--board-rx, 0px)) / ${R}), calc(100vh - 24px - var(--board-ry, 0px)))` : `min(calc((98vw - var(--board-rx, 0px)) / ${invR}), calc(100vh - 24px - var(--board-ry, 0px)))`)
                 : (orientation === 'landscape' 
