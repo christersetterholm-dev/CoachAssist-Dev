@@ -365,7 +365,7 @@ export const SessionRsvpView: React.FC<SessionRsvpViewProps> = ({
    * Sparar eller tar bort ett svar och uppdaterar närvaron.
    * toggle = true: samma status igen tar bort svaret (används när spelaren trycker på sina knappar).
    */
-  const saveRsvpForPlayer = (playerId: string, targetStatus: RsvpStatus | null, comment?: string, byWho?: string, toggle = false) => {
+  const saveRsvpForPlayer = (playerId: string, targetStatus: RsvpStatus | null, comment?: string, byWho?: string, toggle = false, keepAttendance = false) => {
     const currentRsvps = session.rsvps || {};
     const currentRsvp = currentRsvps[playerId];
 
@@ -377,7 +377,7 @@ export const SessionRsvpView: React.FC<SessionRsvpViewProps> = ({
 
     if (finalStatus === null) {
       delete newRsvps[playerId];
-      newAttendance = newAttendance.filter(id => id !== playerId);
+      if (!keepAttendance) newAttendance = newAttendance.filter(id => id !== playerId);
     } else {
       newRsvps[playerId] = {
         status: finalStatus,
@@ -650,13 +650,36 @@ export const SessionRsvpView: React.FC<SessionRsvpViewProps> = ({
 
   const statusOf = (p: SquadPlayer): RsvpStatus | 'unanswered' => rsvps[p.id]?.status || 'unanswered';
 
+  // Flikarna Kommer/Delvis/Kan inte visar hela truppen så att tränaren kan bocka i svaret åt en spelare
+  // (t.ex. efter ett sms). De som hade svaret när fliken öppnades ligger först; ordningen hålls fast
+  // medan man bockar, så att raderna inte hoppar.
+  const statusTab: RsvpStatus | null = filter === 'attending' || filter === 'partial' || filter === 'declined' ? filter : null;
+  // Spelare som var närvaromarkerade innan tränaren bockade i ett svar här: ångras svaret ska bocken för
+  // närvaro vara kvar.
+  const presentBeforeToggle = useRef<Set<string>>(new Set());
+  const toggleStatusForPlayer = (player: SquadPlayer, status: RsvpStatus) => {
+    const current = rsvps[player.id];
+    const clearing = current?.status === status;
+    if (!clearing && !current && attendance.includes(player.id)) presentBeforeToggle.current.add(player.id);
+    const keep = clearing && presentBeforeToggle.current.has(player.id);
+    if (clearing) presentBeforeToggle.current.delete(player.id);
+    saveRsvpForPlayer(player.id, status, clearing ? undefined : current?.comment, coachName(), true, keep);
+  };
+  const [frozenOrder, setFrozenOrder] = useState<{ key: string; ids: Set<string> } | null>(null);
+  const frozenKey = statusTab ? `${statusTab}:${session.id}` : '';
+  let statusTabFirst = frozenOrder?.ids || new Set<string>();
+  if (statusTab && frozenOrder?.key !== frozenKey) {
+    statusTabFirst = new Set(Object.entries(rsvps).filter(([, r]) => r?.status === statusTab).map(([id]) => id));
+    setFrozenOrder({ key: frozenKey, ids: statusTabFirst });
+  }
+
   const filteredMembers = useMemo(() => {
     const q = searchQuery.toLowerCase().trim();
     return allMembers.filter(player => {
       const isGuest = player.id.startsWith('guest_');
       const status = rsvps[player.id]?.status || 'unanswered';
       if (filter === 'present' && !attendance.includes(player.id)) return false;
-      if ((filter === 'attending' || filter === 'partial' || filter === 'declined') && status !== filter) return false;
+      if ((filter === 'attending' || filter === 'partial' || filter === 'declined') && isGuest) return false;
       if (filter === 'unanswered' && (status !== 'unanswered' || isGuest)) return false;
       if (filter === 'guests' && !isGuest) return false;
       if (q) {
@@ -907,6 +930,27 @@ export const SessionRsvpView: React.FC<SessionRsvpViewProps> = ({
             <Badge tone={statusMeta[status].tone} icon={statusMeta[status].icon} className="shrink-0">{statusMeta[status].label}</Badge>
           )}
         </button>
+        {statusTab ? (() => {
+          const on = status === statusTab;
+          const label = statusMeta[statusTab].label;
+          const onClass = statusTab === 'attending' ? 'bg-emerald-600 border-emerald-600' : statusTab === 'partial' ? 'bg-amber-500 border-amber-500' : 'bg-red-600 border-red-600';
+          return (
+            <button
+              type="button"
+              onClick={() => toggleStatusForPlayer(player, statusTab)}
+              aria-pressed={on}
+              aria-label={on ? `${player.name} har svarat ${label} – tryck för att ta bort svaret` : `Svara ${label} åt ${player.name}`}
+              title={on ? `Svarat ${label} – tryck för att ta bort svaret` : `Svara ${label} åt spelaren`}
+              className={`w-11 h-11 shrink-0 rounded-xl border inline-flex items-center justify-center transition-all active:scale-95 cursor-pointer ${
+                on
+                  ? `${onClass} text-white`
+                  : 'bg-white dark:bg-zinc-900 border-zinc-200 dark:border-zinc-700 text-zinc-300 dark:text-zinc-600 hover:text-zinc-600 hover:border-zinc-400'
+              }`}
+            >
+              {statusTab === 'declined' ? <X size={20} strokeWidth={3} /> : statusTab === 'partial' ? <HelpCircle size={20} strokeWidth={2.5} /> : <Check size={20} strokeWidth={3} />}
+            </button>
+          );
+        })() : (
         <button
           type="button"
           onClick={() => handleTogglePresence(player.id)}
@@ -921,6 +965,7 @@ export const SessionRsvpView: React.FC<SessionRsvpViewProps> = ({
         >
           <Check size={20} strokeWidth={3} />
         </button>
+        )}
       </li>
     );
   };
@@ -1005,12 +1050,33 @@ export const SessionRsvpView: React.FC<SessionRsvpViewProps> = ({
             )
           ) : filteredMembers.length === 0 ? (
             <Card><EmptyState title="Ingen matchar" text="Prova ett annat filter eller sökord." className="py-6" /></Card>
+          ) : statusTab ? (
+            [
+              { key: 'first', title: statusMeta[statusTab].label, members: filteredMembers.filter(p => statusTabFirst.has(p.id)) },
+              { key: 'rest', title: 'Övriga i laget', members: filteredMembers.filter(p => !statusTabFirst.has(p.id)) },
+            ].filter(g => g.members.length > 0).map(g => (
+              <div key={g.key}>
+                <h3 className="flex items-center gap-2 px-1 mb-1.5 text-sm font-bold text-zinc-500 dark:text-zinc-400">
+                  {g.key === 'first'
+                    ? <Badge tone={statusMeta[statusTab].tone} icon={statusMeta[statusTab].icon}>{g.title}</Badge>
+                    : <span>{g.title}</span>}
+                  <span className="tabular-nums">{g.members.length}</span>
+                </h3>
+                <Card padded={false}>
+                  <ul className="divide-y divide-zinc-100 dark:divide-zinc-800">{g.members.map(p => renderRow(p, true))}</ul>
+                </Card>
+              </div>
+            ))
           ) : (
             <Card padded={false}>
               <ul className="divide-y divide-zinc-100 dark:divide-zinc-800">{filteredMembers.map(p => renderRow(p, true))}</ul>
             </Card>
           )}
-          <p className="px-1 text-xs text-zinc-500 dark:text-zinc-400">Tryck på en person för att ändra svaret. Bocken till höger markerar närvaro.</p>
+          <p className="px-1 text-xs text-zinc-500 dark:text-zinc-400">
+            {statusTab
+              ? `Tryck på en person för att ändra svaret. Knappen till höger sparar svaret ${statusMeta[statusTab].label} åt spelaren.`
+              : 'Tryck på en person för att ändra svaret. Bocken till höger markerar närvaro.'}
+          </p>
         </section>
 
         {/* Kallelse, eget svar och verktyg */}

@@ -318,7 +318,8 @@ npm run set-password -- e@post.se            # lokalt konto/lösenord
 - Spelare ser inte Övningsbanken eller tävlingsknapparna i poänglistan (`canManage`).
 - Passvyn (`SessionEditor` + `SessionRsvpView`): tränaren har flikarna Planera / Träna / Närvaro,
   momenten visas som tidslinje och svaren grupperade per status (tryck på en person för att ändra
-  svar; bocken markerar närvaro). Spelaren landar på Kallelse (vad, när, var, svara Kommer/Delvis/
+  svar; bocken markerar närvaro). Flikarna Kommer/Delvis/Kan inte visar hela truppen (de med svaret först,
+  ordningen låst medan fliken är öppen) och knappen till höger sparar svaret åt spelaren (`toggleStatusForPlayer`). Spelaren landar på Kallelse (vad, när, var, svara Kommer/Delvis/
   Kan inte med kommentar) och ser Upplägg i läsläge, eller inte alls om `hideContentForPlayers`.
   Två kolumner från 768 px. "Skapa kallelse" sätter sista svarsdag och meddelande (spelarna kan svara
   ändå); inga mejl skickas, men tränaren kan välja att skicka en notis (se Notiser).
