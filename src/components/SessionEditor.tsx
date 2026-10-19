@@ -1399,7 +1399,7 @@ export default function SessionEditor({
               type="text"
               value={session.location || ''}
               onChange={(e) => onUpdate({ ...session, location: e.target.value || undefined, updatedAt: Date.now() })}
-              placeholder="T.ex. Kungsgårdens IP, plan 2"
+              placeholder="T.ex. Sportvallen, plan 2"
               className={fieldClass}
             />
           </div>

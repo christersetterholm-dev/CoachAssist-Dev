@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { Calendar, Trophy, Clock, Trash2, Copy, History, ListTodo, FileText, X, ArrowUpDown, ChevronLeft, ChevronRight, RefreshCw, EyeOff, Eye, CalendarDays, MapPin, CheckCircle, HelpCircle, ChevronDown, ChevronUp, ArrowRight, Edit, Library, Check } from 'lucide-react';
+import { Calendar, Trophy, Clock, Trash2, Copy, History, ListTodo, FileText, X, ArrowUpDown, ChevronLeft, ChevronRight, RefreshCw, EyeOff, Eye, CalendarDays, MapPin, CheckCircle, HelpCircle, ChevronDown, ChevronUp, ArrowRight, Edit, Library } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Exercise, TrainingSession, TrainingSettings, BankExercise } from '../types';
 import { syncTeamCalendar } from '../utils/calendarSync';
@@ -8,7 +8,8 @@ import GameList from './GameList';
 import TeamOverviewModal from './TeamOverviewModal';
 import MobileCalendarView from './MobileCalendarView';
 import ExerciseBankView from './ExerciseBankView';
-import { SegmentedTabs, TextArea, TextInput } from './ui';
+import { SegmentedTabs, Sheet, TextArea, TextInput } from './ui';
+import { CalendarFeedLink } from './CalendarFeedLink';
 
 interface TrainingManagerProps {
   exercises: Exercise[];
@@ -574,13 +575,13 @@ export default function TrainingManager({
   onCalendarMonthChange
 }: TrainingManagerProps) {
   const [sessionToDelete, setSessionToDelete] = useState<string | null>(null);
-  const [copiedOutboundCalFeed, setCopiedOutboundCalFeed] = useState(false);
-  const [sessionToPermanentDelete, setSessionToPermanentDelete] = useState<string | null>(null);
+    const [sessionToPermanentDelete, setSessionToPermanentDelete] = useState<string | null>(null);
   const [showClearTrashConfirm, setShowClearTrashConfirm] = useState(false);
   const [selectedExerciseForTeams, setSelectedExerciseForTeams] = useState<string | null>(null);
   
   const [localShowSettings, setLocalShowSettings] = useState(false);
   const showSettings = openSettings !== undefined ? openSettings : localShowSettings;
+  const [showSubscribe, setShowSubscribe] = useState(false);
   const setShowSettings = (val: boolean) => {
     if (openSettings !== undefined) {
       if (!val && onCloseSettings) onCloseSettings();
@@ -1074,6 +1075,7 @@ export default function TrainingManager({
           lastSyncedAt={settings?.lastSyncedAt}
           icsUrl={effectiveIcsUrl}
           onOpenSettings={() => setShowSettings(true)}
+          onOpenSubscribe={activeClubId ? () => setShowSubscribe(true) : undefined}
           currentMonth={calendarMonth}
           onMonthChange={onCalendarMonthChange}
         />
@@ -1222,6 +1224,26 @@ export default function TrainingManager({
           })()}
         </div>
       )}
+
+      {/* Prenumerera på lagets kalender (knappen i kalenderns verktygsrad) */}
+      <Sheet open={showSubscribe} onClose={() => setShowSubscribe(false)} title="Prenumerera på kalendern">
+        <div className="px-2 pb-2 space-y-3">
+          <p className="text-sm text-zinc-600 dark:text-zinc-400">
+            Få lagets träningar och matcher i telefonens kalender. Ändringar dyker upp automatiskt.
+          </p>
+          <CalendarFeedLink
+            clubId={activeClubId}
+            teamId={activeTeamId || 'club_global'}
+            title={activeClubInfo ? `${activeClubInfo.clubName} • ${activeClubInfo.teamName}` : undefined}
+            subtitle="Tryck på knappen för din kalender, eller kopiera länken och lägg till den som prenumeration."
+            showAddButtons
+          />
+          <ul className="text-xs text-zinc-500 dark:text-zinc-400 space-y-1.5 px-1">
+            <li><strong className="font-semibold text-zinc-700 dark:text-zinc-300">Android:</strong> lägg till i Google Kalender, så syns den i telefonen. Bocka i kalendern under Google Kalenders inställningar om den inte syns.</li>
+            <li><strong className="font-semibold text-zinc-700 dark:text-zinc-300">Outlook:</strong> Lägg till kalender › Prenumerera från webben › klistra in länken.</li>
+          </ul>
+        </div>
+      </Sheet>
 
       {/* Settings Modal */}
       <AnimatePresence>
@@ -1383,52 +1405,14 @@ export default function TrainingManager({
                 <div className="pt-4 border-t border-zinc-100 dark:border-zinc-800/60">
                   <h4 className="text-xs font-black text-zinc-900 dark:text-white uppercase tracking-wider mb-2">Kalenderintegration & Synk</h4>
                   
-                  {/* Lagets unika iCal prenumerationslänk för spelare och ledare */}
-                  {(() => {
-                    const cId = activeClubId;
-                    const tId = activeTeamId || 'club_global';
-                    const outboundUrl = cId 
-                      ? `${window.location.origin}/api/calendar/${cId}/${tId}/events.ics`
-                      : `${window.location.origin}/api/calendar/events.ics`;
-
-                    return (
-                      <div className="p-3 bg-indigo-50/70 dark:bg-indigo-950/30 rounded-xl border border-indigo-100 dark:border-indigo-900/40 mb-4">
-                        <div className="flex items-center justify-between gap-2 mb-1 min-w-0">
-                          <div className="flex items-center gap-1.5 min-w-0 shrink">
-                            <Calendar size={13} className="text-indigo-600 dark:text-indigo-400 shrink-0" />
-                            <span className="text-[10px] font-black uppercase text-indigo-700 dark:text-indigo-300 tracking-wider truncate">
-                              Lagets Prenumerationslänk (iCal)
-                            </span>
-                          </div>
-                          {activeClubInfo && (
-                            <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-md bg-indigo-100 dark:bg-indigo-900/50 text-indigo-800 dark:text-indigo-200 truncate shrink-0 max-w-[130px]">
-                              {activeClubInfo.clubName} • {activeClubInfo.teamName}
-                            </span>
-                          )}
-                        </div>
-                        <p className="text-[10px] text-zinc-500 dark:text-zinc-400 mb-2">
-                          Spelare och ledare kan klistra in denna i sin mobil/Google/Apple Kalender för att få alla lagets träningar och matcher automatiskt.
-                        </p>
-                        <div className="flex items-center justify-between gap-2 bg-white dark:bg-zinc-900 px-2.5 py-1.5 rounded-lg border border-indigo-100 dark:border-indigo-900/30 min-w-0">
-                          <span className="text-[11px] font-mono font-bold text-zinc-800 dark:text-zinc-200 truncate select-all min-w-0 flex-1">
-                            {outboundUrl}
-                          </span>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              navigator.clipboard.writeText(outboundUrl);
-                              setCopiedOutboundCalFeed(true);
-                              setTimeout(() => setCopiedOutboundCalFeed(false), 2000);
-                            }}
-                            className="px-2 py-1 bg-indigo-600 hover:bg-indigo-700 text-white rounded-md text-[10px] font-bold transition-all shrink-0 cursor-pointer flex items-center gap-1"
-                          >
-                            {copiedOutboundCalFeed ? <Check size={12} /> : <Copy size={12} />}
-                            <span>{copiedOutboundCalFeed ? 'Kopierad' : 'Kopiera'}</span>
-                          </button>
-                        </div>
-                      </div>
-                    );
-                  })()}
+                  {/* Lagets prenumerationslänk (iCal) med hemlig nyckel */}
+                  <div className="mb-4">
+                    <CalendarFeedLink
+                      clubId={activeClubId}
+                      teamId={activeTeamId || 'club_global'}
+                      title={activeClubInfo ? `Prenumerera: ${activeClubInfo.clubName} • ${activeClubInfo.teamName}` : undefined}
+                    />
+                  </div>
 
                   <div className="p-2.5 mb-3 bg-zinc-50 dark:bg-zinc-900 rounded-xl border border-zinc-200/80 dark:border-zinc-800 text-[11px] text-zinc-600 dark:text-zinc-400 font-medium leading-relaxed">
                     💡 <strong>Importera matcher/pass:</strong> Kalendersynkronisering från externa tjänster (Laget.se / SportAdmin / Svenskalag) sparas centralt för laget under <strong className="font-bold">Admingränssnittet &gt; Kalendersynkronisering</strong>.
@@ -2026,7 +2010,7 @@ export default function TrainingManager({
                     type="text"
                     value={seriesLocation}
                     onChange={(e) => setSeriesLocation(e.target.value)}
-                    placeholder="T.ex. Kungsgårdens IP, plan 2"
+                    placeholder="T.ex. Sportvallen, plan 2"
                     className="w-full bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-xl px-3 py-2.5 text-sm font-bold text-zinc-900 dark:text-white focus:ring-2 focus:ring-indigo-500 outline-none"
                   />
                 </div>

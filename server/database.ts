@@ -346,6 +346,16 @@ export const SCHEMA = `
     fail_count INTEGER NOT NULL DEFAULT 0
   );
   CREATE INDEX IF NOT EXISTS idx_push_user ON push_subscriptions(user_id);
+
+  -- Hemlig nyckel i lagets kalenderprenumeration (se server/calendarFeed.ts): en rad per lag.
+  CREATE TABLE IF NOT EXISTS calendar_feed_keys (
+    club_id TEXT NOT NULL,
+    team_id TEXT NOT NULL,
+    token TEXT NOT NULL UNIQUE,
+    created_by TEXT,
+    created_at INTEGER NOT NULL,
+    PRIMARY KEY (club_id, team_id)
+  );
 `;
 
 const USER_COLUMNS = [

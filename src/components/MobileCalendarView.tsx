@@ -5,7 +5,7 @@ import { TrainingSession, SquadPlayer } from '../types';
 import { categorizeSession } from '../utils/sessionCategory';
 import { Button } from './ui';
 import MonthGrid from './calendar/MonthGrid';
-import { CalendarDays, List as ListIcon, Rows3 } from 'lucide-react';
+import { CalendarDays, CalendarPlus, List as ListIcon, Rows3 } from 'lucide-react';
 
 const SWEDISH_WEEKDAYS = ['Sön', 'Mån', 'Tis', 'Ons', 'Tor', 'Fre', 'Lör'];
 
@@ -84,6 +84,7 @@ interface MobileCalendarViewProps {
   lastSyncedAt?: number;
   icsUrl?: string;
   onOpenSettings?: () => void;
+  onOpenSubscribe?: () => void;
   currentMonth?: Date;
   onMonthChange?: (month: Date) => void;
 }
@@ -107,6 +108,7 @@ export default function MobileCalendarView({
   lastSyncedAt,
   icsUrl: _icsUrl,
   onOpenSettings: _onOpenSettings,
+  onOpenSubscribe,
   currentMonth: propCurrentMonth,
   onMonthChange
 }: MobileCalendarViewProps) {
@@ -506,6 +508,20 @@ export default function MobileCalendarView({
                   )}
                 </AnimatePresence>
               </div>
+            )}
+
+            {/* Prenumerera på lagets kalender (för alla i laget) */}
+            {onOpenSubscribe && (
+              <button
+                type="button"
+                onClick={onOpenSubscribe}
+                className="h-10 min-w-10 px-2.5 sm:px-3 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-zinc-600 dark:text-zinc-300 hover:text-indigo-600 dark:hover:text-indigo-400 inline-flex items-center justify-center gap-1.5 text-sm font-semibold transition-all cursor-pointer active:scale-95"
+                title="Prenumerera på lagets kalender i mobilen"
+                aria-label="Prenumerera på lagets kalender"
+              >
+                <CalendarPlus size={18} />
+                <span className="hidden lg:inline">Prenumerera</span>
+              </button>
             )}
 
             {/* Search Toggle Button */}

@@ -6,6 +6,7 @@ import PwaIconGenerator from './PwaIconGenerator';
 import ImageCropper from './ImageCropper';
 import { Badge, Button, Sheet, TextArea, TextInput } from './ui';
 import { CachedImage } from './CachedImage';
+import { CalendarFeedLink } from './CalendarFeedLink';
 import { syncTeamCalendar } from '../utils/calendarSync';
 import { deduplicateClubMembers, deduplicateSquad } from '../lib/clubUtils';
 import * as XLSX from 'xlsx';
@@ -146,7 +147,6 @@ export default function ClubAdminDashboard({
   const [calendarSyncMsg, setCalendarSyncMsg] = useState<{ type: 'success' | 'error' | 'info'; text: string } | null>(null);
 
   const [calSyncSaved, setCalSyncSaved] = useState(false);
-  const [copiedCalFeed, setCopiedCalFeed] = useState(false);
 
   // Import Modal State
   const [showImportModal, setShowImportModal] = useState(false);
@@ -3993,47 +3993,13 @@ export default function ClubAdminDashboard({
               Prenumerera på lagets träningar och matcher direkt i din mobil, Google Kalender, Outlook eller Apple Kalender.
             </p>
 
-            {(() => {
-              const calFeedClubId = selectedClub?.id || activeClubId;
-              const calFeedTeamId = activeTeamId || 'club_global';
-              const calFeedUrl = calFeedClubId
-                ? `${window.location.origin}/api/calendar/${calFeedClubId}/${calFeedTeamId}/events.ics`
-                : `${window.location.origin}/api/calendar/events.ics`;
-
-              return (
-                <div className="p-4 bg-indigo-50/50 dark:bg-indigo-950/20 rounded-2xl border border-indigo-100 dark:border-indigo-900/30 mb-6">
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <span className="text-xs font-bold uppercase text-indigo-500 tracking-wider">
-                          Unik iCal Prenumerationslänk
-                        </span>
-                        {selectedClub && (
-                          <span className="px-2 py-0.5 rounded-md bg-indigo-100 dark:bg-indigo-900/50 text-indigo-700 dark:text-indigo-300 text-xs font-semibold">
-                            {selectedClub.name}
-                          </span>
-                        )}
-                      </div>
-                      <div className="text-xs font-mono font-bold text-zinc-800 dark:text-zinc-200 mt-1 break-all select-all">
-                        {calFeedUrl}
-                      </div>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        navigator.clipboard.writeText(calFeedUrl);
-                        setCopiedCalFeed(true);
-                        setTimeout(() => setCopiedCalFeed(false), 2500);
-                      }}
-                      className="inline-flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold px-4 py-2.5 rounded-xl text-xs transition-all shrink-0 cursor-pointer active:scale-95 shadow-sm"
-                    >
-                      {copiedCalFeed ? <Check size={14} /> : <Copy size={14} />}
-                      <span>{copiedCalFeed ? 'Kopierad!' : 'Kopiera Länk'}</span>
-                    </button>
-                  </div>
-                </div>
-              );
-            })()}
+            <div className="mb-6">
+              <CalendarFeedLink
+                clubId={selectedClub?.id || activeClubId}
+                teamId={activeTeamId || 'club_global'}
+                title={selectedClub ? `Prenumerationslänk (iCal) • ${selectedClub.name}` : undefined}
+              />
+            </div>
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <div className="p-4 bg-zinc-50 dark:bg-zinc-950 rounded-2xl border border-zinc-100 dark:border-zinc-800">

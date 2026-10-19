@@ -290,6 +290,13 @@ npm run set-password -- e@post.se            # lokalt konto/lösenord
   vecka" (veckodagar från–till, lägger till datum i kalendern) och "Skapa kallelse direkt" (sätter
   `rsvpConfig` i varje pass; sista svarsdag räknas som X dagar före passet). Samling och information
   kan ändras per pass i passets detaljark och visas i kallelsen, kalendern och på Översikt.
+- iCal-prenumeration: `GET /api/calendar/<förening>/<lag>/<nyckel>/events.ics` (`handleIcsFeed` i server.ts). Nyckeln är
+  slumpad per lag (tabell `calendar_feed_keys`, `server/calendarFeed.ts`); fel nyckel ger 404. Någon i laget hämtar länken via
+  `GET /api/calendar-feed` (skapar nyckeln första gången), tränare byter den med `POST /api/calendar-feed/rotate` ("Skapa ny länk",
+  gamla slutar fungera). Rutan `CalendarFeedLink` visas i arket bakom knappen Prenumerera i kalenderns verktygsrad (för alla; med
+  direktknappar webcal: för Apple och Google Kalender), under kalenderns inställningar (kugghjulet) och i Administration.
+  Alla pass utom ignorerade; DESCRIPTION = samling, information, anteckningar och moment (inte moment om `hideContentForPlayers`).
+  Gamla adresser utan nyckel (`/api/calendar/events.ics`, `/<förening>/<lag>/events.ics`) är borttagna och ger 404.
 - Huvudadministratören räknas som tränare i kalendern och passvyerna (`effectiveUserRoles` med
   `root_admin` i App.tsx).
 - Spelare ser inte Övningsbanken eller tävlingsknapparna i poänglistan (`canManage`).

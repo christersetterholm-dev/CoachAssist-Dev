@@ -385,3 +385,55 @@ test('inlägg: tränare skriver, laget läser, reagerar och kommenterar, andra n
   assert.equal((await s.api('GET', `/api/posts/${postId}`, { token: coachToken })).status, 404);
   assert.deepEqual((await list(playerToken)).json.posts.map((p) => p.title), ['Viktigt']);
 });
+
+test('kalenderflödet (iCal) visar samling, plats och information men inte dolt upplägg', async () => {
+  const date = new Date(2026, 10, 2, 12).getTime();
+  await post('clubs/klubb1/teams/lag1/data/sessions', { sessions: [
+    { id: 'ics1', title: 'Träning', date, startTime: '18:00', endTime: '19:30', gatheringTime: '17:45',
+      location: 'Sportvallen', description: 'Ta med vattenflaska', moments: [{ id: 'm1', name: 'Hemligt moment' }],
+      hideContentForPlayers: true },
+  ] }, coachToken);
+  const feed = await s.api('GET', '/api/calendar-feed?clubId=klubb1&teamId=lag1', { token: playerToken });
+  assert.equal(feed.status, 200);
+  const r = await s.api('GET', feed.json.path);
+  assert.equal(r.status, 200);
+  assert.match(r.text, /DTSTART;TZID=Europe\/Stockholm:20261102T180000/);
+  assert.match(r.text, /LOCATION:Sportvallen/);
+  assert.match(r.text, /DESCRIPTION:Samling 17:45\\nTa med vattenflaska/);
+  assert.doesNotMatch(r.text, /Hemligt moment/);
+});
+
+test('kalenderflödet kräver lagets hemliga nyckel, och tränaren kan byta den', async () => {
+  // Spelare och tränare i laget får samma länk; bara tränaren får byta
+  const p = await s.api('GET', '/api/calendar-feed?clubId=klubb1&teamId=lag1', { token: playerToken });
+  const c = await s.api('GET', '/api/calendar-feed?clubId=klubb1&teamId=lag1', { token: coachToken });
+  assert.equal(p.status, 200);
+  assert.equal(p.json.path, c.json.path);
+  assert.equal(p.json.canRotate, false);
+  assert.equal(c.json.canRotate, true);
+  const oldPath = c.json.path;
+  assert.match(oldPath, /^\/api\/calendar\/klubb1\/lag1\/[A-Za-z0-9_-]{20,}\/events\.ics$/);
+  assert.equal((await s.api('GET', oldPath)).status, 200);
+
+  // Fel nyckel, nyckel från fel lag och den allmänna adressen utan id ger 404
+  assert.equal((await s.api('GET', '/api/calendar/klubb1/lag1/fel-nyckel/events.ics')).status, 404);
+  const key = oldPath.split('/')[5];
+  assert.equal((await s.api('GET', `/api/calendar/klubb2/lagX/${key}/events.ics`)).status, 404);
+  assert.equal((await s.api('GET', '/api/calendar/events.ics')).status, 404);
+  assert.equal((await s.api('GET', '/api/calendar/klubb1/lag1/events.ics')).status, 404, 'gamla adressen utan nyckel');
+
+  // Icke-medlem och utloggad får ingen nyckel; spelare och tränare i annat lag får inte byta
+  assert.equal((await s.api('GET', '/api/calendar-feed?clubId=klubb1&teamId=lag1', { token: otherToken })).status, 403);
+  assert.equal((await s.api('GET', '/api/calendar-feed?clubId=klubb1&teamId=lag1')).status, 401);
+  assert.equal((await s.api('POST', '/api/calendar-feed/rotate', { token: playerToken, body: { clubId: 'klubb1', teamId: 'lag1' } })).status, 403);
+  assert.equal((await s.api('POST', '/api/calendar-feed/rotate', { token: otherToken, body: { clubId: 'klubb1', teamId: 'lag1' } })).status, 403);
+
+  // Ny nyckel: den gamla länken slutar fungera
+  const rot = await s.api('POST', '/api/calendar-feed/rotate', { token: coachToken, body: { clubId: 'klubb1', teamId: 'lag1' } });
+  assert.equal(rot.status, 200);
+  assert.notEqual(rot.json.path, oldPath);
+  assert.equal((await s.api('GET', oldPath)).status, 404);
+  assert.equal((await s.api('GET', rot.json.path)).status, 200);
+  const again = await s.api('GET', '/api/calendar-feed?clubId=klubb1&teamId=lag1', { token: playerToken });
+  assert.equal(again.json.path, rot.json.path);
+});

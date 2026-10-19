@@ -21,6 +21,7 @@ import * as tacticalBoards from './server/tacticalBoards.ts';
 import * as posts from './server/posts.ts';
 import { registerChatRoutes, teamNames } from './server/chat.ts';
 import * as push from './server/push.ts';
+import * as calendarFeed from './server/calendarFeed.ts';
 
 const customRequire = typeof require !== 'undefined' ? require : createRequire(import.meta.url);
 
@@ -3684,19 +3685,42 @@ async function startServer() {
     }
   });
 
-  // Calendar ICS Feed endpoint for subscribing to a specific team's calendar
+  // Lagets kalenderprenumeration. Länken (med hemlig nyckel) hämtas av någon i laget;
+  // tränare kan byta nyckel så att den gamla länken slutar fungera.
+  const calendarFeedAccess = async (req: express.Request, clubId: unknown, teamId: unknown) => {
+    if (typeof clubId !== 'string' || typeof teamId !== 'string' || !clubId || !teamId) return null;
+    const user = (req as any).user;
+    const access = registry.getClubAccess(db, user, clubId, await verifyIsRootAdmin(user));
+    return {
+      user, clubId, teamId,
+      canRead: registry.canReadClubDoc(access, teamId, 'sessions'),
+      isCoach: registry.canWriteClubDoc(access, teamId, 'sessions'),
+    };
+  };
+
+  app.get('/api/calendar-feed', requireAuthUser, async (req, res) => {
+    const a = await calendarFeedAccess(req, req.query.clubId, req.query.teamId);
+    if (!a) return res.status(400).json({ error: 'clubId och teamId krävs.' });
+    if (!a.canRead) return res.status(403).json({ error: 'Du har inte behörighet till det här laget.' });
+    const token = calendarFeed.getOrCreateKey(db, a.clubId, a.teamId, a.user.id);
+    res.json({ path: calendarFeed.feedPath(a.clubId, a.teamId, token), canRotate: a.isCoach });
+  });
+
+  app.post('/api/calendar-feed/rotate', requireAuthUser, async (req, res) => {
+    const a = await calendarFeedAccess(req, req.body?.clubId, req.body?.teamId);
+    if (!a) return res.status(400).json({ error: 'clubId och teamId krävs.' });
+    if (!a.isCoach) return res.status(403).json({ error: 'Bara tränare kan skapa en ny länk.' });
+    const token = calendarFeed.rotateKey(db, a.clubId, a.teamId, a.user.id);
+    res.json({ path: calendarFeed.feedPath(a.clubId, a.teamId, token), canRotate: true });
+  });
+
+  // Själva flödet: /api/calendar/<förening>/<lag>/<nyckel>/events.ics (fel nyckel = 404).
   const handleIcsFeed = async (req: express.Request, res: express.Response) => {
     try {
-      let clubId = (req.params.clubId || req.query.clubId || '').toString().trim();
-      let teamId = (req.params.teamId || req.query.teamId || '').toString().trim();
-
-      // If no clubId specified in generic feed URL, default to primary club & team if available
-      if (!clubId) {
-        clubId = 'club_xckk55vw2';
-        teamId = teamId || 'team_h4nibr38i';
-      }
-      if (!teamId) {
-        teamId = 'club_global';
+      const clubId = String(req.params.clubId || '').trim();
+      const teamId = String(req.params.teamId || '').trim();
+      if (!clubId || !teamId || !calendarFeed.isValidKey(db, clubId, teamId, String(req.params.key || ''))) {
+        return res.status(404).send('Not found');
       }
 
       // Fetch sessions for this club and team
@@ -3837,9 +3861,11 @@ async function startServer() {
           icsLines.push(`LOCATION:${escapeIcal(s.location)}`);
         }
         const descParts = [];
-        if (s.notes) descParts.push(s.notes);
+        if (typeof s.gatheringTime === 'string' && /^\d{1,2}:\d{2}$/.test(s.gatheringTime)) descParts.push(`Samling ${s.gatheringTime}`);
         if (s.description) descParts.push(s.description);
-        if (s.moments && Array.isArray(s.moments) && s.moments.length > 0) {
+        if (s.notes) descParts.push(s.notes);
+        // Flödet är för spelarna: dolt upplägg skickas inte med
+        if (!s.hideContentForPlayers && s.moments && Array.isArray(s.moments) && s.moments.length > 0) {
           descParts.push('Moment: ' + s.moments.map((m: any) => m.name || m.title).filter(Boolean).join(', '));
         }
         if (descParts.length > 0) {
@@ -3863,9 +3889,10 @@ async function startServer() {
     }
   };
 
-  app.get('/api/calendar/events.ics', handleIcsFeed);
-  app.get('/api/calendar/:clubId/:teamId/events.ics', handleIcsFeed);
-  app.get('/api/calendar/:clubId/events.ics', handleIcsFeed);
+  app.get('/api/calendar/:clubId/:teamId/:key/events.ics', handleIcsFeed);
+  // Gamla adresser utan nyckel finns inte längre: svara 404 i stället för att appens sida skickas.
+  app.get(['/api/calendar/events.ics', '/api/calendar/:clubId/events.ics', '/api/calendar/:clubId/:teamId/events.ics'],
+    (_req, res) => { res.status(404).send('Not found'); });
 
   // --- VITE AND SPA SERVING ---
 
