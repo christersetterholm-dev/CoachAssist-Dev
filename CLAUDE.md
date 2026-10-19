@@ -245,6 +245,13 @@ npm run set-password -- e@post.se            # lokalt konto/lösenord
   att sådan text ändå når onChange. Utan `value` är de helt ostyrda (ref + defaultValue, läs vid sparning
   – så gör Inlägg). Sök på "DICTATION". LineupBuilder har kvar vanliga rutor (inte genomgången än).
   Stil: meningsversaler (inte VERSALER), `font-semibold`/`font-bold`, tryckytor minst 40 px.
+- Kalendern (`MobileCalendarView.tsx`) har tre vyer, valet sparas i webbläsaren (`calendar_view_mode`):
+  **Agenda** (standard, en rad per dag i månaden; raden "Inga fler aktiviteter" när månaden är slut),
+  **Månad** (`src/components/calendar/MonthGrid.tsx`: rutnät mån–sön med veckonummer, prick +
+  klockslag + namn per aktivitet, röda dagar från `src/utils/swedishHolidays.ts`, panel för vald dag
+  med "Ny aktivitet den här dagen" – `onNewSession(date)`) och **Lista** (kort, Kommande/Historik).
+- Huvudadministratören räknas som tränare i kalendern och passvyerna (`effectiveUserRoles` med
+  `root_admin` i App.tsx).
 - Spelare ser inte Övningsbanken eller tävlingsknapparna i poänglistan (`canManage`).
 - Passvyn (`SessionEditor` + `SessionRsvpView`): tränaren har flikarna Planera / Träna / Närvaro,
   momenten visas som tidslinje och svaren grupperade per status (tryck på en person för att ändra
