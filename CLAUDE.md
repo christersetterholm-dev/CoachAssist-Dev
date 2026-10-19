@@ -208,6 +208,12 @@ npm run set-password -- e@post.se            # lokalt konto/lösenord
   `gammalt/` = flyttade rester från AI Studio-tiden (kan raderas).
 - Ikonfilerna i approten skrivs av appens PWA-ikonfunktion och ska vara kvar.
 - `deploy.sh` vägrar köra om servern har Node äldre än 22.13.
+- **Domänen truppio.se** (registrerad hos Loopia, DNS i Loopias DNS-editor: `@`, `www` och `app` → A
+  46.246.119.18). I cPanel är `app.truppio.se` upplagd med samma mapp som `coachassist.setterholm.se`,
+  alltså samma app och databas på båda adresserna (okt 2026; den gamla adressen ska vara kvar tills vidare).
+  `truppio.se` har egen mapp `~/truppio.se` med informationssidan från `site/` i repot
+  (`npm run deploy-site`, laddar bara upp `site/`). Inloggning, notiser och hemskärmsikon gäller per
+  adress, så den som byter adress måste logga in och slå på notiser igen.
 
 ## Gränssnittet (ombyggt okt 2026, gren `ux-ombyggnad`)
 
