@@ -3486,6 +3486,11 @@ export default function LineupBuilder({
     const shownOpponents: (typeof opponents[number] & { opacity?: number })[] = anim ? (anim.opponents as any) : opponents;
     const shownFootballs: (BoardToken & { opacity?: number })[] = anim ? anim.footballs : footballs;
     const shownStarters: (LineupPlayer & { opacity?: number })[] = anim ? (anim.players as any) : starters;
+    // Planens bredd i vanliga vyn. Rubrikraden (lagnamn, match, logga) får samma bredd och zoom,
+    // så att den ligger precis ovanför planen även när planen är smalare än kortet.
+    const pitchWidthCss = orientation === 'landscape'
+      ? `min(100%, 1024px, calc((100vh - 160px) * ${R}))`
+      : `min(100%, 680px, calc((100dvh - 200px) * ${invR}))`;
 
     return (
       <div 
@@ -3502,7 +3507,10 @@ export default function LineupBuilder({
       >
         {/* Export Header - Title & Team Logo */}
         {(!isFieldMaximized) && (
-          <div className="flex items-center justify-between mb-1 sm:mb-2 px-4 sm:px-2 pt-2 sm:pt-0">
+          <div
+            className="flex items-center justify-between mb-1 sm:mb-2 px-4 sm:px-1 pt-2 sm:pt-0 mx-auto"
+            style={isSimplified ? undefined : { width: `calc(${pitchWidthCss} * ${previewZoom})`, maxWidth: '100%' }}
+          >
             <div 
               className={`flex flex-col ${isSimplified ? '' : 'cursor-pointer group/title'}`}
               onClick={isSimplified ? undefined : () => {
@@ -3718,9 +3726,7 @@ export default function LineupBuilder({
                 ? (orientation === 'landscape' ? `min(calc(98vw - var(--board-rx, 0px)), calc((100vh - 24px - var(--board-ry, 0px)) * ${R}))` : `min(calc(98vw - var(--board-rx, 0px)), calc((100vh - 24px - var(--board-ry, 0px)) * ${invR}))`)
                 : isSimplified
                   ? '100%' // bildläget: fast storlek som sedan skalas till skärmen
-                  : (orientation === 'landscape'
-                    ? `min(100%, 1024px, calc((100vh - 160px) * ${R}))`
-                    : `min(100%, 680px, calc((100dvh - 200px) * ${invR}))`),
+                  : pitchWidthCss,
               height: isFieldMaximized
                 ? (orientation === 'landscape' ? `min(calc((98vw - var(--board-rx, 0px)) / ${R}), calc(100vh - 24px - var(--board-ry, 0px)))` : `min(calc((98vw - var(--board-rx, 0px)) / ${invR}), calc(100vh - 24px - var(--board-ry, 0px)))`)
                 : (orientation === 'landscape' 
