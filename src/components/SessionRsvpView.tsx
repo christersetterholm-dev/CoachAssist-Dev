@@ -23,6 +23,7 @@ import {
   MapPin,
   CalendarDays,
   Megaphone,
+  Info,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { TrainingSession, SquadPlayer, RsvpStatus, PlayerRsvp, SessionRsvpConfig, UserProfile } from '../types';
@@ -792,6 +793,9 @@ export const SessionRsvpView: React.FC<SessionRsvpViewProps> = ({
                 <dd className="min-w-0">
                   <span className="block text-base font-semibold text-zinc-900 dark:text-white">{dateLabel.charAt(0).toUpperCase() + dateLabel.slice(1)}</span>
                   <span className="block text-sm text-zinc-500 dark:text-zinc-400 tabular-nums">{session.startTime}{endTime ? `–${endTime}` : ''}</span>
+                  {session.gatheringTime && (
+                    <span className="block text-sm font-semibold text-indigo-600 dark:text-indigo-300 tabular-nums">Samling {session.gatheringTime}</span>
+                  )}
                 </dd>
               </div>
               <div className="flex gap-3">
@@ -803,6 +807,13 @@ export const SessionRsvpView: React.FC<SessionRsvpViewProps> = ({
                   </span>
                 </dd>
               </div>
+              {session.description?.trim() && (
+                <div className="flex gap-3">
+                  <dt className="sr-only">Information</dt>
+                  <span className="w-10 h-10 shrink-0 rounded-xl bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300 flex items-center justify-center"><Info size={18} /></span>
+                  <dd className="min-w-0 self-center text-sm text-zinc-700 dark:text-zinc-200 whitespace-pre-wrap break-words">{session.description.trim()}</dd>
+                </div>
+              )}
               {session.rsvpConfig?.notes && (
                 <div className="flex gap-3">
                   <dt className="sr-only">Meddelande</dt>

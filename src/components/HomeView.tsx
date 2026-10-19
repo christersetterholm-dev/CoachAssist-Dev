@@ -258,6 +258,7 @@ export default function HomeView(props: HomeViewProps) {
                         <h3 className="mt-1.5 text-lg font-bold leading-snug">{next.title || (kindOf(next) === 'match' ? 'Match' : 'Träning')}</h3>
                         <div className="mt-1.5 flex flex-wrap gap-x-4 gap-y-1 text-sm text-zinc-500 dark:text-zinc-400">
                           <span className="inline-flex items-center gap-1.5"><Clock size={15} />{next.startTime}{next.endTime ? `–${next.endTime}` : ''}</span>
+                          {next.gatheringTime && <span className="font-semibold text-zinc-700 dark:text-zinc-200">Samling {next.gatheringTime}</span>}
                           {next.location && <span className="inline-flex items-center gap-1.5 min-w-0"><MapPin size={15} className="shrink-0" /><span className="truncate">{next.location}</span></span>}
                         </div>
                       </div>

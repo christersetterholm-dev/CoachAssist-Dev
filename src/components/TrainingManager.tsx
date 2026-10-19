@@ -8,7 +8,7 @@ import GameList from './GameList';
 import TeamOverviewModal from './TeamOverviewModal';
 import MobileCalendarView from './MobileCalendarView';
 import ExerciseBankView from './ExerciseBankView';
-import { SegmentedTabs, TextInput } from './ui';
+import { SegmentedTabs, TextArea, TextInput } from './ui';
 
 interface TrainingManagerProps {
   exercises: Exercise[];
@@ -598,6 +598,18 @@ export default function TrainingManager({
   const [seriesStartTime, setSeriesStartTime] = useState('');
   const [seriesDuration, setSeriesDuration] = useState<number | ''>('');
   const [seriesTitle, setSeriesTitle] = useState('');
+  const [seriesLocation, setSeriesLocation] = useState('');
+  const [seriesDescription, setSeriesDescription] = useState('');
+  const [seriesGathering, setSeriesGathering] = useState('');
+  // Snabbval för upprepning: veckodagar (0 = måndag … 6 = söndag) mellan två datum
+  const [repeatDays, setRepeatDays] = useState<number[]>([]);
+  const [repeatFrom, setRepeatFrom] = useState('');
+  const [repeatUntil, setRepeatUntil] = useState('');
+  // Kallelse direkt för alla pass i serien
+  const [seriesInvite, setSeriesInvite] = useState(false);
+  const [seriesDeadlineDays, setSeriesDeadlineDays] = useState<number | ''>(1);
+  const [seriesDeadlineTime, setSeriesDeadlineTime] = useState('12:00');
+  const [seriesInviteNotes, setSeriesInviteNotes] = useState('');
   const [manualDateInput, setManualDateInput] = useState('');
 
   // Sorting states
@@ -618,6 +630,35 @@ export default function TrainingManager({
     const offset = firstDay === 0 ? 6 : firstDay - 1;
     const totalDays = new Date(year, month + 1, 0).getDate();
     return { offset, totalDays, year, month };
+  };
+
+  const handleApplyRepeat = () => {
+    const today = new Date().toLocaleDateString('sv-SE');
+    const from = repeatFrom || today;
+    if (repeatDays.length === 0 || !repeatUntil) {
+      alert('Välj veckodag och ett slutdatum.');
+      return;
+    }
+    if (repeatUntil < from) {
+      alert('Slutdatumet måste vara efter startdatumet.');
+      return;
+    }
+    const [fy, fm, fd] = from.split('-').map(Number);
+    const cursor = new Date(fy, fm - 1, fd, 12, 0, 0);
+    const found: string[] = [];
+    // Högst ett år framåt
+    for (let i = 0; i < 366; i++) {
+      const dateStr = cursor.toLocaleDateString('sv-SE');
+      if (dateStr > repeatUntil) break;
+      if (repeatDays.includes((cursor.getDay() + 6) % 7)) found.push(dateStr);
+      cursor.setDate(cursor.getDate() + 1);
+    }
+    if (found.length === 0) {
+      alert('Inga datum passade valen.');
+      return;
+    }
+    setSelectedDates(prev => Array.from(new Set([...prev, ...found])).sort());
+    setCurrentMonth(new Date(fy, fm - 1, 1));
   };
 
   const handleCreateSeries = () => {
@@ -641,12 +682,31 @@ export default function TrainingManager({
       tempDate.setMinutes(tempDate.getMinutes() + duration);
       const endTime = tempDate.toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' });
 
+      let rsvpConfig: TrainingSession['rsvpConfig'] = undefined;
+      if (seriesInvite) {
+        let deadline: number | undefined = undefined;
+        if (seriesDeadlineDays !== '') {
+          const [dh, dm] = (seriesDeadlineTime || '12:00').split(':').map(Number);
+          deadline = new Date(year, colMonth - 1, day - Number(seriesDeadlineDays), dh, dm, 0).getTime();
+        }
+        rsvpConfig = {
+          deadline,
+          notes: seriesInviteNotes.trim() || undefined,
+          invitedAt: Date.now(),
+          invitedCount: squad?.length || 0
+        };
+      }
+
       return {
         id: crypto.randomUUID(),
         title: seriesTitle.trim() || 'Träningspass',
         date: sessionDate,
         startTime,
         endTime,
+        location: seriesLocation.trim() || undefined,
+        description: seriesDescription.trim() || undefined,
+        gatheringTime: seriesGathering || undefined,
+        rsvpConfig,
         hideContentForPlayers: settings?.defaultHideContentForPlayers || false,
         moments: [],
         createdAt: Date.now(),
@@ -661,6 +721,14 @@ export default function TrainingManager({
     // Reset and close
     setSelectedDates([]);
     setSeriesTitle('');
+    setSeriesLocation('');
+    setSeriesDescription('');
+    setSeriesGathering('');
+    setRepeatDays([]);
+    setRepeatFrom('');
+    setRepeatUntil('');
+    setSeriesInvite(false);
+    setSeriesInviteNotes('');
     setSeriesStartTime('');
     setSeriesDuration('');
     setShowSeriesModal(false);
@@ -1880,14 +1948,14 @@ export default function TrainingManager({
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-black/40 backdrop-blur-sm z-[100] flex items-start sm:items-center justify-center p-4 text-left overflow-y-auto"
+            className="fixed inset-0 bg-black/40 backdrop-blur-sm z-[100] flex items-start justify-center p-4 text-left overflow-y-auto"
             onClick={() => setShowSeriesModal(false)}
           >
             <motion.div
               initial={{ scale: 0.9, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
               exit={{ scale: 0.9, opacity: 0 }}
-              className="bg-white dark:bg-zinc-900 rounded-3xl p-6 sm:p-8 max-w-2xl w-full shadow-2xl border border-zinc-100 dark:border-zinc-800 my-4 sm:my-8 overflow-hidden flex flex-col"
+              className="bg-white dark:bg-zinc-900 rounded-3xl p-6 sm:p-8 max-w-2xl w-full shadow-2xl border border-zinc-100 dark:border-zinc-800 my-auto overflow-hidden flex flex-col"
               onClick={(e) => e.stopPropagation()}
             >
               {/* Header */}
@@ -1936,6 +2004,96 @@ export default function TrainingManager({
                   />
                   <span className="text-[10px] text-zinc-400 dark:text-zinc-500 block mt-1 font-bold">Standard: {settings?.defaultDuration || 90} min</span>
                 </div>
+              </div>
+
+              {/* Plats och information (samma i alla pass i serien) */}
+              <div className="grid grid-cols-1 gap-4 mb-6">
+                <div>
+                  <label htmlFor="series-gathering" className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-1.5 font-bold">Samling (valfri)</label>
+                  <input
+                    id="series-gathering"
+                    type="time"
+                    value={seriesGathering}
+                    onChange={(e) => setSeriesGathering(e.target.value)}
+                    className="w-full bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-xl px-3 py-2.5 text-sm font-bold text-zinc-900 dark:text-white focus:ring-2 focus:ring-indigo-500 outline-none"
+                  />
+                  <span className="text-[10px] text-zinc-400 dark:text-zinc-500 block mt-1 font-bold">Klockslag när spelarna ska vara på plats, t.ex. 15 min före start.</span>
+                </div>
+                <div>
+                  <label htmlFor="series-location" className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-1.5 font-bold">Plats (valfri)</label>
+                  <TextInput
+                    id="series-location"
+                    type="text"
+                    value={seriesLocation}
+                    onChange={(e) => setSeriesLocation(e.target.value)}
+                    placeholder="T.ex. Kungsgårdens IP, plan 2"
+                    className="w-full bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-xl px-3 py-2.5 text-sm font-bold text-zinc-900 dark:text-white focus:ring-2 focus:ring-indigo-500 outline-none"
+                  />
+                </div>
+                <div>
+                  <label htmlFor="series-description" className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-1.5 font-bold">Information / beskrivning (valfri)</label>
+                  <TextArea
+                    id="series-description"
+                    value={seriesDescription}
+                    onChange={(e) => setSeriesDescription(e.target.value)}
+                    placeholder="T.ex. samling 17:45 vid omklädningsrummen, ta med vattenflaska"
+                    rows={3}
+                    className="w-full bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-xl px-3 py-2.5 text-sm font-bold text-zinc-900 dark:text-white focus:ring-2 focus:ring-indigo-500 outline-none resize-none min-h-[80px]"
+                  />
+                  <span className="text-[10px] text-zinc-400 dark:text-zinc-500 block mt-1 font-bold">Visas i kallelsen för alla pass i serien och kan ändras per pass.</span>
+                </div>
+              </div>
+
+              {/* Snabbval: återkommer varje vecka */}
+              <div className="mb-6 bg-zinc-50 dark:bg-zinc-950 p-4 rounded-2xl border border-zinc-100 dark:border-zinc-800/80">
+                <span className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-1.5 font-bold">Återkommer varje vecka</span>
+                <div className="grid grid-cols-7 gap-1 mb-3" role="group" aria-label="Veckodagar">
+                  {['Mån', 'Tis', 'Ons', 'Tor', 'Fre', 'Lör', 'Sön'].map((label, idx) => {
+                    const active = repeatDays.includes(idx);
+                    return (
+                      <button
+                        type="button"
+                        key={label}
+                        aria-pressed={active}
+                        onClick={() => setRepeatDays(prev => active ? prev.filter(d => d !== idx) : [...prev, idx])}
+                        className={`h-10 rounded-xl text-xs font-bold transition-all border ${active ? 'bg-indigo-600 border-indigo-600 text-white' : 'bg-white dark:bg-zinc-900 border-zinc-200 dark:border-zinc-700 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800'}`}
+                      >
+                        {label}
+                      </button>
+                    );
+                  })}
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label htmlFor="repeat-from" className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-1.5 font-bold">Från</label>
+                    <input
+                      id="repeat-from"
+                      type="date"
+                      value={repeatFrom || new Date().toLocaleDateString('sv-SE')}
+                      onChange={(e) => setRepeatFrom(e.target.value)}
+                      className="w-full bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-xl px-3 py-2.5 text-sm font-bold text-zinc-900 dark:text-white focus:ring-2 focus:ring-indigo-500 outline-none"
+                    />
+                  </div>
+                  <div>
+                    <label htmlFor="repeat-until" className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-1.5 font-bold">Till och med</label>
+                    <input
+                      id="repeat-until"
+                      type="date"
+                      value={repeatUntil}
+                      onChange={(e) => setRepeatUntil(e.target.value)}
+                      className="w-full bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-xl px-3 py-2.5 text-sm font-bold text-zinc-900 dark:text-white focus:ring-2 focus:ring-indigo-500 outline-none"
+                    />
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleApplyRepeat}
+                  disabled={repeatDays.length === 0 || !repeatUntil}
+                  className="mt-3 w-full h-10 bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950 dark:hover:bg-indigo-900 text-indigo-600 dark:text-indigo-400 border border-indigo-100 dark:border-indigo-900/40 rounded-xl text-sm font-bold transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  Lägg till datumen
+                </button>
+                <span className="text-[10px] text-zinc-400 dark:text-zinc-500 block mt-1 font-bold">Datumen läggs till i kalendern nedan. Tryck på ett datum där för att ta bort det, t.ex. på lov.</span>
               </div>
 
               {/* Date section */}
@@ -2076,6 +2234,67 @@ export default function TrainingManager({
                     )}
                   </div>
                 </div>
+              </div>
+
+              {/* Kallelse direkt */}
+              <div className="mt-6 bg-zinc-50 dark:bg-zinc-950 p-4 rounded-2xl border border-zinc-100 dark:border-zinc-800/80">
+                <label className="flex items-center gap-3 cursor-pointer min-h-[40px]">
+                  <input
+                    type="checkbox"
+                    checked={seriesInvite}
+                    onChange={(e) => setSeriesInvite(e.target.checked)}
+                    className="w-5 h-5 accent-indigo-600"
+                  />
+                  <span>
+                    <span className="block text-sm font-bold text-zinc-900 dark:text-white">Skapa kallelse direkt</span>
+                    <span className="block text-xs text-zinc-500 dark:text-zinc-400">Spelarna kan svara på alla pass i serien i appen. Inga mejl eller notiser skickas.</span>
+                  </span>
+                </label>
+                {seriesInvite && (
+                  <div className="mt-4 space-y-4">
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label htmlFor="series-deadline-days" className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-1.5 font-bold">Sista svarsdag</label>
+                        <select
+                          id="series-deadline-days"
+                          value={seriesDeadlineDays}
+                          onChange={(e) => setSeriesDeadlineDays(e.target.value === '' ? '' : Number(e.target.value))}
+                          className="w-full bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-xl px-3 py-2.5 text-sm font-bold text-zinc-900 dark:text-white focus:ring-2 focus:ring-indigo-500 outline-none"
+                        >
+                          <option value="">Ingen</option>
+                          <option value={0}>Samma dag</option>
+                          <option value={1}>1 dag före</option>
+                          <option value={2}>2 dagar före</option>
+                          <option value={3}>3 dagar före</option>
+                          <option value={7}>1 vecka före</option>
+                        </select>
+                      </div>
+                      {seriesDeadlineDays !== '' && (
+                        <div>
+                          <label htmlFor="series-deadline-time" className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-1.5 font-bold">Klockan</label>
+                          <input
+                            id="series-deadline-time"
+                            type="time"
+                            value={seriesDeadlineTime}
+                            onChange={(e) => setSeriesDeadlineTime(e.target.value)}
+                            className="w-full bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-xl px-3 py-2.5 text-sm font-bold text-zinc-900 dark:text-white focus:ring-2 focus:ring-indigo-500 outline-none"
+                          />
+                        </div>
+                      )}
+                    </div>
+                    <div>
+                      <label htmlFor="series-invite-notes" className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-1.5 font-bold">Meddelande till spelarna (valfritt)</label>
+                      <TextArea
+                        id="series-invite-notes"
+                        value={seriesInviteNotes}
+                        onChange={(e) => setSeriesInviteNotes(e.target.value)}
+                        placeholder="T.ex. Svara senast dagen före så vi vet hur många vi blir"
+                        rows={2}
+                        className="w-full bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-xl px-3 py-2.5 text-sm font-bold text-zinc-900 dark:text-white focus:ring-2 focus:ring-indigo-500 outline-none resize-none min-h-[64px]"
+                      />
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* Action trigger buttons */}

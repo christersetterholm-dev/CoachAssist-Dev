@@ -248,6 +248,7 @@ export interface TrainingSession {
   type?: 'training' | 'match' | 'cup' | 'other';
   category?: 'training' | 'match' | 'cup' | 'other';
   location?: string; // Location of the event
+  gatheringTime?: string; // Samlingstid "HH:MM" (valfri)
   moments: SessionMoment[];
   attendance?: string[]; // Player IDs or names
   guestPlayers?: SquadPlayer[];

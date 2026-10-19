@@ -940,6 +940,12 @@ export default function SessionEditor({
       <span className="inline-flex items-center gap-1.5"><Calendar size={15} className="text-zinc-400" />{dateLabel}</span>
       <span className="text-zinc-300 dark:text-zinc-600">·</span>
       <span className="inline-flex items-center gap-1.5 tabular-nums"><Clock size={15} className="text-zinc-400" />{timeLabel}</span>
+      {session.gatheringTime && (
+        <>
+          <span className="text-zinc-300 dark:text-zinc-600">·</span>
+          <span className="tabular-nums">Samling {session.gatheringTime}</span>
+        </>
+      )}
       {session.location && (
         <>
           <span className="text-zinc-300 dark:text-zinc-600">·</span>
@@ -1383,6 +1389,10 @@ export default function SessionEditor({
             </div>
           </div>
           <div>
+            <label htmlFor="session-gathering" className={fieldLabel}>Samling (valfri)</label>
+            <input id="session-gathering" type="time" value={session.gatheringTime || ''} onChange={(e) => onUpdate({ ...session, gatheringTime: e.target.value || undefined, updatedAt: Date.now() })} className={fieldClass} />
+          </div>
+          <div>
             <label htmlFor="session-location" className={fieldLabel}>Plats</label>
             <TextInput
               id="session-location"
@@ -1391,6 +1401,17 @@ export default function SessionEditor({
               onChange={(e) => onUpdate({ ...session, location: e.target.value || undefined, updatedAt: Date.now() })}
               placeholder="T.ex. Kungsgårdens IP, plan 2"
               className={fieldClass}
+            />
+          </div>
+          <div>
+            <label htmlFor="session-description" className={fieldLabel}>Information / beskrivning</label>
+            <TextArea
+              id="session-description"
+              value={session.description || ''}
+              onChange={(e) => onUpdate({ ...session, description: e.target.value || undefined, updatedAt: Date.now() })}
+              placeholder="T.ex. samlingstid, vad man ska ta med"
+              rows={3}
+              className={`${fieldClass} resize-none min-h-[80px]`}
             />
           </div>
           <p className={`text-sm font-medium ${timeStatus.color}`}>

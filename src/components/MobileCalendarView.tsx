@@ -1053,6 +1053,12 @@ export default function MobileCalendarView({
                                   <Clock size={14} className="text-indigo-500" />
                                   <span>Tid: {session.startTime} {session.endTime ? `- ${session.endTime}` : ''} ({durationText})</span>
                                 </div>
+                                {session.gatheringTime && (
+                                  <div className="flex items-center gap-2 text-zinc-700 dark:text-zinc-300 font-bold">
+                                    <Clock size={14} className="text-amber-500" />
+                                    <span>Samling: {session.gatheringTime}</span>
+                                  </div>
+                                )}
                                 
                                 {session.location && (
                                   <div className="flex items-center gap-2 text-zinc-700 dark:text-zinc-300 font-bold flex-wrap">
@@ -1295,6 +1301,9 @@ export default function MobileCalendarView({
                                   <span className="text-zinc-400 dark:text-zinc-500 text-[10px] font-normal">
                                     ({durationText})
                                   </span>
+                                )}
+                                {session.gatheringTime && (
+                                  <span className="text-zinc-700 dark:text-zinc-300 font-bold">· Samling {session.gatheringTime}</span>
                                 )}
                               </div>
 

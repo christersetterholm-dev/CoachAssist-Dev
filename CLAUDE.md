@@ -285,6 +285,11 @@ npm run set-password -- e@post.se            # lokalt konto/lösenord
   **Månad** (`src/components/calendar/MonthGrid.tsx`: rutnät mån–sön med veckonummer, prick +
   klockslag + namn per aktivitet, röda dagar från `src/utils/swedishHolidays.ts`, panel för vald dag
   med "Ny aktivitet den här dagen" – `onNewSession(date)`) och **Lista** (kort, Kommande/Historik).
+- Serie träningspass (+ i kalendern → `showSeriesModal` i `TrainingManager.tsx`): titel, tid, längd,
+  samling (`gatheringTime`, "HH:MM"), plats, information (`description`), snabbval "Återkommer varje
+  vecka" (veckodagar från–till, lägger till datum i kalendern) och "Skapa kallelse direkt" (sätter
+  `rsvpConfig` i varje pass; sista svarsdag räknas som X dagar före passet). Samling och information
+  kan ändras per pass i passets detaljark och visas i kallelsen, kalendern och på Översikt.
 - Huvudadministratören räknas som tränare i kalendern och passvyerna (`effectiveUserRoles` med
   `root_admin` i App.tsx).
 - Spelare ser inte Övningsbanken eller tävlingsknapparna i poänglistan (`canManage`).
