@@ -6,12 +6,12 @@ import React from 'react';
 import {
   House, Calendar, Users, Shirt, Trophy, Globe, ShieldCheck, User as UserIcon, Sun, Moon,
   RefreshCw, LogOut, Building2, ChevronRight, Cloud, CloudOff, Loader2, VibrateOff, Minimize2, Presentation, Megaphone, MessageCircle,
-  LayoutGrid,
+  LayoutGrid, Library,
 } from 'lucide-react';
 import { Avatar, MenuItem, Sheet } from '../ui';
 import { CustomizeNavSheet, MoreSheet, defaultMobileNav, resolveMobileNav } from './MoreSheet';
 
-export type ShellView = 'home' | 'training' | 'squad' | 'lineup' | 'tacticalboards' | 'posts' | 'chat' | 'leaderboard' | 'teampage' | 'clubadmin' | 'profile';
+export type ShellView = 'home' | 'training' | 'squad' | 'exercisebank' | 'lineup' | 'tacticalboards' | 'posts' | 'chat' | 'leaderboard' | 'teampage' | 'clubadmin' | 'profile';
 
 export interface NavItem {
   id: ShellView;
@@ -21,9 +21,9 @@ export interface NavItem {
   badge?: number;
 }
 
-export const buildNavItems = (opts: { canViewLineup: boolean; unreadPosts?: number; unreadChats?: number }): { primary: NavItem[]; secondary: NavItem[] } => {
+export const buildNavItems = (opts: { canViewLineup: boolean; unreadPosts?: number; unreadChats?: number; canManageExercises?: boolean }): { primary: NavItem[]; secondary: NavItem[] } => {
   // Ordningen i sidomenyn (och i Mer på mobil): Översikt, Kalender, Chatt, Inlägg, Uppställning,
-  // Taktiktavla, Poängliga, Truppen.
+  // Taktiktavla, Poängliga, Truppen, Övningsbanken.
   const primary: NavItem[] = [
     { id: 'home', label: 'Översikt', icon: House },
     { id: 'training', label: 'Kalender', icon: Calendar },
@@ -37,6 +37,8 @@ export const buildNavItems = (opts: { canViewLineup: boolean; unreadPosts?: numb
   primary.push({ id: 'tacticalboards', label: 'Taktiktavla', shortLabel: 'Taktik', icon: Presentation });
   primary.push({ id: 'leaderboard', label: 'Poängliga', shortLabel: 'Poäng', icon: Trophy });
   primary.push({ id: 'squad', label: 'Truppen', icon: Users });
+  // Genväg till Kalenderns flik Övningar (övningsbanken) – bara för tränare.
+  if (opts.canManageExercises) primary.push({ id: 'exercisebank', label: 'Övningsbanken', shortLabel: 'Övningar', icon: Library });
   return { primary, secondary: [{ id: 'teampage', label: 'Lagsida', icon: Globe }] };
 };
 
@@ -221,7 +223,7 @@ export const AppShell: React.FC<AppShellProps> = props => {
   // Fäller ihop en rad på mobil (höjden animeras); från 768 px visas den alltid.
   const collapse = (hidden: boolean) =>
     `grid transition-[grid-template-rows] duration-300 ease-out md:grid-rows-[1fr] ${hidden ? 'grid-rows-[0fr]' : 'grid-rows-[1fr]'}`;
-  const { primary, secondary } = buildNavItems({ canViewLineup, unreadPosts, unreadChats });
+  const { primary, secondary } = buildNavItems({ canViewLineup, unreadPosts, unreadChats, canManageExercises: isCoachOrAdmin && !!account });
   const adminItem: NavItem | null = isCoachOrAdmin && account
     ? { id: 'clubadmin', label: 'Administration', shortLabel: 'Admin', icon: ShieldCheck, badge: pendingRequests || undefined }
     : null;

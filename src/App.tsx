@@ -3830,7 +3830,9 @@ export default function App() {
     clubadmin: 'Administration',
     profile: 'Min profil',
   };
-  const shellTitle = shellTitles[view] || 'CoachAssist';
+  // Övningsbanken är Kalenderns flik Övningar men har en egen menyrad.
+  const isExerciseBank = view === 'training' && trainingTab === 'bank';
+  const shellTitle = isExerciseBank ? 'Övningsbanken' : shellTitles[view] || 'CoachAssist';
 
   const roleLabel = isRootAdmin
     ? 'Huvudadministratör'
@@ -5113,8 +5115,13 @@ export default function App() {
   return (
     <>
       <AppShell
-        view={view as ShellView}
-        onNavigate={(v) => { setIsPresenting(false); setView(v); }}
+        view={(isExerciseBank ? 'exercisebank' : view) as ShellView}
+        onNavigate={(v) => {
+          setIsPresenting(false);
+          if (v === 'exercisebank') { setTrainingTab('bank'); setView('training'); return; }
+          if (v === 'training' && trainingTab === 'bank') setTrainingTab('calendar_view');
+          setView(v);
+        }}
         canViewLineup={canViewLineup}
         unreadPosts={postsState.unreadCount}
         unreadChats={chatSummary.unreadChats}
