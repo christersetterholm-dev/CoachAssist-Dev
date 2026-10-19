@@ -67,7 +67,7 @@ $SSH "$SERVER" 'cd ~/'"$REMOTE_DIR"' && mkdir -p backups && stamp=$(date +%Y%m%d
   [ $found = 1 ] || echo "  (ingen databasfil hittades)"
   if [ -d chat_files ]; then tar -czf "backups/$stamp-chat_files.tar.gz" chat_files && echo "  ✓ chattens filer packade till backups/$stamp-chat_files.tar.gz"; fi
   ls -1t backups/*-chat_files.tar.gz 2>/dev/null | tail -n +4 | xargs -r rm --
-  ls -1t backups/* 2>/dev/null | tail -n +41 | xargs -r rm --'
+  ls -1t backups/*-coachassist.db 2>/dev/null | tail -n +11 | xargs -r rm --'
 
 step "Laddar upp filer"
 OLD_PKG=$($SSH "$SERVER" "cat ~/$REMOTE_DIR/package.json 2>/dev/null | md5sum" || true)
@@ -79,7 +79,7 @@ NEW_PKG=$($SSH "$SERVER" "cat ~/$REMOTE_DIR/package.json | md5sum")
 HAS_MODULES=$($SSH "$SERVER" "test -f ~/$REMOTE_DIR/node_modules/express/package.json && echo ja || echo nej")
 if [[ "$OLD_PKG" != "$NEW_PKG" || "$HAS_MODULES" != "ja" ]]; then
   step "Installerar paket på servern (npm install)"
-  if ! $SSH "$SERVER" "$ACTIVATE && cd ~/$REMOTE_DIR && npm install --omit=dev --no-audit --no-fund"; then
+  if ! $SSH "$SERVER" "$ACTIVATE && cd ~/$REMOTE_DIR && npm install --omit=dev --no-audit --no-fund && npm cache clean --force"; then
     echo "⚠️  npm install på servern misslyckades. Öppna cPanel > Setup Node.js App och klicka 'Run NPM Install'."
   fi
 fi
