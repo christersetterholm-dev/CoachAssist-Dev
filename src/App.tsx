@@ -2869,7 +2869,10 @@ export default function App() {
     setSessionActionCount(prev => prev + 1);
   };
 
-  const onNewSession = () => {
+  // date: dagen passet ska ligga på (från kalenderns Månad-vy). Anropas ibland direkt från en
+  // knapp och får då ett klick-objekt – då används dagens datum.
+  const onNewSession = (date?: unknown) => {
+    const sessionDate = typeof date === 'number' && Number.isFinite(date) ? date : Date.now();
     let endTime = trainingSettings?.defaultEndTime;
     
     if (!endTime && trainingSettings?.defaultStartTime && trainingSettings?.defaultDuration) {
@@ -2883,7 +2886,7 @@ export default function App() {
     const newSession: TrainingSession = {
       id: crypto.randomUUID(),
       title: '',
-      date: Date.now(),
+      date: sessionDate,
       startTime: trainingSettings?.defaultStartTime || '18:00',
       endTime: endTime,
       hideContentForPlayers: trainingSettings?.defaultHideContentForPlayers || false,

@@ -4,6 +4,8 @@ import { motion, AnimatePresence } from 'motion/react';
 import { TrainingSession, SquadPlayer } from '../types';
 import { categorizeSession } from '../utils/sessionCategory';
 import { Button } from './ui';
+import MonthGrid from './calendar/MonthGrid';
+import { CalendarDays, List as ListIcon, Rows3 } from 'lucide-react';
 
 const SWEDISH_WEEKDAYS = ['Sön', 'Mån', 'Tis', 'Ons', 'Tor', 'Fre', 'Lör'];
 
@@ -70,7 +72,7 @@ interface MobileCalendarViewProps {
   isSyncing?: boolean;
   onSync?: () => Promise<void>;
   hasSyncUrl: boolean;
-  onNewSession?: () => void;
+  onNewSession?: (date?: number) => void;
   onOpenTrash?: () => void;
   onOpenSeriesCreator?: () => void;
   deletedSessionsCount?: number;
@@ -120,21 +122,22 @@ export default function MobileCalendarView({
   }, [_user, _userRoles]);
 
   // States for month view
-  const [viewMode, setViewMode] = useState<'list' | 'month'>(() => {
+  // Tre vyer: Agenda (en rad per dag, standard), Månad (rutnät) och Lista (kort).
+  // Sparas i webbläsaren. Den gamla nyckeln hade 'month' för det som nu heter Agenda.
+  const [viewMode, setViewMode] = useState<'agenda' | 'month' | 'list'>(() => {
     try {
-      const saved = localStorage.getItem('mobile_calendar_view_mode');
-      if (saved === 'list' || saved === 'month') {
-        return saved;
-      }
+      const saved = localStorage.getItem('calendar_view_mode');
+      if (saved === 'agenda' || saved === 'month' || saved === 'list') return saved;
+      if (localStorage.getItem('mobile_calendar_view_mode') === 'list') return 'list';
     } catch (e) {
       // Ignore localStorage errors
     }
-    return 'month';
+    return 'agenda';
   });
 
   useEffect(() => {
     try {
-      localStorage.setItem('mobile_calendar_view_mode', viewMode);
+      localStorage.setItem('calendar_view_mode', viewMode);
     } catch (e) {
       // Ignore
     }
@@ -257,7 +260,7 @@ export default function MobileCalendarView({
     // Månadsvyn räknar månadens aktiviteter, listvyn kommande eller tidigare.
     const activeList = sessions.filter(s => {
       if (s.isIgnored) return false;
-      if (viewMode === 'month') {
+      if (viewMode !== 'list') {
         const d = new Date(s.date);
         return d.getFullYear() === currentMonth.getFullYear() && d.getMonth() === currentMonth.getMonth();
       }
@@ -325,6 +328,24 @@ export default function MobileCalendarView({
     return days;
   }, [currentMonth, sessions, searchQuery, activeFilter]);
 
+  // Månad (rutnät): vald dag och passen med samma filter och sökning som Agenda.
+  const [selectedDay, setSelectedDay] = useState<Date>(() => new Date());
+  useEffect(() => {
+    const now = new Date();
+    setSelectedDay(currentMonth.getFullYear() === now.getFullYear() && currentMonth.getMonth() === now.getMonth()
+      ? now
+      : new Date(currentMonth.getFullYear(), currentMonth.getMonth(), 1));
+  }, [currentMonth]);
+  const monthGridSessions = useMemo(() => {
+    const query = searchQuery.trim().toLowerCase();
+    return sessions.filter(s => {
+      if (s.isIgnored) return false;
+      if (activeFilter !== 'all' && categorizeSession(s) !== activeFilter) return false;
+      if (!query) return true;
+      return [s.title, s.location, s.notes, s.description].some(v => (v || '').toLowerCase().includes(query));
+    });
+  }, [sessions, searchQuery, activeFilter]);
+
   // Innevarande månad utan fler aktiviteter från och med i dag (med valt filter och sökning).
   const noMoreThisMonth = useMemo(() => {
     const now = new Date();
@@ -334,7 +355,7 @@ export default function MobileCalendarView({
 
   // Månadsvyn: rulla fram till dagens datum när månaden visas – men inte ner till bara tomma dagar.
   useEffect(() => {
-    if (viewMode !== 'month' || noMoreThisMonth) return;
+    if (viewMode !== 'agenda' || noMoreThisMonth) return;
     const t = setTimeout(() => {
       const el = document.querySelector('[data-cal-today="true"]') as HTMLElement | null;
       el?.scrollIntoView({ block: 'center', behavior: 'auto' });
@@ -500,31 +521,36 @@ export default function MobileCalendarView({
               <Search size={18} />
             </button>
 
-            {/* View Mode Switcher (Grid/Month vs List) */}
-            <button
-              type="button"
-              onClick={() => {
-                setViewMode(prev => prev === 'month' ? 'list' : 'month');
-                setExpandedEventId(null);
-                setExpandedSessionId(null);
-              }}
-              className="h-10 min-w-10 px-2.5 rounded-xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 text-zinc-600 hover:text-zinc-900 dark:text-zinc-300 dark:hover:text-zinc-100 transition-all cursor-pointer flex items-center justify-center"
-              title={viewMode === 'month' ? 'Visa som lista' : 'Visa månadsvy'}
-            >
-              {viewMode === 'month' ? (
-                /* Show List Icon */
-                <span className="flex items-center gap-1.5 text-sm font-semibold">
-                  <FileText size={18} />
-                  <span className="hidden sm:inline">Lista</span>
-                </span>
-              ) : (
-                /* Show Month Calendar Grid Icon */
-                <span className="flex items-center gap-1.5 text-sm font-semibold">
-                  <Calendar size={18} />
-                  <span className="hidden sm:inline">Månad</span>
-                </span>
-              )}
-            </button>
+            {/* Vyväljare: Agenda, Månad, Lista (bara ikoner på smal skärm) */}
+            <div role="tablist" aria-label="Visa kalendern som" className="h-10 flex items-center gap-0.5 p-0.5 rounded-xl bg-zinc-100 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800">
+              {([
+                { id: 'agenda', label: 'Agenda', icon: <Rows3 size={17} /> },
+                { id: 'month', label: 'Månad', icon: <CalendarDays size={17} /> },
+                { id: 'list', label: 'Lista', icon: <ListIcon size={17} /> },
+              ] as const).map(opt => (
+                <button
+                  key={opt.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={viewMode === opt.id}
+                  title={opt.label}
+                  aria-label={opt.label}
+                  onClick={() => {
+                    setViewMode(opt.id);
+                    setExpandedEventId(null);
+                    setExpandedSessionId(null);
+                  }}
+                  className={`h-full min-w-9 px-2 sm:px-2.5 rounded-lg inline-flex items-center justify-center gap-1.5 text-sm font-semibold cursor-pointer transition-all ${
+                    viewMode === opt.id
+                      ? 'bg-white dark:bg-zinc-800 text-zinc-900 dark:text-white shadow-sm'
+                      : 'text-zinc-500 dark:text-zinc-400 hover:text-zinc-800 dark:hover:text-zinc-200'
+                  }`}
+                >
+                  {opt.icon}
+                  <span className="hidden sm:inline">{opt.label}</span>
+                </button>
+              ))}
+            </div>
 
             {/* Sync trigger button if sync URL exists */}
             {onSync && hasSyncUrl && isCoachOrAdmin && (
@@ -692,6 +718,15 @@ export default function MobileCalendarView({
       </div>
 
       {viewMode === 'month' ? (
+        <MonthGrid
+          month={currentMonth}
+          sessions={monthGridSessions}
+          selectedDay={selectedDay}
+          onSelectDay={setSelectedDay}
+          onOpenSession={(id) => onSelectSession(id)}
+          onNewSessionOnDay={isCoachOrAdmin && onNewSession ? (d) => onNewSession(new Date(d.getFullYear(), d.getMonth(), d.getDate(), 12).getTime()) : undefined}
+        />
+      ) : viewMode === 'agenda' ? (
         <div className="px-0 sm:px-0 mt-2">
           {noMoreThisMonth && (
             <div className="mx-3 sm:mx-0 mb-2 p-3 sm:p-4 rounded-2xl bg-indigo-50 dark:bg-indigo-950/40 border border-indigo-100 dark:border-indigo-900 flex flex-col sm:flex-row sm:items-center gap-3">
@@ -704,7 +739,7 @@ export default function MobileCalendarView({
               <div className="flex gap-2 shrink-0">
                 <Button size="sm" variant="secondary" icon={<ChevronRight size={16} />} onClick={handleNextMonth}>Nästa månad</Button>
                 {isCoachOrAdmin && onNewSession && (
-                  <Button size="sm" icon={<Plus size={16} />} onClick={onNewSession}>Ny aktivitet</Button>
+                  <Button size="sm" icon={<Plus size={16} />} onClick={() => onNewSession()}>Ny aktivitet</Button>
                 )}
               </div>
             </div>

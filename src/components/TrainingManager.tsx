@@ -24,7 +24,7 @@ interface TrainingManagerProps {
   onEditExercise: (id: string) => void;
   onReorderExercises: (exercises: Exercise[]) => void;
   onNewExercise: () => void;
-  onNewSession: () => void;
+  onNewSession: (date?: number) => void;
   onAddSessionsBatch?: (newSessions: TrainingSession[]) => void;
   onSelectSession: (id: string, initialTab?: 'schema' | 'attendance' | 'rsvp') => void;
   onDeleteSession: (id: string) => void;
