@@ -6,8 +6,10 @@ import React from 'react';
 import {
   House, Calendar, Users, Shirt, Trophy, Globe, ShieldCheck, User as UserIcon, Sun, Moon,
   RefreshCw, LogOut, Building2, ChevronRight, Cloud, CloudOff, Loader2, VibrateOff, Minimize2, Presentation, Megaphone, MessageCircle,
+  LayoutGrid,
 } from 'lucide-react';
 import { Avatar, MenuItem, Sheet } from '../ui';
+import { CustomizeNavSheet, MoreSheet, defaultMobileNav, resolveMobileNav } from './MoreSheet';
 
 export type ShellView = 'home' | 'training' | 'squad' | 'lineup' | 'tacticalboards' | 'posts' | 'chat' | 'leaderboard' | 'teampage' | 'clubadmin' | 'profile';
 
@@ -17,15 +19,13 @@ export interface NavItem {
   shortLabel?: string;
   icon: React.ComponentType<{ size?: number; strokeWidth?: number; className?: string }>;
   badge?: number;
-  /** Visas inte i bottenmenyn på mobil (där får Översikt i stället märket). */
-  desktopOnly?: boolean;
 }
 
 export const buildNavItems = (opts: { canViewLineup: boolean; unreadPosts?: number; unreadChats?: number }): { primary: NavItem[]; secondary: NavItem[] } => {
   const primary: NavItem[] = [
     { id: 'home', label: 'Översikt', icon: House },
-    // Inlägg från tränarna. På mobil nås de via Översikt, så bottenmenyn inte blir för trång.
-    { id: 'posts', label: 'Inlägg', icon: Megaphone, badge: opts.unreadPosts || undefined, desktopOnly: true },
+    // Inlägg från tränarna. På mobil visas märket på Översikt (där inläggen också syns).
+    { id: 'posts', label: 'Inlägg', icon: Megaphone, badge: opts.unreadPosts || undefined },
     { id: 'training', label: 'Kalender', icon: Calendar },
     { id: 'squad', label: 'Truppen', icon: Users },
   ];
@@ -33,8 +33,7 @@ export const buildNavItems = (opts: { canViewLineup: boolean; unreadPosts?: numb
   // Chatt med lag, grupper och enskilda i föreningen. Märket = antal chattar med olästa.
   primary.push({ id: 'chat', label: 'Chatt', icon: MessageCircle, badge: opts.unreadChats || undefined });
   // Lagets taktiktavlor: alla i laget (spelare ser de tavlor som tränaren har delat).
-  // På mobil ligger Taktiktavla i kontomenyn (bottenmenyn har inte plats).
-  primary.push({ id: 'tacticalboards', label: 'Taktiktavla', shortLabel: 'Taktik', icon: Presentation, desktopOnly: true });
+  primary.push({ id: 'tacticalboards', label: 'Taktiktavla', shortLabel: 'Taktik', icon: Presentation });
   primary.push({ id: 'leaderboard', label: 'Poängliga', shortLabel: 'Poäng', icon: Trophy });
   return { primary, secondary: [{ id: 'teampage', label: 'Lagsida', icon: Globe }] };
 };
@@ -56,6 +55,9 @@ export interface AppShellProps {
   unreadPosts?: number;
   /** Antal chattar med olästa meddelanden. */
   unreadChats?: number;
+  /** De knappar personen valt i mobilens bottenmeny (utöver Översikt och Mer). */
+  mobileNav?: string[];
+  onChangeMobileNav?: (ids: ShellView[]) => void;
   isCoachOrAdmin: boolean;
   title: string;
   /** Knappar som hör till den aktuella sidan, visas till höger i toppfältet. */
@@ -170,20 +172,32 @@ const ExitPresentingButton: React.FC<{ onExit: () => void }> = ({ onExit }) => {
 
 export const AppShell: React.FC<AppShellProps> = props => {
   const {
-    view, onNavigate, canViewLineup, unreadPosts, unreadChats, isCoachOrAdmin, title, actions, clubName, teamName, account,
+    view, onNavigate, canViewLineup, unreadPosts, unreadChats, mobileNav, onChangeMobileNav, isCoachOrAdmin, title, actions, clubName, teamName, account,
     pendingRequests, syncState, onSaveNow, onRefresh, theme, onToggleTheme, onLogout, onLogin,
     onOpenShakeInfo, onOpenPendingRequests, chromeHidden, hideTopBar, presenting, onExitPresenting, banner, children,
   } = props;
   const [accountOpen, setAccountOpen] = React.useState(false);
+  const [moreOpen, setMoreOpen] = React.useState(false);
+  const [customizeOpen, setCustomizeOpen] = React.useState(false);
   const { primary, secondary } = buildNavItems({ canViewLineup, unreadPosts, unreadChats });
   const adminItem: NavItem | null = isCoachOrAdmin && account
-    ? { id: 'clubadmin', label: 'Administration', icon: ShieldCheck, badge: pendingRequests || undefined }
+    ? { id: 'clubadmin', label: 'Administration', shortLabel: 'Admin', icon: ShieldCheck, badge: pendingRequests || undefined }
     : null;
 
   const go = (v: ShellView) => {
     setAccountOpen(false);
     onNavigate(v);
   };
+
+  // Mobilens bottenmeny: Översikt + de valda + Mer. Allt annat ligger i arket Mer.
+  const allItems: NavItem[] = [...primary, ...secondary, ...(adminItem ? [adminItem] : [])];
+  const homeItem = allItems.find(i => i.id === 'home')!;
+  const mobileIds = resolveMobileNav(mobileNav, allItems.map(i => i.id), isCoachOrAdmin);
+  const bottomItems: NavItem[] = [homeItem, ...mobileIds.map(id => allItems.find(i => i.id === id)!).filter(Boolean)];
+  const moreItems = allItems.filter(i => i.id !== 'home' && !mobileIds.includes(i.id));
+  const choiceItems = allItems.filter(i => i.id !== 'home');
+  const moreBadge = (mobileIds.includes('chat') ? 0 : unreadChats || 0) + (adminItem && !mobileIds.includes('clubadmin') ? pendingRequests : 0);
+  const moreActive = !['home', 'posts', ...mobileIds].includes(view);
 
   const SideLink: React.FC<{ item: NavItem }> = ({ item }) => {
     const active = view === item.id;
@@ -289,7 +303,7 @@ export const AppShell: React.FC<AppShellProps> = props => {
               <div className="flex items-center gap-1 sm:gap-1.5">
                 <SyncIndicator state={syncState} onSaveNow={onSaveNow} />
                 {actions}
-                <div className="md:hidden ml-1">{accountButton}</div>
+                {!account && <div className="md:hidden ml-1">{accountButton}</div>}
               </div>
             </div>
           </header>
@@ -306,7 +320,7 @@ export const AppShell: React.FC<AppShellProps> = props => {
             className="md:hidden shrink-0 bg-white/95 dark:bg-zinc-900/95 backdrop-blur-md border-t border-zinc-200/80 dark:border-zinc-800 pb-safe z-30"
           >
             <div className="flex items-stretch justify-around px-1">
-              {primary.filter(item => !item.desktopOnly).map(item => {
+              {bottomItems.map(item => {
                 const active = view === item.id || (item.id === 'home' && view === 'posts');
                 const Icon = item.icon;
                 const badge = item.id === 'home' ? unreadPosts : item.badge;
@@ -330,12 +344,58 @@ export const AppShell: React.FC<AppShellProps> = props => {
                   </button>
                 );
               })}
+              <button
+                type="button"
+                onClick={() => setMoreOpen(true)}
+                aria-current={moreActive ? 'page' : undefined}
+                aria-label={moreBadge ? `Mer (${moreBadge} nya)` : 'Mer'}
+                className={`flex-1 flex flex-col items-center justify-center gap-0.5 pt-2 pb-1.5 min-h-[56px] cursor-pointer transition-colors ${
+                  moreActive ? 'text-indigo-600 dark:text-indigo-300' : 'text-zinc-500 dark:text-zinc-400'
+                }`}
+              >
+                <span className={`relative flex items-center justify-center w-14 h-7 rounded-full transition-colors ${moreActive ? 'bg-indigo-50 dark:bg-indigo-950/70' : ''}`}>
+                  <LayoutGrid size={21} strokeWidth={moreActive ? 2.4 : 2} />
+                  {moreBadge ? (
+                    <span className="absolute -top-1 right-1.5 min-w-[16px] h-[16px] px-1 rounded-full bg-red-600 text-white text-[10px] font-bold leading-[16px] text-center">{moreBadge}</span>
+                  ) : null}
+                </span>
+                <span className={`text-[11px] leading-tight ${moreActive ? 'font-bold' : 'font-medium'}`}>Mer</span>
+              </button>
             </div>
           </nav>
         )}
       </div>
 
       {presenting && onExitPresenting && <ExitPresentingButton onExit={onExitPresenting} />}
+
+      {/* Mobilens Mer och valet av knappar i bottenmenyn */}
+      <MoreSheet
+        open={moreOpen}
+        onClose={() => setMoreOpen(false)}
+        view={view}
+        items={moreItems}
+        account={account}
+        clubName={clubName}
+        teamName={teamName}
+        isCoachOrAdmin={isCoachOrAdmin}
+        pendingRequests={pendingRequests}
+        theme={theme}
+        onNavigate={go}
+        onCustomize={() => setCustomizeOpen(true)}
+        onToggleTheme={onToggleTheme}
+        onRefresh={onRefresh}
+        onOpenShakeInfo={onOpenShakeInfo}
+        onOpenPendingRequests={onOpenPendingRequests}
+        onLogout={onLogout}
+      />
+      <CustomizeNavSheet
+        open={customizeOpen}
+        onClose={() => setCustomizeOpen(false)}
+        current={mobileIds}
+        choices={choiceItems}
+        defaults={defaultMobileNav(isCoachOrAdmin).filter(id => choiceItems.some(c => c.id === id))}
+        onSave={(ids) => onChangeMobileNav?.(ids)}
+      />
 
       {/* Kontomeny */}
       <Sheet open={accountOpen} onClose={() => setAccountOpen(false)} title="Konto">
@@ -360,9 +420,6 @@ export const AppShell: React.FC<AppShellProps> = props => {
             />
           )}
           <MenuItem icon={<UserIcon size={18} />} label="Min profil" description="Namn, bild, lösenord och inloggning" onClick={() => go('profile')} active={view === 'profile'} />
-          <div className="md:hidden">
-            <MenuItem icon={<Presentation size={18} />} label="Taktiktavla" description="Lagets taktiktavlor" onClick={() => go('tacticalboards')} active={view === 'tacticalboards'} />
-          </div>
           <MenuItem icon={<Globe size={18} />} label="Lagsida" description="Lagets webbsida, kalender och tabell" onClick={() => go('teampage')} active={view === 'teampage'} />
           {adminItem && (
             <MenuItem

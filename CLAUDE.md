@@ -38,7 +38,7 @@ Läs den här filen först i varje nytt samtal. Håll den uppdaterad när något
 | Chatt (lagchatt, grupper, en-till-en) | `server/chat.ts` (tester i `tests/chat.test.mjs`), `src/lib/chat.ts`, `src/components/chat/` |
 | Startfil på webbhotellet (Passenger) | `app.cjs` → `dist/server.cjs` |
 | React-appen | `src/` (`App.tsx` och `LineupBuilder.tsx` är mycket stora) |
-| Appens skal (sidomeny, bottenmeny, toppfält, kontomeny) | `src/components/shell/AppShell.tsx` |
+| Appens skal (sidomeny, bottenmeny, toppfält, kontomeny, Mer) | `src/components/shell/AppShell.tsx`, `src/components/shell/MoreSheet.tsx` |
 | Gemensamma byggklossar (Button, IconButton, Card, SegmentedTabs, Badge, EmptyState, Avatar, Sheet, MenuItem) | `src/components/ui/index.tsx` |
 | Textrutor som tål diktering (TextInput, TextArea) | `src/components/ui/TextField.tsx` |
 | Startsidan Översikt (nästa aktivitet, svar på kallelse, snabbval, poängtopp) | `src/components/HomeView.tsx` |
@@ -123,7 +123,6 @@ Appen läser/skriver JSON-dokument via sökvägar:
   (Websocket/SSE passar inte Passenger på webbhotellet.)
 - Appen: `useChatSummary` i App.tsx (märket), `view === 'chat'` → `ChatView` (lista; på mobil täcker en
   öppen chatt hela skärmen, från 768 px lista + chatt bredvid). Skrivfältet är en ostyrd `TextArea`.
-  Mobilens bottenmeny: Chatt ersatte Taktik; Taktiktavla ligger i kontomenyn på mobil.
 
 ## Köra, testa, driftsätta
 
@@ -163,9 +162,13 @@ npm run set-password -- e@post.se            # lokalt konto/lösenord
 
 ## Gränssnittet (ombyggt okt 2026, gren `ux-ombyggnad`)
 
-- Navigering: bottenmeny på mobil (Översikt, Kalender, Truppen, Uppställn., Chatt, Poäng), sidomeny från
-  768 px bredd (iPad/dator). Lagsida, Administration, profil, tema, "Hämta senaste" och
-  Logga ut ligger i kontomenyn (avataren) och i sidomenyn.
+- Navigering: sidomeny från 768 px bredd (iPad/dator) med alla funktioner; avataren längst ner i
+  sidomenyn öppnar kontomenyn. På mobil: bottenmeny med Översikt (alltid först) + tre valfria +
+  **Mer** (`LayoutGrid`). Mer (`src/components/shell/MoreSheet.tsx`) visar övriga funktioner som
+  rutor, Anpassa menyn, lag, tema, Hämta senaste, Skakskydd och Logga ut; avataren i toppfältet
+  finns inte på mobil. Valet sparas i profilen (`mobileNav`, följer kontot); standard för tränare
+  Kalender/Uppställning/Chatt, för spelare Kalender/Chatt/Poängliga (`defaultMobileNav`). Märket på
+  Mer = olästa chattar och väntande ansökningar som inte har egen knapp.
 - Startvy är `home` (Översikt). Poängräkning (`exercise`) och skapa tävlingsmoment (`setup`)
   är "fokusvyer" utan meny, med eget sidhuvud och tillbakaknapp (`handleFocusBack`).
 - Storskärmsläge (`isPresenting` i App.tsx): knappen "Visa på storskärm" på Uppställning och

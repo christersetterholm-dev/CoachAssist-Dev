@@ -5112,6 +5112,11 @@ export default function App() {
         canViewLineup={canViewLineup}
         unreadPosts={postsState.unreadCount}
         unreadChats={chatSummary.unreadChats}
+        mobileNav={userProfile.mobileNav}
+        onChangeMobileNav={(ids) => {
+          setUserProfile(prev => ({ ...prev, mobileNav: ids }));
+          if (user) setDoc(doc(db, 'users', user.uid, 'data', 'profile'), { mobileNav: ids }, { merge: true }).catch(() => {});
+        }}
         isCoachOrAdmin={isCoachOrAdmin}
         title={shellTitle}
         actions={shellActions}

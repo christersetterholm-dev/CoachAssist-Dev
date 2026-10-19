@@ -436,6 +436,8 @@ export interface UserProfile {
   requestedRole?: 'player' | 'leader' | 'parent';
   requestedClubId?: string;
   requestedTeamId?: string;
+  /** Knapparna i mobilens bottenmeny mellan Översikt och Mer (vy-id:n, högst 3). */
+  mobileNav?: string[];
 }
 
 export interface PendingUserRequest {
