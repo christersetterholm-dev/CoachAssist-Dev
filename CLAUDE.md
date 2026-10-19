@@ -35,6 +35,7 @@ Läs den här filen först i varje nytt samtal. Håll den uppdaterad när något
 | Lagets taktiktavlor (menyposten Taktiktavla) | `server/tacticalBoards.ts`, `src/components/TacticalBoardsView.tsx` |
 | Animationer i steg på taktiktavlan (räknandet, ingen React) | `src/utils/boardAnimation.ts` (tester i `tests/boardAnimation.test.mjs`) |
 | Inlägg (tränarnas meddelanden till laget) | `server/posts.ts`, `src/lib/posts.ts`, `src/components/PostsView.tsx` |
+| Chatt (lagchatt, grupper, en-till-en) | `server/chat.ts` (tester i `tests/chat.test.mjs`), `src/lib/chat.ts`, `src/components/chat/` |
 | Startfil på webbhotellet (Passenger) | `app.cjs` → `dist/server.cjs` |
 | React-appen | `src/` (`App.tsx` och `LineupBuilder.tsx` är mycket stora) |
 | Appens skal (sidomeny, bottenmeny, toppfält, kontomeny) | `src/components/shell/AppShell.tsx` |
@@ -100,6 +101,30 @@ Appen läser/skriver JSON-dokument via sökvägar:
   `PostEditorSheet` ligger i `overlays`. Menyvalet Inlägg (märke = olästa) syns i sidomenyn; i
   mobilens bottenmeny finns det inte (för trångt) – där får Översikt märket.
 
+### Chatt (`/api/chat`, `server/chat.ts`, okt 2026)
+- Per förening. Tre sorter: `team` (en lagchatt per lag, skapas automatiskt; vem som är med räknas
+  fram ur `team_roles`, föreningsadmin räknas inte in), `group` (vem som helst startar; skaparen är
+  gruppadmin och kan utse fler; alla kan lämna; föreningsadmin som är med kan "ta över"), `direct`
+  (en per par, `direct_key`; syns för mottagaren först när något skrivits). Bara personer med konto
+  kopplat till en medlemsrad i föreningen kan chatta.
+- Tabeller: `chat_conversations`, `chat_participants` (roll, `left_at`, `last_read_seq` = läst till),
+  `chat_messages` (`seq` stigande; `kind` text/event – händelser som "X lade till Y"; `rev` höjs vid
+  varje ändring, från `chat_revs`), `chat_reactions`, `chat_files`, `chat_reports`.
+- Privat: den som inte är med får 404, även root-admin. Personlistan skickar bara namn, bild och lag.
+  Lagets tränare kan ta bort meddelanden i lagchatten. Anmälda meddelanden visas för föreningsadmin och
+  tränare i avsändarens lag – bara meddelandet och två före/efter.
+- Filer ligger i `DATA_DIR/chat_files/` (inte publikt) och hämtas via `/api/chat/files/:id` med
+  inloggning (appen gör blob-adresser). Bilder krymps/HEIC görs om i webbläsaren. Tillåtna typer i
+  `FILE_TYPES`. `deploy.sh` packar `chat_files/` till `backups/` (3 senaste).
+- Gränser (`LIMITS`): 4000 tecken, 30 meddelanden/min, 20 grupper/dygn, 100 i en grupp, 10 MB/fil,
+  5 filer/meddelande, 1 GB/förening, ändra inom 15 min.
+- Ingen push: appen frågar `?after=<rev>` var 3:e s i en öppen chatt (10 s efter 2 min utan aktivitet),
+  `/api/chat/summary` var 30:e s för märket, listan var 15:e s, inget när appen ligger i bakgrunden.
+  (Websocket/SSE passar inte Passenger på webbhotellet.)
+- Appen: `useChatSummary` i App.tsx (märket), `view === 'chat'` → `ChatView` (lista; på mobil täcker en
+  öppen chatt hela skärmen, från 768 px lista + chatt bredvid). Skrivfältet är en ostyrd `TextArea`.
+  Mobilens bottenmeny: Chatt ersatte Taktik; Taktiktavla ligger i kontomenyn på mobil.
+
 ## Köra, testa, driftsätta
 
 ```bash
@@ -138,7 +163,7 @@ npm run set-password -- e@post.se            # lokalt konto/lösenord
 
 ## Gränssnittet (ombyggt okt 2026, gren `ux-ombyggnad`)
 
-- Navigering: bottenmeny på mobil (Översikt, Kalender, Truppen, Uppställn., Taktik, Poäng), sidomeny från
+- Navigering: bottenmeny på mobil (Översikt, Kalender, Truppen, Uppställn., Chatt, Poäng), sidomeny från
   768 px bredd (iPad/dator). Lagsida, Administration, profil, tema, "Hämta senaste" och
   Logga ut ligger i kontomenyn (avataren) och i sidomenyn.
 - Startvy är `home` (Översikt). Poängräkning (`exercise`) och skapa tävlingsmoment (`setup`)
@@ -233,6 +258,8 @@ npm run set-password -- e@post.se            # lokalt konto/lösenord
 
 ## Kvar att göra / idéer
 
+- Chatt, senare: svara på/citera ett meddelande, sök i meddelanden, tysta en chatt, blockera,
+  @-omnämnanden, föräldrar, webbnotiser (Web Push).
 - Inlägg: visa kopplade inlägg även i passvyn (`SessionRsvpView`); notiser när nytt inlägg kommer.
 - `isProduction` i server.ts blir sant om mappens sökväg innehåller "dist" (t.ex. en worktree som
   heter `distracted-...`) – då letar `npm run dev` efter `dist/index.html`. Kontrollera hellre mappnamnet exakt.

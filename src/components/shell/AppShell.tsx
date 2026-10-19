@@ -5,11 +5,11 @@
 import React from 'react';
 import {
   House, Calendar, Users, Shirt, Trophy, Globe, ShieldCheck, User as UserIcon, Sun, Moon,
-  RefreshCw, LogOut, Building2, ChevronRight, Cloud, CloudOff, Loader2, VibrateOff, Minimize2, Presentation, Megaphone,
+  RefreshCw, LogOut, Building2, ChevronRight, Cloud, CloudOff, Loader2, VibrateOff, Minimize2, Presentation, Megaphone, MessageCircle,
 } from 'lucide-react';
 import { Avatar, MenuItem, Sheet } from '../ui';
 
-export type ShellView = 'home' | 'training' | 'squad' | 'lineup' | 'tacticalboards' | 'posts' | 'leaderboard' | 'teampage' | 'clubadmin' | 'profile';
+export type ShellView = 'home' | 'training' | 'squad' | 'lineup' | 'tacticalboards' | 'posts' | 'chat' | 'leaderboard' | 'teampage' | 'clubadmin' | 'profile';
 
 export interface NavItem {
   id: ShellView;
@@ -21,7 +21,7 @@ export interface NavItem {
   desktopOnly?: boolean;
 }
 
-export const buildNavItems = (opts: { canViewLineup: boolean; unreadPosts?: number }): { primary: NavItem[]; secondary: NavItem[] } => {
+export const buildNavItems = (opts: { canViewLineup: boolean; unreadPosts?: number; unreadChats?: number }): { primary: NavItem[]; secondary: NavItem[] } => {
   const primary: NavItem[] = [
     { id: 'home', label: 'Översikt', icon: House },
     // Inlägg från tränarna. På mobil nås de via Översikt, så bottenmenyn inte blir för trång.
@@ -30,8 +30,11 @@ export const buildNavItems = (opts: { canViewLineup: boolean; unreadPosts?: numb
     { id: 'squad', label: 'Truppen', icon: Users },
   ];
   if (opts.canViewLineup) primary.push({ id: 'lineup', label: 'Uppställning', shortLabel: 'Uppställn.', icon: Shirt });
+  // Chatt med lag, grupper och enskilda i föreningen. Märket = antal chattar med olästa.
+  primary.push({ id: 'chat', label: 'Chatt', icon: MessageCircle, badge: opts.unreadChats || undefined });
   // Lagets taktiktavlor: alla i laget (spelare ser de tavlor som tränaren har delat).
-  primary.push({ id: 'tacticalboards', label: 'Taktiktavla', shortLabel: 'Taktik', icon: Presentation });
+  // På mobil ligger Taktiktavla i kontomenyn (bottenmenyn har inte plats).
+  primary.push({ id: 'tacticalboards', label: 'Taktiktavla', shortLabel: 'Taktik', icon: Presentation, desktopOnly: true });
   primary.push({ id: 'leaderboard', label: 'Poängliga', shortLabel: 'Poäng', icon: Trophy });
   return { primary, secondary: [{ id: 'teampage', label: 'Lagsida', icon: Globe }] };
 };
@@ -51,6 +54,8 @@ export interface AppShellProps {
   canViewLineup: boolean;
   /** Antal olästa inlägg (märke på menyvalet). */
   unreadPosts?: number;
+  /** Antal chattar med olästa meddelanden. */
+  unreadChats?: number;
   isCoachOrAdmin: boolean;
   title: string;
   /** Knappar som hör till den aktuella sidan, visas till höger i toppfältet. */
@@ -165,12 +170,12 @@ const ExitPresentingButton: React.FC<{ onExit: () => void }> = ({ onExit }) => {
 
 export const AppShell: React.FC<AppShellProps> = props => {
   const {
-    view, onNavigate, canViewLineup, unreadPosts, isCoachOrAdmin, title, actions, clubName, teamName, account,
+    view, onNavigate, canViewLineup, unreadPosts, unreadChats, isCoachOrAdmin, title, actions, clubName, teamName, account,
     pendingRequests, syncState, onSaveNow, onRefresh, theme, onToggleTheme, onLogout, onLogin,
     onOpenShakeInfo, onOpenPendingRequests, chromeHidden, hideTopBar, presenting, onExitPresenting, banner, children,
   } = props;
   const [accountOpen, setAccountOpen] = React.useState(false);
-  const { primary, secondary } = buildNavItems({ canViewLineup, unreadPosts });
+  const { primary, secondary } = buildNavItems({ canViewLineup, unreadPosts, unreadChats });
   const adminItem: NavItem | null = isCoachOrAdmin && account
     ? { id: 'clubadmin', label: 'Administration', icon: ShieldCheck, badge: pendingRequests || undefined }
     : null;
@@ -355,6 +360,9 @@ export const AppShell: React.FC<AppShellProps> = props => {
             />
           )}
           <MenuItem icon={<UserIcon size={18} />} label="Min profil" description="Namn, bild, lösenord och inloggning" onClick={() => go('profile')} active={view === 'profile'} />
+          <div className="md:hidden">
+            <MenuItem icon={<Presentation size={18} />} label="Taktiktavla" description="Lagets taktiktavlor" onClick={() => go('tacticalboards')} active={view === 'tacticalboards'} />
+          </div>
           <MenuItem icon={<Globe size={18} />} label="Lagsida" description="Lagets webbsida, kalender och tabell" onClick={() => go('teampage')} active={view === 'teampage'} />
           {adminItem && (
             <MenuItem

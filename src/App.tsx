@@ -16,6 +16,8 @@ import LineupBuilder from './components/LineupBuilder';
 import TacticalBoardsView from './components/TacticalBoardsView';
 import PostsView, { PostDetailSheet, PostEditorSheet } from './components/PostsView';
 import { usePosts, type Post } from './lib/posts';
+import ChatView from './components/chat/ChatView';
+import { useChatSummary } from './lib/chat';
 
 import TeamPage from './components/TeamPage';
 import TrainingManager from './components/TrainingManager';
@@ -33,7 +35,7 @@ import { OnboardingModal } from './components/OnboardingModal';
 import { PendingRequestsModal } from './components/PendingRequestsModal';
 import { ShakeProtectionModal, QuickShakeModal } from './components/ShakeProtectionModal';
 
-type View = 'home' | 'training' | 'setup' | 'exercise' | 'squad' | 'leaderboard' | 'profile' | 'lineup' | 'tacticalboards' | 'posts' | 'teampage' | 'clubadmin';
+type View = 'home' | 'training' | 'setup' | 'exercise' | 'squad' | 'leaderboard' | 'profile' | 'lineup' | 'tacticalboards' | 'posts' | 'chat' | 'teampage' | 'clubadmin';
 
 const INITIAL_DATA: CoachData = {
   squad: [],
@@ -866,6 +868,10 @@ export default function App() {
   const [sessionEditorTab, setSessionEditorTab] = useState<'schema' | 'attendance' | 'rsvp'>('schema');
   // Inlägg till laget (hämtas från /api/posts, inte via lagets dokument)
   const postsState = usePosts(userProfile.activeClubId, userProfile.activeTeamId, !!user);
+  // Chatt: olästa-märket i menyn och vilken chatt som är öppen.
+  const chatSummary = useChatSummary(userProfile.activeClubId, !!user);
+  const [openChatId, setOpenChatId] = useState<string | null>(null);
+  useEffect(() => { setOpenChatId(null); }, [userProfile.activeClubId]);
   const [openPostId, setOpenPostId] = useState<string | null>(null);
   const [editingPost, setEditingPost] = useState<Post | 'new' | null>(null);
   const [sessionMode, setSessionMode] = useState<'plan' | 'live'>('plan');
@@ -3813,6 +3819,7 @@ export default function App() {
     lineup: 'Uppställning & taktik',
     tacticalboards: 'Taktiktavla',
     posts: 'Inlägg',
+    chat: 'Chatt',
     leaderboard: 'Poängliga',
     teampage: 'Lagsida',
     clubadmin: 'Administration',
@@ -3883,7 +3890,7 @@ export default function App() {
 
   const mainContent = (
     <div className={`flex-1 flex flex-col min-h-0 w-full max-w-full overflow-x-hidden ${
-      view === 'exercise' || view === 'teampage' || view === 'home' || view === 'tacticalboards' || view === 'posts' || (view === 'lineup' && (isLineupMaximized || isPresenting))
+      view === 'exercise' || view === 'teampage' || view === 'home' || view === 'tacticalboards' || view === 'posts' || view === 'chat' || (view === 'lineup' && (isLineupMaximized || isPresenting))
         ? 'overflow-hidden'
         : 'overflow-y-auto'
     } ${view === 'exercise' ? 'select-none' : ''}`}>
@@ -3921,6 +3928,21 @@ export default function App() {
               onNewPost={() => setEditingPost('new')}
               onShowAllPosts={() => setView('posts')}
             />
+          )}
+
+          {view === 'chat' && user && (
+            userProfile.activeClubId ? (
+              <ChatView
+                key={`chat-${userProfile.activeClubId}`}
+                clubId={userProfile.activeClubId}
+                myUserId={user.uid}
+                summary={chatSummary}
+                openChatId={openChatId}
+                onOpenChat={setOpenChatId}
+              />
+            ) : (
+              <p key="chat-noclub" className="p-6 text-sm text-zinc-500">Välj en förening först för att kunna chatta.</p>
+            )
           )}
 
           {view === 'posts' && (
@@ -4633,7 +4655,7 @@ export default function App() {
           )}
         </AnimatePresence>
 
-        {view !== 'exercise' && view !== 'teampage' && view !== 'home' && view !== 'setup' && view !== 'tacticalboards' && view !== 'posts' && !(view === 'lineup' && (isLineupMaximized || isPresenting)) && !isPresenting && (
+        {view !== 'exercise' && view !== 'teampage' && view !== 'home' && view !== 'setup' && view !== 'tacticalboards' && view !== 'posts' && view !== 'chat' && !(view === 'lineup' && (isLineupMaximized || isPresenting)) && !isPresenting && (
           <div className="mt-8 mb-4 flex justify-center">
             <VersionFooter />
           </div>
@@ -5089,6 +5111,7 @@ export default function App() {
         onNavigate={(v) => { setIsPresenting(false); setView(v); }}
         canViewLineup={canViewLineup}
         unreadPosts={postsState.unreadCount}
+        unreadChats={chatSummary.unreadChats}
         isCoachOrAdmin={isCoachOrAdmin}
         title={shellTitle}
         actions={shellActions}

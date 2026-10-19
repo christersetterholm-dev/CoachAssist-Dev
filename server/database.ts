@@ -239,6 +239,98 @@ export const SCHEMA = `
     created_at INTEGER NOT NULL
   );
   CREATE INDEX IF NOT EXISTS idx_post_comments_post ON post_comments(post_id);
+
+  -- Chatt (se server/chat.ts): lagchattar, gruppchattar och en-till-en-chattar per förening.
+  CREATE TABLE IF NOT EXISTS chat_conversations (
+    id TEXT PRIMARY KEY,
+    club_id TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    team_id TEXT,
+    name TEXT,
+    direct_key TEXT,
+    created_by TEXT,
+    created_at INTEGER NOT NULL,
+    last_message_seq INTEGER NOT NULL DEFAULT 0,
+    last_message_at INTEGER
+  );
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_chat_team ON chat_conversations(club_id, team_id) WHERE kind = 'team';
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_chat_direct ON chat_conversations(club_id, direct_key) WHERE kind = 'direct';
+
+  -- Vilka som är med i en chatt och hur långt de har läst. I lagchatten bestäms vilka som
+  -- är med av laget; raden finns bara för att hålla reda på vad personen har läst.
+  CREATE TABLE IF NOT EXISTS chat_participants (
+    conversation_id TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    role TEXT NOT NULL DEFAULT 'member',
+    joined_at INTEGER NOT NULL,
+    left_at INTEGER,
+    last_read_seq INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (conversation_id, user_id)
+  );
+  CREATE INDEX IF NOT EXISTS idx_chat_participants_user ON chat_participants(user_id);
+
+  -- seq: stigande nummer per meddelande. rev: höjs vid varje ändring (nytt, ändrat, borttaget,
+  -- reaktion) så att appen kan hämta "allt som ändrats sedan sist".
+  CREATE TABLE IF NOT EXISTS chat_messages (
+    seq INTEGER PRIMARY KEY AUTOINCREMENT,
+    conversation_id TEXT NOT NULL,
+    user_id TEXT,
+    author_name TEXT,
+    kind TEXT NOT NULL DEFAULT 'text',
+    body TEXT NOT NULL DEFAULT '',
+    attachments TEXT,
+    created_at INTEGER NOT NULL,
+    edited_at INTEGER,
+    deleted_at INTEGER,
+    deleted_by TEXT,
+    rev INTEGER NOT NULL DEFAULT 0
+  );
+  CREATE INDEX IF NOT EXISTS idx_chat_messages_conv ON chat_messages(conversation_id, seq);
+  CREATE INDEX IF NOT EXISTS idx_chat_messages_rev ON chat_messages(conversation_id, rev);
+  CREATE INDEX IF NOT EXISTS idx_chat_messages_user ON chat_messages(user_id, created_at);
+
+  -- Räknare för rev (en rad per ändring; nummret är det som används).
+  CREATE TABLE IF NOT EXISTS chat_revs (rev INTEGER PRIMARY KEY AUTOINCREMENT, at INTEGER);
+
+  CREATE TABLE IF NOT EXISTS chat_reactions (
+    message_seq INTEGER NOT NULL,
+    user_id TEXT NOT NULL,
+    emoji TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    PRIMARY KEY (message_seq, user_id, emoji)
+  );
+
+  -- Bilder och filer i chatten. Ligger i mappen chat_files/ (inte publik) och lämnas bara ut
+  -- till dem som är med i chatten.
+  CREATE TABLE IF NOT EXISTS chat_files (
+    id TEXT PRIMARY KEY,
+    club_id TEXT NOT NULL,
+    conversation_id TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    message_seq INTEGER,
+    original_name TEXT NOT NULL,
+    mime TEXT NOT NULL,
+    size INTEGER NOT NULL,
+    stored_name TEXT NOT NULL,
+    created_at INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_chat_files_conv ON chat_files(conversation_id);
+  CREATE INDEX IF NOT EXISTS idx_chat_files_club ON chat_files(club_id);
+
+  -- Anmälda meddelanden.
+  CREATE TABLE IF NOT EXISTS chat_reports (
+    id TEXT PRIMARY KEY,
+    club_id TEXT NOT NULL,
+    conversation_id TEXT NOT NULL,
+    message_seq INTEGER NOT NULL,
+    reported_by TEXT NOT NULL,
+    reason TEXT,
+    created_at INTEGER NOT NULL,
+    handled_by TEXT,
+    handled_at INTEGER,
+    action TEXT
+  );
+  CREATE INDEX IF NOT EXISTS idx_chat_reports_club ON chat_reports(club_id, handled_at);
 `;
 
 const USER_COLUMNS = [

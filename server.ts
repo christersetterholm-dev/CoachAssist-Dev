@@ -19,6 +19,7 @@ import * as registry from './server/registry.ts';
 import * as invites from './server/invites.ts';
 import * as tacticalBoards from './server/tacticalBoards.ts';
 import * as posts from './server/posts.ts';
+import { registerChatRoutes } from './server/chat.ts';
 
 const customRequire = typeof require !== 'undefined' ? require : createRequire(import.meta.url);
 
@@ -2631,6 +2632,9 @@ async function startServer() {
     posts.deleteComment(db, req.params.commentId);
     res.json({ success: true });
   });
+
+  // Chatt: lagchattar, grupper och en-till-en (se server/chat.ts). Filerna ligger i chat_files/.
+  registerChatRoutes(app, db, { requireAuthUser, isRootAdmin: verifyIsRootAdmin, filesDir: path.join(DATA_DIR, 'chat_files') });
 
   // Öppna inbjudningar i föreningen (för att visa "Inbjuden" i listor).
   app.get('/api/invites', requireAuthUser, async (req, res) => {

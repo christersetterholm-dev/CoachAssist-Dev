@@ -6,7 +6,7 @@
 #   ./deploy.sh --skip-tests hoppar över testerna (snabbare)
 #
 # Kräver SSH-nyckeln ~/.ssh/coachassist (samma som tidigare).
-# Databasen och uppladdade bilder på servern rörs aldrig, men databasen
+# Databasen och uppladdade bilder på servern rörs aldrig, men databasen (och chattens filer)
 # säkerhetskopieras före varje uppdatering (sparas i backups/ på servern).
 # =============================================================================
 set -euo pipefail
@@ -65,6 +65,8 @@ $SSH "$SERVER" 'cd ~/'"$REMOTE_DIR"' && mkdir -p backups && stamp=$(date +%Y%m%d
     if [ -f "$f" ]; then cp "$f" "backups/$stamp-$f"; found=1; echo "  ✓ $f kopierad till backups/$stamp-$f"; fi
   done
   [ $found = 1 ] || echo "  (ingen databasfil hittades)"
+  if [ -d chat_files ]; then tar -czf "backups/$stamp-chat_files.tar.gz" chat_files && echo "  ✓ chattens filer packade till backups/$stamp-chat_files.tar.gz"; fi
+  ls -1t backups/*-chat_files.tar.gz 2>/dev/null | tail -n +4 | xargs -r rm --
   ls -1t backups/* 2>/dev/null | tail -n +41 | xargs -r rm --'
 
 step "Laddar upp filer"
