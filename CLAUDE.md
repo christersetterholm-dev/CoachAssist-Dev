@@ -167,8 +167,17 @@ npm run set-password -- e@post.se            # lokalt konto/lösenord
   `npm run dev` igång på Macen. Använd `http://127.0.0.1:3000` för en andra, separat
   inloggning (t.ex. som spelare). Lösenord får Claude inte skriva in – be Christer logga in.
 - Christer måste själv starta om `npm run dev` i Terminal om den inte redan går i watch-läge.
-- Christer committar och pushar själv med GitHub Desktop. Ge inga git-kommandon för commit/push;
-  föreslå i stället ett commit-meddelande (på svenska) som han kan klistra in.
+- Från VM:en når Claude inte GitHub: där committar och pushar Christer själv med GitHub Desktop.
+  Föreslå i stället ett commit-meddelande (på svenska) som han kan klistra in.
+
+### När Claude arbetar i Claude-appen på Macen (Code)
+- Claude sköter hela flödet när Christer ber om det: egen gren, commit (svenska meddelanden),
+  slå ihop till `main` (`git merge --ff-only`), `git push origin main` och `npm run deploy`.
+  Tillåtelserna står i `.claude/settings.local.json` (finns bara på Macen, inte i git).
+  Driftsätt bara när Christer ber om det.
+- Går något inte (spärr eller fel): säg vad som stoppade och ge exakta steg för GitHub Desktop
+  eller Terminal. I GitHub Desktop slår man ihop genom att stå på **main** och välja grenen i
+  Branch → Merge into current branch.
 
 ### Servern (webbhotell med cPanel)
 - `setterho@setterholm.se`, SSH-nyckel `~/.ssh/coachassist`, appmapp `~/coachassist.setterholm.se`.
