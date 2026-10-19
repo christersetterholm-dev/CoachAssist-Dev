@@ -3,6 +3,7 @@ import { Calendar, Clock, MapPin, Search, ChevronDown, ChevronUp, ChevronLeft, C
 import { motion, AnimatePresence } from 'motion/react';
 import { TrainingSession, SquadPlayer } from '../types';
 import { categorizeSession } from '../utils/sessionCategory';
+import { Button } from './ui';
 
 const SWEDISH_WEEKDAYS = ['Sön', 'Mån', 'Tis', 'Ons', 'Tor', 'Fre', 'Lör'];
 
@@ -324,15 +325,22 @@ export default function MobileCalendarView({
     return days;
   }, [currentMonth, sessions, searchQuery, activeFilter]);
 
-  // Månadsvyn: rulla fram till dagens datum när månaden visas.
+  // Innevarande månad utan fler aktiviteter från och med i dag (med valt filter och sökning).
+  const noMoreThisMonth = useMemo(() => {
+    const now = new Date();
+    if (currentMonth.getFullYear() !== now.getFullYear() || currentMonth.getMonth() !== now.getMonth()) return false;
+    return !calendarDays.some(day => day.dayNumber >= now.getDate() && day.events.length > 0);
+  }, [calendarDays, currentMonth]);
+
+  // Månadsvyn: rulla fram till dagens datum när månaden visas – men inte ner till bara tomma dagar.
   useEffect(() => {
-    if (viewMode !== 'month') return;
+    if (viewMode !== 'month' || noMoreThisMonth) return;
     const t = setTimeout(() => {
       const el = document.querySelector('[data-cal-today="true"]') as HTMLElement | null;
       el?.scrollIntoView({ block: 'center', behavior: 'auto' });
     }, 50);
     return () => clearTimeout(t);
-  }, [viewMode, currentMonth]);
+  }, [viewMode, currentMonth, noMoreThisMonth]);
 
   const toggleExpand = (id: string) => {
     setExpandedSessionId(prev => (prev === id ? null : id));
@@ -685,6 +693,22 @@ export default function MobileCalendarView({
 
       {viewMode === 'month' ? (
         <div className="px-0 sm:px-0 mt-2">
+          {noMoreThisMonth && (
+            <div className="mx-3 sm:mx-0 mb-2 p-3 sm:p-4 rounded-2xl bg-indigo-50 dark:bg-indigo-950/40 border border-indigo-100 dark:border-indigo-900 flex flex-col sm:flex-row sm:items-center gap-3">
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-bold text-zinc-900 dark:text-white">Inga fler aktiviteter i {SWEDISH_MONTHS[currentMonth.getMonth()].toLowerCase()}</p>
+                <p className="text-xs text-zinc-600 dark:text-zinc-400">
+                  {activeFilter !== 'all' || searchQuery.trim() ? 'Med det valda filtret finns inget mer den här månaden.' : 'Månadens tidigare aktiviteter finns längre ner.'}
+                </p>
+              </div>
+              <div className="flex gap-2 shrink-0">
+                <Button size="sm" variant="secondary" icon={<ChevronRight size={16} />} onClick={handleNextMonth}>Nästa månad</Button>
+                {isCoachOrAdmin && onNewSession && (
+                  <Button size="sm" icon={<Plus size={16} />} onClick={onNewSession}>Ny aktivitet</Button>
+                )}
+              </div>
+            </div>
+          )}
           {calendarDays.length === 0 ? (
             <div className="bg-white dark:bg-zinc-900 rounded-3xl p-10 text-center border-2 border-dashed border-zinc-150 dark:border-zinc-850 animate-fade-in">
               <div className="w-14 h-14 bg-zinc-50 dark:bg-zinc-950 rounded-2xl flex items-center justify-center mx-auto mb-3 text-zinc-400">
