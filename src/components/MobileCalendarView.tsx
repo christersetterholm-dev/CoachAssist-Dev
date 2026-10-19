@@ -160,6 +160,8 @@ export default function MobileCalendarView({
   };
   const [expandedEventId, setExpandedEventId] = useState<string | null>(null);
   const [showPlanMenu, setShowPlanMenu] = useState(false);
+  // Menyn öppnas åt det håll där den får plats (på mobil hamnar plusknappen längst till vänster)
+  const [planMenuAlignLeft, setPlanMenuAlignLeft] = useState(false);
   const planMenuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -453,6 +455,8 @@ export default function MobileCalendarView({
                   type="button"
                   onClick={(e) => {
                     e.stopPropagation();
+                    const rect = planMenuRef.current?.getBoundingClientRect();
+                    setPlanMenuAlignLeft(!!rect && rect.right - 224 < 8);
                     setShowPlanMenu(prev => !prev);
                   }}
                   className="h-10 px-3 sm:px-4 inline-flex items-center justify-center gap-1.5 bg-indigo-600 hover:bg-indigo-700 dark:bg-indigo-500 text-white rounded-xl text-sm font-semibold transition-all shadow-sm active:scale-95 cursor-pointer"
@@ -468,7 +472,7 @@ export default function MobileCalendarView({
                       initial={{ opacity: 0, scale: 0.95, y: 5 }}
                       animate={{ opacity: 1, scale: 1, y: 0 }}
                       exit={{ opacity: 0, scale: 0.95, y: 5 }}
-                      className="absolute right-0 mt-1.5 w-56 bg-white dark:bg-zinc-900 border border-zinc-150 dark:border-zinc-800 rounded-2xl shadow-xl z-50 py-1.5 overflow-hidden text-left"
+                      className={`absolute ${planMenuAlignLeft ? 'left-0' : 'right-0'} mt-1.5 w-56 max-w-[calc(100vw-1rem)] bg-white dark:bg-zinc-900 border border-zinc-150 dark:border-zinc-800 rounded-2xl shadow-xl z-50 py-1.5 overflow-hidden text-left`}
                     >
                       {onNewSession && (
                         <button
