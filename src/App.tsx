@@ -4764,6 +4764,7 @@ export default function App() {
             user={user}
             userRoles={userRoles}
             userProfile={userProfile}
+            isRootAdmin={isRootAdmin}
             onClose={() => {
               if (sessionActionCountRef.current > 0) {
                 pushDirtySegments(true).catch(err => console.warn('App: Push on session editor close:', err));

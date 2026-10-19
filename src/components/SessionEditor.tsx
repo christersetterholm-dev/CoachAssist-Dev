@@ -19,6 +19,8 @@ interface SessionEditorProps {
   onClose: () => void;
   user?: any;
   userRoles?: string[];
+  /** Huvudadministratören får alltid planera och ändra, även utan roll i laget. */
+  isRootAdmin?: boolean;
   userProfile?: UserProfile;
   onCreateExercise?: (name: string, momentId: string) => string;
   onSelectExercise?: (id: string) => void;
@@ -742,12 +744,13 @@ export default function SessionEditor({
   onOpenLineup,
   user,
   userRoles,
-  userProfile
+  userProfile,
+  isRootAdmin
 }: SessionEditorProps) {
   const isCoachOrAdmin = useMemo(() => {
     if (!user) return true; // Offline or fallback mode
-    return userRoles?.includes('admin') || userRoles?.includes('coach') || false;
-  }, [user, userRoles]);
+    return !!isRootAdmin || userRoles?.includes('admin') || userRoles?.includes('coach') || false;
+  }, [user, userRoles, isRootAdmin]);
 
   // Spelare landar på kallelsen; tränare där de valde.
   const startTab = isCoachOrAdmin ? initialTab : 'rsvp';
