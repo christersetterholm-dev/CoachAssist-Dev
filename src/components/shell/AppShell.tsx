@@ -22,19 +22,21 @@ export interface NavItem {
 }
 
 export const buildNavItems = (opts: { canViewLineup: boolean; unreadPosts?: number; unreadChats?: number }): { primary: NavItem[]; secondary: NavItem[] } => {
+  // Ordningen i sidomenyn (och i Mer på mobil): Översikt, Kalender, Chatt, Inlägg, Uppställning,
+  // Taktiktavla, Poängliga, Truppen.
   const primary: NavItem[] = [
     { id: 'home', label: 'Översikt', icon: House },
+    { id: 'training', label: 'Kalender', icon: Calendar },
+    // Chatt med lag, grupper och enskilda i föreningen. Märket = antal chattar med olästa.
+    { id: 'chat', label: 'Chatt', icon: MessageCircle, badge: opts.unreadChats || undefined },
     // Inlägg från tränarna. På mobil visas märket på Översikt (där inläggen också syns).
     { id: 'posts', label: 'Inlägg', icon: Megaphone, badge: opts.unreadPosts || undefined },
-    { id: 'training', label: 'Kalender', icon: Calendar },
-    { id: 'squad', label: 'Truppen', icon: Users },
   ];
   if (opts.canViewLineup) primary.push({ id: 'lineup', label: 'Uppställning', shortLabel: 'Uppställn.', icon: Shirt });
-  // Chatt med lag, grupper och enskilda i föreningen. Märket = antal chattar med olästa.
-  primary.push({ id: 'chat', label: 'Chatt', icon: MessageCircle, badge: opts.unreadChats || undefined });
   // Lagets taktiktavlor: alla i laget (spelare ser de tavlor som tränaren har delat).
   primary.push({ id: 'tacticalboards', label: 'Taktiktavla', shortLabel: 'Taktik', icon: Presentation });
   primary.push({ id: 'leaderboard', label: 'Poängliga', shortLabel: 'Poäng', icon: Trophy });
+  primary.push({ id: 'squad', label: 'Truppen', icon: Users });
   return { primary, secondary: [{ id: 'teampage', label: 'Lagsida', icon: Globe }] };
 };
 
