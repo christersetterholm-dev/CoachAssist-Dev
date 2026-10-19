@@ -175,6 +175,10 @@ npm run set-password -- e@post.se            # lokalt konto/lösenord
   slå ihop till `main` (`git merge --ff-only`), `git push origin main` och `npm run deploy`.
   Tillåtelserna står i `.claude/settings.local.json` (finns bara på Macen, inte i git).
   Driftsätt bara när Christer ber om det.
+- Pushen loggar in via GitHub CLI (`gh`, Homebrew) över HTTPS som kontot **christersetterholm-dev**
+  (äger repot). Kontot `christersetterholm` finns också i `gh` men har inte skrivrätt (403).
+  Vid 403 eller "could not read Username": kolla `gh auth status`, byt med
+  `gh auth switch -u christersetterholm-dev`, kör vid behov `gh auth setup-git`.
 - Går något inte (spärr eller fel): säg vad som stoppade och ge exakta steg för GitHub Desktop
   eller Terminal. I GitHub Desktop slår man ihop genom att stå på **main** och välja grenen i
   Branch → Merge into current branch.
