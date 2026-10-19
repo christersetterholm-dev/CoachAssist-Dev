@@ -106,13 +106,16 @@ export const MonthGrid: React.FC<{
                     <span className="block truncate text-center sm:text-left text-[9px] sm:text-[11px] leading-tight text-rose-500">{holiday.name}</span>
                   )}
                   {events.slice(0, 2).map((s) => (
-                    <span key={s.id} className="flex items-center gap-0.5 sm:gap-1 min-w-0">
-                      <span className={cx('w-1.5 h-1.5 sm:w-2 sm:h-2 rounded-full shrink-0', DOT[categorizeSession(s)])} />
-                      <span className="truncate text-[9px] sm:text-xs leading-tight text-zinc-700 dark:text-zinc-200">
-                        <span className="font-semibold tabular-nums">{s.startTime}</span>
-                        <span className="sm:hidden"> {firstWord(s.title)}</span>
-                        <span className="hidden sm:inline"> {s.title || 'Aktivitet'}</span>
+                    <span key={s.id} className="block min-w-0">
+                      <span className="flex items-center gap-0.5 sm:gap-1 min-w-0">
+                        <span className={cx('w-1.5 h-1.5 sm:w-2 sm:h-2 rounded-full shrink-0', DOT[categorizeSession(s)])} />
+                        <span className="truncate text-[9px] sm:text-xs leading-tight text-zinc-700 dark:text-zinc-200">
+                          <span className="font-semibold tabular-nums">{s.startTime}</span>
+                          <span className="hidden sm:inline"> {s.title || 'Aktivitet'}</span>
+                        </span>
                       </span>
+                      {/* Mobil: första ordet på egen rad under klockslaget (rutorna är smala). */}
+                      <span className="sm:hidden block truncate pl-2 text-[9px] leading-tight text-zinc-500 dark:text-zinc-400">{firstWord(s.title)}</span>
                     </span>
                   ))}
                   {events.length > 2 && (
