@@ -2542,6 +2542,58 @@ async function startServer() {
     res.json({ success: true });
   });
 
+  // Konton med en roll i laget (för notiser), utom den som gjorde ändringen.
+  const teamUserIds = (clubId: string, teamId: string, exceptUserId: string): string[] => db.prepare(
+    `SELECT DISTINCT m.user_id FROM team_roles tr JOIN members m ON m.id = tr.member_id
+     WHERE tr.club_id = ? AND tr.team_id = ? AND m.user_id IS NOT NULL AND m.user_id != ''`
+  ).all(clubId, teamId).map((r: any) => String(r.user_id)).filter((id: string) => id !== String(exceptUserId));
+
+  // Notis till laget om nya pass att svara på (serie eller publicerad kallelse). Tränaren väljer det
+  // själv i appen. Appen skickar en kort sammanfattning av passen (de kanske inte hunnit sparas än).
+  const sessionNotifyLog = new Map<string, number[]>();
+  app.post('/api/sessions/notify', requireAuthUser, async (req, res) => {
+    const a = await teamAccess(req, req.body?.clubId, req.body?.teamId);
+    if (!a) return res.status(400).json({ error: 'clubId och teamId krävs.' });
+    if (!a.isCoach) return res.status(403).json({ error: 'Bara tränare kan skicka notiser om pass.' });
+    const list = Array.isArray(req.body?.sessions) ? req.body.sessions.slice(0, 200) : [];
+    const items = list
+      .map((x: any) => ({
+        id: typeof x?.id === 'string' ? x.id.slice(0, 100) : '',
+        title: typeof x?.title === 'string' ? x.title.replace(/\s+/g, ' ').trim().slice(0, 60) : '',
+        date: Number(x?.date),
+        startTime: typeof x?.startTime === 'string' && /^\d{1,2}:\d{2}$/.test(x.startTime) ? x.startTime : '',
+      }))
+      .filter((x: any) => x.id && Number.isFinite(x.date))
+      .sort((x: any, y: any) => x.date - y.date);
+    if (!items.length) return res.status(400).json({ error: 'Inga pass att skicka notis om.' });
+    // Högst 10 notiser per lag och timme
+    const key = `${a.clubId}/${a.teamId}`;
+    const now = Date.now();
+    const recent = (sessionNotifyLog.get(key) || []).filter((t) => now - t < 3600_000);
+    if (recent.length >= 10) return res.status(429).json({ error: 'Många notiser har redan skickats till laget. Vänta en stund.' });
+    sessionNotifyLog.set(key, [...recent, now]);
+
+    const fmt = (ms: number, withDay: boolean) => new Intl.DateTimeFormat('sv-SE', {
+      timeZone: 'Europe/Stockholm', day: 'numeric', month: 'short', ...(withDay ? { weekday: 'short' } : {}),
+    }).format(new Date(ms)).replace(/\./g, '');
+    const teamName = teamNames(db, a.clubId).get(a.teamId) || 'laget';
+    const first = items[0];
+    const last = items[items.length - 1];
+    const sameTitle = items.every((x: any) => x.title === first.title) && first.title;
+    const single = items.length === 1;
+    const body = single
+      ? `${first.title || 'Pass'} ${fmt(first.date, true)}${first.startTime ? ` ${first.startTime}` : ''}. Svara i appen.`
+      : `${items.length} ${sameTitle ? `pass (${first.title})` : 'pass'} ${fmt(first.date, false)} – ${fmt(last.date, false)}. Svara i appen.`;
+    const ids = teamUserIds(a.clubId, a.teamId, a.user.id);
+    push.notifyUsers(ids, 'sessions', {
+      title: `${single ? 'Ny kallelse' : 'Nya pass att svara på'} · ${teamName}`,
+      body,
+      tag: `sessions-${a.teamId}-${first.id}`,
+      open: { view: 'sessions', clubId: a.clubId, teamId: a.teamId, ...(single ? { sessionId: first.id } : {}) },
+    });
+    res.json({ success: true, recipients: ids.length });
+  });
+
   // Inlägg: tränare skriver till laget, alla i laget läser, reagerar och kommenterar.
   const teamAccess = async (req: express.Request, clubId: unknown, teamId: unknown) => {
     if (typeof clubId !== 'string' || typeof teamId !== 'string' || !clubId || !teamId || teamId === registry.CLUB_LEVEL) return null;
@@ -2587,10 +2639,7 @@ async function startServer() {
     res.json(posts.getPost(db, row, a.user.id, true));
     // Notis till alla i laget (utom den som skrev)
     try {
-      const ids = db.prepare(
-        `SELECT DISTINCT m.user_id FROM team_roles tr JOIN members m ON m.id = tr.member_id
-         WHERE tr.club_id = ? AND tr.team_id = ? AND m.user_id IS NOT NULL AND m.user_id != ''`
-      ).all(a.clubId, a.teamId).map((r: any) => String(r.user_id)).filter((id: string) => id !== String(a.user.id));
+      const ids = teamUserIds(a.clubId, a.teamId, a.user.id);
       const teamName = teamNames(db, a.clubId).get(a.teamId) || 'laget';
       push.notifyUsers(ids, 'posts', {
         title: `Nytt inlägg · ${teamName}`,

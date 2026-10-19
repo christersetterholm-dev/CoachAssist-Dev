@@ -1,4 +1,4 @@
-// Notiser (Web Push) för chatt och inlägg. Servern: server/push.ts. Servicearbetaren: public/sw.js.
+// Notiser (Web Push) för chatt, inlägg och kallelser (nya pass att svara på). Servern: server/push.ts. Servicearbetaren: public/sw.js.
 //
 // Notiser gäller en enhet i taget (telefonen, iPaden, datorn). På iPhone/iPad fungerar de bara när
 // appen är tillagd på hemskärmen (iOS 16.4 eller senare) och öppnad därifrån.
@@ -7,11 +7,12 @@ import { getApiUrl, getAuthHeader } from './firebase';
 export type PushOpen =
   | { view: 'chat'; clubId: string; conversationId: string }
   | { view: 'post'; clubId: string; teamId: string; postId: string }
+  | { view: 'sessions'; clubId: string; teamId: string; sessionId?: string }
   | { view: 'home' };
 
 export type PushSupport = 'ok' | 'ios-install' | 'unsupported';
 
-export interface PushPrefs { chat: boolean; posts: boolean }
+export interface PushPrefs { chat: boolean; posts: boolean; sessions: boolean }
 export interface PushStatus extends PushPrefs { support: PushSupport; permission: NotificationPermission | 'unsupported'; subscribed: boolean }
 
 // Vilket konto som slog på notiser på den här enheten (och vilka val), så att appen kan förnya
@@ -52,10 +53,13 @@ export function registerServiceWorker(): Promise<ServiceWorkerRegistration | nul
 
 const currentSubscription = async () => (await registerServiceWorker())?.pushManager.getSubscription() ?? null;
 
-const readOwner = (): { userId: string; chat: boolean; posts: boolean } | null => {
-  try { return JSON.parse(localStorage.getItem(OWNER_KEY) || 'null'); } catch { return null; }
+const readOwner = (): ({ userId: string } & PushPrefs) | null => {
+  try {
+    const v = JSON.parse(localStorage.getItem(OWNER_KEY) || 'null');
+    return v ? { ...v, sessions: v.sessions !== false } : null; // äldre sparat val saknar sessions
+  } catch { return null; }
 };
-const writeOwner = (v: { userId: string; chat: boolean; posts: boolean } | null) => {
+const writeOwner = (v: ({ userId: string } & PushPrefs) | null) => {
   try { if (v) localStorage.setItem(OWNER_KEY, JSON.stringify(v)); else localStorage.removeItem(OWNER_KEY); } catch { /* privat läge */ }
 };
 
@@ -67,12 +71,12 @@ const b64ToBytes = (b64: string) => {
 export async function getPushStatus(): Promise<PushStatus> {
   const support = pushSupport();
   const permission = 'Notification' in window ? Notification.permission : 'unsupported';
-  const base = { support, permission, subscribed: false, chat: true, posts: true } as PushStatus;
+  const base = { support, permission, subscribed: false, chat: true, posts: true, sessions: true } as PushStatus;
   if (support !== 'ok') return base;
   const sub = await currentSubscription();
   if (!sub) return base;
   const r = await call('/api/push/status', { endpoint: sub.endpoint });
-  return { ...base, subscribed: !!r.subscribed, chat: r.chat !== false, posts: r.posts !== false };
+  return { ...base, subscribed: !!r.subscribed, chat: r.chat !== false, posts: r.posts !== false, sessions: r.sessions !== false };
 }
 
 /** Slår på notiser på den här enheten (frågar om lov första gången). Måste anropas från ett tryck. */
@@ -97,7 +101,7 @@ export async function enablePush(userId: string, prefs: PushPrefs): Promise<Push
   if (!sub) sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64ToBytes(publicKey) });
   const r = await call('/api/push/subscribe', { subscription: sub.toJSON(), ...prefs });
   writeOwner({ userId, ...prefs });
-  return { support: 'ok', permission, subscribed: !!r.subscribed, chat: r.chat !== false, posts: r.posts !== false };
+  return { support: 'ok', permission, subscribed: !!r.subscribed, chat: r.chat !== false, posts: r.posts !== false, sessions: r.sessions !== false };
 }
 
 export async function updatePushPrefs(userId: string, prefs: PushPrefs): Promise<void> {
@@ -133,9 +137,9 @@ export async function syncPush(userId: string): Promise<void> {
   if (!owner || owner.userId !== userId || Notification.permission !== 'granted') return;
   try {
     const sub = await currentSubscription();
-    if (!sub) { await enablePush(userId, { chat: owner.chat, posts: owner.posts }); return; }
+    if (!sub) { await enablePush(userId, { chat: owner.chat, posts: owner.posts, sessions: owner.sessions }); return; }
     const r = await call('/api/push/status', { endpoint: sub.endpoint });
-    if (!r.subscribed) await call('/api/push/subscribe', { subscription: sub.toJSON(), chat: owner.chat, posts: owner.posts });
+    if (!r.subscribed) await call('/api/push/subscribe', { subscription: sub.toJSON(), chat: owner.chat, posts: owner.posts, sessions: owner.sessions });
   } catch (e) {
     console.warn('[Notiser] Kunde inte förnya:', e);
   }
@@ -159,4 +163,17 @@ export function listenForPushOpen(handler: (open: PushOpen) => void): () => void
   };
   navigator.serviceWorker.addEventListener('message', onMessage);
   return () => navigator.serviceWorker.removeEventListener('message', onMessage);
+}
+
+/**
+ * Tränaren skickar en notis till laget om nya pass att svara på (en serie eller en kallelse).
+ * Returnerar hur många konton i laget som kan få den (bara de som slagit på notiser får den).
+ */
+export async function notifyTeamAboutSessions(
+  clubId: string, teamId: string, sessions: { id: string; title?: string; date: number; startTime?: string }[],
+): Promise<{ recipients: number }> {
+  return call('/api/sessions/notify', {
+    clubId, teamId,
+    sessions: sessions.map((x) => ({ id: x.id, title: x.title || '', date: x.date, startTime: x.startTime || '' })),
+  });
 }

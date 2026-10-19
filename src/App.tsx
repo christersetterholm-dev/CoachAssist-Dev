@@ -894,7 +894,7 @@ export default function App() {
   const lastSyncedAtRef = useRef<number>(0);
   const [isInitialSyncDone, setIsInitialSyncDone] = useState(false);
   const [isProfileLoaded, setIsProfileLoaded] = useState(false);
-  // Tryck på en notis: öppna chatten eller inlägget när profilen är inläst.
+  // Tryck på en notis: öppna chatten, inlägget eller kalendern när profilen är inläst.
   useEffect(() => {
     if (!pushOpen || !user || !isProfileLoaded) return;
     setPushOpen(null);
@@ -904,6 +904,14 @@ export default function App() {
       if (pushOpen.clubId === userProfile.activeClubId) setOpenChatId(pushOpen.conversationId);
     } else if (pushOpen.view === 'post') {
       setOpenPostId(pushOpen.postId);
+    } else if (pushOpen.view === 'sessions') {
+      // Nya pass att svara på: kalendern, och kallelsen om det gäller ett pass i det aktiva laget.
+      setTrainingTab('calendar_view');
+      setView('training');
+      if (pushOpen.sessionId && pushOpen.clubId === userProfile.activeClubId && pushOpen.teamId === userProfile.activeTeamId) {
+        setActiveSessionId(pushOpen.sessionId);
+        setSessionEditorTab('rsvp');
+      }
     }
   }, [pushOpen, user, isProfileLoaded]); // eslint-disable-line react-hooks/exhaustive-deps
   const [hasPulledFromCloud, setHasPulledFromCloud] = useState(false);

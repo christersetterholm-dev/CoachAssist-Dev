@@ -1,9 +1,9 @@
 /**
- * Arket "Notiser": slå på/av notiser för chatt och inlägg på den här enheten.
+ * Arket "Notiser": slå på/av notiser för chatt, inlägg och kallelser på den här enheten.
  * Logiken ligger i src/lib/push.ts.
  */
 import React, { useEffect, useState } from 'react';
-import { Bell, BellOff, MessageCircle, Megaphone, Send, Share, SquarePlus } from 'lucide-react';
+import { Bell, BellOff, CalendarCheck, MessageCircle, Megaphone, Send, Share, SquarePlus } from 'lucide-react';
 import { Button, Sheet } from './ui';
 import { disablePush, enablePush, getPushStatus, PushStatus, sendTestPush, updatePushPrefs } from '../lib/push';
 
@@ -52,12 +52,12 @@ export const NotificationsSheet: React.FC<{ open: boolean; onClose: () => void; 
 
   const enable = () => run(async () => {
     if (!userId) return;
-    setStatus(await enablePush(userId, { chat: status?.chat ?? true, posts: status?.posts ?? true }));
+    setStatus(await enablePush(userId, { chat: status?.chat ?? true, posts: status?.posts ?? true, sessions: status?.sessions ?? true }));
     setMessage({ tone: 'ok', text: 'Notiserna är påslagna på den här enheten.' });
   });
-  const setPref = (key: 'chat' | 'posts', v: boolean) => run(async () => {
+  const setPref = (key: 'chat' | 'posts' | 'sessions', v: boolean) => run(async () => {
     if (!userId || !status) return;
-    const next = { chat: status.chat, posts: status.posts, [key]: v };
+    const next = { chat: status.chat, posts: status.posts, sessions: status.sessions, [key]: v };
     await updatePushPrefs(userId, next);
     setStatus({ ...status, ...next });
   });
@@ -76,7 +76,7 @@ export const NotificationsSheet: React.FC<{ open: boolean; onClose: () => void; 
     <Sheet open={open} onClose={onClose} title="Notiser">
       <div className="px-3 pb-2 flex flex-col gap-3">
         <p className="text-sm text-zinc-600 dark:text-zinc-300">
-          Få en notis när någon skriver i chatten eller när tränaren lägger upp ett nytt inlägg. Valet gäller bara
+          Få en notis när någon skriver i chatten, när tränaren lägger upp ett nytt inlägg eller när det finns nya pass att svara på. Valet gäller bara
           den här enheten – slå på det på varje telefon, iPad eller dator där du vill ha notiser.
         </p>
 
@@ -118,6 +118,7 @@ export const NotificationsSheet: React.FC<{ open: boolean; onClose: () => void; 
             <div className="flex flex-col gap-0.5 -mx-3">
               <Toggle icon={<MessageCircle size={18} />} label="Chatt" description="Nya meddelanden i dina chattar" checked={s.chat} disabled={busy} onChange={(v) => setPref('chat', v)} />
               <Toggle icon={<Megaphone size={18} />} label="Inlägg" description="Nya inlägg från tränarna" checked={s.posts} disabled={busy} onChange={(v) => setPref('posts', v)} />
+              <Toggle icon={<CalendarCheck size={18} />} label="Kallelser" description="Nya pass och kallelser att svara på" checked={s.sessions} disabled={busy} onChange={(v) => setPref('sessions', v)} />
             </div>
             <div className="flex flex-col sm:flex-row gap-2">
               <Button variant="secondary" block icon={<Send size={16} />} onClick={test} disabled={busy}>Skicka testnotis</Button>

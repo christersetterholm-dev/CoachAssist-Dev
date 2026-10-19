@@ -77,8 +77,8 @@ test('notiser: nyckel, påslagning, status och ogiltiga prenumerationer', async 
   assert.equal(Buffer.from(publicKey, 'base64url').length, 65);
 
   const d = device('anna-status');
-  assert.deepEqual(ok(await subscribe(anna, d, { posts: false })), { subscribed: true, chat: true, posts: false });
-  assert.deepEqual(ok(await s.api('POST', '/api/push/status', { token: anna, body: { endpoint: d.subscription.endpoint } })), { subscribed: true, chat: true, posts: false });
+  assert.deepEqual(ok(await subscribe(anna, d, { posts: false })), { subscribed: true, chat: true, posts: false, sessions: true });
+  assert.deepEqual(ok(await s.api('POST', '/api/push/status', { token: anna, body: { endpoint: d.subscription.endpoint } })), { subscribed: true, chat: true, posts: false, sessions: true });
   // Någon annans enhet syns inte som påslagen
   assert.equal(ok(await s.api('POST', '/api/push/status', { token: bo, body: { endpoint: d.subscription.endpoint } })).subscribed, false);
 
@@ -170,4 +170,38 @@ test('notiser: samma enhet med nytt konto tillhör det nya kontot', async () => 
   ok(await subscribe(bo, d));
   assert.equal(ok(await s.api('POST', '/api/push/status', { token: anna, body: { endpoint: d.subscription.endpoint } })).subscribed, false);
   assert.equal(ok(await s.api('POST', '/api/push/status', { token: bo, body: { endpoint: d.subscription.endpoint } })).subscribed, true);
+});
+
+test('notiser: nya pass att svara på går till laget, bara tränaren får skicka', async () => {
+  const dAnna = device('anna-pass'), dBo = device('bo-pass'), dOther = device('other-pass'), dCoach = device('coach-pass');
+  ok(await subscribe(anna, dAnna));
+  ok(await subscribe(bo, dBo, { sessions: false }));
+  ok(await subscribe(other, dOther));
+  ok(await subscribe(coach, dCoach));
+  assert.equal(ok(await s.api('POST', '/api/push/status', { token: bo, body: { endpoint: dBo.subscription.endpoint } })).sessions, false);
+
+  const day = (d) => new Date(2026, 9, d, 12).getTime();
+  const series = [20, 22, 27].map((d, i) => ({ id: `p${i}`, title: 'Träning', date: day(d), startTime: '18:30' }));
+  const body = { clubId: 'klubb1', teamId: 'lag1', sessions: series };
+  assert.equal((await s.api('POST', '/api/sessions/notify', { body })).status, 401);
+  assert.equal((await s.api('POST', '/api/sessions/notify', { token: anna, body })).status, 403);
+  assert.equal((await s.api('POST', '/api/sessions/notify', { token: other, body })).status, 403);
+  assert.equal((await s.api('POST', '/api/sessions/notify', { token: coach, body: { ...body, sessions: [] } })).status, 400);
+
+  ok(await s.api('POST', '/api/sessions/notify', { token: coach, body }));
+  const [p] = await waitFor('anna-pass');
+  assert.equal(p.payload.title, 'Nya pass att svara på · A-laget');
+  assert.equal(p.payload.body, '3 pass (Träning) 20 okt – 27 okt. Svara i appen.');
+  assert.deepEqual(p.payload.open, { view: 'sessions', clubId: 'klubb1', teamId: 'lag1' });
+  await wait(300);
+  assert.equal(pushesFor('bo-pass').length, 0, 'har stängt av kallelser');
+  assert.equal(pushesFor('other-pass').length, 0, 'annat lag');
+  assert.equal(pushesFor('coach-pass').length, 0, 'den som skickade');
+
+  // Ett pass: öppnar just det passet
+  ok(await s.api('POST', '/api/sessions/notify', { token: coach, body: { ...body, sessions: [series[1]] } }));
+  const [, one] = await waitFor('anna-pass', 2);
+  assert.equal(one.payload.title, 'Ny kallelse · A-laget');
+  assert.equal(one.payload.body, 'Träning tors 22 okt 18:30. Svara i appen.');
+  assert.deepEqual(one.payload.open, { view: 'sessions', clubId: 'klubb1', teamId: 'lag1', sessionId: 'p1' });
 });

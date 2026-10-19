@@ -10,6 +10,7 @@ import MobileCalendarView from './MobileCalendarView';
 import ExerciseBankView from './ExerciseBankView';
 import { SegmentedTabs, Sheet, TextArea, TextInput } from './ui';
 import { CalendarFeedLink } from './CalendarFeedLink';
+import { notifyTeamAboutSessions } from '../lib/push';
 
 interface TrainingManagerProps {
   exercises: Exercise[];
@@ -613,6 +614,7 @@ export default function TrainingManager({
   const [seriesDeadlineDays, setSeriesDeadlineDays] = useState<number | ''>(1);
   const [seriesDeadlineTime, setSeriesDeadlineTime] = useState('12:00');
   const [seriesInviteNotes, setSeriesInviteNotes] = useState('');
+  const [seriesNotify, setSeriesNotify] = useState(true);
   const [manualDateInput, setManualDateInput] = useState('');
 
   // Sorting states
@@ -720,6 +722,10 @@ export default function TrainingManager({
     if (onAddSessionsBatch) {
       onAddSessionsBatch(created);
     }
+    if (seriesNotify && activeClubId && activeTeamId) {
+      notifyTeamAboutSessions(activeClubId, activeTeamId, created)
+        .catch((e) => alert(`Passen är skapade, men notisen kunde inte skickas: ${e?.message || e}`));
+    }
     
     // Reset and close
     setSelectedDates([]);
@@ -732,6 +738,7 @@ export default function TrainingManager({
     setRepeatUntil('');
     setSeriesInvite(false);
     setSeriesInviteNotes('');
+    setSeriesNotify(true);
     setSeriesStartTime('');
     setSeriesDuration('');
     setShowSeriesModal(false);
@@ -2233,8 +2240,8 @@ export default function TrainingManager({
                     className="w-5 h-5 accent-indigo-600"
                   />
                   <span>
-                    <span className="block text-sm font-bold text-zinc-900 dark:text-white">Skapa kallelse direkt</span>
-                    <span className="block text-xs text-zinc-500 dark:text-zinc-400">Spelarna kan svara på alla pass i serien i appen. Inga mejl eller notiser skickas.</span>
+                    <span className="block text-sm font-bold text-zinc-900 dark:text-white">Sista svarsdag och meddelande</span>
+                    <span className="block text-xs text-zinc-500 dark:text-zinc-400">Visas i kallelsen till varje pass. Spelarna kan svara på passen i appen även utan det här.</span>
                   </span>
                 </label>
                 {seriesInvite && (
@@ -2283,6 +2290,24 @@ export default function TrainingManager({
                   </div>
                 )}
               </div>
+
+              {/* Notis till laget om de nya passen (en notis för hela serien) */}
+              {activeClubId && activeTeamId && (
+                <div className="mt-3 bg-zinc-50 dark:bg-zinc-950 p-4 rounded-2xl border border-zinc-100 dark:border-zinc-800/80">
+                  <label className="flex items-center gap-3 cursor-pointer min-h-[40px]">
+                    <input
+                      type="checkbox"
+                      checked={seriesNotify}
+                      onChange={(e) => setSeriesNotify(e.target.checked)}
+                      className="w-5 h-5 accent-indigo-600"
+                    />
+                    <span>
+                      <span className="block text-sm font-bold text-zinc-900 dark:text-white">Skicka notis till laget</span>
+                      <span className="block text-xs text-zinc-500 dark:text-zinc-400">En notis om de nya passen till alla i laget som slagit på notiser för kallelser.</span>
+                    </span>
+                  </label>
+                </div>
+              )}
 
               {/* Action trigger buttons */}
               <div className="flex gap-3 mt-8 pt-4 border-t border-zinc-50 dark:border-zinc-800">

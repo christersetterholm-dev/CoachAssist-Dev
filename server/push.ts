@@ -3,7 +3,7 @@
 // Google, Mozilla, Microsoft) med egna VAPID-nycklar.
 //
 // - Varje enhet som slår på notiser blir en rad i push_subscriptions (kopplad till kontot).
-//   Per enhet väljer man om chatt och/eller inlägg ska ge notis.
+//   Per enhet väljer man om chatt, inlägg och/eller kallelser (nya pass att svara på) ska ge notis.
 // - Nycklarna skapas första gången och sparas i system_docs (eller sätts med VAPID_PUBLIC_KEY /
 //   VAPID_PRIVATE_KEY). Byts nycklarna måste alla slå på notiserna igen.
 // - Notiser skickas efter att svaret gått iväg och får aldrig få ett anrop att misslyckas.
@@ -13,7 +13,7 @@ import webpush from 'web-push';
 import type express from 'express';
 import type { Db } from './database.ts';
 
-export type PushKind = 'chat' | 'posts';
+export type PushKind = 'chat' | 'posts' | 'sessions';
 
 export interface PushPayload {
   title: string;
@@ -21,11 +21,12 @@ export interface PushPayload {
   /** Notiser med samma tag ersätter varandra (t.ex. en per chatt). */
   tag: string;
   /** Vad appen ska öppna när man trycker på notisen. */
-  open: { view: 'chat'; clubId: string; conversationId: string } | { view: 'post'; clubId: string; teamId: string; postId: string } | { view: 'home' };
+  open: { view: 'chat'; clubId: string; conversationId: string } | { view: 'post'; clubId: string; teamId: string; postId: string }
+    | { view: 'sessions'; clubId: string; teamId: string; sessionId?: string } | { view: 'home' };
 }
 
 interface SubRow {
-  endpoint: string; user_id: string; p256dh: string; auth: string; chat: number; posts: number;
+  endpoint: string; user_id: string; p256dh: string; auth: string; chat: number; posts: number; sessions: number;
   created_at: number; last_used_at: number | null; fail_count: number;
 }
 
@@ -90,14 +91,15 @@ export function saveSubscription(db: Db, userId: string, body: any, userAgent: s
   if (b64len(sub?.keys?.p256dh) !== 65 || b64len(sub?.keys?.auth) !== 16) return { ok: false, error: 'Notisnycklarna är ogiltiga.' };
   const chat = body?.chat === false ? 0 : 1;
   const posts = body?.posts === false ? 0 : 1;
+  const sessions = body?.sessions === false ? 0 : 1;
   const t = Date.now();
   db.transaction(() => {
     // Samma enhet kan ha bytt konto: då tillhör adressen det nya kontot.
     db.prepare(
-      `INSERT INTO push_subscriptions (endpoint, user_id, p256dh, auth, chat, posts, user_agent, created_at, fail_count) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)
+      `INSERT INTO push_subscriptions (endpoint, user_id, p256dh, auth, chat, posts, sessions, user_agent, created_at, fail_count) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
        ON CONFLICT(endpoint) DO UPDATE SET user_id = excluded.user_id, p256dh = excluded.p256dh, auth = excluded.auth,
-         chat = excluded.chat, posts = excluded.posts, user_agent = excluded.user_agent, fail_count = 0`
-    ).run(endpoint, userId, sub.keys.p256dh, sub.keys.auth, chat, posts, String(userAgent || '').slice(0, 300), t);
+         chat = excluded.chat, posts = excluded.posts, sessions = excluded.sessions, user_agent = excluded.user_agent, fail_count = 0`
+    ).run(endpoint, userId, sub.keys.p256dh, sub.keys.auth, chat, posts, sessions, String(userAgent || '').slice(0, 300), t);
     const extra = db.prepare('SELECT endpoint FROM push_subscriptions WHERE user_id = ? ORDER BY created_at DESC LIMIT -1 OFFSET ?').all(userId, MAX_PER_USER);
     for (const r of extra) db.prepare('DELETE FROM push_subscriptions WHERE endpoint = ?').run(r.endpoint);
   })();
@@ -106,8 +108,8 @@ export function saveSubscription(db: Db, userId: string, body: any, userAgent: s
 
 export function subscriptionStatus(db: Db, userId: string, endpoint: unknown) {
   const row = typeof endpoint === 'string' ? getSub(db, endpoint) : undefined;
-  if (!row || row.user_id !== userId) return { subscribed: false, chat: true, posts: true };
-  return { subscribed: true, chat: !!row.chat, posts: !!row.posts };
+  if (!row || row.user_id !== userId) return { subscribed: false, chat: true, posts: true, sessions: true };
+  return { subscribed: true, chat: !!row.chat, posts: !!row.posts, sessions: !!row.sessions };
 }
 
 export function removeSubscription(db: Db, userId: string, endpoint: unknown) {
@@ -169,7 +171,7 @@ export function notifyUsers(userIds: Iterable<string>, kind: PushKind, payload: 
   const ids = Array.from(new Set(userIds)).filter((id) => id && !(opts.conversationId && isActive(id, opts.conversationId)));
   if (!ids.length) return;
   const rows: SubRow[] = [];
-  const col = kind === 'chat' ? 'chat' : 'posts';
+  const col = kind === 'chat' ? 'chat' : kind === 'sessions' ? 'sessions' : 'posts';
   for (let i = 0; i < ids.length; i += 500) {
     const part = ids.slice(i, i + 500);
     rows.push(...state.db.prepare(`SELECT * FROM push_subscriptions WHERE ${col} = 1 AND user_id IN (${part.map(() => '?').join(',')})`).all(...part));
@@ -209,7 +211,7 @@ export function registerPushRoutes(app: express.Express, db: Db, deps: { require
   app.post('/api/push/test', requireAuthUser, async (req, res) => {
     const row = typeof req.body?.endpoint === 'string' ? getSub(db, req.body.endpoint) : undefined;
     if (!row || row.user_id !== uid(req)) return res.status(404).json({ error: 'Notiser är inte påslagna på den här enheten.' });
-    const r = await sendOne(row, { title: 'Notiserna fungerar', body: 'Så här ser det ut när något nytt händer i chatten eller inläggen.', tag: 'test', open: { view: 'home' } });
+    const r = await sendOne(row, { title: 'Notiserna fungerar', body: 'Så här ser det ut när något nytt händer i chatten, inläggen eller kalendern.', tag: 'test', open: { view: 'home' } });
     if (r !== 'ok') return res.status(502).json({ error: r === 'gone' ? 'Enhetens notiser har slutat gälla. Slå på dem igen.' : 'Notisen kunde inte skickas just nu. Försök igen senare.' });
     res.json({ success: true });
   });

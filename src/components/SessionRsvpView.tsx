@@ -29,6 +29,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { TrainingSession, SquadPlayer, RsvpStatus, PlayerRsvp, SessionRsvpConfig, UserProfile } from '../types';
 import { findSquadMatch } from '../lib/teamUtils';
 import { saveRsvp, clearRsvps } from '../lib/firebase';
+import { notifyTeamAboutSessions } from '../lib/push';
 import { isMatchSession } from '../utils/sessionCategory';
 import { Button, Card, SectionHeader, SegmentedTabs, Badge, EmptyState, Avatar, Sheet, MenuItem, TextArea, TextInput } from './ui';
 
@@ -188,6 +189,7 @@ export const SessionRsvpView: React.FC<SessionRsvpViewProps> = ({
   const [deadlineDate, setDeadlineDate] = useState<string>('');
   const [deadlineTime, setDeadlineTime] = useState<string>('18:00');
   const [inviteNotes, setInviteNotes] = useState<string>('');
+  const [inviteNotify, setInviteNotify] = useState(true);
 
   // Klistra in lista
   const [pasteValue, setPasteValue] = useState<string>('');
@@ -431,6 +433,7 @@ export const SessionRsvpView: React.FC<SessionRsvpViewProps> = ({
       setDeadlineTime('18:00');
     }
     setInviteNotes(cfg?.notes || '');
+    setInviteNotify(!cfg); // notis som standard när kallelsen publiceras, inte när den ändras
     setShowInviteModal(true);
   };
 
@@ -448,7 +451,15 @@ export const SessionRsvpView: React.FC<SessionRsvpViewProps> = ({
     };
     onUpdateSession({ ...session, rsvpConfig: newConfig, updatedAt: Date.now() });
     setShowInviteModal(false);
-    showToast(session.rsvpConfig ? 'Kallelsen är uppdaterad.' : 'Kallelsen är publicerad. Spelarna ser den i appen.', 4000);
+    const clubId = userProfile?.activeClubId;
+    const teamId = userProfile?.activeTeamId;
+    if (inviteNotify && clubId && teamId) {
+      notifyTeamAboutSessions(clubId, teamId, [session])
+        .then(() => showToast(session.rsvpConfig ? 'Kallelsen är uppdaterad och laget har fått en notis.' : 'Kallelsen är publicerad och laget har fått en notis.', 4000))
+        .catch((err) => showToast(`Kallelsen är sparad, men notisen kunde inte skickas: ${err?.message || err}`, 5000));
+    } else {
+      showToast(session.rsvpConfig ? 'Kallelsen är uppdaterad.' : 'Kallelsen är publicerad. Spelarna ser den i appen.', 4000);
+    }
   };
 
   const handleAddGuest = (e?: React.FormEvent) => {
@@ -1234,7 +1245,7 @@ export const SessionRsvpView: React.FC<SessionRsvpViewProps> = ({
       >
         <form onSubmit={handleSendInvitations} className="px-2 pb-2 space-y-4">
           <p className="text-sm text-zinc-500 dark:text-zinc-400">
-            Spelarna ser kallelsen och svarar i appen. Inga mejl eller notiser skickas – dela gärna en påminnelse i lagets chatt.
+            Spelarna ser kallelsen och svarar i appen. Inga mejl skickas.
           </p>
           <div className="grid grid-cols-2 gap-3">
             <div>
@@ -1257,6 +1268,15 @@ export const SessionRsvpView: React.FC<SessionRsvpViewProps> = ({
               className="w-full bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-xl p-3.5 text-base sm:text-sm text-zinc-900 dark:text-white outline-none focus:ring-2 focus:ring-indigo-500 placeholder-zinc-400"
             />
           </div>
+          {userProfile?.activeClubId && userProfile?.activeTeamId && (
+            <label className="flex items-center gap-3 cursor-pointer min-h-[40px] rounded-xl bg-zinc-50 dark:bg-zinc-800/60 border border-zinc-200 dark:border-zinc-700 px-3.5 py-2.5">
+              <input type="checkbox" checked={inviteNotify} onChange={(e) => setInviteNotify(e.target.checked)} className="w-5 h-5 accent-indigo-600" />
+              <span>
+                <span className="block text-sm font-semibold text-zinc-900 dark:text-white">Skicka notis till laget</span>
+                <span className="block text-xs text-zinc-500 dark:text-zinc-400">Till alla i laget som slagit på notiser för kallelser.</span>
+              </span>
+            </label>
+          )}
         </form>
       </Sheet>
 

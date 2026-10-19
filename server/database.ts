@@ -368,6 +368,8 @@ function createSchema(db: Db) {
   for (const col of USER_COLUMNS) {
     try { db.exec(`ALTER TABLE users ADD COLUMN ${col};`); } catch (_) { /* finns redan */ }
   }
+  // Notiser om nya pass/kallelser (lades till efter chatt och inlägg)
+  try { db.exec('ALTER TABLE push_subscriptions ADD COLUMN sessions INTEGER NOT NULL DEFAULT 1;'); } catch (_) { /* finns redan */ }
 }
 
 const TABLE_COLUMNS: Record<string, string[]> = {

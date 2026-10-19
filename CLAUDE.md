@@ -36,7 +36,7 @@ Läs den här filen först i varje nytt samtal. Håll den uppdaterad när något
 | Animationer i steg på taktiktavlan (räknandet, ingen React) | `src/utils/boardAnimation.ts` (tester i `tests/boardAnimation.test.mjs`) |
 | Inlägg (tränarnas meddelanden till laget) | `server/posts.ts`, `src/lib/posts.ts`, `src/components/PostsView.tsx` |
 | Chatt (lagchatt, grupper, en-till-en) | `server/chat.ts` (tester i `tests/chat.test.mjs`), `src/lib/chat.ts`, `src/components/chat/` |
-| Notiser (Web Push för chatt och inlägg) | `server/push.ts` (tester i `tests/push.test.mjs`), `src/lib/push.ts`, `public/sw.js`, `src/components/NotificationsSheet.tsx` |
+| Notiser (Web Push för chatt, inlägg och kallelser) | `server/push.ts` (tester i `tests/push.test.mjs`), `src/lib/push.ts`, `public/sw.js`, `src/components/NotificationsSheet.tsx` |
 | Startfil på webbhotellet (Passenger) | `app.cjs` → `dist/server.cjs` |
 | React-appen | `src/` (`App.tsx` och `LineupBuilder.tsx` är mycket stora) |
 | Appens skal (sidomeny, bottenmeny, toppfält, kontomeny, Mer) | `src/components/shell/AppShell.tsx`, `src/components/shell/MoreSheet.tsx` |
@@ -139,17 +139,23 @@ Appen läser/skriver JSON-dokument via sökvägar:
 - Web Push med egna VAPID-nycklar (paketet `web-push`, ingen Firebase). Nycklarna skapas första gången
   och sparas i `system_docs` (`system/vapid_keys`), eller sätts med `VAPID_PUBLIC_KEY`/`VAPID_PRIVATE_KEY`.
   Avsändaradress `VAPID_SUBJECT` (standard `mailto:` + första i `ADMIN_EMAILS`). Byts nycklarna måste alla slå på igen.
-- Tabell `push_subscriptions` (en rad per enhet: adress, nycklar, konto, `chat`/`posts` på/av). Högst 10
+- Tabell `push_subscriptions` (en rad per enhet: adress, nycklar, konto, `chat`/`posts`/`sessions` på/av). Högst 10
   enheter per konto. Samma enhet med nytt konto tillhör det nya kontot. 404/410 från push-tjänsten tar bort raden.
   Bara adresser hos de vanliga push-tjänsterna godtas (`PUSH_HOSTS`); `PUSH_ALLOW_ANY_ENDPOINT=1` bara i testerna.
 - Skickas: nytt chattmeddelande (till alla andra i chatten, inte den som har chatten öppen – `markActive` när
-  appen hämtar meddelanden, 15 s) och nytt inlägg (till alla med roll i laget utom författaren). Ändringar,
+  appen hämtar meddelanden, 15 s), nytt inlägg (till alla med roll i laget utom författaren). Ändringar,
   reaktioner och kommentarer ger ingen notis. Skickas i bakgrunden efter svaret.
+- Kallelser (`sessions`): `POST /api/sessions/notify` (bara tränare, högst 10 per lag och timme) skickar EN notis till
+  alla med roll i laget utom avsändaren. Appen skickar en sammanfattning av passen (id, titel, datum, tid) eftersom de
+  kanske inte hunnit sparas. Rutan "Skicka notis till laget" finns i serieformuläret (på som standard) och i arket
+  Skapa kallelse (på vid första publicering, av vid ändring). Ett pass öppnar kallelsen, flera öppnar kalendern
+  (`view: 'sessions'` i `pushOpen`).
 - `public/sw.js` är appens servicearbetare: visar notisen och vid tryck skickar `{ type: 'coachassist-open', open }`
   till ett öppet fönster, annars öppnas `/?open=<json>`. Den cachar ingenting. App.tsx (`pushOpen`) öppnar chatten
   (`openChatId`) eller inlägget (`openPostId`).
-- Appen: menyposten **Notiser** (Mer och kontomenyn) öppnar `NotificationsSheet` – slå på, välj Chatt/Inlägg,
+- Appen: menyposten **Notiser** (Mer och kontomenyn) öppnar `NotificationsSheet` – slå på, välj Chatt/Inlägg/Kallelser,
   testnotis, stäng av. Gäller en enhet. iPhone/iPad: bara när appen är tillagd på hemskärmen (iOS 16.4+).
+  Notisarket har valen Chatt, Inlägg och Kallelser.
   `syncPush` vid start förnyar enhetens adress om samma konto slagit på notiser (`coachassist.push` i localStorage).
   Utloggning stänger av notiserna på enheten.
 - Claudes webbläsare (i Claude-appen) kan inte registrera servicearbetare – prova notiser i Safari/Chrome eller på telefonen.
@@ -314,8 +320,8 @@ npm run set-password -- e@post.se            # lokalt konto/lösenord
   momenten visas som tidslinje och svaren grupperade per status (tryck på en person för att ändra
   svar; bocken markerar närvaro). Spelaren landar på Kallelse (vad, när, var, svara Kommer/Delvis/
   Kan inte med kommentar) och ser Upplägg i läsläge, eller inte alls om `hideContentForPlayers`.
-  Två kolumner från 768 px. "Skapa kallelse" sätter bara sista svarsdag och meddelande – inga
-  mejl eller notiser skickas.
+  Två kolumner från 768 px. "Skapa kallelse" sätter sista svarsdag och meddelande (spelarna kan svara
+  ändå); inga mejl skickas, men tränaren kan välja att skicka en notis (se Notiser).
 
 ## Konventioner
 
@@ -332,7 +338,7 @@ npm run set-password -- e@post.se            # lokalt konto/lösenord
 - Chatt, senare: svara på/citera ett meddelande, sök i meddelanden, tysta en chatt (även dess notiser),
   blockera, @-omnämnanden, föräldrar.
 - Inlägg: visa kopplade inlägg även i passvyn (`SessionRsvpView`).
-- Notiser, senare: kommentarer på egna inlägg, kallelser/påminnelser (kräver cron-jobb i cPanel), märke med
+- Notiser, senare: kommentarer på egna inlägg, påminnelser om obesvarade kallelser (kräver cron-jobb i cPanel), märke med
   antal olästa på appikonen (`setAppBadge`), notis från annan förening byter inte förening (öppnar bara chattlistan).
 - `isProduction` i server.ts blir sant om mappens sökväg innehåller "dist" (t.ex. en worktree som
   heter `distracted-...`) – då letar `npm run dev` efter `dist/index.html`. Kontrollera hellre mappnamnet exakt.
