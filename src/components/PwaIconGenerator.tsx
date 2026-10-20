@@ -326,10 +326,12 @@ export default function PwaIconGenerator({ initialLogoUrl, clubName = 'Truppio' 
       }
 
       const endpoint = getApiUrl('/api/pwa-icons');
+      const token = localStorage.getItem('token');
       const response = await fetch(endpoint, {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json'
+          'Content-Type': 'application/json',
+          ...(token ? { 'Authorization': `Bearer ${token}` } : {})
         },
         body: JSON.stringify({
           appName: (appName || 'Truppio').trim(),
