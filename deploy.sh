@@ -14,7 +14,7 @@ set -euo pipefail
 SERVER="setterho@setterholm.se"
 SSH_KEY="$HOME/.ssh/coachassist"
 REMOTE_DIR="coachassist.setterholm.se"           # relativt hemkatalogen på servern
-SITE_URL="https://coachassist.setterholm.se"
+SITE_URL="https://app.truppio.se"
 
 SKIP_TESTS=false
 [[ "${1:-}" == "--skip-tests" ]] && SKIP_TESTS=true

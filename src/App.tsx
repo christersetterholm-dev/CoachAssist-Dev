@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { RotateCcw, Trophy, ArrowLeft, Check, Timer as TimerIcon, Edit2, Zap, Rocket, Users, Unlock, LogIn, LogOut, User as UserIcon, Cloud, Calendar, Settings, VibrateOff, Maximize2, MoreVertical } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { SquadPlayer, Exercise, Team, PointsConfig, Period, PeriodStandings, Lineup, TrainingSession, TrainingSettings, CoachData, BankExercise, SessionMoment, UserProfile, ClubMember, ClubTeam, Club, FormationVariant } from './types';
-import { auth, signInWithGoogle, db, handleFirestoreError, OperationType, getApiUrl, doc, onSnapshot, setDoc, getDoc, collection, getDocs, onAuthStateChanged, signOut, User, deleteObject } from './lib/firebase';
+import { auth, signInWithGoogle, db, handleFirestoreError, OperationType, getApiUrl, doc, onSnapshot, setDoc, getDoc, collection, getDocs, onAuthStateChanged, signOut, User, deleteObject, MOVED_PUSH_FLAG } from './lib/firebase';
 import { calculateLeaderboard } from './lib/leaderboardUtils';
 import { deduplicateSquad } from './lib/clubUtils';
 import { deduplicateSessionsList } from './utils/calendarSync';
@@ -881,6 +881,16 @@ export default function App() {
   const [pushOpen, setPushOpen] = useState<PushOpen | null>(null);
   useEffect(() => listenForPushOpen(setPushOpen), []);
   useEffect(() => { if (user?.uid) syncPush(user.uid); }, [user?.uid]);
+  // Kom från den gamla adressen med notiser påslagna där: visa notisarket så att de slås på här (en gång).
+  useEffect(() => {
+    if (!user?.uid) return;
+    try {
+      if (sessionStorage.getItem(MOVED_PUSH_FLAG)) {
+        sessionStorage.removeItem(MOVED_PUSH_FLAG);
+        setIsNotificationsOpen(true);
+      }
+    } catch (_) {}
+  }, [user?.uid]);
   const [editingPost, setEditingPost] = useState<Post | 'new' | null>(null);
   const [isMultiRsvpOpen, setIsMultiRsvpOpen] = useState(false); // Svara på flera pass
   const [sessionMode, setSessionMode] = useState<'plan' | 'live'>('plan');

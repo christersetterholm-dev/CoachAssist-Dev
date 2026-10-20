@@ -22,6 +22,7 @@ import * as posts from './server/posts.ts';
 import { registerChatRoutes, teamNames } from './server/chat.ts';
 import * as push from './server/push.ts';
 import * as calendarFeed from './server/calendarFeed.ts';
+import { movedFromOldHost } from './server/moved.ts';
 
 const customRequire = typeof require !== 'undefined' ? require : createRequire(import.meta.url);
 
@@ -748,6 +749,8 @@ async function ensureTeamAndClubIntegrity() {
 
 async function startServer() {
   const app = express();
+  // Gamla adressen (coachassist.setterholm.se) visar flyttsidan till app.truppio.se (server/moved.ts).
+  app.use(movedFromOldHost);
   const PORT = process.env.PORT || 3000;
 
   await ensureJwtSecret();

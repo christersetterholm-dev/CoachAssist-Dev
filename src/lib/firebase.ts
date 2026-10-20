@@ -601,8 +601,24 @@ export const signInWithGoogle = async (_forceSelect = false): Promise<User> => {
   });
 };
 
+// Flytten från den gamla adressen (server/moved.ts): flyttsidan skickar hit med inloggningen i
+// adressens #-del (#flytt=<token>&notiser=1). Ta emot den och ta bort den ur adressen direkt.
+// Är man redan inloggad här behålls den inloggningen.
+export const MOVED_PUSH_FLAG = 'coachassist.flyttNotiser';
+const takeMovedLogin = () => {
+  try {
+    if (!location.hash || !/(^#|&)(flytt|notiser)=/.test(location.hash)) return;
+    const params = new URLSearchParams(location.hash.slice(1));
+    const token = params.get('flytt');
+    if (token && !localStorage.getItem('token')) localStorage.setItem('token', token);
+    if (params.get('notiser') === '1') sessionStorage.setItem(MOVED_PUSH_FLAG, '1');
+    history.replaceState(history.state, '', location.pathname + location.search);
+  } catch (_) {}
+};
+
 // On module load, restore login session from JWT if exists
 const initializeSession = async () => {
+  takeMovedLogin();
   const token = localStorage.getItem('token');
   const cachedUserStr = localStorage.getItem('cached_auth_user');
   let cachedUser = null;

@@ -218,7 +218,11 @@ npm run set-password -- e@post.se            # lokalt konto/lösenord
   `truppio.se` har egen mapp `~/truppio.se` med informationssidan från `site/` i repot
   (`npm run deploy-site`, laddar bara upp `site/`). `~/truppio.se/.htaccess` (bara på servern) skickar http till https;
   för app-adresserna görs det med Force HTTPS Redirect i cPanel. Inloggning, notiser och hemskärmsikon gäller per
-  adress, så den som byter adress måste logga in och slå på notiser igen.
+  adress. **Flytten (okt 2026, `server/moved.ts`):** på `coachassist.setterholm.se` visar servern en flyttsida för
+  allt utom `/api/`, `/uploads/` och `/sw.js`. Den stänger av notiserna där och skickar vidare till samma sida på
+  `app.truppio.se` med inloggningen i #-delen (`#flytt=<token>&notiser=1`), som appen tar emot i `takeMovedLogin`
+  (firebase.ts) och sedan öppnar Notiser. Gamla kalenderprenumerationer fungerar alltså kvar. Styrs av
+  `OLD_HOSTS`/`NEW_ORIGIN` (tester i `tests/moved.test.mjs`). `deploy.sh` kontrollerar `https://app.truppio.se`.
 
 ## Gränssnittet (ombyggt okt 2026, gren `ux-ombyggnad`)
 
