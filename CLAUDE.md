@@ -216,7 +216,8 @@ npm run set-password -- e@post.se            # lokalt konto/lösenord
   46.246.119.18). I cPanel är `app.truppio.se` upplagd med samma mapp som `coachassist.setterholm.se`,
   alltså samma app och databas på båda adresserna (okt 2026; den gamla adressen ska vara kvar tills vidare).
   `truppio.se` har egen mapp `~/truppio.se` med informationssidan från `site/` i repot
-  (`npm run deploy-site`, laddar bara upp `site/`). Inloggning, notiser och hemskärmsikon gäller per
+  (`npm run deploy-site`, laddar bara upp `site/`). `~/truppio.se/.htaccess` (bara på servern) skickar http till https;
+  för app-adresserna görs det med Force HTTPS Redirect i cPanel. Inloggning, notiser och hemskärmsikon gäller per
   adress, så den som byter adress måste logga in och slå på notiser igen.
 
 ## Gränssnittet (ombyggt okt 2026, gren `ux-ombyggnad`)
