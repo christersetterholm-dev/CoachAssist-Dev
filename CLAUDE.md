@@ -109,7 +109,7 @@ Appen läser/skriver JSON-dokument via sökvägar:
   gräns vid funktionsnedsättning, ledare minst 13, minst 3 deltagare + 1 ledare och 45 min, högst 20 per ledare, en gång
   per dag, högst 3 (6–9 år) resp. 5 tillfällen per vecka) eller `municipal` (föreningsadmin fyller i under Administration
   → Närvaro/LOK, sparas i `system_docs` `lok_rules/<förening>`; Sandvikens regler okända, av som standard). Bara
-  genomförda pass med `lok !== false`; spelare = deltagare, tränare (även spelande) = ledare; ålder och kön ur
+  genomförda pass med `lok !== false`; spelare = deltagare (även den som också är tränare), övriga tränare = ledare; ålder och kön ur
   personnummer om `gender` saknas. Celler 1 / (1) / x som laget.se. API: `GET /api/lok/rules`, `PUT /api/lok/rules`
   (föreningsadmin), `GET /api/lok/card` (lagets tränare), `GET /api/lok/club` (föreningsadmin, alla lag),
   `POST /api/lok/lock` (tränare intygar; summorna sparas i `lok_locks` och kortet visar om närvaron ändrats sedan),
