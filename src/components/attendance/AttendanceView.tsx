@@ -9,7 +9,7 @@ import { Check, X, HelpCircle, Plus, ListChecks, Dumbbell, Trophy, Shapes, Clock
 import { RsvpStatus, SquadPlayer, TrainingSession, TrainingSettings } from '../../types';
 import { categorizeSession, SessionCategory } from '../../utils/sessionCategory';
 import { Button, Card, EmptyState, SegmentedTabs } from '../ui';
-import SquadAttendanceOverview from '../SquadAttendanceOverview';
+import AttendanceStatsView from './AttendanceStatsView';
 import NewActivitySheet from './NewActivitySheet';
 import { answerForMe, isPresent, myRow, responseSummary, sessionEnd, sessionStart, sessionTitle, teamLeaders, teamPlayers } from './shared';
 
@@ -20,6 +20,7 @@ interface AttendanceViewProps {
   clubId?: string | null;
   teamId?: string | null;
   settings?: TrainingSettings;
+  teamName?: string;
   onUpdateSession: (session: TrainingSession) => void;
   onOpenSession: (id: string, tab?: 'schema' | 'attendance' | 'rsvp') => void;
   onOpenMultiRsvp: () => void;
@@ -54,7 +55,7 @@ const chipOff = 'border-zinc-200 dark:border-zinc-700 text-zinc-700 dark:text-zi
 const chipOn = 'border-indigo-600 bg-indigo-600 text-white';
 
 export default function AttendanceView(props: AttendanceViewProps) {
-  const { squad, sessions, isCoachOrAdmin, clubId, teamId, settings, onUpdateSession, onOpenSession, onOpenMultiRsvp, onCreateSessions } = props;
+  const { squad, sessions, isCoachOrAdmin, clubId, teamId, settings, teamName, onUpdateSession, onOpenSession, onOpenMultiRsvp, onCreateSessions } = props;
   const [tab, setTab] = useState<Tab>('activities');
   const [when, setWhen] = useState<When>('upcoming');
   const [kindFilter, setKindFilter] = useState<KindFilter>('all');
@@ -113,7 +114,7 @@ export default function AttendanceView(props: AttendanceViewProps) {
       )}
 
       {tab === 'stats' && isCoachOrAdmin ? (
-        <SquadAttendanceOverview squad={squad} sessions={sessions} isCoachOrAdmin={isCoachOrAdmin} />
+        <AttendanceStatsView squad={squad} sessions={sessions} teamName={teamName} />
       ) : (
         <>
           <div className="flex flex-col sm:flex-row sm:items-center gap-3">

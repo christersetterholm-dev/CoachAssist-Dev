@@ -81,10 +81,14 @@ Appen läser/skriver JSON-dokument via sökvägar:
 - Konton kopplas automatiskt till medlemsrader med samma id eller e-post vid inloggning.
 
 ### Närvaro (menyn, gren `narvaro`, okt 2026)
-- `view === 'attendance'` → `AttendanceView`. Flikar Aktiviteter (alla) och Statistik (tränare; samma
-  `SquadAttendanceOverview` som i Truppen). Aktiviteter: Kommande/Tidigare, filter Träning/Match/Övrigt; spelare svarar
+- `view === 'attendance'` → `AttendanceView`. Flikar Aktiviteter (alla) och Statistik (tränare). Aktiviteter: Kommande/Tidigare, filter Träning/Match/Övrigt; spelare svarar
   direkt på raden (`answerForMe` i `attendance/shared.ts`), tränare ser svar resp. närvaro på en rad för spelare och
   en för tränare (`teamLeaders`; den som också är spelare räknas som spelare) och öppnar passet.
+- **Statistik** (`AttendanceStatsView`, även Truppens flik Närvaro; gamla `SquadAttendanceOverview` borttagen): period
+  (30 dagar / 6 månader / Halvåret / I år eller egna datum), typer, grupp Spelare/Tränare, en stapel per person uppdelad
+  på match/övrigt/träning med procent, medelnärvaro (medel av personernas procent, som laget.se), tryck = detaljer inkl.
+  "svarade kommer men bockades inte". Spara som bild (html-to-image, laddas vid behov) eller Excel (xlsx). Uträkningen i
+  `src/utils/attendanceStats.ts` (tester i `tests/attendanceStats.test.mjs`): bara genomförda, ej ignorerade pass räknas.
 - **Ny aktivitet** (`NewActivitySheet`, tränare): typ, motståndare + hemma/borta (match), enskild eller varje vecka,
   start/slut/samling, plats, information, LOK-aktivitet, kallelse med sista svarsdag och notis. Sparas som vanliga pass.
 - Nya fält i pass: `opponent`, `homeAway`, `lok` (saknas = räknas för LOK, `false` = inte). Typen `other` (Övrigt)

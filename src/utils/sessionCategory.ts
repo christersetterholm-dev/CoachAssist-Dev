@@ -1,4 +1,4 @@
-import { TrainingSession } from '../types';
+import type { TrainingSession } from '../types';
 
 export type SessionCategory = 'match' | 'training' | 'other';
 

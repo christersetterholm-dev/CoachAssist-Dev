@@ -11,7 +11,7 @@ import Papa from 'papaparse';
 import ImageCropper from './ImageCropper';
 import { CachedImage } from './CachedImage';
 import { sortLeadersByPosition } from '../lib/teamUtils';
-import SquadAttendanceOverview from './SquadAttendanceOverview';
+import AttendanceStatsView from './attendance/AttendanceStatsView';
 
 type SortOption = 'standard' | 'number' | 'position' | 'firstname' | 'lastname';
 
@@ -1009,7 +1009,7 @@ export default function SquadManager({ squad, sessions = [], onUpdateSquad, acti
       )}
 
       {activeTab === 'attendance' && isCoachOrAdmin ? (
-        <SquadAttendanceOverview squad={squad} sessions={sessions} isCoachOrAdmin={isCoachOrAdmin} />
+        <AttendanceStatsView squad={squad} sessions={sessions} />
       ) : squad.length === 0 ? (
         <Card>
           <EmptyState
