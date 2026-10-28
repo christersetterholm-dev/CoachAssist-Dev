@@ -5,11 +5,12 @@
  * visar närvaron per spelare.
  */
 import React, { useMemo, useState } from 'react';
-import { Check, X, HelpCircle, Plus, ListChecks, Dumbbell, Trophy, Shapes, Clock, MapPin, ChevronRight, BarChart3, CalendarDays } from 'lucide-react';
+import { Check, X, HelpCircle, Plus, ListChecks, Dumbbell, Trophy, Shapes, Clock, MapPin, ChevronRight, BarChart3, CalendarDays, FileCheck2 } from 'lucide-react';
 import { RsvpStatus, SquadPlayer, TrainingSession, TrainingSettings } from '../../types';
 import { categorizeSession, SessionCategory } from '../../utils/sessionCategory';
 import { Button, Card, EmptyState, SegmentedTabs } from '../ui';
 import AttendanceStatsView from './AttendanceStatsView';
+import LokCardView from './LokCardView';
 import NewActivitySheet from './NewActivitySheet';
 import { answerForMe, isPresent, myRow, responseSummary, sessionEnd, sessionStart, sessionTitle, teamLeaders, teamPlayers } from './shared';
 
@@ -21,13 +22,14 @@ interface AttendanceViewProps {
   teamId?: string | null;
   settings?: TrainingSettings;
   teamName?: string;
+  clubName?: string;
   onUpdateSession: (session: TrainingSession) => void;
   onOpenSession: (id: string, tab?: 'schema' | 'attendance' | 'rsvp') => void;
   onOpenMultiRsvp: () => void;
   onCreateSessions: (sessions: TrainingSession[], notify: boolean) => void;
 }
 
-type Tab = 'activities' | 'stats';
+type Tab = 'activities' | 'stats' | 'cards';
 type When = 'upcoming' | 'past';
 type KindFilter = 'all' | SessionCategory;
 
@@ -55,7 +57,7 @@ const chipOff = 'border-zinc-200 dark:border-zinc-700 text-zinc-700 dark:text-zi
 const chipOn = 'border-indigo-600 bg-indigo-600 text-white';
 
 export default function AttendanceView(props: AttendanceViewProps) {
-  const { squad, sessions, isCoachOrAdmin, clubId, teamId, settings, teamName, onUpdateSession, onOpenSession, onOpenMultiRsvp, onCreateSessions } = props;
+  const { squad, sessions, isCoachOrAdmin, clubId, teamId, settings, teamName, clubName, onUpdateSession, onOpenSession, onOpenMultiRsvp, onCreateSessions } = props;
   const [tab, setTab] = useState<Tab>('activities');
   const [when, setWhen] = useState<When>('upcoming');
   const [kindFilter, setKindFilter] = useState<KindFilter>('all');
@@ -107,13 +109,16 @@ export default function AttendanceView(props: AttendanceViewProps) {
           tabs={[
             { id: 'activities', label: 'Aktiviteter', icon: <CalendarDays size={16} /> },
             { id: 'stats', label: 'Statistik', icon: <BarChart3 size={16} /> },
+            { id: 'cards', label: 'Närvarokort', icon: <FileCheck2 size={16} /> },
           ]}
           value={tab}
           onChange={setTab}
         />
       )}
 
-      {tab === 'stats' && isCoachOrAdmin ? (
+      {tab === 'cards' && isCoachOrAdmin ? (
+        <LokCardView clubId={clubId} teamId={teamId} clubName={clubName} />
+      ) : tab === 'stats' && isCoachOrAdmin ? (
         <AttendanceStatsView squad={squad} sessions={sessions} teamName={teamName} />
       ) : (
         <>

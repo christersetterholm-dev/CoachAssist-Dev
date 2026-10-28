@@ -161,3 +161,28 @@ html, body {
   box-shadow: 0 4px 14px rgba(0, 0, 0, 0.3), inset 0 1px 1px rgba(255, 255, 255, 0.2);
 }
 
+
+/* Utskrift av närvarokort (LokPrint i src/components/attendance/LokParts.tsx): bara korten, liggande A4. */
+#lok-print { display: none; }
+@media print {
+  @page { size: A4 landscape; margin: 8mm; }
+  body.lok-printing { background: #fff !important; }
+  body.lok-printing > *:not(#lok-print) { display: none !important; }
+  body.lok-printing #lok-print { display: block; color: #000; font: 8.5pt/1.25 system-ui, sans-serif; }
+  #lok-print .lok-page { page-break-after: always; break-after: page; }
+  #lok-print .lok-page:last-child { page-break-after: auto; break-after: auto; }
+  #lok-print table { border-collapse: collapse; width: 100%; }
+  #lok-print .lok-head { margin-bottom: 3mm; }
+  #lok-print .lok-head th, #lok-print .lok-head td { border: 0.5pt solid #000; padding: 1mm 2mm; text-align: left; vertical-align: top; }
+  #lok-print .lok-head .lok-sign { height: 9mm; color: #666; }
+  #lok-print .lok-grid th, #lok-print .lok-grid td { border: 0.5pt solid #000; padding: 0.4mm 0.8mm; text-align: center; font-variant-numeric: tabular-nums; }
+  #lok-print .lok-grid thead th { font-size: 6.5pt; font-weight: 600; vertical-align: bottom; }
+  #lok-print .lok-grid .lok-name { text-align: left; white-space: nowrap; }
+  #lok-print .lok-grid .lok-section { text-align: left; background: #eee; }
+  #lok-print .lok-grid .lok-sum td { font-weight: 700; }
+  #lok-print .lok-foot { margin-top: 3mm; display: grid; grid-template-columns: 1fr 1fr; gap: 3mm 8mm; }
+  #lok-print .lok-foot > p { grid-column: 1 / -1; margin: 0; }
+  #lok-print .lok-foot table th, #lok-print .lok-foot table td { border: 0.5pt solid #000; padding: 0.5mm 1.5mm; }
+  #lok-print .lok-foot caption { text-align: left; font-weight: 700; padding-bottom: 1mm; }
+  #lok-print .lok-note { font-size: 7pt; color: #444; }
+}

@@ -279,6 +279,48 @@ test('kön och funktionsnedsättning sparas i registret och visas bara för trä
   assert.equal((await get('clubs/klubb1/teams/lag1/data/squad', coachToken)).json.squad.find((p) => p.id === 'm-ny').gender, undefined);
 });
 
+test('närvarokort för LOK-stöd: regler, kort, föreningsvy och låsning med behörigheter', async () => {
+  const q = (o) => new URLSearchParams({ clubId: 'klubb1', ...o }).toString();
+  // Reglerna läses av tränare, ändras bara av föreningsadmin
+  const rules = await s.api('GET', `/api/lok/rules?${q({})}`, { token: coachToken });
+  assert.equal(rules.status, 200);
+  assert.deepEqual([rules.json.state.minAge, rules.json.state.maxAge, rules.json.state.minMinutes, rules.json.municipal.enabled, rules.json.canEdit], [6, 25, 45, false, false]);
+  assert.equal((await s.api('GET', `/api/lok/rules?${q({})}`, { token: playerToken })).status, 403);
+  assert.equal((await s.api('PUT', '/api/lok/rules', { token: coachToken, body: { clubId: 'klubb1', municipal: { enabled: true } } })).status, 403);
+
+  // Statligt kort för lag1 (tränare); spelare och annan förening får inte se det
+  const card = (token, o = {}) => s.api('GET', `/api/lok/card?${q({ teamId: 'lag1', period: '2026-2', type: 'state', ...o })}`, { token });
+  const c = await card(coachToken);
+  assert.equal(c.status, 200);
+  assert.ok(Array.isArray(c.json.card.activities) && Array.isArray(c.json.card.participants));
+  assert.equal(c.json.period.label, '2026, 1 juli – 31 december');
+  assert.equal((await card(playerToken)).status, 403);
+  assert.equal((await card(otherToken)).status, 403);
+  assert.equal((await card(coachToken, { period: '2026-3' })).status, 400);
+  assert.equal((await card(coachToken, { type: 'municipal' })).json.code, 'municipal-off');
+
+  // Föreningsadmin slår på kommunala regler
+  const put = await s.api('PUT', '/api/lok/rules', { token: rootToken, body: { clubId: 'klubb1', municipal: { enabled: true, minAge: 7, maxAge: 20 } } });
+  assert.equal(put.status, 200);
+  assert.equal((await card(coachToken, { type: 'municipal' })).status, 200);
+
+  // Låsning: tränaren intygar, bara föreningsadmin låser upp
+  const lock = await s.api('POST', '/api/lok/lock', { token: coachToken, body: { clubId: 'klubb1', teamId: 'lag1', period: '2026-2', type: 'state' } });
+  assert.equal(lock.status, 200);
+  assert.equal(lock.json.lock.lockedBy, 'Tränare Ett');
+  assert.equal((await card(coachToken)).json.changedSinceLock, false);
+  assert.equal((await s.api('POST', '/api/lok/unlock', { token: coachToken, body: { clubId: 'klubb1', teamId: 'lag1', period: '2026-2', type: 'state' } })).status, 403);
+  assert.equal((await s.api('POST', '/api/lok/unlock', { token: rootToken, body: { clubId: 'klubb1', teamId: 'lag1', period: '2026-2', type: 'state' } })).status, 200);
+  assert.equal((await card(coachToken)).json.lock, null);
+
+  // Föreningens summering: bara föreningsadmin
+  assert.equal((await s.api('GET', `/api/lok/club?${q({ period: '2026-2', type: 'state' })}`, { token: coachToken })).status, 403);
+  const club = await s.api('GET', `/api/lok/club?${q({ period: '2026-2', type: 'state' })}`, { token: rootToken });
+  assert.equal(club.status, 200);
+  assert.deepEqual(club.json.teams.map((t) => t.teamId), ['lag1']);
+  assert.equal(club.json.groups.participants.labels.length, 5);
+});
+
 test('föreningslistan räknas fram ur föreningarna', async () => {
   const r = await get('shared_leaderboards/all_clubs', playerToken);
   assert.deepEqual(r.json.clubs.map((c) => c.id), ['klubb1', 'klubb2']);

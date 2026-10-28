@@ -4023,6 +4023,7 @@ export default function App() {
               teamId={userProfile.activeTeamId}
               settings={trainingSettings}
               teamName={activeClubInfo?.teamName}
+              clubName={activeClubInfo?.clubName}
               onUpdateSession={onUpdateSession}
               onOpenSession={(id, tab) => {
                 setActiveSessionId(id);

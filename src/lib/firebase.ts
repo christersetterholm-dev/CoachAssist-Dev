@@ -961,6 +961,25 @@ export const saveAttendance = async (body: { clubId: string; teamId: string; ses
   return (await jsonOrError(res, 'Kunde inte spara närvaron')) as { success: true; attendance: string[] };
 };
 
+// --- Närvarokort för LOK-stöd (server/lok.ts) ---
+const lokCall = async (method: string, url: string, body?: any, fallback = 'Något gick fel') => {
+  const res = await fetch(getApiUrl(url), {
+    method,
+    headers: { ...(body ? { 'Content-Type': 'application/json' } : {}), ...getAuthHeader() },
+    ...(body ? { body: JSON.stringify(body) } : {}),
+  });
+  return jsonOrError(res, fallback);
+};
+const lokQuery = (o: Record<string, string>) => new URLSearchParams(o).toString();
+export const getLokRules = (clubId: string) => lokCall('GET', `/api/lok/rules?${lokQuery({ clubId })}`, undefined, 'Kunde inte hämta reglerna');
+export const saveLokRules = (clubId: string, municipal: any) => lokCall('PUT', '/api/lok/rules', { clubId, municipal }, 'Kunde inte spara reglerna');
+export const getLokCard = (clubId: string, teamId: string, period: string, type: string) =>
+  lokCall('GET', `/api/lok/card?${lokQuery({ clubId, teamId, period, type })}`, undefined, 'Kunde inte hämta närvarokortet');
+export const getLokClub = (clubId: string, period: string, type: string) =>
+  lokCall('GET', `/api/lok/club?${lokQuery({ clubId, period, type })}`, undefined, 'Kunde inte hämta föreningens närvarokort');
+export const lockLokCard = (body: { clubId: string; teamId: string; period: string; type: string }) => lokCall('POST', '/api/lok/lock', body, 'Kunde inte låsa kortet');
+export const unlockLokCard = (body: { clubId: string; teamId: string; period: string; type: string }) => lokCall('POST', '/api/lok/unlock', body, 'Kunde inte låsa upp kortet');
+
 // Tar bort alla svar för en aktivitet (endast tränare).
 export const clearRsvps = async (body: { clubId: string; teamId: string; sessionId: string }) => {
   const res = await fetch(getApiUrl('/api/rsvp/clear'), {

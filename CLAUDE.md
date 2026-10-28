@@ -37,6 +37,7 @@ Läs den här filen först i varje nytt samtal. Håll den uppdaterad när något
 | Medlemsregister, behörigheter, svar på kallelser | `server/registry.ts` |
 | Inbjudningslänkar | `server/invites.ts` |
 | Närvaro (tabell, läs/spara, flytt) | `server/attendance.ts` |
+| Närvarokort för LOK-stöd (regler, uträkning, låsning) | `server/lok.ts` (tester i `tests/lok.test.mjs`), `src/lib/lok.ts`, `src/components/attendance/Lok*.tsx` |
 | Lagets taktiktavlor (menyposten Taktiktavla) | `server/tacticalBoards.ts`, `src/components/TacticalBoardsView.tsx` |
 | Animationer i steg på taktiktavlan (räknandet, ingen React) | `src/utils/boardAnimation.ts` (tester i `tests/boardAnimation.test.mjs`) |
 | Inlägg (tränarnas meddelanden till laget) | `server/posts.ts`, `src/lib/posts.ts`, `src/components/PostsView.tsx` |
@@ -81,7 +82,7 @@ Appen läser/skriver JSON-dokument via sökvägar:
 - Konton kopplas automatiskt till medlemsrader med samma id eller e-post vid inloggning.
 
 ### Närvaro (menyn, gren `narvaro`, okt 2026)
-- `view === 'attendance'` → `AttendanceView`. Flikar Aktiviteter (alla) och Statistik (tränare). Aktiviteter: Kommande/Tidigare, filter Träning/Match/Övrigt; spelare svarar
+- `view === 'attendance'` → `AttendanceView`. Flikar Aktiviteter (alla), Statistik och Närvarokort (tränare). Aktiviteter: Kommande/Tidigare, filter Träning/Match/Övrigt; spelare svarar
   direkt på raden (`answerForMe` i `attendance/shared.ts`), tränare ser svar resp. närvaro på en rad för spelare och
   en för tränare (`teamLeaders`; den som också är spelare räknas som spelare) och öppnar passet.
 - **Statistik** (`AttendanceStatsView`, även Truppens flik Närvaro; gamla `SquadAttendanceOverview` borttagen): period
@@ -103,12 +104,20 @@ Appen läser/skriver JSON-dokument via sökvägar:
   dokumenten flyttas vid start (`migrateAttendance`; lokalt flyttades 465 bockar okt 2026).
 - Medlemmar har `gender` ('female'/'male', null = räknas fram ur personnumret) och `disability` (funktionsnedsättning)
   i `members`, visas bara för tränare (som personnumret). Ändras i Administrationens medlemsformulär.
-- **Plan framåt** (godkänd av Christer okt 2026): närvaron i egen tabell på servern (som `rsvps`), statistik som i
-  laget.se (staplar per spelare och typ, medelnärvaro, export), sedan närvarokort för LOK-stöd med regelpaket
-  (statligt: RF:s föreskrifter fr.o.m. 2025-07-01 – 6–25 år räknat på födelseår, ledare minst 13 år, minst 3 deltagare
-  och 45 min, högst 20 deltagare per ledare, en aktivitet per dag, 3 resp. 5 tillfällen per vecka; kommunalt: föreningen
-  fyller i själv, Sandvikens regler okända), halvår, PDF, summering per kön/ålder och föreningsvy för kansliet
-  (rollen föreningsadmin räcker, ingen ny roll). Sist import från SvFF (FOGIS).
+- **Närvarokort för LOK-stöd** (`server/lok.ts`, räknas på servern): halvår (`period` "2026-2" = juli–dec), korttyp
+  `state` (RF:s föreskrifter fr.o.m. 2025-07-01, `STATE_RULES`, fasta: deltagare som fyller 6–25 under året, ingen övre
+  gräns vid funktionsnedsättning, ledare minst 13, minst 3 deltagare + 1 ledare och 45 min, högst 20 per ledare, en gång
+  per dag, högst 3 (6–9 år) resp. 5 tillfällen per vecka) eller `municipal` (föreningsadmin fyller i under Administration
+  → Närvaro/LOK, sparas i `system_docs` `lok_rules/<förening>`; Sandvikens regler okända, av som standard). Bara
+  genomförda pass med `lok !== false`; spelare = deltagare, tränare (även spelande) = ledare; ålder och kön ur
+  personnummer om `gender` saknas. Celler 1 / (1) / x som laget.se. API: `GET /api/lok/rules`, `PUT /api/lok/rules`
+  (föreningsadmin), `GET /api/lok/card` (lagets tränare), `GET /api/lok/club` (föreningsadmin, alla lag),
+  `POST /api/lok/lock` (tränare intygar; summorna sparas i `lok_locks` och kortet visar om närvaron ändrats sedan),
+  `POST /api/lok/unlock` (föreningsadmin). Utskrift/PDF: `LokPrint` lägger korten (25 aktiviteter per kort) i `<body>`
+  och `body.lok-printing` i index.css döljer resten. Ledare 13–25 år räknas inte som deltagare (laget.se gör så);
+  varje lag räknas för sig (en person i två lag samma dag kan räknas två gånger i föreningens summering).
+- Kvar: import från SvFF (FOGIS) när Christer fått uppgifterna; kanslisten ska kolla hur ansökan görs i dag och
+  vilka regler Sandvikens kommun har.
 - **Ingen koppling till RF:s API** (kostar pengar, gäller inte alla föreningar). Statligt LOK-stöd kräver att närvaron
   finns i RF:s system (IdrottOnline/Idrottsarenan), så Truppio tar fram underlag men skickar inget till RF.
 

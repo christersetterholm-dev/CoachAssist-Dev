@@ -192,6 +192,18 @@ export const SCHEMA = `
     PRIMARY KEY (club_id, team_id, session_id, member_id)
   );
 
+  -- Intygade (låsta) närvarokort för LOK-stöd. snapshot = summorna när kortet låstes. Se server/lok.ts.
+  CREATE TABLE IF NOT EXISTS lok_locks (
+    club_id TEXT NOT NULL,
+    team_id TEXT NOT NULL,
+    period TEXT NOT NULL,
+    type TEXT NOT NULL,
+    locked_at INTEGER NOT NULL,
+    locked_by TEXT,
+    snapshot TEXT,
+    PRIMARY KEY (club_id, team_id, period, type)
+  );
+
   -- Inbjudningar: personlig länk som kopplar ett konto till en medlem. Bara en
   -- hash av koden sparas, så en databaskopia avslöjar inga giltiga länkar.
   CREATE TABLE IF NOT EXISTS invites (

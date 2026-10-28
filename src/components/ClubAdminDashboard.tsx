@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { Landmark, Trash2, Edit3, Users, Shield, ShieldAlert, Check, PlusCircle, Search, Mail, Phone, Fingerprint, Settings, UserPlus, Save, Smartphone, X, Database, HardDrive, RefreshCw, Download, Upload, Globe, CheckCircle2, AlertTriangle, AlertCircle, Calendar, Link, Copy, ExternalLink, FileSpreadsheet, FileText, Camera, Loader2, Key, UserCheck, Sparkles, Filter, ArrowUpDown, RotateCcw, Pencil } from 'lucide-react';
+import { ClipboardCheck, Landmark, Trash2, Edit3, Users, Shield, ShieldAlert, Check, PlusCircle, Search, Mail, Phone, Fingerprint, Settings, UserPlus, Save, Smartphone, X, Database, HardDrive, RefreshCw, Download, Upload, Globe, CheckCircle2, AlertTriangle, AlertCircle, Calendar, Link, Copy, ExternalLink, FileSpreadsheet, FileText, Camera, Loader2, Key, UserCheck, Sparkles, Filter, ArrowUpDown, RotateCcw, Pencil } from 'lucide-react';
 import { Club, ClubMetadata, ClubTeam, ClubMember, SquadPlayer, TrainingSettings, TrainingSession } from '../types';
 import { db, storage, getApiUrl, getAuthHeader, ref, uploadBytes, getDownloadURL, doc, getDoc, setDoc } from '../lib/firebase';
 import PwaIconGenerator from './PwaIconGenerator';
@@ -7,6 +7,7 @@ import ImageCropper from './ImageCropper';
 import { Badge, Button, Sheet, TextArea, TextInput } from './ui';
 import { CachedImage } from './CachedImage';
 import { CalendarFeedLink } from './CalendarFeedLink';
+import LokAdminPanel from './attendance/LokAdminPanel';
 import { syncTeamCalendar } from '../utils/calendarSync';
 import { deduplicateClubMembers, deduplicateSquad } from '../lib/clubUtils';
 import * as XLSX from 'xlsx';
@@ -87,7 +88,7 @@ export default function ClubAdminDashboard({
     );
   }
   // Navigation tabs within admin
-  const [activeTab, setActiveTab] = useState<'clubs' | 'teams' | 'members' | 'user_accounts' | 'calendar_sync' | 'pwa_icons' | 'database_env' | 'root_admins'>(() => isRootAdmin ? 'clubs' : 'teams');
+  const [activeTab, setActiveTab] = useState<'clubs' | 'teams' | 'members' | 'user_accounts' | 'calendar_sync' | 'pwa_icons' | 'lok' | 'database_env' | 'root_admins'>(() => isRootAdmin ? 'clubs' : 'teams');
 
   // Master lists
   const [clubs, setClubs] = useState<Club[]>([]);
@@ -1966,6 +1967,7 @@ export default function ClubAdminDashboard({
             { id: 'teams', label: `Lag (${clubMetadata?.teams?.length || 0})`, icon: <Settings size={16} />, needsClub: true },
             { id: 'members', label: `Medlemmar (${members.length})`, icon: <Users size={16} />, needsClub: true },
             { id: 'user_accounts', label: 'Konton', icon: <Key size={16} />, needsClub: true },
+            { id: 'lok', label: 'Närvaro/LOK', icon: <ClipboardCheck size={16} />, needsClub: true },
             { id: 'calendar_sync', label: 'Kalender & webb', icon: <Calendar size={16} /> },
             { id: 'pwa_icons', label: 'Appikon', icon: <Smartphone size={16} /> },
             ...(isRootAdmin ? [
@@ -4055,6 +4057,8 @@ export default function ClubAdminDashboard({
           </div>
         </div>
       )}
+
+      {activeTab === 'lok' && selectedClub && <LokAdminPanel clubId={selectedClub.id} />}
 
       {activeTab === 'pwa_icons' && (
         <PwaIconGenerator

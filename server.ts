@@ -19,6 +19,7 @@ import * as registry from './server/registry.ts';
 import * as invites from './server/invites.ts';
 import * as tacticalBoards from './server/tacticalBoards.ts';
 import * as attendance from './server/attendance.ts';
+import * as lok from './server/lok.ts';
 import * as posts from './server/posts.ts';
 import { registerChatRoutes, teamNames } from './server/chat.ts';
 import * as push from './server/push.ts';
@@ -2912,6 +2913,117 @@ async function startServer() {
       updatedBy: me?.full_name || user.email,
     });
     res.json({ success: true, attendance: list });
+  });
+
+  // --- NÄRVAROKORT FÖR LOK-STÖD (server/lok.ts) ---
+  const lokType = (v: any): lok.CardType | null => (v === 'state' || v === 'municipal' ? v : null);
+  const memberName = (access: registry.ClubAccess, user: any) => {
+    const me: any = access.memberIds.length ? db.prepare('SELECT full_name FROM members WHERE id = ?').get(access.memberIds[0]) : null;
+    return me?.full_name || user.email;
+  };
+  // Räknar fram ett lags kort; null om korttypen inte används i föreningen.
+  const lokCard = (clubId: string, teamId: string, period: { from: number; to: number }, type: lok.CardType) => {
+    const rules = lok.getRules(db, clubId)[type];
+    if (!rules.enabled) return null;
+    const { sessions, people } = lok.loadTeam(db, clubId, teamId);
+    return lok.computeCard({ rules, sessions, people, from: period.from, to: period.to });
+  };
+  const sameTotals = (a: any, b: any) => !!a && !!b && ['gatherings', 'participantOccasions', 'leaderOccasions'].every((k) => a[k] === b[k]);
+
+  // Reglerna: statligt (RF, fast) och kommunalt (föreningen fyller i). Tränare läser, föreningsadmin ändrar.
+  app.get('/api/lok/rules', requireAuthUser, async (req, res) => {
+    const user = (req as any).user;
+    const clubId = String(req.query.clubId || '');
+    const access = registry.getClubAccess(db, user, clubId, await verifyIsRootAdmin(user));
+    if (!clubId || !registry.isClubCoach(access)) return res.status(403).json({ error: 'Endast tränare och administratörer.' });
+    res.json({ ...lok.getRules(db, clubId), canEdit: access.isClubAdmin });
+  });
+
+  app.put('/api/lok/rules', requireAuthUser, async (req, res) => {
+    const user = (req as any).user;
+    const { clubId, municipal } = req.body || {};
+    if (typeof clubId !== 'string' || !clubId) return res.status(400).json({ error: 'clubId krävs.' });
+    const access = registry.getClubAccess(db, user, clubId, await verifyIsRootAdmin(user));
+    if (!access.isClubAdmin) return res.status(403).json({ error: 'Endast föreningens administratörer kan ändra reglerna.' });
+    res.json({ success: true, municipal: lok.saveMunicipalRules(db, clubId, municipal) });
+  });
+
+  // Ett lags närvarokort för ett halvår (period "2026-2") och korttyp (state/municipal).
+  app.get('/api/lok/card', requireAuthUser, async (req, res) => {
+    const user = (req as any).user;
+    const clubId = String(req.query.clubId || ''), teamId = String(req.query.teamId || ''), periodKey = String(req.query.period || '');
+    const type = lokType(req.query.type), period = lok.parsePeriod(periodKey);
+    if (!clubId || !teamId || !type || !period) return res.status(400).json({ error: 'clubId, teamId, period och type krävs.' });
+    const access = registry.getClubAccess(db, user, clubId, await verifyIsRootAdmin(user));
+    if (!registry.isTeamCoach(access, teamId)) return res.status(403).json({ error: 'Endast lagets tränare och föreningens administratörer.' });
+    const card = lokCard(clubId, teamId, period, type);
+    if (!card) return res.status(400).json({ error: 'Kommunalt aktivitetsstöd är inte inställt för föreningen.', code: 'municipal-off' });
+    const lock = lok.getLock(db, clubId, teamId, periodKey, type);
+    const team = lok.teamsOfClub(db, clubId).find((t) => t.id === teamId);
+    res.json({
+      period: { key: periodKey, label: period.label }, type, rules: lok.getRules(db, clubId)[type], teamName: team?.name || teamId,
+      card, lock, changedSinceLock: !!lock && !sameTotals(lock.totals, card.totals), canUnlock: access.isClubAdmin,
+    });
+  });
+
+  // Föreningens summering (alla lag) för kansliet: föreningsadmin.
+  app.get('/api/lok/club', requireAuthUser, async (req, res) => {
+    const user = (req as any).user;
+    const clubId = String(req.query.clubId || ''), periodKey = String(req.query.period || '');
+    const type = lokType(req.query.type), period = lok.parsePeriod(periodKey);
+    if (!clubId || !type || !period) return res.status(400).json({ error: 'clubId, period och type krävs.' });
+    const access = registry.getClubAccess(db, user, clubId, await verifyIsRootAdmin(user));
+    if (!access.isClubAdmin) return res.status(403).json({ error: 'Endast föreningens administratörer.' });
+    const rules = lok.getRules(db, clubId)[type];
+    if (!rules.enabled) return res.status(400).json({ error: 'Kommunalt aktivitetsstöd är inte inställt för föreningen.', code: 'municipal-off' });
+    const teams = lok.teamsOfClub(db, clubId).map((t) => {
+      const card = lokCard(clubId, t.id, period, type)!;
+      const lock = lok.getLock(db, clubId, t.id, periodKey, type);
+      const w = card.warnings;
+      return {
+        teamId: t.id, name: t.name, totals: card.totals, groups: card.groups, lock,
+        changedSinceLock: !!lock && !sameTotals(lock.totals, card.totals),
+        warnings: w.noEndTime.length + w.tooShort.length + w.noBirthYear.length + w.noGender.length,
+      };
+    });
+    const sum = (key: 'gatherings' | 'participantOccasions' | 'leaderOccasions') => teams.reduce((n, t) => n + t.totals[key], 0);
+    const merge = (key: 'participants' | 'leaders', bounds: number[]): lok.GroupTable => {
+      const out: lok.GroupTable = { labels: lok.groupLabels(bounds), female: bounds.map(() => 0), male: bounds.map(() => 0), unknown: bounds.map(() => 0) };
+      for (const t of teams) for (const g of ['female', 'male', 'unknown'] as const) t.groups[key][g].forEach((n, i) => { out[g][i] += n; });
+      return out;
+    };
+    res.json({
+      period: { key: periodKey, label: period.label }, type, rules,
+      teams,
+      totals: { gatherings: sum('gatherings'), participantOccasions: sum('participantOccasions'), leaderOccasions: sum('leaderOccasions') },
+      groups: { participants: merge('participants', rules.participantGroups), leaders: merge('leaders', rules.leaderGroups) },
+    });
+  });
+
+  // Intyga och låsa ett kort (lagets tränare). Summorna sparas så att senare ändringar syns.
+  app.post('/api/lok/lock', requireAuthUser, async (req, res) => {
+    const user = (req as any).user;
+    const { clubId, teamId, period: periodKey } = req.body || {};
+    const type = lokType(req.body?.type), period = lok.parsePeriod(periodKey);
+    if (typeof clubId !== 'string' || typeof teamId !== 'string' || !type || !period) return res.status(400).json({ error: 'clubId, teamId, period och type krävs.' });
+    const access = registry.getClubAccess(db, user, clubId, await verifyIsRootAdmin(user));
+    if (!registry.isTeamCoach(access, teamId)) return res.status(403).json({ error: 'Endast lagets tränare och föreningens administratörer.' });
+    const card = lokCard(clubId, teamId, period, type);
+    if (!card) return res.status(400).json({ error: 'Kommunalt aktivitetsstöd är inte inställt för föreningen.', code: 'municipal-off' });
+    lok.setLock(db, { clubId, teamId, period: periodKey, type, lockedBy: memberName(access, user), totals: card.totals });
+    res.json({ success: true, lock: lok.getLock(db, clubId, teamId, periodKey, type) });
+  });
+
+  // Låsa upp ett kort: bara föreningsadmin.
+  app.post('/api/lok/unlock', requireAuthUser, async (req, res) => {
+    const user = (req as any).user;
+    const { clubId, teamId, period: periodKey } = req.body || {};
+    const type = lokType(req.body?.type);
+    if (typeof clubId !== 'string' || typeof teamId !== 'string' || !type || !lok.parsePeriod(periodKey)) return res.status(400).json({ error: 'clubId, teamId, period och type krävs.' });
+    const access = registry.getClubAccess(db, user, clubId, await verifyIsRootAdmin(user));
+    if (!access.isClubAdmin) return res.status(403).json({ error: 'Endast föreningens administratörer kan låsa upp.' });
+    lok.removeLock(db, clubId, teamId, periodKey, type);
+    res.json({ success: true });
   });
 
   // --- DOCUMENT STORE ENDPOINTS ---
