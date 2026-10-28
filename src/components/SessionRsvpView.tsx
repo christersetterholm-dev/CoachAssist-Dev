@@ -34,6 +34,18 @@ import { isMatchSession } from '../utils/sessionCategory';
 import { Button, Card, SectionHeader, SegmentedTabs, Badge, EmptyState, Avatar, Sheet, MenuItem, TextArea, TextInput } from './ui';
 import { teamLeaders } from './attendance/shared';
 
+// Antal i en grupp (t.ex. Kommer): totalt och uppdelat på spelare och ledare, för planeringen av passet.
+const GroupCount: React.FC<{ members: SquadPlayer[] }> = ({ members }) => {
+  const leaders = members.filter(p => p.role === 'leader').length;
+  const players = members.length - leaders;
+  return (
+    <span className="tabular-nums">
+      {members.length}
+      <span className="ml-1.5 font-semibold">· {players} spelare, {leaders} ledare</span>
+    </span>
+  );
+};
+
 interface SessionRsvpViewProps {
   session: TrainingSession;
   squad?: SquadPlayer[];
@@ -1069,7 +1081,7 @@ export const SessionRsvpView: React.FC<SessionRsvpViewProps> = ({
                   <h3 className="flex items-center gap-2 px-1 mb-1.5 text-sm font-bold text-zinc-500 dark:text-zinc-400">
                     {g.key !== 'guests' && <Badge tone={statusMeta[g.key as RsvpStatus | 'unanswered'].tone} icon={statusMeta[g.key as RsvpStatus | 'unanswered'].icon}>{g.title}</Badge>}
                     {g.key === 'guests' && <Badge tone="brand">{g.title}</Badge>}
-                    <span className="tabular-nums">{g.members.length}</span>
+                    <GroupCount members={g.members} />
                   </h3>
                   <Card padded={false}>
                     <ul className="divide-y divide-zinc-100 dark:divide-zinc-800">{g.members.map(p => renderRow(p, false))}</ul>
@@ -1089,7 +1101,7 @@ export const SessionRsvpView: React.FC<SessionRsvpViewProps> = ({
                   {g.key === 'first'
                     ? <Badge tone={statusMeta[statusTab].tone} icon={statusMeta[statusTab].icon}>{g.title}</Badge>
                     : <span>{g.title}</span>}
-                  <span className="tabular-nums">{g.members.length}</span>
+                  <GroupCount members={g.members} />
                 </h3>
                 <Card padded={false}>
                   <ul className="divide-y divide-zinc-100 dark:divide-zinc-800">{g.members.map(p => renderRow(p, true))}</ul>
