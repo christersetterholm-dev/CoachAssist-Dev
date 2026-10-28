@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useRef, useEffect } from 'react';
-import { ArrowLeft, Trash2, GripVertical, Clock, Calendar, Check, CheckCircle2, ListTodo, Save, ChevronDown, ChevronLeft, ChevronRight, Play, PlusCircle, Users, X, Edit2, Image as ImageIcon, Link as LinkIcon, Youtube, ExternalLink, Maximize2, Upload, Loader2, FileText, Copy, Library, Download, Layout, Bell, Eye, EyeOff, UserCheck, Trophy, Dumbbell, MapPin, RotateCcw } from 'lucide-react';
+import { ArrowLeft, Trash2, GripVertical, Clock, Calendar, Check, CheckCircle2, ListTodo, Save, ChevronDown, ChevronLeft, ChevronRight, Play, PlusCircle, Users, X, Edit2, Image as ImageIcon, Link as LinkIcon, Youtube, ExternalLink, Maximize2, Upload, Loader2, FileText, Copy, Library, Download, Layout, Bell, Eye, EyeOff, UserCheck, Trophy, Dumbbell, MapPin, RotateCcw, Shapes } from 'lucide-react';
 import { motion, AnimatePresence, Reorder, useDragControls } from 'motion/react';
 import { storage, ref, uploadBytesResumable, getDownloadURL, deleteObject } from '../lib/firebase';
 import { TrainingSession, SessionMoment, Exercise, SquadPlayer, UserProfile, getExerciseImages } from '../types';
@@ -7,7 +7,7 @@ import TeamOverviewModal from './TeamOverviewModal';
 import MomentCopyModal from './MomentCopyModal';
 import TacticalBoardModal from './TacticalBoardModal';
 import { SessionRsvpView } from './SessionRsvpView';
-import { isMatchSession } from '../utils/sessionCategory';
+import { categorizeSession, isMatchSession } from '../utils/sessionCategory';
 import { optimizeImageForUpload } from '../utils/imageOptimizer';
 import { Button, IconButton, Card, SectionHeader, SegmentedTabs, Badge, EmptyState, Sheet, TextArea, TextInput } from './ui';
 
@@ -1359,8 +1359,9 @@ export default function SessionEditor({
               tabs={[
                 { id: 'training', label: 'Träning', icon: <Dumbbell size={15} /> },
                 { id: 'match', label: 'Match', icon: <Trophy size={15} /> },
+                { id: 'other', label: 'Övrigt', icon: <Shapes size={15} /> },
               ]}
-              value={isMatch ? 'match' : 'training'}
+              value={categorizeSession(session)}
               onChange={(t) => onUpdate({ ...session, type: t, category: t, updatedAt: Date.now() })}
             />
           </div>

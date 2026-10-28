@@ -14,11 +14,12 @@ import SquadManager from './components/SquadManager';
 import Leaderboard from './components/Leaderboard';
 import LineupBuilder from './components/LineupBuilder';
 import TacticalBoardsView from './components/TacticalBoardsView';
+import AttendanceView from './components/attendance/AttendanceView';
 import PostsView, { PostDetailSheet, PostEditorSheet } from './components/PostsView';
 import { usePosts, type Post } from './lib/posts';
 import ChatView from './components/chat/ChatView';
 import { useChatSummary } from './lib/chat';
-import { disablePush, listenForPushOpen, syncPush, type PushOpen } from './lib/push';
+import { disablePush, listenForPushOpen, notifyTeamAboutSessions, syncPush, type PushOpen } from './lib/push';
 import { NotificationsSheet } from './components/NotificationsSheet';
 
 import TeamPage from './components/TeamPage';
@@ -38,7 +39,7 @@ import { OnboardingModal } from './components/OnboardingModal';
 import { PendingRequestsModal } from './components/PendingRequestsModal';
 import { ShakeProtectionModal, QuickShakeModal } from './components/ShakeProtectionModal';
 
-type View = 'home' | 'training' | 'setup' | 'exercise' | 'squad' | 'leaderboard' | 'profile' | 'lineup' | 'tacticalboards' | 'posts' | 'chat' | 'teampage' | 'clubadmin';
+type View = 'home' | 'training' | 'attendance' | 'setup' | 'exercise' | 'squad' | 'leaderboard' | 'profile' | 'lineup' | 'tacticalboards' | 'posts' | 'chat' | 'teampage' | 'clubadmin';
 
 const INITIAL_DATA: CoachData = {
   squad: [],
@@ -752,7 +753,7 @@ export default function App() {
     // If sharing, priority is leaderboard (already handled by useEffect but setting here for initial sync too)
     if (shareId) return 'leaderboard';
     
-    if (v === 'home' || v === 'squad' || v === 'training' || v === 'leaderboard' || v === 'profile' || v === 'lineup' || v === 'teampage' || v === 'exercise') {
+    if (v === 'home' || v === 'squad' || v === 'training' || v === 'attendance' || v === 'leaderboard' || v === 'profile' || v === 'lineup' || v === 'teampage' || v === 'exercise') {
       return v as View;
     }
     return 'home';
@@ -3861,6 +3862,7 @@ export default function App() {
   const shellTitles: Record<string, string> = {
     home: 'Översikt',
     training: 'Kalender',
+    attendance: 'Närvaro',
     squad: 'Truppen',
     lineup: 'Uppställning & taktik',
     tacticalboards: 'Taktiktavla',
@@ -3992,6 +3994,31 @@ export default function App() {
             ) : (
               <p key="chat-noclub" className="p-6 text-sm text-zinc-500">Välj en förening först för att kunna chatta.</p>
             )
+          )}
+
+          {view === 'attendance' && (
+            <AttendanceView
+              key="attendance"
+              squad={squad}
+              sessions={sessions}
+              isCoachOrAdmin={isCoachOrAdmin}
+              clubId={userProfile.activeClubId}
+              teamId={userProfile.activeTeamId}
+              settings={trainingSettings}
+              onUpdateSession={onUpdateSession}
+              onOpenSession={(id, tab) => {
+                setActiveSessionId(id);
+                setSessionEditorTab(tab || 'schema');
+              }}
+              onOpenMultiRsvp={() => setIsMultiRsvpOpen(true)}
+              onCreateSessions={(created, notify) => {
+                onAddSessionsBatch(created);
+                if (notify && userProfile.activeClubId && userProfile.activeTeamId) {
+                  notifyTeamAboutSessions(userProfile.activeClubId, userProfile.activeTeamId, created)
+                    .catch((e) => alert(`Aktiviteterna är sparade, men notisen kunde inte skickas: ${e?.message || e}`));
+                }
+              }}
+            />
           )}
 
           {view === 'posts' && (

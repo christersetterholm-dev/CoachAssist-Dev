@@ -249,6 +249,9 @@ export interface TrainingSession {
   category?: 'training' | 'match' | 'cup' | 'other';
   location?: string; // Location of the event
   gatheringTime?: string; // Samlingstid "HH:MM" (valfri)
+  opponent?: string; // Motståndare (match)
+  homeAway?: 'home' | 'away'; // Hemma eller borta (match)
+  lok?: boolean; // Räknas för LOK-stöd; saknas = ja, false = nej
   moments: SessionMoment[];
   attendance?: string[]; // Player IDs or names
   guestPlayers?: SquadPlayer[];

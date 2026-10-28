@@ -7,12 +7,12 @@ import {
   Bell,
   House, Calendar, Users, Shirt, Trophy, Globe, ShieldCheck, User as UserIcon, Sun, Moon,
   RefreshCw, LogOut, Building2, ChevronRight, Cloud, CloudOff, Loader2, VibrateOff, Minimize2, Presentation, Megaphone, MessageCircle,
-  LayoutGrid, Library,
+  LayoutGrid, Library, ClipboardCheck,
 } from 'lucide-react';
 import { Avatar, MenuItem, Sheet } from '../ui';
 import { CustomizeNavSheet, MoreSheet, defaultMobileNav, resolveMobileNav } from './MoreSheet';
 
-export type ShellView = 'home' | 'training' | 'squad' | 'exercisebank' | 'lineup' | 'tacticalboards' | 'posts' | 'chat' | 'leaderboard' | 'teampage' | 'clubadmin' | 'profile';
+export type ShellView = 'home' | 'training' | 'attendance' | 'squad' | 'exercisebank' | 'lineup' | 'tacticalboards' | 'posts' | 'chat' | 'leaderboard' | 'teampage' | 'clubadmin' | 'profile';
 
 export interface NavItem {
   id: ShellView;
@@ -23,11 +23,13 @@ export interface NavItem {
 }
 
 export const buildNavItems = (opts: { canViewLineup: boolean; unreadPosts?: number; unreadChats?: number; canManageExercises?: boolean }): { primary: NavItem[]; secondary: NavItem[] } => {
-  // Ordningen i sidomenyn (och i Mer på mobil): Översikt, Kalender, Chatt, Inlägg, Uppställning,
+  // Ordningen i sidomenyn (och i Mer på mobil): Översikt, Kalender, Närvaro, Chatt, Inlägg, Uppställning,
   // Taktiktavla, Poängliga, Truppen, Övningsbanken.
   const primary: NavItem[] = [
     { id: 'home', label: 'Översikt', icon: House },
     { id: 'training', label: 'Kalender', icon: Calendar },
+    // Anmälan till aktiviteter och uppföljning av närvaro.
+    { id: 'attendance', label: 'Närvaro', icon: ClipboardCheck },
     // Chatt med lag, grupper och enskilda i föreningen. Märket = antal chattar med olästa.
     { id: 'chat', label: 'Chatt', icon: MessageCircle, badge: opts.unreadChats || undefined },
     // Inlägg från tränarna. På mobil visas märket på Översikt (där inläggen också syns).

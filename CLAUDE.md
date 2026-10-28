@@ -47,6 +47,7 @@ Läs den här filen först i varje nytt samtal. Håll den uppdaterad när något
 | Gemensamma byggklossar (Button, IconButton, Card, SegmentedTabs, Badge, EmptyState, Avatar, Sheet, MenuItem) | `src/components/ui/index.tsx` |
 | Textrutor som tål diktering (TextInput, TextArea) | `src/components/ui/TextField.tsx` |
 | Startsidan Översikt (nästa aktivitet, svar på kallelse, snabbval, poängtopp) | `src/components/HomeView.tsx` |
+| Menyn Närvaro (aktiviteter, svar, Ny aktivitet, statistik) | `src/components/attendance/` |
 | Välkomstsida för utloggade | `src/components/WelcomeScreen.tsx` |
 | Tester | `tests/*.test.mjs` (node:test, startar servern mot tom temp-databas) |
 
@@ -77,6 +78,23 @@ Appen läser/skriver JSON-dokument via sökvägar:
 - Personnummer/telefon/e-post visas bara för tränare (och för personen själv).
 - Bara root-admin skapar föreningar. Tränare kan inte ge sig själva admin-roll.
 - Konton kopplas automatiskt till medlemsrader med samma id eller e-post vid inloggning.
+
+### Närvaro (menyn, gren `narvaro`, okt 2026)
+- `view === 'attendance'` → `AttendanceView`. Flikar Aktiviteter (alla) och Statistik (tränare; samma
+  `SquadAttendanceOverview` som i Truppen). Aktiviteter: Kommande/Tidigare, filter Träning/Match/Övrigt; spelare svarar
+  direkt på raden (`answerForMe` i `attendance/shared.ts`), tränare ser antal svar resp. närvaro och öppnar passet.
+- **Ny aktivitet** (`NewActivitySheet`, tränare): typ, motståndare + hemma/borta (match), enskild eller varje vecka,
+  start/slut/samling, plats, information, LOK-aktivitet, kallelse med sista svarsdag och notis. Sparas som vanliga pass.
+- Nya fält i pass: `opponent`, `homeAway`, `lok` (saknas = räknas för LOK, `false` = inte). Typen `other` (Övrigt)
+  går också att välja i passvyn.
+- **Plan framåt** (godkänd av Christer okt 2026): närvaron i egen tabell på servern (som `rsvps`), statistik som i
+  laget.se (staplar per spelare och typ, medelnärvaro, export), sedan närvarokort för LOK-stöd med regelpaket
+  (statligt: RF:s föreskrifter fr.o.m. 2025-07-01 – 6–25 år räknat på födelseår, ledare minst 13 år, minst 3 deltagare
+  och 45 min, högst 20 deltagare per ledare, en aktivitet per dag, 3 resp. 5 tillfällen per vecka; kommunalt: föreningen
+  fyller i själv, Sandvikens regler okända), halvår, PDF, summering per kön/ålder och föreningsvy för kansliet
+  (rollen föreningsadmin räcker, ingen ny roll). Sist import från SvFF (FOGIS).
+- **Ingen koppling till RF:s API** (kostar pengar, gäller inte alla föreningar). Statligt LOK-stöd kräver att närvaron
+  finns i RF:s system (IdrottOnline/Idrottsarenan), så Truppio tar fram underlag men skickar inget till RF.
 
 ### Svar på kallelser
 - Tabell `rsvps` (en rad per person och aktivitet). `POST /api/rsvp`, `POST /api/rsvp/clear`.
