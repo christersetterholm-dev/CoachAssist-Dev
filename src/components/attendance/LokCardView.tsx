@@ -9,16 +9,18 @@ import { getLokCard, getLokRules, lockLokCard, unlockLokCard } from '../../lib/f
 import { formatLockDate, LOK_TYPE_LABEL, lokPeriods, type LokCardResponse, type LokType } from '../../lib/lok';
 import { Button, Card, EmptyState, IconButton, SegmentedTabs, Sheet } from '../ui';
 import { CardGrid, GroupTable, LokPrint, PER_CARD } from './LokParts';
+import LeaderBatchSheet from './LeaderBatchSheet';
 
 interface LokCardViewProps {
   clubId?: string | null;
   teamId?: string | null;
   clubName?: string;
+  onAttendanceSaved: (sessionId: string, attendance: string[]) => void;
 }
 
 const dmy = (ts: number) => new Date(ts).toLocaleDateString('sv-SE', { day: 'numeric', month: 'short' });
 
-export default function LokCardView({ clubId, teamId, clubName }: LokCardViewProps) {
+export default function LokCardView({ clubId, teamId, clubName, onAttendanceSaved }: LokCardViewProps) {
   const periods = useMemo(() => lokPeriods(), []);
   const [period, setPeriod] = useState(periods[0].key);
   const [type, setType] = useState<LokType>('state');
@@ -30,6 +32,7 @@ export default function LokCardView({ clubId, teamId, clubName }: LokCardViewPro
   const [printing, setPrinting] = useState(false);
   const [confirmLock, setConfirmLock] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [isLeaderSheetOpen, setIsLeaderSheetOpen] = useState(false);
 
   useEffect(() => {
     if (!clubId) return;
@@ -80,7 +83,8 @@ export default function LokCardView({ clubId, teamId, clubName }: LokCardViewPro
     const a = card?.activities.find(x => x.id === id);
     return a ? `${a.title || 'Aktivitet'} ${dmy(a.date)}` : id;
   };
-  const warningCount = w ? w.noEndTime.length + w.tooShort.length + w.noBirthYear.length + w.noGender.length : 0;
+  const noLeader = (card?.activities || []).filter(a => a.reason === 'Ingen ledare närvarande');
+  const warningCount = w ? w.noEndTime.length + w.tooShort.length + w.noBirthYear.length + w.noGender.length + noLeader.length : 0;
 
   return (
     <div className="space-y-4">
@@ -168,6 +172,12 @@ export default function LokCardView({ clubId, teamId, clubName }: LokCardViewPro
             <Card className="border-amber-200 dark:border-amber-900 bg-amber-50/60 dark:bg-amber-950/20 space-y-2">
               <p className="font-semibold flex items-center gap-2 text-amber-800 dark:text-amber-200"><AlertTriangle size={18} /> Kontrollera</p>
               <ul className="text-sm space-y-1.5 text-zinc-700 dark:text-zinc-200 list-disc pl-5">
+                {noLeader.length > 0 && card.leaders.length > 0 && (
+                  <li>
+                    {noLeader.length} pass räknas inte för att ingen tränare är bockad som närvarande.{' '}
+                    <button type="button" onClick={() => setIsLeaderSheetOpen(true)} className="font-semibold text-indigo-700 dark:text-indigo-300 underline underline-offset-2 cursor-pointer">Bocka tränare</button>
+                  </li>
+                )}
                 {w.noEndTime.length > 0 && <li>Sluttid saknas, räknas inte: {w.noEndTime.map(activityName).join(', ')}</li>}
                 {w.tooShort.length > 0 && <li>För korta ({data.rules.minMinutes} min krävs): {w.tooShort.map(activityName).join(', ')}</li>}
                 {w.noBirthYear.length > 0 && <li>Personnummer saknas (räknas inte som deltagare): {w.noBirthYear.join(', ')}. Fyll i under Administration → Medlemmar.</li>}
@@ -201,6 +211,17 @@ export default function LokCardView({ clubId, teamId, clubName }: LokCardViewPro
               <CardGrid card={card} from={page * PER_CARD} to={page * PER_CARD + PER_CARD} />
             )}
           </Card>
+
+          <LeaderBatchSheet
+            open={isLeaderSheetOpen}
+            onClose={() => setIsLeaderSheetOpen(false)}
+            clubId={clubId}
+            teamId={teamId}
+            activities={noLeader}
+            leaders={card.leaders}
+            onSaved={onAttendanceSaved}
+            onDone={load}
+          />
 
           {printing && (
             <LokPrint card={card} type={type} clubName={clubName || ''} teamName={data.teamName} periodLabel={data.period.label} onDone={stopPrinting} />

@@ -24,6 +24,8 @@ interface AttendanceViewProps {
   teamName?: string;
   clubName?: string;
   onUpdateSession: (session: TrainingSession) => void;
+  /** Närvaro som redan sparats på servern (t.ex. tränare bockade på flera pass). */
+  onAttendanceSaved: (sessionId: string, attendance: string[]) => void;
   onOpenSession: (id: string, tab?: 'schema' | 'attendance' | 'rsvp') => void;
   onOpenMultiRsvp: () => void;
   onCreateSessions: (sessions: TrainingSession[], notify: boolean) => void;
@@ -57,7 +59,7 @@ const chipOff = 'border-zinc-200 dark:border-zinc-700 text-zinc-700 dark:text-zi
 const chipOn = 'border-indigo-600 bg-indigo-600 text-white';
 
 export default function AttendanceView(props: AttendanceViewProps) {
-  const { squad, sessions, isCoachOrAdmin, clubId, teamId, settings, teamName, clubName, onUpdateSession, onOpenSession, onOpenMultiRsvp, onCreateSessions } = props;
+  const { squad, sessions, isCoachOrAdmin, clubId, teamId, settings, teamName, clubName, onUpdateSession, onAttendanceSaved, onOpenSession, onOpenMultiRsvp, onCreateSessions } = props;
   const [tab, setTab] = useState<Tab>('activities');
   const [when, setWhen] = useState<When>('upcoming');
   const [kindFilter, setKindFilter] = useState<KindFilter>('all');
@@ -117,7 +119,7 @@ export default function AttendanceView(props: AttendanceViewProps) {
       )}
 
       {tab === 'cards' && isCoachOrAdmin ? (
-        <LokCardView clubId={clubId} teamId={teamId} clubName={clubName} />
+        <LokCardView clubId={clubId} teamId={teamId} clubName={clubName} onAttendanceSaved={onAttendanceSaved} />
       ) : tab === 'stats' && isCoachOrAdmin ? (
         <AttendanceStatsView squad={squad} sessions={sessions} teamName={teamName} />
       ) : (

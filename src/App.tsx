@@ -3011,8 +3011,9 @@ export default function App() {
     }
   };
 
-  const onUpdateSession = (updatedSession: TrainingSession, instantPush = false) => {
-    syncAttendanceChange(latestDataRef.current.sessions?.find(s => s.id === updatedSession.id), updatedSession);
+  // attendanceSynced: närvaron är redan sparad på servern (skickas inte igen).
+  const onUpdateSession = (updatedSession: TrainingSession, instantPush = false, attendanceSynced = false) => {
+    if (!attendanceSynced) syncAttendanceChange(latestDataRef.current.sessions?.find(s => s.id === updatedSession.id), updatedSession);
     let updatedSessionsList: TrainingSession[] = [];
     setData(prev => {
       const updatedSessions = prev.sessions.map(s => s.id === updatedSession.id ? updatedSession : s);
@@ -4025,6 +4026,10 @@ export default function App() {
               teamName={activeClubInfo?.teamName}
               clubName={activeClubInfo?.clubName}
               onUpdateSession={onUpdateSession}
+              onAttendanceSaved={(id, list) => {
+                const s = latestDataRef.current.sessions?.find(x => x.id === id);
+                if (s) onUpdateSession({ ...s, attendance: list, updatedAt: Date.now() }, false, true);
+              }}
               onOpenSession={(id, tab) => {
                 setActiveSessionId(id);
                 setSessionEditorTab(tab || 'schema');

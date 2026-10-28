@@ -116,6 +116,9 @@ Appen läser/skriver JSON-dokument via sökvägar:
   `POST /api/lok/unlock` (föreningsadmin). Utskrift/PDF: `LokPrint` lägger korten (25 aktiviteter per kort) i `<body>`
   och `body.lok-printing` i index.css döljer resten. Ledare 13–25 år räknas inte som deltagare (laget.se gör så);
   varje lag räknas för sig (en person i två lag samma dag kan räknas två gånger i föreningens summering).
+- Tränarnas närvaro (krävs för att ett pass ska räknas): knapparna "Tränare på plats" i passvyns närvaro
+  (`SessionRsvpView`, `teamLeaders`) och "Bocka tränare" i Närvarokort → `LeaderBatchSheet` (flera pass på en gång,
+  `POST /api/attendance` per pass; appen uppdateras med `onUpdateSession(..., attendanceSynced = true)`).
 - Kvar: import från SvFF (FOGIS) när Christer fått uppgifterna; kanslisten ska kolla hur ansökan görs i dag och
   vilka regler Sandvikens kommun har.
 - **Ingen koppling till RF:s API** (kostar pengar, gäller inte alla föreningar). Statligt LOK-stöd kräver att närvaron

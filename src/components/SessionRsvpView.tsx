@@ -32,6 +32,7 @@ import { saveRsvp, clearRsvps } from '../lib/firebase';
 import { notifyTeamAboutSessions } from '../lib/push';
 import { isMatchSession } from '../utils/sessionCategory';
 import { Button, Card, SectionHeader, SegmentedTabs, Badge, EmptyState, Avatar, Sheet, MenuItem, TextArea, TextInput } from './ui';
+import { teamLeaders } from './attendance/shared';
 
 interface SessionRsvpViewProps {
   session: TrainingSession;
@@ -269,6 +270,9 @@ export const SessionRsvpView: React.FC<SessionRsvpViewProps> = ({
         name: p.name || 'Provspelare'
       }));
   }, [session?.guestPlayers]);
+
+  // Lagets tränare (för snabbknapparna "Tränare på plats"); den som också är spelare bockas i listan som spelare
+  const leaders = useMemo(() => teamLeaders(safeSquad), [safeSquad]);
 
   // Truppen + provspelare
   const allMembers = useMemo<SquadPlayer[]>(() => {
@@ -1014,6 +1018,31 @@ export const SessionRsvpView: React.FC<SessionRsvpViewProps> = ({
               />
             </div>
           </div>
+          {leaders.length > 0 && (
+            <div className="mt-4">
+              <p className="text-sm font-semibold text-zinc-700 dark:text-zinc-200">Tränare på plats</p>
+              <p className="text-xs text-zinc-500 dark:text-zinc-400 mb-2">Minst en tränare behöver vara med för att passet ska räknas för LOK-stöd.</p>
+              <div className="flex flex-wrap gap-2">
+                {leaders.map(l => {
+                  const on = attendance.includes(l.id);
+                  return (
+                    <button
+                      key={l.id}
+                      type="button"
+                      aria-pressed={on}
+                      onClick={() => handleTogglePresence(l.id)}
+                      className={`h-10 px-3 rounded-full border text-sm font-semibold inline-flex items-center gap-1.5 cursor-pointer transition-colors ${
+                        on ? 'bg-emerald-600 border-emerald-600 text-white' : 'bg-white dark:bg-zinc-800 border-zinc-200 dark:border-zinc-700 text-zinc-700 dark:text-zinc-200 hover:bg-zinc-50 dark:hover:bg-zinc-750'
+                      }`}
+                    >
+                      {on && <Check size={15} strokeWidth={2.6} />}
+                      {l.name}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
         </Card>
 
         {/* Listan */}
