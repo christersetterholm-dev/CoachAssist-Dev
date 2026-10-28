@@ -34,14 +34,13 @@ import { isMatchSession } from '../utils/sessionCategory';
 import { Button, Card, SectionHeader, SegmentedTabs, Badge, EmptyState, Avatar, Sheet, MenuItem, TextArea, TextInput } from './ui';
 import { teamLeaders } from './attendance/shared';
 
-// Antal i en grupp (t.ex. Kommer): totalt och uppdelat på spelare och ledare, för planeringen av passet.
+// Antal i en grupp, t.ex. "3 st, varav 2 spelare & 1 ledare" – för planeringen av passet.
 const GroupCount: React.FC<{ members: SquadPlayer[] }> = ({ members }) => {
   const leaders = members.filter(p => p.role === 'leader').length;
   const players = members.length - leaders;
   return (
     <span className="tabular-nums">
-      {members.length}
-      <span className="ml-1.5 font-semibold">· {players} spelare, {leaders} ledare</span>
+      {members.length} st, <span className="font-semibold">varav {players} spelare &amp; {leaders} ledare</span>
     </span>
   );
 };
@@ -1095,7 +1094,7 @@ export const SessionRsvpView: React.FC<SessionRsvpViewProps> = ({
             [
               { key: 'first', title: statusMeta[statusTab].label, members: filteredMembers.filter(p => statusTabFirst.has(p.id)) },
               { key: 'rest', title: 'Övriga i laget', members: filteredMembers.filter(p => !statusTabFirst.has(p.id)) },
-            ].filter(g => g.members.length > 0).map(g => (
+            ].filter(g => g.key === 'first' || g.members.length > 0).map(g => (
               <div key={g.key}>
                 <h3 className="flex items-center gap-2 px-1 mb-1.5 text-sm font-bold text-zinc-500 dark:text-zinc-400">
                   {g.key === 'first'
@@ -1103,15 +1102,23 @@ export const SessionRsvpView: React.FC<SessionRsvpViewProps> = ({
                     : <span>{g.title}</span>}
                   <GroupCount members={g.members} />
                 </h3>
-                <Card padded={false}>
-                  <ul className="divide-y divide-zinc-100 dark:divide-zinc-800">{g.members.map(p => renderRow(p, true))}</ul>
-                </Card>
+                {g.members.length > 0 && (
+                  <Card padded={false}>
+                    <ul className="divide-y divide-zinc-100 dark:divide-zinc-800">{g.members.map(p => renderRow(p, true))}</ul>
+                  </Card>
+                )}
               </div>
             ))
           ) : (
-            <Card padded={false}>
-              <ul className="divide-y divide-zinc-100 dark:divide-zinc-800">{filteredMembers.map(p => renderRow(p, true))}</ul>
-            </Card>
+            <div>
+              <h3 className="flex items-center gap-2 px-1 mb-1.5 text-sm font-bold text-zinc-500 dark:text-zinc-400">
+                <span>{searchQuery.trim() ? 'Sökträffar' : filterTabs.find(t => t.id === filter)?.label}</span>
+                <GroupCount members={filteredMembers} />
+              </h3>
+              <Card padded={false}>
+                <ul className="divide-y divide-zinc-100 dark:divide-zinc-800">{filteredMembers.map(p => renderRow(p, true))}</ul>
+              </Card>
+            </div>
           )}
           <p className="px-1 text-xs text-zinc-500 dark:text-zinc-400">
             {statusTab
