@@ -951,6 +951,16 @@ export const completeLogin = (token: string, user: any) => {
   listeners.forEach(cb => cb(user));
 };
 
+// Tränare: bocka i (add) och ur (remove) närvaro för ett pass. Svarar med passets närvaro efteråt.
+export const saveAttendance = async (body: { clubId: string; teamId: string; sessionId: string; add?: string[]; remove?: string[] }) => {
+  const res = await fetch(getApiUrl('/api/attendance'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
+    body: JSON.stringify(body),
+  });
+  return (await jsonOrError(res, 'Kunde inte spara närvaron')) as { success: true; attendance: string[] };
+};
+
 // Tar bort alla svar för en aktivitet (endast tränare).
 export const clearRsvps = async (body: { clubId: string; teamId: string; sessionId: string }) => {
   const res = await fetch(getApiUrl('/api/rsvp/clear'), {

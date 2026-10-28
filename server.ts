@@ -18,6 +18,7 @@ import { openDatabase } from './server/database.ts';
 import * as registry from './server/registry.ts';
 import * as invites from './server/invites.ts';
 import * as tacticalBoards from './server/tacticalBoards.ts';
+import * as attendance from './server/attendance.ts';
 import * as posts from './server/posts.ts';
 import { registerChatRoutes, teamNames } from './server/chat.ts';
 import * as push from './server/push.ts';
@@ -62,6 +63,7 @@ try {
 
 const db = openDatabase({ dbPath: DB_PATH, dataDir: DATA_DIR, require: customRequire });
 registry.migrateRegistry(db);
+attendance.migrateAttendance(db);
 
 // --- SECURE JWT INITIALIZATION & CONSTANTS ---
 // Block all previously leaked repository secrets using SHA-256 hashes to prevent scanners from detecting raw strings
@@ -2881,6 +2883,37 @@ async function startServer() {
     res.json({ success: true, removed: Number(r.changes) });
   });
 
+  // --- NÄRVARO ---
+  // Tränaren bockar i (add) och ur (remove) närvaro för ett pass. Varje person sparas som egen rad.
+  app.post('/api/attendance', requireAuthUser, async (req, res) => {
+    const user = (req as any).user;
+    const { clubId, teamId, sessionId } = req.body || {};
+    if (![clubId, teamId, sessionId].every((v) => typeof v === 'string' && v)) {
+      return res.status(400).json({ error: 'clubId, teamId och sessionId krävs.' });
+    }
+    const ids = (v: any) => (v === undefined ? [] : v);
+    const add = ids(req.body.add), remove = ids(req.body.remove);
+    const okList = (v: any) => Array.isArray(v) && v.every((x: any) => typeof x === 'string' && x && x.length <= 200);
+    if (!okList(add) || !okList(remove) || add.length + remove.length === 0 || add.length + remove.length > attendance.MAX_IDS) {
+      return res.status(400).json({ error: `Ange mellan 1 och ${attendance.MAX_IDS} personer.` });
+    }
+    const access = registry.getClubAccess(db, user, clubId, await verifyIsRootAdmin(user));
+    if (!registry.isTeamCoach(access, teamId)) return res.status(403).json({ error: 'Endast tränare kan ändra närvaron.' });
+    const sessRow: any = db.prepare(`SELECT data FROM clubs_data WHERE clubId = ? AND teamId = ? AND segment = 'sessions'`).get(clubId, teamId);
+    const sessDoc = sessRow ? JSON.parse(sessRow.data) : null;
+    const sessions: any[] = Array.isArray(sessDoc) ? sessDoc : (sessDoc?.sessions || []);
+    if (!sessions.some((s) => s && s.id === sessionId)) return res.status(404).json({ error: 'Aktiviteten finns inte.' });
+    const me: any = access.memberIds.length ? db.prepare('SELECT full_name FROM members WHERE id = ?').get(access.memberIds[0]) : null;
+    const removeSet = new Set<string>(remove);
+    const list = attendance.setAttendance(db, {
+      clubId, teamId, sessionId,
+      add: Array.from(new Set<string>(add)).filter((id) => !removeSet.has(id)),
+      remove: Array.from(removeSet),
+      updatedBy: me?.full_name || user.email,
+    });
+    res.json({ success: true, attendance: list });
+  });
+
   // --- DOCUMENT STORE ENDPOINTS ---
 
   // GET Document Data
@@ -3079,7 +3112,7 @@ async function startServer() {
           // Ej delade taktiktavlor skickas aldrig till spelare.
           return res.json(tacticalBoards.filterDoc(parsedDoc, registry.isTeamCoach(access, teamId)));
         }
-        res.json(segment === 'sessions' ? registry.overlayRsvps(db, clubId, teamId, parsedDoc) : parsedDoc);
+        res.json(segment === 'sessions' ? attendance.overlayAttendance(db, clubId, teamId, registry.overlayRsvps(db, clubId, teamId, parsedDoc)) : parsedDoc);
       } catch (e: any) {
         if (e.name === 'JsonWebTokenError' || e.name === 'TokenExpiredError' || e.message === 'Invalid token' || e.message === 'No token provided') {
           return res.status(401).json({ error: 'Unauthorized', message: 'Session expired, please log in again.' });
@@ -3310,6 +3343,8 @@ async function startServer() {
         if (segment === 'sessions') {
           // Svar på kallelser lagras i egen tabell så att samtidiga svar inte skriver över varandra
           finalDataToSave = registry.extractRsvps(db, clubId, teamId, data, clubReqUser.email);
+          // Närvaron likaså (bara personer som saknar rad läggs till, se server/attendance.ts)
+          finalDataToSave = attendance.extractAttendance(db, clubId, teamId, finalDataToSave, clubReqUser.email);
         }
         if (segment === 'periods') {
           const consolidated = getConsolidatedPeriods({ clubTeams: [{ clubId, teamId }], userId: registry.isTeamCoach(access, teamId) ? clubReqUser.id : undefined });

@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { RotateCcw, Trophy, ArrowLeft, Check, Timer as TimerIcon, Edit2, Zap, Rocket, Users, Unlock, LogIn, LogOut, User as UserIcon, Cloud, Calendar, Settings, VibrateOff, Maximize2, MoreVertical } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { SquadPlayer, Exercise, Team, PointsConfig, Period, PeriodStandings, Lineup, TrainingSession, TrainingSettings, CoachData, BankExercise, SessionMoment, UserProfile, ClubMember, ClubTeam, Club, FormationVariant } from './types';
-import { auth, signInWithGoogle, db, handleFirestoreError, OperationType, getApiUrl, doc, onSnapshot, setDoc, getDoc, collection, getDocs, onAuthStateChanged, signOut, User, deleteObject, MOVED_PUSH_FLAG } from './lib/firebase';
+import { auth, signInWithGoogle, db, handleFirestoreError, OperationType, getApiUrl, doc, onSnapshot, setDoc, getDoc, collection, getDocs, onAuthStateChanged, signOut, User, deleteObject, MOVED_PUSH_FLAG, saveAttendance } from './lib/firebase';
 import { calculateLeaderboard } from './lib/leaderboardUtils';
 import { deduplicateSquad } from './lib/clubUtils';
 import { deduplicateSessionsList } from './utils/calendarSync';
@@ -2909,6 +2909,22 @@ export default function App() {
     setSessionActionCount(prev => prev + 1);
   };
 
+  // Närvaron sparas per person på servern (/api/attendance), så att två tränare som bockar samtidigt inte
+  // skriver över varandra. Alla vyer ändrar närvaron via onUpdateSession; här skickas bara skillnaden.
+  const syncAttendanceChange = (before: TrainingSession | undefined, after: TrainingSession) => {
+    const clubId = userProfile.activeClubId, teamId = userProfile.activeTeamId;
+    if (!before || !user || !isCoachOrAdmin || !clubId || !teamId) return;
+    const ids = (list: any[] | undefined) => new Set((list || []).map(v => (typeof v === 'string' ? v : String(v?.id || v?.name || ''))).filter(Boolean));
+    const was = ids(before.attendance), now = ids(after.attendance);
+    const add = [...now].filter(id => !was.has(id));
+    const remove = [...was].filter(id => !now.has(id));
+    if (add.length === 0 && remove.length === 0) return;
+    saveAttendance({ clubId, teamId, sessionId: after.id, add, remove }).catch(err => {
+      // Ett nytt pass som inte hunnit sparas (404): närvaron följer med när passet sparas.
+      if (err?.status !== 404) setSyncError(`Närvaron kunde inte sparas: ${err?.message || err}`);
+    });
+  };
+
   // date: dagen passet ska ligga på (från kalenderns Månad-vy). Anropas ibland direkt från en
   // knapp och får då ett klick-objekt – då används dagens datum.
   const onNewSession = (date?: unknown) => {
@@ -2996,6 +3012,7 @@ export default function App() {
   };
 
   const onUpdateSession = (updatedSession: TrainingSession, instantPush = false) => {
+    syncAttendanceChange(latestDataRef.current.sessions?.find(s => s.id === updatedSession.id), updatedSession);
     let updatedSessionsList: TrainingSession[] = [];
     setData(prev => {
       const updatedSessions = prev.sessions.map(s => s.id === updatedSession.id ? updatedSession : s);

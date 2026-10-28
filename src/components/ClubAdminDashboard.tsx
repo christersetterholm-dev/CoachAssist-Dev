@@ -251,6 +251,9 @@ export default function ClubAdminDashboard({
   const [memberName, setMemberName] = useState('');
   const [memberPhone, setMemberPhone] = useState('');
   const [memberPersonnummer, setMemberPersonnummer] = useState('');
+  // Kön och funktionsnedsättning behövs till LOK-stödets närvarokort ('' = räknas fram ur personnumret)
+  const [memberGender, setMemberGender] = useState<'' | 'female' | 'male'>('');
+  const [memberDisability, setMemberDisability] = useState(false);
   const [memberPosition, setMemberPosition] = useState('');
   const [memberNumber, setMemberNumber] = useState('');
   const [memberPhotoUrl, setMemberPhotoUrl] = useState('');
@@ -1579,6 +1582,8 @@ export default function ClubAdminDashboard({
       setMemberName(member.fullName || '');
       setMemberPhone(member.phone || '');
       setMemberPersonnummer(member.personnummer || '');
+      setMemberGender(member.gender || '');
+      setMemberDisability(!!member.disability);
       setMemberPosition(member.position || '');
       setMemberNumber(member.number || '');
       setMemberPhotoUrl(member.photoUrl || '');
@@ -1590,6 +1595,8 @@ export default function ClubAdminDashboard({
       setMemberName('');
       setMemberPhone('');
       setMemberPersonnummer('');
+      setMemberGender('');
+      setMemberDisability(false);
       setMemberPosition('');
       setMemberNumber('');
       setMemberPhotoUrl('');
@@ -1636,6 +1643,8 @@ export default function ClubAdminDashboard({
         fullName: cleanName,
         phone: memberPhone.trim() || undefined,
         personnummer: memberPersonnummer.trim() || undefined,
+        gender: memberGender || null,
+        disability: memberDisability,
         position: memberPosition.trim() || undefined,
         number: memberNumber.trim() || undefined,
         photoUrl: memberPhotoUrl.trim() || undefined,
@@ -2508,6 +2517,26 @@ export default function ClubAdminDashboard({
                         />
                       </div>
                     </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <label htmlFor="member-gender" className="block text-xs font-bold text-zinc-650 dark:text-zinc-400 mb-2">Kön (för närvarokort)</label>
+                      <select
+                        id="member-gender"
+                        value={memberGender}
+                        onChange={(e) => setMemberGender(e.target.value as '' | 'female' | 'male')}
+                        className="w-full h-11 px-3 bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-white border border-zinc-200 dark:border-zinc-800 rounded-xl focus:outline-none focus:border-indigo-500 font-semibold text-sm cursor-pointer"
+                      >
+                        <option value="">Från personnumret</option>
+                        <option value="female">Flicka/kvinna</option>
+                        <option value="male">Pojke/man</option>
+                      </select>
+                    </div>
+                    <label className="flex items-center gap-3 sm:mt-6 min-h-11 cursor-pointer">
+                      <input type="checkbox" checked={memberDisability} onChange={(e) => setMemberDisability(e.target.checked)} className="w-5 h-5 rounded accent-indigo-600 shrink-0 cursor-pointer" />
+                      <span className="text-sm font-semibold">Funktionsnedsättning (LOK-stöd)</span>
+                    </label>
                   </div>
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">

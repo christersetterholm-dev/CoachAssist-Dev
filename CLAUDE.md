@@ -36,6 +36,7 @@ Läs den här filen först i varje nytt samtal. Håll den uppdaterad när något
 | Databas, schema, flytt från gammal JSON-databas | `server/database.ts` |
 | Medlemsregister, behörigheter, svar på kallelser | `server/registry.ts` |
 | Inbjudningslänkar | `server/invites.ts` |
+| Närvaro (tabell, läs/spara, flytt) | `server/attendance.ts` |
 | Lagets taktiktavlor (menyposten Taktiktavla) | `server/tacticalBoards.ts`, `src/components/TacticalBoardsView.tsx` |
 | Animationer i steg på taktiktavlan (räknandet, ingen React) | `src/utils/boardAnimation.ts` (tester i `tests/boardAnimation.test.mjs`) |
 | Inlägg (tränarnas meddelanden till laget) | `server/posts.ts`, `src/lib/posts.ts`, `src/components/PostsView.tsx` |
@@ -88,6 +89,16 @@ Appen läser/skriver JSON-dokument via sökvägar:
   start/slut/samling, plats, information, LOK-aktivitet, kallelse med sista svarsdag och notis. Sparas som vanliga pass.
 - Nya fält i pass: `opponent`, `homeAway`, `lok` (saknas = räknas för LOK, `false` = inte). Typen `other` (Övrigt)
   går också att välja i passvyn.
+- **Närvaron lagras i tabellen `attendance`** (`server/attendance.ts`), en rad per person och pass, `present` 1/0. Raden
+  med 0 (tränaren tog bort bocken) finns kvar så att en gammal kopia av pass-dokumentet inte lägger tillbaka bocken.
+  Vid läsning av `sessions` läggs närvaron in som `attendance` (`overlayAttendance`); vid sparning läggs bara personer
+  utan rad till och listan tas bort ur dokumentet (`extractAttendance`). Appen skickar ändringar med
+  `POST /api/attendance` `{ clubId, teamId, sessionId, add?, remove? }` (bara tränare, högst 300 personer) –
+  `syncAttendanceChange` i App.tsx jämför före/efter i `onUpdateSession`, så alla vyer som ändrar `attendance` går den
+  vägen. 404 (pass som inte hunnit sparas) ignoreras; närvaron följer då med när passet sparas. Gammal närvaro i
+  dokumenten flyttas vid start (`migrateAttendance`; lokalt flyttades 465 bockar okt 2026).
+- Medlemmar har `gender` ('female'/'male', null = räknas fram ur personnumret) och `disability` (funktionsnedsättning)
+  i `members`, visas bara för tränare (som personnumret). Ändras i Administrationens medlemsformulär.
 - **Plan framåt** (godkänd av Christer okt 2026): närvaron i egen tabell på servern (som `rsvps`), statistik som i
   laget.se (staplar per spelare och typ, medelnärvaro, export), sedan närvarokort för LOK-stöd med regelpaket
   (statligt: RF:s föreskrifter fr.o.m. 2025-07-01 – 6–25 år räknat på födelseår, ledare minst 13 år, minst 3 deltagare

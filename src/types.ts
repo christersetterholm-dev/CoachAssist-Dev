@@ -10,9 +10,13 @@ export interface SquadPlayer {
   email?: string;
   phone?: string;
   personnummer?: string;
+  gender?: Gender; // bara för tränare, som personnumret
+  disability?: boolean; // funktionsnedsättning (LOK-stöd utan övre åldersgräns)
   accountLinked?: boolean; // har ett inloggningskonto kopplat
   isMe?: boolean; // raden tillhör den inloggade användaren
 }
+
+export type Gender = 'female' | 'male';
 
 export interface LineupPlayer {
   id: string;
@@ -417,6 +421,8 @@ export interface ClubMember {
   fullName: string;
   phone?: string;
   personnummer?: string;
+  gender?: Gender | null; // null = ta bort (räknas då fram ur personnumret)
+  disability?: boolean;
   position?: string;
   number?: string;
   photoUrl?: string;

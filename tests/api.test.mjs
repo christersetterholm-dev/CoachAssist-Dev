@@ -229,6 +229,56 @@ test('svar på flera pass på en gång: samma regler, allt eller inget', async (
   assert.equal((await rsvpsOf('s3'))['m-player'], undefined);
 });
 
+test('närvaro: egen rad per person, tränare bockar, gamla pass-kopior lägger inte tillbaka', async () => {
+  // s1 behålls (inbjudningstestet längre ner svarar på det)
+  const sessions = (attendance) => ({ sessions: [
+    { id: 's1', title: 'Träning', date: 1, startTime: '18:00', moments: [] },
+    { id: 'n1', title: 'Träning', date: 1, startTime: '18:00', moments: [], ...(attendance ? { attendance } : {}) },
+  ] });
+  const mark = (token, body) => s.api('POST', '/api/attendance', { token, body: { clubId: 'klubb1', teamId: 'lag1', sessionId: 'n1', ...body } });
+  const attendanceOf = async (token = coachToken) => (await get('clubs/klubb1/teams/lag1/data/sessions', token)).json.sessions.find((x) => x.id === 'n1').attendance;
+
+  // Närvaro som följer med när passen sparas hamnar i tabellen
+  await post('clubs/klubb1/teams/lag1/data/sessions', sessions(['m-player']), coachToken);
+  assert.deepEqual(await attendanceOf(), ['m-player']);
+  assert.deepEqual(await attendanceOf(playerToken), ['m-player'], 'spelare ser närvaron');
+
+  // Tränaren bockar ur och i
+  const r = await mark(coachToken, { add: ['m-ny'], remove: ['m-player'] });
+  assert.equal(r.status, 200);
+  assert.deepEqual(r.json.attendance, ['m-ny']);
+  // En gammal kopia av passen (med m-player kvar och utan m-ny) ändrar ingenting
+  await post('clubs/klubb1/teams/lag1/data/sessions', sessions(['m-player']), coachToken);
+  assert.deepEqual(await attendanceOf(), ['m-ny']);
+  // Pass sparade utan närvarolista rör inte närvaron
+  await post('clubs/klubb1/teams/lag1/data/sessions', sessions(), coachToken);
+  assert.deepEqual(await attendanceOf(), ['m-ny']);
+
+  // Behörigheter och felaktiga anrop
+  assert.equal((await mark(playerToken, { add: ['m-player'] })).status, 403, 'spelare bockar inte närvaro');
+  assert.equal((await mark(otherToken, { add: ['m-player'] })).status, 403, 'annan förening');
+  assert.equal((await mark(coachToken, {})).status, 400);
+  assert.equal((await mark(coachToken, { add: [5] })).status, 400);
+  assert.equal((await mark(coachToken, { sessionId: 'finns-inte', add: ['m-player'] })).status, 404);
+});
+
+test('kön och funktionsnedsättning sparas i registret och visas bara för tränare', async () => {
+  const r = await get('clubs/klubb1/teams/lag1/data/squad', coachToken);
+  const squad = r.json.squad.map((p) => (p.id === 'm-ny' ? { ...p, gender: 'female', disability: true } : p.id === 'm-player' ? { ...p, gender: 'okänt' } : p));
+  await post('clubs/klubb1/teams/lag1/data/squad', { squad }, coachToken);
+  const after = (await get('clubs/klubb1/teams/lag1/data/squad', coachToken)).json.squad;
+  const ny = after.find((p) => p.id === 'm-ny');
+  assert.deepEqual([ny.gender, ny.disability], ['female', true]);
+  assert.equal(after.find((p) => p.id === 'm-player').gender, undefined, 'ogiltigt kön sparas inte');
+  const asPlayer = (await get('clubs/klubb1/teams/lag1/data/squad', playerToken)).json.squad.find((p) => p.id === 'm-ny');
+  assert.deepEqual([asPlayer.gender, asPlayer.disability], [undefined, undefined]);
+  // Sparas truppen utan fälten (t.ex. från en äldre app) ligger de kvar; null tar bort könet
+  await post('clubs/klubb1/teams/lag1/data/squad', { squad: after.map(({ gender, disability, ...p }) => p) }, coachToken);
+  assert.equal((await get('clubs/klubb1/teams/lag1/data/squad', coachToken)).json.squad.find((p) => p.id === 'm-ny').gender, 'female');
+  await post('clubs/klubb1/teams/lag1/data/squad', { squad: after.map((p) => (p.id === 'm-ny' ? { ...p, gender: null } : p)) }, coachToken);
+  assert.equal((await get('clubs/klubb1/teams/lag1/data/squad', coachToken)).json.squad.find((p) => p.id === 'm-ny').gender, undefined);
+});
+
 test('föreningslistan räknas fram ur föreningarna', async () => {
   const r = await get('shared_leaderboards/all_clubs', playerToken);
   assert.deepEqual(r.json.clubs.map((c) => c.id), ['klubb1', 'klubb2']);

@@ -21,7 +21,10 @@ export interface MemberRow {
   id: string; club_id: string; user_id: string | null; full_name: string; email: string | null;
   phone: string | null; personnummer: string | null; position: string | null; number: string | null;
   photo_url: string | null; created_at: number; updated_at: number;
+  gender: string | null; disability: number;
 }
+
+export const GENDERS = ['female', 'male'];
 
 // ---------------------------------------------------------------------------
 // Behörigheter
@@ -137,15 +140,17 @@ const clean = (v: any): string | null => {
 function upsertMember(db: Db, clubId: string, id: string, f: {
   fullName?: string; email?: string; phone?: string; personnummer?: string;
   position?: string; number?: string; photoUrl?: string; userId?: string | null;
+  gender?: string | null; disability?: boolean;
 }): 'created' | 'updated' | 'conflict' {
+  const gender = (v: any) => (GENDERS.includes(v) ? v : null);
   const existing = getMember(db, id);
   const t = now();
   if (!existing) {
     db.prepare(
-      `INSERT INTO members (id, club_id, user_id, full_name, email, phone, personnummer, position, number, photo_url, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO members (id, club_id, user_id, full_name, email, phone, personnummer, position, number, photo_url, gender, disability, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).run(id, clubId, f.userId ?? null, clean(f.fullName) || 'Namnlös', clean(f.email)?.toLowerCase() ?? null, clean(f.phone),
-      clean(f.personnummer), clean(f.position), clean(f.number), clean(f.photoUrl), t, t);
+      clean(f.personnummer), clean(f.position), clean(f.number), clean(f.photoUrl), gender(f.gender), f.disability ? 1 : 0, t, t);
     return 'created';
   }
   if (existing.club_id !== clubId) return 'conflict';
@@ -158,12 +163,14 @@ function upsertMember(db: Db, clubId: string, id: string, f: {
     number: f.number !== undefined ? clean(f.number) : existing.number,
     photo_url: f.photoUrl !== undefined ? clean(f.photoUrl) : existing.photo_url,
     user_id: f.userId !== undefined && f.userId !== null ? f.userId : existing.user_id,
+    gender: f.gender !== undefined ? gender(f.gender) : existing.gender,
+    disability: f.disability !== undefined ? (f.disability ? 1 : 0) : existing.disability,
   };
   const changed = Object.entries(next).some(([k, v]) => (existing as any)[k] !== v);
   if (changed) {
     db.prepare(
-      `UPDATE members SET full_name = ?, email = ?, phone = ?, personnummer = ?, position = ?, number = ?, photo_url = ?, user_id = ?, updated_at = ? WHERE id = ?`
-    ).run(next.full_name, next.email, next.phone, next.personnummer, next.position, next.number, next.photo_url, next.user_id, t, id);
+      `UPDATE members SET full_name = ?, email = ?, phone = ?, personnummer = ?, position = ?, number = ?, photo_url = ?, user_id = ?, gender = ?, disability = ?, updated_at = ? WHERE id = ?`
+    ).run(next.full_name, next.email, next.phone, next.personnummer, next.position, next.number, next.photo_url, next.user_id, next.gender, next.disability, t, id);
   }
   return 'updated';
 }
@@ -182,7 +189,10 @@ function removeRole(db: Db, memberId: string, teamId: string, role: string) {
 // Dölj känsliga uppgifter för den som inte är tränare/admin.
 function contactFields(m: MemberRow, full: boolean) {
   return full
-    ? { email: m.email || '', phone: m.phone || undefined, personnummer: m.personnummer || undefined }
+    ? {
+        email: m.email || '', phone: m.phone || undefined, personnummer: m.personnummer || undefined,
+        gender: m.gender || undefined, disability: m.disability ? true : undefined,
+      }
     : { email: '' };
 }
 
@@ -229,10 +239,10 @@ export function saveMembersDoc(db: Db, clubId: string, incoming: any[], a: ClubA
 
       const fields = {
         fullName: e.fullName, email: e.email, phone: e.phone, personnummer: e.personnummer,
-        position: e.position, number: e.number, photoUrl: e.photoUrl,
+        position: e.position, number: e.number, photoUrl: e.photoUrl, gender: e.gender, disability: e.disability,
       };
       if (beforeShape) {
-        const same = ['fullName', 'email', 'phone', 'personnummer', 'position', 'number', 'photoUrl']
+        const same = ['fullName', 'email', 'phone', 'personnummer', 'position', 'number', 'photoUrl', 'gender', 'disability']
           .every((k) => (clean((beforeShape as any)[k]) || '') === (clean((e as any)[k]) || '').toString() || (k === 'email' && lower((beforeShape as any)[k]) === lower(e.email)))
           && sameSet(beforeShape.roles, newRoles) && sameSet(beforeShape.teams, newTeams);
         if (same) continue;
@@ -334,7 +344,7 @@ export function saveSquadDoc(db: Db, clubId: string, teamId: string, squad: any[
       const role = p.role === 'leader' ? 'coach' : 'player';
       const res = upsertMember(db, clubId, baseId, {
         fullName: p.name, email: p.email, phone: p.phone, personnummer: p.personnummer,
-        position: p.position, number: p.number, photoUrl: p.photoUrl,
+        position: p.position, number: p.number, photoUrl: p.photoUrl, gender: p.gender, disability: p.disability,
       });
       if (res === 'conflict') return;
       desired.set(`${baseId}|${role}`, { role, sort: i });

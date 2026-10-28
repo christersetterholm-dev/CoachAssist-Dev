@@ -180,6 +180,18 @@ export const SCHEMA = `
     PRIMARY KEY (club_id, team_id, session_id, member_id)
   );
 
+  -- Närvaro: en rad per person och aktivitet (present 1 = var med, 0 = bocken borttagen). Se server/attendance.ts.
+  CREATE TABLE IF NOT EXISTS attendance (
+    club_id TEXT NOT NULL,
+    team_id TEXT NOT NULL,
+    session_id TEXT NOT NULL,
+    member_id TEXT NOT NULL,
+    present INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    updated_by TEXT,
+    PRIMARY KEY (club_id, team_id, session_id, member_id)
+  );
+
   -- Inbjudningar: personlig länk som kopplar ett konto till en medlem. Bara en
   -- hash av koden sparas, så en databaskopia avslöjar inga giltiga länkar.
   CREATE TABLE IF NOT EXISTS invites (
@@ -368,6 +380,9 @@ function createSchema(db: Db) {
   for (const col of USER_COLUMNS) {
     try { db.exec(`ALTER TABLE users ADD COLUMN ${col};`); } catch (_) { /* finns redan */ }
   }
+  // Kön och funktionsnedsättning (för LOK-stödets närvarokort), visas bara för tränare som personnumret
+  try { db.exec('ALTER TABLE members ADD COLUMN gender TEXT;'); } catch (_) { /* finns redan */ }
+  try { db.exec('ALTER TABLE members ADD COLUMN disability INTEGER NOT NULL DEFAULT 0;'); } catch (_) { /* finns redan */ }
   // Notiser om nya pass/kallelser (lades till efter chatt och inlägg)
   try { db.exec('ALTER TABLE push_subscriptions ADD COLUMN sessions INTEGER NOT NULL DEFAULT 1;'); } catch (_) { /* finns redan */ }
 }
