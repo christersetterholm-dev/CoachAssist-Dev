@@ -3035,6 +3035,39 @@ export default function App() {
     }
   };
 
+  // Flera pass ändrade eller borttagna på en gång (serie eller Välj flera). Den nya listan räknas fram
+  // direkt ur latestDataRef (inte i en setData-funktion, som React kan köra senare) och sparas i ett anrop –
+  // annars kan en tom passlista skickas till servern.
+  const replaceSessionsNow = (sessionsList: TrainingSession[], deletedList?: TrainingSession[]) => {
+    const updated = { ...latestDataRef.current, sessions: sessionsList, ...(deletedList ? { deletedSessions: deletedList } : {}) };
+    latestDataRef.current = updated;
+    setData(updated);
+    try {
+      setPrefixedItem('football_sessions', JSON.stringify(sessionsList), user);
+      if (deletedList) setPrefixedItem('football_deleted_sessions', JSON.stringify(deletedList), user);
+      setPrefixedItem('data', JSON.stringify(updated), user);
+    } catch (e) {}
+    setSessionActionCount(prev => prev + 1);
+    pushDirtySegments(true, { sessions: sessionsList, ...(deletedList ? { deletedSessions: deletedList } : {}) })
+      .catch(err => console.warn('App: Instant push on bulk session change:', err));
+  };
+
+  const onUpdateSessions = (changed: TrainingSession[]) => {
+    if (changed.length === 0) return;
+    const byId = new Map(changed.map(s => [s.id, s]));
+    replaceSessionsNow((latestDataRef.current.sessions || []).map(s => byId.get(s.id) || s));
+  };
+
+  // Flyttar flera pass till papperskorgen på en gång (t.ex. resten av en serie).
+  const onDeleteSessions = (ids: string[]) => {
+    if (ids.length === 0 || !isCoachOrAdmin) return;
+    const remove = new Set(ids);
+    const current = latestDataRef.current.sessions || [];
+    const removed = current.filter(s => remove.has(s.id));
+    if (removed.length === 0) return;
+    replaceSessionsNow(current.filter(s => !remove.has(s.id)), [...removed, ...(latestDataRef.current.deletedSessions || [])]);
+  };
+
   const addBankExercise = (exercise: Omit<BankExercise, 'id' | 'createdAt'>) => {
     const newEx: BankExercise = {
       ...exercise,
@@ -4026,6 +4059,9 @@ export default function App() {
               teamName={activeClubInfo?.teamName}
               clubName={activeClubInfo?.clubName}
               onUpdateSession={onUpdateSession}
+              onUpdateSessions={onUpdateSessions}
+              onAddSessions={(created) => replaceSessionsNow([...created, ...(latestDataRef.current.sessions || [])])}
+              onDeleteSessions={onDeleteSessions}
               onAttendanceSaved={(id, list) => {
                 const s = latestDataRef.current.sessions?.find(x => x.id === id);
                 if (s) onUpdateSession({ ...s, attendance: list, updatedAt: Date.now() }, false, true);
@@ -4868,6 +4904,9 @@ export default function App() {
             onUpdate={(updated) => onUpdateSession({ ...updated, isLocallyEdited: true, isPlanned: true })}
             allSessions={sessions}
             onUpdateSession={(updated) => onUpdateSession({ ...updated, isLocallyEdited: true, isPlanned: true })}
+            onUpdateSessions={onUpdateSessions}
+            onAddSessions={(created) => replaceSessionsNow([...created, ...(latestDataRef.current.sessions || [])])}
+            onDeleteSessions={onDeleteSessions}
             exerciseBank={exerciseBank}
             exerciseBankCategories={exerciseBankCategories}
             onSaveToBank={saveMomentToBank}

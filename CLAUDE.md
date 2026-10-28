@@ -102,6 +102,18 @@ Appen läser/skriver JSON-dokument via sökvägar:
   `syncAttendanceChange` i App.tsx jämför före/efter i `onUpdateSession`, så alla vyer som ändrar `attendance` går den
   vägen. 404 (pass som inte hunnit sparas) ignoreras; närvaron följer då med när passet sparas. Gammal närvaro i
   dokumenten flyttas vid start (`migrateAttendance`; lokalt flyttades 465 bockar okt 2026).
+- **Serier och ändra flera pass** (`src/components/sessions/`): pass som skapas tillsammans (serieformuläret i Kalendern,
+  "Varje vecka" i Ny aktivitet) får samma `seriesId`. Ändras tid, plats, samling, information, typ eller LOK i passvyns
+  "Tid och plats" frågar appen: bara det här / det här och kommande / alla i serien (även genomförda); pass som har ett
+  annat värde behåller det om man inte bockar "skriv över" (`applyChanges` med `onlyIf`). "Hantera serien" och knappen
+  Serier i Närvaro öppnar `SeriesSheet`: ändra alla eller kommande (`BulkEditSheet`), förläng (`extendSeries`, samma
+  veckodagar/tider, inget upplägg/svar/närvaro) och ta bort pass från ett datum (till papperskorgen). "Välj flera" i
+  Närvaro → Aktiviteter ändrar valfria pass (även gamla utan serie, t.ex. LOK på genomförda). LOK-rutan finns i "Tid och
+  plats". Tester i `tests/series.test.mjs`.
+  **Viktigt:** ändringar av flera pass räknas fram ur `latestDataRef` och sparas i ett anrop (`replaceSessionsNow`,
+  `onUpdateSessions`, `onDeleteSessions` i App.tsx). Att anropa `onDeleteSession`/`onUpdateSession` i en loop skickade
+  en tom passlista till servern (variabeln som sätts i `setData(prev => …)` hinner inte sättas) – det tömde den lokala
+  databasen vid test okt 2026 (återställt).
 - Medlemmar har `gender` ('female'/'male', null = räknas fram ur personnumret) och `disability` (funktionsnedsättning)
   i `members`, visas bara för tränare (som personnumret). Ändras i Administrationens medlemsformulär.
 - **Närvarokort för LOK-stöd** (`server/lok.ts`, räknas på servern): halvår (`period` "2026-2" = juli–dec), korttyp

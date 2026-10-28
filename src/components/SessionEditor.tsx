@@ -8,6 +8,8 @@ import MomentCopyModal from './MomentCopyModal';
 import TacticalBoardModal from './TacticalBoardModal';
 import { SessionRsvpView } from './SessionRsvpView';
 import { categorizeSession, isMatchSession } from '../utils/sessionCategory';
+import SeriesSheet from './sessions/SeriesSheet';
+import { applyChanges, changedFields, describeSeries, FIELD_LABEL, seriesSessions, type BulkChanges } from './sessions/seriesUtils';
 import { optimizeImageForUpload } from '../utils/imageOptimizer';
 import { Button, IconButton, Card, SectionHeader, SegmentedTabs, Badge, EmptyState, Sheet, TextArea, TextInput } from './ui';
 
@@ -39,6 +41,10 @@ interface SessionEditorProps {
   onSaveToBank?: (moment: SessionMoment) => any;
   onUpdateBankExercise?: (id: string, updates: Partial<any>) => void;
   onOpenLineup?: (session: TrainingSession) => void;
+  /** Serier: ändra flera pass, lägga till pass (förlänga) och ta bort pass. */
+  onUpdateSessions?: (changed: TrainingSession[]) => void;
+  onAddSessions?: (created: TrainingSession[]) => void;
+  onDeleteSessions?: (ids: string[]) => void;
 }
 
 interface MomentItemProps {
@@ -745,7 +751,10 @@ export default function SessionEditor({
   user,
   userRoles,
   userProfile,
-  isRootAdmin
+  isRootAdmin,
+  onUpdateSessions,
+  onAddSessions,
+  onDeleteSessions,
 }: SessionEditorProps) {
   const isCoachOrAdmin = useMemo(() => {
     if (!user) return true; // Offline or fallback mode
@@ -756,6 +765,19 @@ export default function SessionEditor({
   const startTab = isCoachOrAdmin ? initialTab : 'rsvp';
 
   const [showTimePicker, setShowTimePicker] = useState(false);
+  // Serier: passet som det såg ut när Tid och plats öppnades, och frågan om ändringen ska gälla fler pass
+  const [timeSnapshot, setTimeSnapshot] = useState<TrainingSession | null>(null);
+  const [seriesPrompt, setSeriesPrompt] = useState<{ before: TrainingSession; changes: BulkChanges } | null>(null);
+  const [overwriteOthers, setOverwriteOthers] = useState(false);
+  const [showSeries, setShowSeries] = useState(false);
+  const seriesList = useMemo(() => seriesSessions(allSessions || [], session.seriesId), [allSessions, session.seriesId]);
+  const closeTimePicker = () => {
+    setShowTimePicker(false);
+    if (!timeSnapshot || seriesList.length < 2 || !onUpdateSessions) return;
+    const changes = changedFields(timeSnapshot, session);
+    if (Object.keys(changes).length > 0) { setOverwriteOthers(false); setSeriesPrompt({ before: timeSnapshot, changes }); }
+    setTimeSnapshot(null);
+  };
   const [showCopyModal, setShowCopyModal] = useState(false);
   const [showVisibilityInfoModal, setShowVisibilityInfoModal] = useState(false);
   const [showCompletionInfoModal, setShowCompletionInfoModal] = useState(false);
@@ -1203,7 +1225,7 @@ export default function SessionEditor({
           <div className="mb-4">
             <button
               type="button"
-              onClick={() => setShowTimePicker(true)}
+              onClick={() => { setTimeSnapshot(session); setShowTimePicker(true); }}
               className="max-w-full min-h-[40px] inline-flex flex-wrap items-center gap-x-2 gap-y-1 px-3 py-1.5 rounded-xl bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-750 text-sm font-semibold text-zinc-700 dark:text-zinc-200 text-left transition-colors cursor-pointer"
               aria-label="Ändra typ, datum, tid och plats"
             >
@@ -1347,11 +1369,20 @@ export default function SessionEditor({
       {/* Typ, datum, tid och plats */}
       <Sheet
         open={showTimePicker && isCoachOrAdmin}
-        onClose={() => setShowTimePicker(false)}
+        onClose={closeTimePicker}
         title="Tid och plats"
-        footer={<Button block onClick={() => setShowTimePicker(false)}>Klar</Button>}
+        footer={<Button block onClick={closeTimePicker}>Klar</Button>}
       >
         <div className="px-2 pb-2 space-y-4">
+          {seriesList.length > 1 && (
+            <div className="p-3 rounded-2xl bg-indigo-50/70 dark:bg-indigo-950/30 text-sm flex items-center gap-3">
+              <span className="flex-1 min-w-0">
+                <span className="block font-semibold">Del av en serie</span>
+                <span className="block text-zinc-600 dark:text-zinc-300 truncate">{describeSeries(seriesList)}</span>
+              </span>
+              {onUpdateSessions && <Button size="sm" variant="secondary" onClick={() => { setShowTimePicker(false); setShowSeries(true); }}>Hantera serien</Button>}
+            </div>
+          )}
           <div>
             <p className={fieldLabel}>Typ</p>
             <SegmentedTabs
@@ -1415,11 +1446,67 @@ export default function SessionEditor({
               className={`${fieldClass} resize-none min-h-[80px]`}
             />
           </div>
+          <label className="flex items-start gap-3 p-3 rounded-2xl bg-zinc-50 dark:bg-zinc-800/60 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={session.lok !== false}
+              onChange={(e) => onUpdate({ ...session, lok: e.target.checked ? undefined : false, updatedAt: Date.now() })}
+              className="w-5 h-5 rounded accent-indigo-600 shrink-0 cursor-pointer mt-0.5"
+            />
+            <span>
+              <span className="block text-sm font-semibold">LOK-aktivitet</span>
+              <span className="block text-xs text-zinc-500 dark:text-zinc-400">Räknas med på närvarokorten för aktivitetsstöd. Går att ändra även när passet är genomfört.</span>
+            </span>
+          </label>
           <p className={`text-sm font-medium ${timeStatus.color}`}>
             Planerat {totalPlannedMinutes}{session.endTime ? ` av ${sessionDuration}` : ''} min. {timeStatus.label}.
           </p>
         </div>
       </Sheet>
+
+      {/* Ändrat i ett pass som hör till en serie: gäller det fler pass? */}
+      <Sheet
+        open={!!seriesPrompt}
+        onClose={() => setSeriesPrompt(null)}
+        title="Ändra fler pass i serien?"
+      >
+        {seriesPrompt && (() => {
+          const fields = Object.keys(seriesPrompt.changes).map(f => FIELD_LABEL[f as keyof typeof FIELD_LABEL].toLowerCase());
+          const others = seriesList.filter(s => s.id !== session.id);
+          const later = others.filter(s => s.date >= session.date);
+          const apply = (targets: TrainingSession[]) => {
+            const updated = applyChanges(targets, seriesPrompt.changes, overwriteOthers ? undefined : seriesPrompt.before).filter((s, i) => s !== targets[i]);
+            onUpdateSessions?.(updated);
+            setSeriesPrompt(null);
+          };
+          return (
+            <div className="px-2 pb-2 space-y-3">
+              <p className="text-sm text-zinc-600 dark:text-zinc-300">Du ändrade {fields.join(', ')}. Passet är del av en serie med {seriesList.length} pass.</p>
+              <div className="space-y-2">
+                <Button block variant="secondary" onClick={() => setSeriesPrompt(null)}>Bara det här passet</Button>
+                <Button block variant="secondary" disabled={later.length === 0} onClick={() => apply(later)}>Det här och kommande ({later.length + 1} pass)</Button>
+                <Button block onClick={() => apply(others)}>Alla i serien ({seriesList.length} pass, även genomförda)</Button>
+              </div>
+              <label className="flex items-start gap-3 cursor-pointer">
+                <input type="checkbox" checked={overwriteOthers} onChange={(e) => setOverwriteOthers(e.target.checked)} className="w-5 h-5 rounded accent-indigo-600 shrink-0 mt-0.5" />
+                <span className="text-sm text-zinc-600 dark:text-zinc-300">Skriv över även pass där det redan är ändrat till något annat (annars behåller de sin egen ändring)</span>
+              </label>
+            </div>
+          );
+        })()}
+      </Sheet>
+
+      {onUpdateSessions && onAddSessions && onDeleteSessions && (
+        <SeriesSheet
+          open={showSeries}
+          onClose={() => setShowSeries(false)}
+          seriesId={session.seriesId || null}
+          allSessions={allSessions || []}
+          onUpdateSessions={onUpdateSessions}
+          onAddSessions={onAddSessions}
+          onDeleteSessions={onDeleteSessions}
+        />
+      )}
 
       {/* Radera tävling */}
       <Sheet

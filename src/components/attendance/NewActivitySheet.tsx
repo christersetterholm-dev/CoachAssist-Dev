@@ -106,6 +106,7 @@ export default function NewActivitySheet({ open, onClose, settings, squadCount, 
     if (!startTime) { setError('Välj starttid.'); return; }
     if (endTime && endTime <= startTime) { setError('Sluttiden måste vara efter starttiden.'); return; }
     const now = Date.now();
+    const seriesId = dates.length > 1 ? crypto.randomUUID() : undefined;
     const created: TrainingSession[] = dates.map(dateStr => {
       const [y, m, d] = dateStr.split('-').map(Number);
       let rsvpConfig: TrainingSession['rsvpConfig'];
@@ -119,6 +120,7 @@ export default function NewActivitySheet({ open, onClose, settings, squadCount, 
       }
       return {
         id: crypto.randomUUID(),
+        seriesId,
         title: title.trim() || autoTitle,
         date: toNoon(dateStr),
         startTime,

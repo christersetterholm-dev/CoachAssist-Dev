@@ -5,10 +5,13 @@
  * visar närvaron per spelare.
  */
 import React, { useMemo, useState } from 'react';
-import { Check, X, HelpCircle, Plus, ListChecks, Dumbbell, Trophy, Shapes, Clock, MapPin, ChevronRight, BarChart3, CalendarDays, FileCheck2 } from 'lucide-react';
+import { Check, X, HelpCircle, Plus, ListChecks, Dumbbell, Trophy, Shapes, Clock, MapPin, ChevronRight, BarChart3, CalendarDays, FileCheck2, CheckSquare, Repeat } from 'lucide-react';
 import { RsvpStatus, SquadPlayer, TrainingSession, TrainingSettings } from '../../types';
 import { categorizeSession, SessionCategory } from '../../utils/sessionCategory';
-import { Button, Card, EmptyState, SegmentedTabs } from '../ui';
+import { Button, Card, EmptyState, MenuItem, SegmentedTabs, Sheet } from '../ui';
+import BulkEditSheet from '../sessions/BulkEditSheet';
+import SeriesSheet from '../sessions/SeriesSheet';
+import { allSeries, describeSeries } from '../sessions/seriesUtils';
 import AttendanceStatsView from './AttendanceStatsView';
 import LokCardView from './LokCardView';
 import NewActivitySheet from './NewActivitySheet';
@@ -29,6 +32,10 @@ interface AttendanceViewProps {
   onOpenSession: (id: string, tab?: 'schema' | 'attendance' | 'rsvp') => void;
   onOpenMultiRsvp: () => void;
   onCreateSessions: (sessions: TrainingSession[], notify: boolean) => void;
+  /** Serier och Välj flera */
+  onUpdateSessions: (changed: TrainingSession[]) => void;
+  onAddSessions: (created: TrainingSession[]) => void;
+  onDeleteSessions: (ids: string[]) => void;
 }
 
 type Tab = 'activities' | 'stats' | 'cards';
@@ -59,7 +66,7 @@ const chipOff = 'border-zinc-200 dark:border-zinc-700 text-zinc-700 dark:text-zi
 const chipOn = 'border-indigo-600 bg-indigo-600 text-white';
 
 export default function AttendanceView(props: AttendanceViewProps) {
-  const { squad, sessions, isCoachOrAdmin, clubId, teamId, settings, teamName, clubName, onUpdateSession, onAttendanceSaved, onOpenSession, onOpenMultiRsvp, onCreateSessions } = props;
+  const { squad, sessions, isCoachOrAdmin, clubId, teamId, settings, teamName, clubName, onUpdateSession, onAttendanceSaved, onOpenSession, onOpenMultiRsvp, onCreateSessions, onUpdateSessions, onAddSessions, onDeleteSessions } = props;
   const [tab, setTab] = useState<Tab>('activities');
   const [when, setWhen] = useState<When>('upcoming');
   const [kindFilter, setKindFilter] = useState<KindFilter>('all');
@@ -67,6 +74,16 @@ export default function AttendanceView(props: AttendanceViewProps) {
   const [isNewOpen, setIsNewOpen] = useState(false);
   const [savingId, setSavingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Välj flera pass och ändra dem på en gång; serier
+  const [selecting, setSelecting] = useState(false);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [isBulkOpen, setIsBulkOpen] = useState(false);
+  const [isSeriesListOpen, setIsSeriesListOpen] = useState(false);
+  const [openSeriesId, setOpenSeriesId] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const series = useMemo(() => allSeries(sessions), [sessions]);
+  const selectedSessions = useMemo(() => sessions.filter(s => selected.has(s.id)), [sessions, selected]);
+  const stopSelecting = () => { setSelecting(false); setSelected(new Set()); };
 
   const me = useMemo(() => myRow(squad), [squad]);
   const players = useMemo(() => teamPlayers(squad), [squad]);
@@ -140,6 +157,18 @@ export default function AttendanceView(props: AttendanceViewProps) {
             </div>
           </div>
 
+          {isCoachOrAdmin && (
+            <div className="flex flex-wrap gap-2">
+              <Button size="sm" variant={selecting ? 'primary' : 'secondary'} icon={<CheckSquare size={16} />} onClick={() => (selecting ? stopSelecting() : (setSelecting(true), setNotice(null)))}>
+                {selecting ? 'Sluta välja' : 'Välj flera'}
+              </Button>
+              {series.length > 0 && (
+                <Button size="sm" variant="secondary" icon={<Repeat size={16} />} onClick={() => setIsSeriesListOpen(true)}>Serier ({series.length})</Button>
+              )}
+            </div>
+          )}
+          {notice && <p className="text-sm text-emerald-700 dark:text-emerald-300" role="status">{notice}</p>}
+
           <div className="flex gap-2 overflow-x-auto -mx-4 px-4 sm:mx-0 sm:px-0 pb-1" role="group" aria-label="Typ av aktivitet">
             {([['all', 'Alla'], ['training', 'Träning'], ['match', 'Match'], ['other', 'Övrigt']] as [KindFilter, string][]).map(([id, text]) => (
               <button key={id} type="button" aria-pressed={kindFilter === id} onClick={() => setKindFilter(id)} className={`${chipClass} ${kindFilter === id ? chipOn : chipOff}`}>
@@ -181,8 +210,12 @@ export default function AttendanceView(props: AttendanceViewProps) {
                         players={players}
                         leaders={leaders}
                         saving={savingId === s.id}
-                        onOpen={() => open(s)}
+                        onOpen={() => (selecting
+                          ? setSelected(prev => { const n = new Set(prev); if (n.has(s.id)) n.delete(s.id); else n.add(s.id); return n; })
+                          : open(s))}
                         onAnswer={(st) => answer(s, st)}
+                        selecting={selecting}
+                        selected={selected.has(s.id)}
                       />
                     </li>
                   </React.Fragment>
@@ -194,6 +227,46 @@ export default function AttendanceView(props: AttendanceViewProps) {
           {when === 'past' && list.length > pastLimit && (
             <Button block variant="secondary" onClick={() => setPastLimit(x => x + PAST_PAGE)}>Visa fler</Button>
           )}
+
+          {selecting && (
+            <div className="sticky bottom-3 z-20">
+              <Card className="flex flex-wrap items-center gap-2 shadow-lg">
+                <span className="text-sm font-semibold flex-1 min-w-[8rem]">{selected.size} valda</span>
+                <Button size="sm" variant="ghost" onClick={() => setSelected(new Set(shown.map(s => s.id)))}>Välj alla i listan</Button>
+                {selected.size > 0 && <Button size="sm" variant="ghost" onClick={() => setSelected(new Set())}>Avmarkera</Button>}
+                <Button size="sm" disabled={selected.size === 0} onClick={() => setIsBulkOpen(true)}>Ändra {selected.size || ''} pass</Button>
+              </Card>
+            </div>
+          )}
+        </>
+      )}
+
+      {isCoachOrAdmin && (
+        <>
+          <BulkEditSheet
+            open={isBulkOpen}
+            onClose={() => setIsBulkOpen(false)}
+            sessions={selectedSessions}
+            subtitle={`${selectedSessions.length} valda pass`}
+            onApply={(updated) => { onUpdateSessions(updated); setNotice(`${updated.length} pass ändrades.`); stopSelecting(); }}
+          />
+          <Sheet open={isSeriesListOpen} onClose={() => setIsSeriesListOpen(false)} title="Serier">
+            <div className="px-2 pb-2 space-y-1">
+              <p className="text-sm text-zinc-500 dark:text-zinc-400 px-1 pb-1">Pass som skapades tillsammans. Öppna en serie för att ändra, förlänga eller ta bort pass.</p>
+              {series.map(x => (
+                <MenuItem key={x.id} icon={<Repeat size={18} />} label={x.sessions[0].title || 'Serie'} description={describeSeries(x.sessions)} onClick={() => { setIsSeriesListOpen(false); setOpenSeriesId(x.id); }} />
+              ))}
+            </div>
+          </Sheet>
+          <SeriesSheet
+            open={!!openSeriesId}
+            onClose={() => setOpenSeriesId(null)}
+            seriesId={openSeriesId}
+            allSessions={sessions}
+            onUpdateSessions={onUpdateSessions}
+            onAddSessions={onAddSessions}
+            onDeleteSessions={onDeleteSessions}
+          />
         </>
       )}
 
@@ -220,7 +293,9 @@ const ActivityRow: React.FC<{
   saving: boolean;
   onOpen: () => void;
   onAnswer: (status: RsvpStatus) => void;
-}> = ({ session: s, past, isCoachOrAdmin, me, players, leaders, saving, onOpen, onAnswer }) => {
+  selecting?: boolean;
+  selected?: boolean;
+}> = ({ session: s, past, isCoachOrAdmin, me, players, leaders, saving, onOpen, onAnswer, selecting, selected }) => {
   const kind = categorizeSession(s);
   const d = new Date(s.date);
   const weekday = d.toLocaleDateString('sv-SE', { weekday: 'short' }).replace('.', '');
@@ -230,8 +305,13 @@ const ActivityRow: React.FC<{
   const time = `${s.startTime || ''}${s.endTime ? `–${s.endTime}` : ''}`;
 
   return (
-    <Card padded={false} className="overflow-hidden">
-      <button type="button" onClick={onOpen} className="w-full flex items-center gap-3 p-3 sm:p-4 text-left cursor-pointer hover:bg-zinc-50 dark:hover:bg-zinc-800/50 transition-colors">
+    <Card padded={false} className={`overflow-hidden ${selected ? 'ring-2 ring-indigo-500' : ''}`}>
+      <button type="button" onClick={onOpen} aria-pressed={selecting ? !!selected : undefined} className="w-full flex items-center gap-3 p-3 sm:p-4 text-left cursor-pointer hover:bg-zinc-50 dark:hover:bg-zinc-800/50 transition-colors">
+        {selecting && (
+          <span className={`w-6 h-6 rounded-md border-2 flex items-center justify-center shrink-0 ${selected ? 'bg-indigo-600 border-indigo-600 text-white' : 'border-zinc-300 dark:border-zinc-600'}`} aria-hidden="true">
+            {selected && <Check size={16} strokeWidth={3} />}
+          </span>
+        )}
         <span className="w-11 shrink-0 text-center leading-tight">
           <span className="block text-[11px] font-semibold text-zinc-500 dark:text-zinc-400 first-letter:uppercase">{weekday}</span>
           <span className="block text-xl font-bold">{d.getDate()}</span>
@@ -241,6 +321,8 @@ const ActivityRow: React.FC<{
           <span className="block font-semibold truncate">
             {sessionTitle(s)}
             {s.homeAway && <span className="ml-1.5 text-xs font-medium text-zinc-500 dark:text-zinc-400">{s.homeAway === 'home' ? 'Hemma' : 'Borta'}</span>}
+            {isCoachOrAdmin && s.seriesId && <span className="ml-1.5 text-xs font-medium text-indigo-600 dark:text-indigo-300">Serie</span>}
+            {isCoachOrAdmin && s.lok === false && <span className="ml-1.5 text-xs font-medium text-zinc-500 dark:text-zinc-400">Ej LOK</span>}
           </span>
           <span className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
             {time && <span className="inline-flex items-center gap-1"><Clock size={12} />{time}{s.gatheringTime ? ` · samling ${s.gatheringTime}` : ''}</span>}

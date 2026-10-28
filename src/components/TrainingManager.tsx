@@ -672,6 +672,7 @@ export default function TrainingManager({
       return;
     }
 
+    const seriesId = selectedDates.length > 1 ? crypto.randomUUID() : undefined;
     const created: TrainingSession[] = selectedDates.map(dateStr => {
       const [year, colMonth, day] = dateStr.split('-').map(Number);
       // set to noon in local time to avoid timezone wraps
@@ -704,6 +705,7 @@ export default function TrainingManager({
 
       return {
         id: crypto.randomUUID(),
+        seriesId,
         title: seriesTitle.trim() || 'Träningspass',
         date: sessionDate,
         startTime,
