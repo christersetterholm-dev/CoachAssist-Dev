@@ -37,22 +37,35 @@ export const sessionTitle = (s: TrainingSession) => s.title?.trim() || CATEGORY_
 /** Lagets spelare (inte ledarrader). */
 export const teamPlayers = (squad: SquadPlayer[]) => squad.filter(p => p.role !== 'leader' && !p.id.endsWith('_leader'));
 
+/** Lagets tränare/ledare. Den som också är spelare räknas bara som spelare. */
+export const teamLeaders = (squad: SquadPlayer[]) => {
+  const playerIds = new Set(teamPlayers(squad).map(p => p.id));
+  return squad.filter(p => (p.role === 'leader' || p.id.endsWith('_leader')) && !playerIds.has(p.id.replace(/_leader$/, '')));
+};
+
 /** Den inloggades egen rad i truppen (spelarraden före ledarraden). */
 export const myRow = (squad: SquadPlayer[]) => {
   const mine = squad.filter(p => p.isMe);
   return mine.find(p => p.role !== 'leader') || mine[0] || null;
 };
 
-export const responseSummary = (s: TrainingSession, players: SquadPlayer[]) => {
-  const r = s.rsvps || {};
+// Svar och närvaro sparas på truppradens id; ledarrader (<id>_leader) kan ha svarat på grund-id:t.
+const rsvpOf = (s: TrainingSession, p: SquadPlayer) => s.rsvps?.[p.id] || s.rsvps?.[p.id.replace(/_leader$/, '')];
+
+export const isPresent = (s: TrainingSession, p: SquadPlayer) => {
+  const att = s.attendance || [];
+  return att.includes(p.id) || att.includes(p.id.replace(/_leader$/, ''));
+};
+
+export const responseSummary = (s: TrainingSession, people: SquadPlayer[]) => {
   let attending = 0, partial = 0, declined = 0;
-  players.forEach(p => {
-    const st = r[p.id]?.status;
+  people.forEach(p => {
+    const st = rsvpOf(s, p)?.status;
     if (st === 'attending') attending++;
     else if (st === 'partial') partial++;
     else if (st === 'declined') declined++;
   });
-  return { attending, partial, declined, unanswered: Math.max(0, players.length - attending - partial - declined) };
+  return { attending, partial, declined, unanswered: Math.max(0, people.length - attending - partial - declined) };
 };
 
 /**

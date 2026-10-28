@@ -11,7 +11,7 @@ import { categorizeSession, SessionCategory } from '../../utils/sessionCategory'
 import { Button, Card, EmptyState, SegmentedTabs } from '../ui';
 import SquadAttendanceOverview from '../SquadAttendanceOverview';
 import NewActivitySheet from './NewActivitySheet';
-import { answerForMe, myRow, responseSummary, sessionEnd, sessionStart, sessionTitle, teamPlayers } from './shared';
+import { answerForMe, isPresent, myRow, responseSummary, sessionEnd, sessionStart, sessionTitle, teamLeaders, teamPlayers } from './shared';
 
 interface AttendanceViewProps {
   squad: SquadPlayer[];
@@ -65,6 +65,7 @@ export default function AttendanceView(props: AttendanceViewProps) {
 
   const me = useMemo(() => myRow(squad), [squad]);
   const players = useMemo(() => teamPlayers(squad), [squad]);
+  const leaders = useMemo(() => teamLeaders(squad), [squad]);
 
   const list = useMemo(() => {
     const now = Date.now();
@@ -170,6 +171,7 @@ export default function AttendanceView(props: AttendanceViewProps) {
                         isCoachOrAdmin={isCoachOrAdmin}
                         me={me}
                         players={players}
+                        leaders={leaders}
                         saving={savingId === s.id}
                         onOpen={() => open(s)}
                         onAnswer={(st) => answer(s, st)}
@@ -206,17 +208,16 @@ const ActivityRow: React.FC<{
   isCoachOrAdmin: boolean;
   me: SquadPlayer | null;
   players: SquadPlayer[];
+  leaders: SquadPlayer[];
   saving: boolean;
   onOpen: () => void;
   onAnswer: (status: RsvpStatus) => void;
-}> = ({ session: s, past, isCoachOrAdmin, me, players, saving, onOpen, onAnswer }) => {
+}> = ({ session: s, past, isCoachOrAdmin, me, players, leaders, saving, onOpen, onAnswer }) => {
   const kind = categorizeSession(s);
   const d = new Date(s.date);
   const weekday = d.toLocaleDateString('sv-SE', { weekday: 'short' }).replace('.', '');
   const hasInvite = !!s.rsvpConfig || Object.keys(s.rsvps || {}).length > 0;
   const mine = me ? s.rsvps?.[me.id]?.status : undefined;
-  const sum = responseSummary(s, players);
-  const present = players.filter(p => (s.attendance || []).includes(p.id)).length;
   const deadlinePassed = !!s.rsvpConfig?.deadline && s.rsvpConfig.deadline < Date.now();
   const time = `${s.startTime || ''}${s.endTime ? `–${s.endTime}` : ''}`;
 
@@ -238,20 +239,14 @@ const ActivityRow: React.FC<{
             {s.location && <span className="inline-flex items-center gap-1 min-w-0"><MapPin size={12} /><span className="truncate">{s.location}</span></span>}
           </span>
           {isCoachOrAdmin && (
-            <span className="flex flex-wrap items-center gap-1.5 mt-2 text-xs font-semibold">
-              {past ? (
-                <span className="px-2 py-0.5 rounded-lg bg-zinc-100 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-200">Närvaro {present} av {players.length}</span>
-              ) : hasInvite ? (
-                <>
-                  <span className="px-2 py-0.5 rounded-lg bg-emerald-50 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300">{sum.attending} kommer</span>
-                  {sum.partial > 0 && <span className="px-2 py-0.5 rounded-lg bg-amber-50 text-amber-700 dark:bg-amber-950/50 dark:text-amber-300">{sum.partial} delvis</span>}
-                  <span className="px-2 py-0.5 rounded-lg bg-red-50 text-red-700 dark:bg-red-950/50 dark:text-red-300">{sum.declined} kan inte</span>
-                  <span className="px-2 py-0.5 rounded-lg bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">{sum.unanswered} obesvarade</span>
-                </>
-              ) : (
-                <span className="px-2 py-0.5 rounded-lg bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400">Ingen kallelse</span>
-              )}
-            </span>
+            past || hasInvite ? (
+              <span className="block mt-2 space-y-1">
+                <GroupLine label="Spelare" session={s} people={players} past={past} />
+                {leaders.length > 0 && <GroupLine label="Tränare" session={s} people={leaders} past={past} />}
+              </span>
+            ) : (
+              <span className="inline-block mt-2 px-2 py-0.5 rounded-lg text-xs font-semibold bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400">Ingen kallelse</span>
+            )
           )}
         </span>
         <ChevronRight size={18} className="text-zinc-400 shrink-0" />
@@ -286,5 +281,28 @@ const ActivityRow: React.FC<{
         )
       )}
     </Card>
+  );
+};
+
+const pill = 'px-2 py-0.5 rounded-lg';
+
+// En rad per grupp (spelare/tränare): svaren på kallelsen, eller närvaron för en tidigare aktivitet.
+const GroupLine: React.FC<{ label: string; session: TrainingSession; people: SquadPlayer[]; past: boolean }> = ({ label, session, people, past }) => {
+  const sum = responseSummary(session, people);
+  const present = people.filter(p => isPresent(session, p)).length;
+  return (
+    <span className="flex flex-wrap items-center gap-1.5 text-xs font-semibold">
+      <span className="w-14 shrink-0 text-zinc-500 dark:text-zinc-400">{label}</span>
+      {past ? (
+        <span className={`${pill} bg-zinc-100 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-200`}>{present} av {people.length} var med</span>
+      ) : (
+        <>
+          <span className={`${pill} bg-emerald-50 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300`}>{sum.attending} kommer</span>
+          {sum.partial > 0 && <span className={`${pill} bg-amber-50 text-amber-700 dark:bg-amber-950/50 dark:text-amber-300`}>{sum.partial} delvis</span>}
+          <span className={`${pill} bg-red-50 text-red-700 dark:bg-red-950/50 dark:text-red-300`}>{sum.declined} kan inte</span>
+          <span className={`${pill} bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300`}>{sum.unanswered} obesvarade</span>
+        </>
+      )}
+    </span>
   );
 };

@@ -82,7 +82,8 @@ Appen läser/skriver JSON-dokument via sökvägar:
 ### Närvaro (menyn, gren `narvaro`, okt 2026)
 - `view === 'attendance'` → `AttendanceView`. Flikar Aktiviteter (alla) och Statistik (tränare; samma
   `SquadAttendanceOverview` som i Truppen). Aktiviteter: Kommande/Tidigare, filter Träning/Match/Övrigt; spelare svarar
-  direkt på raden (`answerForMe` i `attendance/shared.ts`), tränare ser antal svar resp. närvaro och öppnar passet.
+  direkt på raden (`answerForMe` i `attendance/shared.ts`), tränare ser svar resp. närvaro på en rad för spelare och
+  en för tränare (`teamLeaders`; den som också är spelare räknas som spelare) och öppnar passet.
 - **Ny aktivitet** (`NewActivitySheet`, tränare): typ, motståndare + hemma/borta (match), enskild eller varje vecka,
   start/slut/samling, plats, information, LOK-aktivitet, kallelse med sista svarsdag och notis. Sparas som vanliga pass.
 - Nya fält i pass: `opponent`, `homeAway`, `lok` (saknas = räknas för LOK, `false` = inte). Typen `other` (Övrigt)
