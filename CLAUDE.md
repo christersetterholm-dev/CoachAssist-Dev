@@ -126,7 +126,8 @@ Appen läser/skriver JSON-dokument via sökvägar:
   (föreningsadmin), `GET /api/lok/card` (lagets tränare), `GET /api/lok/club` (föreningsadmin, alla lag),
   `POST /api/lok/lock` (tränare intygar; summorna sparas i `lok_locks` och kortet visar om närvaron ändrats sedan),
   `POST /api/lok/unlock` (föreningsadmin). Utskrift/PDF: `LokPrint` lägger korten (25 aktiviteter per kort) i `<body>`
-  och `body.lok-printing` i index.css döljer resten. Som laget.se (stämt av mot hela 2026): dagens första aktivitet gäller – den
+  och `body.lok-printing` i index.css döljer resten; `html.lok-printing` släpper appens `height: 100%; overflow: hidden`
+  (annars blev PDF:en bara en sida). Prova utskrift med Chrome headless `--print-to-pdf` mot en testsida med byggd CSS. Som laget.se (stämt av mot hela 2026): dagens första aktivitet gäller – den
   som redan räknats samma dag räknas inte igen och inte heller till de tre som krävs, så t.ex. träning efter teori samma
   dag blir (0); den som nått veckotaket räknas däremot till de tre. En aktivitet som inte godkänns visar inom parentes hur
   många som skulle ha räknats. Varje kort (25 aktiviteter, `PER_CARD`) har egen summering (`pages`), och bara de som var

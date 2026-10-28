@@ -122,11 +122,13 @@ export const LokPrint: React.FC<{
   card: LokCard; type: LokType; clubName: string; teamName: string; periodLabel: string; onDone: () => void;
 }> = ({ card, type, clubName, teamName, periodLabel, onDone }) => {
   useEffect(() => {
+    const html = document.documentElement;
+    html.classList.add('lok-printing');
     document.body.classList.add('lok-printing');
-    const done = () => { document.body.classList.remove('lok-printing'); onDone(); };
+    const done = () => { html.classList.remove('lok-printing'); document.body.classList.remove('lok-printing'); onDone(); };
     window.addEventListener('afterprint', done, { once: true });
     const t = setTimeout(() => window.print(), 50);
-    return () => { clearTimeout(t); window.removeEventListener('afterprint', done); document.body.classList.remove('lok-printing'); };
+    return () => { clearTimeout(t); window.removeEventListener('afterprint', done); html.classList.remove('lok-printing'); document.body.classList.remove('lok-printing'); };
   }, [onDone]);
 
   const pages = Math.max(1, Math.ceil(card.activities.length / PER_CARD));
@@ -163,12 +165,12 @@ export const LokPrint: React.FC<{
               <tbody>
                 <tr><th colSpan={acts.length + 4} className="lok-section">Deltagare</th></tr>
                 {participants.map((r, i) => (
-                  <tr key={r.id}><td>{i + 1}</td><td className="lok-name">{r.name}</td><td>{r.personnummer}</td>{r.cells.slice(from, to).map((c, j) => <td key={j}>{c}</td>)}<td>{r.total}</td></tr>
+                  <tr key={r.id}><td>{i + 1}</td><td className="lok-name">{r.name}</td><td className="lok-pnr">{r.personnummer}</td>{r.cells.slice(from, to).map((c, j) => <td key={j}>{c}</td>)}<td>{r.total}</td></tr>
                 ))}
                 <tr className="lok-sum"><td /><td>Summa</td><td />{acts.map(a => <td key={a.id}>{a.approved ? a.counted : `(${a.counted})`}</td>)}<td /></tr>
                 {leaders.length > 0 && <tr><th colSpan={acts.length + 4} className="lok-section">Ledare</th></tr>}
                 {leaders.map((r, i) => (
-                  <tr key={r.id}><td>{participants.length + i + 1}</td><td className="lok-name">{r.name}</td><td>{r.personnummer}</td>{r.cells.slice(from, to).map((c, j) => <td key={j}>{c}</td>)}<td>{r.total}</td></tr>
+                  <tr key={r.id}><td>{participants.length + i + 1}</td><td className="lok-name">{r.name}</td><td className="lok-pnr">{r.personnummer}</td>{r.cells.slice(from, to).map((c, j) => <td key={j}>{c}</td>)}<td>{r.total}</td></tr>
                 ))}
                 {leaders.length > 0 && <tr className="lok-sum"><td /><td>Summa</td><td />{acts.map(a => <td key={a.id}>{a.approved ? a.leaders : `(${a.leaders})`}</td>)}<td /></tr>}
               </tbody>
