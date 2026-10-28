@@ -186,3 +186,7 @@ html, body {
   #lok-print .lok-foot caption { text-align: left; font-weight: 700; padding-bottom: 1mm; }
   #lok-print .lok-note { font-size: 7pt; color: #444; }
 }
+
+/* Aktivitetens namn lodrätt i närvarokortets rubrik (som laget.se), på skärmen och vid utskrift */
+.lok-vlabel { display: block; writing-mode: vertical-rl; text-orientation: upright; white-space: nowrap; overflow: hidden; max-height: 5.5rem; font-size: 10px; letter-spacing: -0.12em; line-height: 1; margin: 0 auto 2px; }
+@media print { #lok-print .lok-vlabel { max-height: 22mm; font-size: 6.5pt; margin: 0.5mm auto; } }

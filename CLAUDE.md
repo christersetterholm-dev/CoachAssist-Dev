@@ -114,7 +114,12 @@ Appen läser/skriver JSON-dokument via sökvägar:
   (föreningsadmin), `GET /api/lok/card` (lagets tränare), `GET /api/lok/club` (föreningsadmin, alla lag),
   `POST /api/lok/lock` (tränare intygar; summorna sparas i `lok_locks` och kortet visar om närvaron ändrats sedan),
   `POST /api/lok/unlock` (föreningsadmin). Utskrift/PDF: `LokPrint` lägger korten (25 aktiviteter per kort) i `<body>`
-  och `body.lok-printing` i index.css döljer resten. Ledare 13–25 år räknas inte som deltagare (laget.se gör så);
+  och `body.lok-printing` i index.css döljer resten. Som laget.se (stämt av mot hela 2026): dagens första aktivitet gäller – den
+  som redan räknats samma dag räknas inte igen och inte heller till de tre som krävs, så t.ex. träning efter teori samma
+  dag blir (0); den som nått veckotaket räknas däremot till de tre. En aktivitet som inte godkänns visar inom parentes hur
+  många som skulle ha räknats. Varje kort (25 aktiviteter, `PER_CARD`) har egen summering (`pages`), och bara de som var
+  med på kortets aktiviteter står på det. Övriga aktiviteter visas med sitt namn i rubriken (`activityLabel`).
+  Ledare 13–25 år räknas inte som deltagare (laget.se gör så);
   varje lag räknas för sig (en person i två lag samma dag kan räknas två gånger i föreningens summering).
 - Tränarnas närvaro (krävs för att ett pass ska räknas): knapparna "Tränare på plats" i passvyns närvaro
   (`SessionRsvpView`, `teamLeaders`) och "Bocka tränare" i Närvarokort → `LeaderBatchSheet` (flera pass på en gång,

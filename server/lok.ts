@@ -152,12 +152,19 @@ export interface CardActivity {
 }
 export interface CardRow { id: string; name: string; personnummer: string; cells: Cell[]; total: number }
 export interface GroupTable { labels: string[]; female: number[]; male: number[]; unknown: number[] }
-export interface CardResult {
+/** Antal aktiviteter per närvarokort (som pappersblanketten och laget.se). */
+export const PER_CARD = 25;
+
+export interface CardSummary {
+  totals: { gatherings: number; participantOccasions: number; leaderOccasions: number };
+  groups: { participants: GroupTable; leaders: GroupTable };
+}
+export interface CardResult extends CardSummary {
   activities: CardActivity[];
   participants: CardRow[];
   leaders: CardRow[];
-  totals: { gatherings: number; participantOccasions: number; leaderOccasions: number };
-  groups: { participants: GroupTable; leaders: GroupTable };
+  /** Summering per kort (25 aktiviteter), som laget.se visar längst ner på varje kort. */
+  pages: CardSummary[];
   warnings: { noEndTime: string[]; tooShort: string[]; noBirthYear: string[]; noGender: string[]; notLok: number };
 }
 
@@ -223,13 +230,23 @@ export function computeCard(opts: { rules: LokRules; sessions: CardSession[]; pe
   const empty = (bounds: number[]): GroupTable => ({ labels: groupLabels(bounds), female: bounds.map(() => 0), male: bounds.map(() => 0), unknown: bounds.map(() => 0) });
   const pGroups = empty(rules.participantGroups);
   const lGroups = empty(rules.leaderGroups);
-  const addGroup = (t: GroupTable, bounds: number[], id: string, ts: number) => {
+  const pages: CardSummary[] = [];
+  const pageOf = (n: number) => {
+    const i = Math.floor(n / PER_CARD);
+    if (!pages[i]) pages[i] = { totals: { gatherings: 0, participantOccasions: 0, leaderOccasions: 0 }, groups: { participants: empty(rules.participantGroups), leaders: empty(rules.leaderGroups) } };
+    return pages[i];
+  };
+  // Räknar ett tillfälle i rätt åldersgrupp, både för hela perioden och för kortet aktiviteten står på
+  const addGroup = (kind: 'participants' | 'leaders', id: string, ts: number, page: CardSummary) => {
+    const bounds = kind === 'participants' ? rules.participantGroups : rules.leaderGroups;
     const age = ageAt(id, ts);
     if (age === null) return;
     const i = groupIndex(bounds, age);
     if (i < 0) return;
     const g = info.get(id)?.gender;
-    (g === 'female' ? t.female : g === 'male' ? t.male : t.unknown)[i]++;
+    const key = g === 'female' ? 'female' : g === 'male' ? 'male' : 'unknown';
+    (kind === 'participants' ? pGroups : lGroups)[key][i]++;
+    page.groups[kind][key][i]++;
   };
 
   const countedDays = new Map<string, Set<string>>();
@@ -241,6 +258,7 @@ export function computeCard(opts: { rules: LokRules; sessions: CardSession[]; pe
 
   for (const s of sessions) {
     const ts = startTs(s);
+    const page = pageOf(activities.length);
     const present = new Set((s.attendance || []).map((id) => String(id).replace(/_leader$/, '')));
     const start = minutesOf(s.startTime);
     const end = minutesOf(s.endTime);
@@ -259,47 +277,55 @@ export function computeCard(opts: { rules: LokRules; sessions: CardSession[]; pe
       return a <= rules.maxAge || (rules.disabilityNoUpperAge && !!p.disability);
     };
     const eligible = presentParticipants.filter(ageOk);
+    // Den som redan räknats på en aktivitet samma dag räknas inte igen och inte heller till de tre som krävs
+    // (som laget.se: dagens första aktivitet gäller). Den som nått veckotaket räknas däremot med (RF 6 §).
+    const day = dayKey(ts), week = weekKey(ts);
+    const notToday = eligible.filter((p) => !(rules.onePerDay && countedDays.get(p.id)?.has(day)));
 
     let reason: string | null = null;
     if (minutes === null) reason = 'Sluttid saknas';
     else if (minutes < rules.minMinutes) reason = `Kortare än ${rules.minMinutes} min`;
     else if (okLeaders.length === 0) reason = 'Ingen ledare närvarande';
-    else if (eligible.length < rules.minParticipants) reason = `Färre än ${rules.minParticipants} deltagare i rätt ålder`;
+    else if (notToday.length < rules.minParticipants) {
+      reason = eligible.length >= rules.minParticipants
+        ? `Färre än ${rules.minParticipants} deltagare som inte redan räknats samma dag`
+        : `Färre än ${rules.minParticipants} deltagare i rätt ålder`;
+    }
     const approved = reason === null;
 
+    // Vilka som räknas (eller skulle ha räknats om aktiviteten hade godkänts – visas inom parentes i summan)
     const counted = new Set<string>();
-    if (approved) {
-      let limit = Infinity;
-      if (rules.maxPerLeader) limit = Math.min(limit, rules.maxPerLeader * okLeaders.length);
-      if (rules.maxParticipants) limit = Math.min(limit, rules.maxParticipants);
-      const day = dayKey(ts), week = weekKey(ts);
-      for (const p of eligible) {
-        if (counted.size >= limit) break;
-        if (rules.onePerDay && countedDays.get(p.id)?.has(day)) continue;
-        const age = ageAt(p.id, ts)!;
-        const cap = rules.weeklyCaps.find((c) => age <= c.maxAge)?.max;
-        const used = weekCounts.get(p.id)?.get(week) || 0;
-        if (cap !== undefined && used >= cap) continue;
-        counted.add(p.id);
+    let limit = Infinity;
+    if (rules.maxPerLeader) limit = Math.min(limit, rules.maxPerLeader * Math.max(1, okLeaders.length));
+    if (rules.maxParticipants) limit = Math.min(limit, rules.maxParticipants);
+    for (const p of notToday) {
+      if (counted.size >= limit) break;
+      const age = ageAt(p.id, ts)!;
+      const cap = rules.weeklyCaps.find((c) => age <= c.maxAge)?.max;
+      const used = weekCounts.get(p.id)?.get(week) || 0;
+      if (cap !== undefined && used >= cap) continue;
+      counted.add(p.id);
+      if (approved) {
         if (!countedDays.has(p.id)) countedDays.set(p.id, new Set());
         countedDays.get(p.id)!.add(day);
         if (!weekCounts.has(p.id)) weekCounts.set(p.id, new Map());
         weekCounts.get(p.id)!.set(week, used + 1);
-        addGroup(pGroups, rules.participantGroups, p.id, ts);
+        addGroup('participants', p.id, ts, page);
       }
     }
     for (const p of participants) {
       const row = pRows[pIndex.get(p.id)!];
-      if (counted.has(p.id)) { row.cells.push('1'); row.total++; } else row.cells.push(present.has(p.id) ? '(1)' : 'x');
+      if (approved && counted.has(p.id)) { row.cells.push('1'); row.total++; page.totals.participantOccasions++; } else row.cells.push(present.has(p.id) ? '(1)' : 'x');
     }
     const countedLeaders = approved ? okLeaders : [];
     for (const l of leaders) {
       const row = lRows[lIndex.get(l.id)!];
-      if (countedLeaders.includes(l)) { row.cells.push('1'); row.total++; addGroup(lGroups, rules.leaderGroups, l.id, ts); } else row.cells.push(present.has(l.id) ? '(1)' : 'x');
+      if (countedLeaders.includes(l)) { row.cells.push('1'); row.total++; page.totals.leaderOccasions++; addGroup('leaders', l.id, ts, page); } else row.cells.push(present.has(l.id) ? '(1)' : 'x');
     }
+    if (approved) page.totals.gatherings++;
     activities.push({
       id: s.id, title: s.title || '', kind: kindOf(s), date: s.date, startTime: s.startTime || '', endTime: s.endTime || '',
-      location: s.location || '', approved, reason, counted: counted.size, leaders: countedLeaders.length,
+      location: s.location || '', approved, reason, counted: counted.size, leaders: okLeaders.length,
     });
   }
 
@@ -314,6 +340,7 @@ export function computeCard(opts: { rules: LokRules; sessions: CardSession[]; pe
       leaderOccasions: lRows.reduce((n, r) => n + r.total, 0),
     },
     groups: { participants: pGroups, leaders: lGroups },
+    pages,
     warnings: {
       noEndTime, tooShort,
       noBirthYear: people.filter((p) => !info.get(p.id)?.birthYear).map((p) => p.name),

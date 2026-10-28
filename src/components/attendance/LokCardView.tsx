@@ -205,6 +205,11 @@ export default function LokCardView({ clubId, teamId, clubName, onAttendanceSave
                 </>
               )}
             </div>
+            {pages > 1 && card.pages[page] && (
+              <p className="text-sm text-zinc-600 dark:text-zinc-300">
+                Kort {page + 1}: <b>{card.pages[page].totals.gatherings}</b> sammankomster · <b>{card.pages[page].totals.participantOccasions}</b> deltagartillfällen · <b>{card.pages[page].totals.leaderOccasions}</b> ledartillfällen
+              </p>
+            )}
             {card.activities.length === 0 ? (
               <EmptyState title="Inga genomförda LOK-aktiviteter" text="Välj ett annat halvår eller kontrollera att aktiviteterna är markerade som LOK-aktivitet." />
             ) : (

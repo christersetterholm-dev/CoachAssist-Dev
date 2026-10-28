@@ -19,12 +19,16 @@ export interface LokActivity {
 export interface LokRow { id: string; name: string; personnummer: string; cells: LokCell[]; total: number }
 export interface LokGroupTable { labels: string[]; female: number[]; male: number[]; unknown: number[] }
 export interface LokTotals { gatherings: number; participantOccasions: number; leaderOccasions: number }
-export interface LokCard {
+export interface LokSummary {
+  totals: LokTotals;
+  groups: { participants: LokGroupTable; leaders: LokGroupTable };
+}
+export interface LokCard extends LokSummary {
   activities: LokActivity[];
   participants: LokRow[];
   leaders: LokRow[];
-  totals: LokTotals;
-  groups: { participants: LokGroupTable; leaders: LokGroupTable };
+  /** Summering per kort (25 aktiviteter). */
+  pages: LokSummary[];
   warnings: { noEndTime: string[]; tooShort: string[]; noBirthYear: string[]; noGender: string[]; notLok: number };
 }
 export interface LokLock { lockedAt: number; lockedBy: string; totals: LokTotals | null }
@@ -41,6 +45,12 @@ export interface LokCardResponse {
 
 export const LOK_TYPE_LABEL: Record<LokType, string> = { state: 'Statligt aktivitetsstöd', municipal: 'Kommunalt aktivitetsstöd' };
 export const KIND_LETTER: Record<LokActivity['kind'], string> = { training: 'Träning', match: 'Match', other: 'Övrigt' };
+
+/** Rubriken för en aktivitet på kortet: Träning, Match eller övriga aktivitetens namn (som laget.se). */
+export const activityLabel = (a: LokActivity) => (a.kind === 'other' ? (a.title.trim() || 'Övrigt') : KIND_LETTER[a.kind]);
+
+/** Personer som var med (1 eller (1)) på någon av aktiviteterna from–to; laget.se visar bara dem på kortet. */
+export const presentOn = (rows: LokRow[], from: number, to: number) => rows.filter(r => r.cells.slice(from, to).some(c => c !== 'x'));
 
 /** Halvår att välja bland: det pågående och de fem före ("2026-2" = juli–december 2026). */
 export function lokPeriods(now = new Date()): { key: string; label: string }[] {

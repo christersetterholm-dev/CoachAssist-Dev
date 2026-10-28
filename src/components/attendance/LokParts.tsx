@@ -4,8 +4,8 @@
  */
 import React, { useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import type { LokActivity, LokCard, LokGroupTable, LokRow, LokType } from '../../lib/lok';
-import { KIND_LETTER, LOK_TYPE_LABEL } from '../../lib/lok';
+import type { LokActivity, LokCard, LokGroupTable, LokRow, LokSummary, LokType } from '../../lib/lok';
+import { activityLabel, LOK_TYPE_LABEL, presentOn } from '../../lib/lok';
 
 /** Antal aktiviteter per närvarokort (som på pappersblanketten). */
 export const PER_CARD = 25;
@@ -74,9 +74,11 @@ const SumRow: React.FC<{ label: string; activities: LokActivity[]; value: (a: Lo
   </tr>
 );
 
-/** Rutnätet för ett kort (aktiviteterna from–to). */
+/** Rutnätet för ett kort (aktiviteterna from–to). Bara de som var med på något av kortets pass visas (som laget.se). */
 export const CardGrid: React.FC<{ card: LokCard; from: number; to: number }> = ({ card, from, to }) => {
   const acts = card.activities.slice(from, to);
+  const participants = presentOn(card.participants, from, to);
+  const leaders = presentOn(card.leaders, from, to);
   return (
     <div className="overflow-x-auto -mx-4 sm:mx-0">
       <table className="text-sm border-separate border-spacing-0 mx-4 sm:mx-0">
@@ -86,8 +88,8 @@ export const CardGrid: React.FC<{ card: LokCard; from: number; to: number }> = (
             <th scope="col" className="sticky left-6 z-10 bg-white dark:bg-zinc-900 text-left text-xs font-semibold text-zinc-500 dark:text-zinc-400 pb-1 pr-3">Namn</th>
             <th scope="col" className="text-left text-xs font-semibold text-zinc-500 dark:text-zinc-400 pb-1 pr-3">Födelsedata</th>
             {acts.map(a => (
-              <th key={a.id} scope="col" title={`${a.title || KIND_LETTER[a.kind]}${a.reason ? ` – räknas inte: ${a.reason}` : ''}`} className="pb-1 px-0.5 text-[10px] font-semibold leading-tight text-center min-w-[2.1rem]">
-                <span className={`block ${a.approved ? 'text-zinc-500 dark:text-zinc-400' : 'text-red-600 dark:text-red-400'}`}>{KIND_LETTER[a.kind].charAt(0)}</span>
+              <th key={a.id} scope="col" title={`${a.title || activityLabel(a)}${a.reason ? ` – räknas inte: ${a.reason}` : ''}`} className="pb-1 px-0.5 text-[10px] font-semibold leading-tight text-center min-w-[2.1rem] align-bottom">
+                <span className={`lok-vlabel mx-auto ${a.approved ? 'text-zinc-500 dark:text-zinc-400' : 'text-red-600 dark:text-red-400'}`}>{activityLabel(a)}</span>
                 <span className="block tabular-nums">{dm(a.date)}</span>
                 <span className="block tabular-nums text-zinc-400">{a.startTime}</span>
               </th>
@@ -97,12 +99,12 @@ export const CardGrid: React.FC<{ card: LokCard; from: number; to: number }> = (
         </thead>
         <tbody>
           <tr><th colSpan={acts.length + 4} scope="colgroup" className="sticky left-0 text-left text-xs font-bold text-zinc-500 dark:text-zinc-400 pt-2 pb-1">Deltagare</th></tr>
-          <PeopleRows rows={card.participants} from={from} to={to} offset={0} />
+          <PeopleRows rows={participants} from={from} to={to} offset={0} />
           <SumRow label="Summa" activities={acts} value={a => a.counted} />
-          {card.leaders.length > 0 && (
+          {leaders.length > 0 && (
             <>
               <tr><th colSpan={acts.length + 4} scope="colgroup" className="sticky left-0 text-left text-xs font-bold text-zinc-500 dark:text-zinc-400 pt-4 pb-1">Ledare</th></tr>
-              <PeopleRows rows={card.leaders} from={from} to={to} offset={card.participants.length} />
+              <PeopleRows rows={leaders} from={from} to={to} offset={participants.length} />
               <SumRow label="Summa" activities={acts} value={a => a.leaders} />
             </>
           )}
@@ -134,6 +136,9 @@ export const LokPrint: React.FC<{
       {Array.from({ length: pages }, (_, p) => {
         const from = p * PER_CARD, to = from + PER_CARD;
         const acts = card.activities.slice(from, to);
+        const participants = presentOn(card.participants, from, to);
+        const leaders = presentOn(card.leaders, from, to);
+        const summary: LokSummary = card.pages[p] || card;
         const last = p === pages - 1;
         return (
           <section key={p} className="lok-page">
@@ -151,31 +156,32 @@ export const LokPrint: React.FC<{
               <thead>
                 <tr>
                   <th>Nr</th><th>Namn</th><th>Födelsedata</th>
-                  {acts.map((a, i) => <th key={a.id}>{from + i + 1}<br />{KIND_LETTER[a.kind].charAt(0)}<br />{dm(a.date)}<br />{a.startTime}<br />{a.endTime}</th>)}
+                  {acts.map((a, i) => <th key={a.id}>{i + 1}<span className="lok-vlabel">{activityLabel(a)}</span>{dm(a.date)}<br />{a.startTime}<br />{a.endTime}</th>)}
                   <th>Summa</th>
                 </tr>
               </thead>
               <tbody>
                 <tr><th colSpan={acts.length + 4} className="lok-section">Deltagare</th></tr>
-                {card.participants.map((r, i) => (
+                {participants.map((r, i) => (
                   <tr key={r.id}><td>{i + 1}</td><td className="lok-name">{r.name}</td><td>{r.personnummer}</td>{r.cells.slice(from, to).map((c, j) => <td key={j}>{c}</td>)}<td>{r.total}</td></tr>
                 ))}
                 <tr className="lok-sum"><td /><td>Summa</td><td />{acts.map(a => <td key={a.id}>{a.approved ? a.counted : `(${a.counted})`}</td>)}<td /></tr>
-                {card.leaders.length > 0 && <tr><th colSpan={acts.length + 4} className="lok-section">Ledare</th></tr>}
-                {card.leaders.map((r, i) => (
-                  <tr key={r.id}><td>{card.participants.length + i + 1}</td><td className="lok-name">{r.name}</td><td>{r.personnummer}</td>{r.cells.slice(from, to).map((c, j) => <td key={j}>{c}</td>)}<td>{r.total}</td></tr>
+                {leaders.length > 0 && <tr><th colSpan={acts.length + 4} className="lok-section">Ledare</th></tr>}
+                {leaders.map((r, i) => (
+                  <tr key={r.id}><td>{participants.length + i + 1}</td><td className="lok-name">{r.name}</td><td>{r.personnummer}</td>{r.cells.slice(from, to).map((c, j) => <td key={j}>{c}</td>)}<td>{r.total}</td></tr>
                 ))}
-                {card.leaders.length > 0 && <tr className="lok-sum"><td /><td>Summa</td><td />{acts.map(a => <td key={a.id}>{a.approved ? a.leaders : `(${a.leaders})`}</td>)}<td /></tr>}
+                {leaders.length > 0 && <tr className="lok-sum"><td /><td>Summa</td><td />{acts.map(a => <td key={a.id}>{a.approved ? a.leaders : `(${a.leaders})`}</td>)}<td /></tr>}
               </tbody>
             </table>
-            {last && (
-              <div className="lok-foot">
-                <p>Antal sammankomster: <b>{card.totals.gatherings}</b> · Antal deltagartillfällen: <b>{card.totals.participantOccasions}</b> · Ledartillfällen: <b>{card.totals.leaderOccasions}</b></p>
-                <GroupTable title="Deltagartillfällen" table={card.groups.participants} />
-                <GroupTable title="Ledartillfällen" table={card.groups.leaders} />
-                <p className="lok-note">1 = räknas · (1) = närvarande men räknas inte · x = inte närvarande. Underlag framtaget i Truppio.</p>
-              </div>
-            )}
+            <div className="lok-foot">
+              <p>Antal sammankomster: <b>{summary.totals.gatherings}</b> · Antal deltagartillfällen: <b>{summary.totals.participantOccasions}</b> · Antal ledartillfällen: <b>{summary.totals.leaderOccasions}</b></p>
+              <GroupTable title="Deltagartillfällen" table={summary.groups.participants} />
+              <GroupTable title="Ledartillfällen" table={summary.groups.leaders} />
+              {last && pages > 1 && (
+                <p>Hela perioden ({pages} kort): <b>{card.totals.gatherings}</b> sammankomster · <b>{card.totals.participantOccasions}</b> deltagartillfällen · <b>{card.totals.leaderOccasions}</b> ledartillfällen</p>
+              )}
+              <p className="lok-note">1 = räknas · (1) = närvarande men räknas inte · x = inte närvarande. Underlag framtaget i Truppio.</p>
+            </div>
           </section>
         );
       })}

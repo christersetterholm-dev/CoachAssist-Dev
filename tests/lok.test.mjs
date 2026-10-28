@@ -55,8 +55,12 @@ test('en gång per dag, högst 5 per vecka för 10–25 år och högst 20 per le
     pass('d0a', 0, all), pass('d0b', 0, all, { startTime: '20:00', endTime: '21:00' }),
     pass('d1', 1, all), pass('d2', 2, all), pass('d3', 3, all), pass('d4', 4, all), pass('d5', 5, all),
   ], [...many, ledare]);
-  // p20 fick inte plats första passet men räknas samma dag på det andra, och har tak kvar dag 5
+  // Andra passet dag 0: bara p20 är inte redan räknad samma dag – för få, så passet räknas inte (som laget.se),
+  // summan visar (1). Dag 5: alla har nått veckotaket utom p20, men de räknas ändå med till de tre som krävs.
   assert.deepEqual(r.activities.map((a) => a.counted), [20, 1, 20, 20, 20, 20, 1]);
+  assert.deepEqual(r.activities.map((a) => a.approved), [true, false, true, true, true, true, true]);
+  assert.equal(r.activities[1].reason, 'Färre än 3 deltagare som inte redan räknats samma dag');
+  assert.equal(r.participants[20].cells[1], '(1)');
   // p0: räknas dag 0, inte igen samma dag, sedan dag 1–4, dag 5 = sjätte tillfället i veckan (tak 5)
   assert.deepEqual(r.participants[0].cells, ['1', '(1)', '1', '1', '1', '1', '(1)']);
   assert.equal(r.participants[20].cells[0], '(1)', 'den 21:a deltagaren räknas inte med en ledare');
@@ -77,4 +81,22 @@ test('kommunala regler rensas och används', () => {
   assert.equal(r.activities[0].reason, null, '18-åringar (7–20 år) och 90 minuter (minst 60) godkänns');
   const kort = card([pass('y', 0, ['a', 'b', 'c', 'L'], { endTime: '18:50' })], [ung('a'), ung('b'), ung('c'), ledare], { ...MUNICIPAL_DEFAULTS, enabled: true });
   assert.equal(kort.activities[0].reason, 'Kortare än 60 min');
+});
+
+test('dagens första aktivitet gäller, och varje kort (25 aktiviteter) får egen summering', () => {
+  const people = [ung('a'), ung('b'), ung('c'), ung('d'), ledare];
+  // Teori kl 18 och träning kl 19 samma dag: teorin räknas, träningen blir (0) (som på laget.se)
+  const r = card([
+    pass('teori', 0, ['a', 'b', 'c', 'L'], { title: 'Teori', type: 'other', startTime: '18:00', endTime: '19:00' }),
+    pass('trn', 0, ['a', 'b', 'c', 'd', 'L'], { startTime: '19:00', endTime: '20:15' }),
+  ], people);
+  assert.deepEqual(r.activities.map((a) => [a.approved, a.counted]), [[true, 3], [false, 1]]);
+  assert.deepEqual(r.participants.find((p) => p.id === 'd').cells, ['x', '(1)']);
+  // 30 pass ger två kort: 25 + 5 sammankomster
+  const many = Array.from({ length: 30 }, (_, i) => pass(`p${i}`, i, ['a', 'b', 'c', 'L']));
+  const r2 = card(many, people);
+  assert.deepEqual(r2.pages.map((p) => p.totals.gatherings), [25, 5]);
+  assert.equal(r2.pages[0].totals.participantOccasions + r2.pages[1].totals.participantOccasions, r2.totals.participantOccasions);
+  // Kort 2: 5 pass, men veckotaket (5) gör att lördag och söndag inte ger deltagartillfällen: 3 pass × 3
+  assert.equal(r2.pages[1].groups.participants.male[2], 9);
 });
