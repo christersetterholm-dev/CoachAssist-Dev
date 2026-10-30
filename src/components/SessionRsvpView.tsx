@@ -32,7 +32,7 @@ import { saveRsvp, clearRsvps } from '../lib/firebase';
 import { notifyTeamAboutSessions } from '../lib/push';
 import { isMatchSession } from '../utils/sessionCategory';
 import { Button, Card, SectionHeader, SegmentedTabs, Badge, EmptyState, Avatar, Sheet, MenuItem, TextArea, TextInput } from './ui';
-import { rsvpCounts, teamLeaders } from './attendance/shared';
+import { isCalled, rsvpCounts, teamLeaders } from './attendance/shared';
 import { SplitCaption, SplitNumber } from './attendance/RsvpCountTile';
 
 // Antal i en grupp, t.ex. "3 st, varav 2 spelare & 1 ledare" – för planeringen av passet.
@@ -286,6 +286,14 @@ export const SessionRsvpView: React.FC<SessionRsvpViewProps> = ({
   // Lagets tränare (för snabbknapparna "Tränare på plats"); den som också är spelare bockas i listan som spelare
   const leaders = useMemo(() => teamLeaders(safeSquad), [safeSquad]);
 
+  // De som är kallade till passet (listor och antal): den som är både spelare och tränare/ledare står en gång,
+  // som spelare, och ledare som inte valt den här typen av pass är inte med (om de inte ändå svarat).
+  const calledSquad = useMemo(() => {
+    const ids = new Set(safeSquad.map(p => p.id));
+    return safeSquad.filter(p => !(p.id.endsWith('_leader') && ids.has(p.id.replace(/_leader$/, ''))) && isCalled(session, p));
+  }, [safeSquad, session]);
+  const calledIds = useMemo(() => new Set(calledSquad.map(p => p.id)), [calledSquad]);
+
   // Truppen + provspelare
   const allMembers = useMemo<SquadPlayer[]>(() => {
     const list = [...safeSquad];
@@ -317,15 +325,15 @@ export const SessionRsvpView: React.FC<SessionRsvpViewProps> = ({
 
   const stats = useMemo(() => {
     let attending = 0, partial = 0, declined = 0, unanswered = 0;
-    safeSquad.forEach(p => {
+    calledSquad.forEach(p => {
       const rsvp = rsvps[p.id];
       if (!rsvp) unanswered++;
       else if (rsvp.status === 'attending') attending++;
       else if (rsvp.status === 'partial') partial++;
       else if (rsvp.status === 'declined') declined++;
     });
-    return { attending, partial, declined, unanswered, total: safeSquad.length, presentCount: attendance.length };
-  }, [safeSquad, rsvps, attendance]);
+    return { attending, partial, declined, unanswered, total: calledSquad.length, presentCount: attendance.length };
+  }, [calledSquad, rsvps, attendance]);
 
   const handleTogglePresence = (id: string) => {
     if (!id) return;
@@ -463,7 +471,7 @@ export const SessionRsvpView: React.FC<SessionRsvpViewProps> = ({
       deadline: deadlineTimestamp,
       notes: inviteNotes.trim() || undefined,
       invitedAt: session.rsvpConfig?.invitedAt || Date.now(),
-      invitedCount: safeSquad.length
+      invitedCount: calledSquad.length
     };
     onUpdateSession({ ...session, rsvpConfig: newConfig, updatedAt: Date.now() });
     setShowInviteModal(false);
@@ -698,12 +706,14 @@ export const SessionRsvpView: React.FC<SessionRsvpViewProps> = ({
       if ((filter === 'attending' || filter === 'partial' || filter === 'declined') && isGuest) return false;
       if (filter === 'unanswered' && (status !== 'unanswered' || isGuest)) return false;
       if (filter === 'guests' && !isGuest) return false;
+      // Svarsflikarna visar de kallade; sökningen hittar alla (t.ex. för att svara åt en ledare)
+      if (filter !== 'present' && filter !== 'guests' && !isGuest && !calledIds.has(player.id) && (filter !== 'all' || !q)) return false;
       if (q) {
         return player.name.toLowerCase().includes(q) || !!player.position?.toLowerCase().includes(q) || !!player.number?.toLowerCase().includes(q);
       }
       return true;
     });
-  }, [allMembers, attendance, rsvps, filter, searchQuery]);
+  }, [allMembers, attendance, rsvps, filter, searchQuery, calledIds]);
 
   const targetAdminUrl = adminUrl || (session as any).adminUrl;
   const deadlinePassed = !!session.rsvpConfig?.deadline && session.rsvpConfig.deadline < Date.now();
@@ -994,10 +1004,10 @@ export const SessionRsvpView: React.FC<SessionRsvpViewProps> = ({
   const grouped = filter === 'all' && !searchQuery.trim();
   const groups: { key: string; title: string; members: SquadPlayer[] }[] = grouped
     ? [
-        { key: 'attending', title: 'Kommer', members: safeSquad.filter(p => statusOf(p) === 'attending') },
-        { key: 'partial', title: 'Delvis', members: safeSquad.filter(p => statusOf(p) === 'partial') },
-        { key: 'declined', title: 'Kan inte', members: safeSquad.filter(p => statusOf(p) === 'declined') },
-        { key: 'unanswered', title: 'Ej svarat', members: safeSquad.filter(p => statusOf(p) === 'unanswered') },
+        { key: 'attending', title: 'Kommer', members: calledSquad.filter(p => statusOf(p) === 'attending') },
+        { key: 'partial', title: 'Delvis', members: calledSquad.filter(p => statusOf(p) === 'partial') },
+        { key: 'declined', title: 'Kan inte', members: calledSquad.filter(p => statusOf(p) === 'declined') },
+        { key: 'unanswered', title: 'Ej svarat', members: calledSquad.filter(p => statusOf(p) === 'unanswered') },
         { key: 'guests', title: 'Provspelare', members: guestPlayers },
       ].filter(g => g.members.length > 0)
     : [];

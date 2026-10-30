@@ -6,6 +6,8 @@ export interface SquadPlayer {
   number?: string;
   photoUrl?: string;
   role?: 'player' | 'leader';
+  teamRole?: 'leader'; // ledarraden gäller rollen Ledare (inte Tränare)
+  rsvpTypes?: RsvpKind[]; // bara ledare som inte är spelare: kallas bara till de här typerna av pass
   roles?: string[];
   email?: string;
   phone?: string;
@@ -428,11 +430,15 @@ export interface ClubMember {
   position?: string;
   number?: string;
   photoUrl?: string;
-  roles: ('admin' | 'coach' | 'player' | 'parent')[];
+  roles: ('admin' | 'coach' | 'leader' | 'player' | 'parent')[];
   teams: string[]; // List of team IDs within the club
+  rsvpTypes?: RsvpKind[]; // Ledare: vilka kallelser hen vill ha (saknas = inte ledare)
   accountLinked?: boolean; // har ett inloggningskonto kopplat
   isMe?: boolean; // posten tillhör den inloggade användaren
 }
+
+// Typer av pass en ledare kan välja kallelser till
+export type RsvpKind = 'training' | 'match' | 'other';
 
 export interface UserProfile {
   fullName: string;

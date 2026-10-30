@@ -477,7 +477,9 @@ export default function App() {
     activeTeamId: null,
   });
   const [activeClubInfo, setActiveClubInfo] = useState<{ clubName: string; teamName: string } | null>(null);
-  const [userRoles, setUserRoles] = useState<string[]>([]);
+  const [userRoles, setUserRolesRaw] = useState<string[]>([]);
+  // Ledare har samma rättigheter som tränare i appen
+  const setUserRoles = (roles: string[]) => setUserRolesRaw(roles.includes('leader') && !roles.includes('coach') ? [...roles, 'coach'] : roles);
 
   useEffect(() => {
     if (!userProfile.activeClubId) {
@@ -4828,7 +4830,24 @@ export default function App() {
         teamId={userProfile.activeTeamId}
         onUpdateSession={onUpdateSession}
       />
-      <NotificationsSheet open={isNotificationsOpen} onClose={() => setIsNotificationsOpen(false)} userId={user?.uid || null} />
+      <NotificationsSheet
+        open={isNotificationsOpen}
+        onClose={() => setIsNotificationsOpen(false)}
+        userId={user?.uid || null}
+        leaderRsvp={(() => {
+          // Ledare (som bara är ledare) väljer själv vilka kallelser hen vill ha
+          const row = squad.find(p => p.isMe && p.teamRole === 'leader' && p.rsvpTypes);
+          return row && userProfile.activeClubId && userProfile.activeTeamId
+            ? { clubId: userProfile.activeClubId, teamId: userProfile.activeTeamId, types: row.rsvpTypes || [] }
+            : null;
+        })()}
+        onLeaderRsvpChanged={(types) => {
+          // Sparat på servern; uppdatera truppen här utan att den skickas igen
+          const apply = (list: SquadPlayer[] = []) => list.map(p => (p.isMe && p.teamRole === 'leader' && p.rsvpTypes ? { ...p, rsvpTypes: types } : p));
+          setData(prev => ({ ...prev, squad: apply(prev.squad) }));
+          if (lastCloudDataRef.current) lastCloudDataRef.current = { ...lastCloudDataRef.current, squad: apply(lastCloudDataRef.current.squad) };
+        }}
+      />
       <PostDetailSheet
         postId={openPostId}
         postsState={postsState}

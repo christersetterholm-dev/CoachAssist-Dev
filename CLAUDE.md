@@ -74,6 +74,17 @@ Appen läser/skriver JSON-dokument via sökvägar:
   `saveSquadDoc`, `getMembersDoc`, `saveMembersDoc`). Ledarrader i truppen kan ha id `<id>_leader`.
 - Den inloggades egna rader markeras `isMe: true`.
 
+### Rollen Ledare (okt 2026)
+- Lagroll `leader` (utöver admin/coach/player/parent): samma rättigheter som tränare (`MANAGER_ROLES`; i appen lägger
+  `setUserRoles` till 'coach'). I truppen en ledarrad (`role: 'leader'`, `teamRole: 'leader'`); `saveSquadDoc` behåller
+  rollen även från äldre appar utan `teamRole`.
+- Den som bara är ledare kallas bara till de typer av pass hen valt: `team_roles.rsvp_types` (JSON, training/match/other,
+  null = inga), i truppen `rsvpTypes`. Ledaren väljer själv överst i arket Notiser (`PUT /api/leader/rsvp-types`);
+  tränare/admin i medlemsformuläret (`rsvpTypes` i medlemslistan). `isCalled` (attendance/shared.ts) styr passvyns listor,
+  svarsrutorna och Närvaro-raderna; notisen om kallelser (`sessionNotifyUserIds`) skickar `kind` per pass.
+- Den som är både spelare och tränare/ledare räknas och listas som spelare (en gång). Tester i `tests/leaders.test.mjs`.
+- Svarsrutorna på Översikt och i passvyn (`rsvpCounts`): spelare stort, ledare inom parentes, provspelare räknas till Kommer.
+
 ### Behörigheter (`getClubAccess` i registry.ts)
 - Root-admin: e-post i `ADMIN_EMAILS` eller `admins/root_admins_list`. Får allt.
 - Läsa lagets data: medlem i laget. Skriva: tränare i laget eller föreningsadmin.

@@ -1,11 +1,52 @@
 /**
  * Arket "Notiser": slå på/av notiser för chatt, inlägg och kallelser på den här enheten.
+ * Överst väljer en ledare (rollen Ledare) vilka kallelser hen vill ha – det gäller personen, inte enheten.
  * Logiken ligger i src/lib/push.ts.
  */
 import React, { useEffect, useState } from 'react';
-import { Bell, BellOff, CalendarCheck, MessageCircle, Megaphone, Send, Share, SquarePlus } from 'lucide-react';
+import { Bell, BellOff, CalendarCheck, Check, MessageCircle, Megaphone, Send, Share, SquarePlus } from 'lucide-react';
 import { Button, Sheet } from './ui';
-import { disablePush, enablePush, getPushStatus, PushStatus, sendTestPush, updatePushPrefs } from '../lib/push';
+import { disablePush, enablePush, getPushStatus, PushStatus, saveLeaderRsvpTypes, sendTestPush, updatePushPrefs } from '../lib/push';
+import type { RsvpKind } from '../types';
+
+export type LeaderRsvp = { clubId: string; teamId: string; types: RsvpKind[] };
+
+const KINDS: [RsvpKind, string][] = [['training', 'Träning'], ['match', 'Match'], ['other', 'Övrigt']];
+
+// Ledarens val av kallelser. Sparas direkt vid varje tryck.
+const LeaderRsvpCard: React.FC<{ leader: LeaderRsvp; onChanged: (types: RsvpKind[]) => void }> = ({ leader, onChanged }) => {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const toggle = async (k: RsvpKind) => {
+    const next = leader.types.includes(k) ? leader.types.filter(x => x !== k) : [...leader.types, k];
+    setBusy(true);
+    setError(null);
+    try { onChanged(await saveLeaderRsvpTypes(leader.clubId, leader.teamId, next)); } catch (e: any) { setError(e?.message || 'Kunde inte spara.'); }
+    setBusy(false);
+  };
+  return (
+    <div className="rounded-2xl border border-zinc-200 dark:border-zinc-800 p-4 flex flex-col gap-2.5">
+      <div>
+        <p className="font-semibold text-zinc-800 dark:text-zinc-100">Kallelser som ledare</p>
+        <p className="text-sm text-zinc-500 dark:text-zinc-400">Välj vilka aktiviteter du vill bli kallad till och svara på. Gäller dig, på alla enheter.</p>
+      </div>
+      <div className="flex flex-wrap gap-2">
+        {KINDS.map(([k, label]) => {
+          const on = leader.types.includes(k);
+          return (
+            <button key={k} type="button" aria-pressed={on} disabled={busy} onClick={() => toggle(k)}
+              className={`min-h-[40px] px-3.5 rounded-xl border text-sm font-semibold inline-flex items-center gap-2 cursor-pointer transition-all disabled:opacity-60 ${
+                on ? 'bg-indigo-600 border-indigo-600 text-white' : 'border-zinc-200 dark:border-zinc-700 text-zinc-700 dark:text-zinc-200 hover:bg-zinc-50 dark:hover:bg-zinc-800'
+              }`}>
+              {on && <Check size={14} strokeWidth={3} />}{label}
+            </button>
+          );
+        })}
+      </div>
+      {error && <p className="text-sm font-semibold text-red-600 dark:text-red-400">{error}</p>}
+    </div>
+  );
+};
 
 const Toggle: React.FC<{ icon: React.ReactNode; label: string; description: string; checked: boolean; disabled?: boolean; onChange: (v: boolean) => void }> = ({
   icon, label, description, checked, disabled, onChange,
@@ -29,7 +70,10 @@ const Toggle: React.FC<{ icon: React.ReactNode; label: string; description: stri
   </button>
 );
 
-export const NotificationsSheet: React.FC<{ open: boolean; onClose: () => void; userId: string | null }> = ({ open, onClose, userId }) => {
+export const NotificationsSheet: React.FC<{
+  open: boolean; onClose: () => void; userId: string | null;
+  leaderRsvp?: LeaderRsvp | null; onLeaderRsvpChanged?: (types: RsvpKind[]) => void;
+}> = ({ open, onClose, userId, leaderRsvp, onLeaderRsvpChanged }) => {
   const [status, setStatus] = useState<PushStatus | null>(null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<{ tone: 'ok' | 'error'; text: string } | null>(null);
@@ -75,6 +119,7 @@ export const NotificationsSheet: React.FC<{ open: boolean; onClose: () => void; 
   return (
     <Sheet open={open} onClose={onClose} title="Notiser">
       <div className="px-3 pb-2 flex flex-col gap-3">
+        {leaderRsvp && onLeaderRsvpChanged && <LeaderRsvpCard leader={leaderRsvp} onChanged={onLeaderRsvpChanged} />}
         <p className="text-sm text-zinc-600 dark:text-zinc-300">
           Få en notis när någon skriver i chatten, när tränaren lägger upp ett nytt inlägg eller när det finns nya pass att svara på. Valet gäller bara
           den här enheten – slå på det på varje telefon, iPad eller dator där du vill ha notiser.

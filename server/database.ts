@@ -407,6 +407,8 @@ function createSchema(db: Db) {
   // Kön och funktionsnedsättning (för LOK-stödets närvarokort), visas bara för tränare som personnumret
   try { db.exec('ALTER TABLE members ADD COLUMN gender TEXT;'); } catch (_) { /* finns redan */ }
   try { db.exec('ALTER TABLE members ADD COLUMN disability INTEGER NOT NULL DEFAULT 0;'); } catch (_) { /* finns redan */ }
+  // Ledare (roll 'leader') väljer själva vilka kallelser de vill ha: JSON-lista med training/match/other, null = inga
+  try { db.exec('ALTER TABLE team_roles ADD COLUMN rsvp_types TEXT;'); } catch (_) { /* finns redan */ }
   // Notiser om nya pass/kallelser (lades till efter chatt och inlägg)
   try { db.exec('ALTER TABLE push_subscriptions ADD COLUMN sessions INTEGER NOT NULL DEFAULT 1;'); } catch (_) { /* finns redan */ }
 }

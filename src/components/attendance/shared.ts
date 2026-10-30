@@ -52,6 +52,13 @@ export const myRow = (squad: SquadPlayer[]) => {
 // Svar och närvaro sparas på truppradens id; ledarrader (<id>_leader) kan ha svarat på grund-id:t.
 const rsvpOf = (s: TrainingSession, p: SquadPlayer) => s.rsvps?.[p.id] || s.rsvps?.[p.id.replace(/_leader$/, '')];
 
+/**
+ * Är personen kallad till passet? Ledare som bara är ledare (rsvpTypes finns) kallas bara till de typer
+ * av pass de valt; den som ändå har svarat räknas med. Alla andra är kallade.
+ */
+export const isCalled = (s: TrainingSession, p: SquadPlayer) =>
+  !p.rsvpTypes || p.rsvpTypes.includes(categorizeSession(s)) || !!rsvpOf(s, p);
+
 export const isPresent = (s: TrainingSession, p: SquadPlayer) => {
   const att = s.attendance || [];
   return att.includes(p.id) || att.includes(p.id.replace(/_leader$/, ''));
@@ -77,7 +84,7 @@ export type SplitCount = { players: number; leaders: number };
 export const rsvpCounts = (s: TrainingSession, squad: SquadPlayer[]) => {
   const players = teamPlayers(squad);
   const p = responseSummary(s, players);
-  const l = responseSummary(s, teamLeaders(squad));
+  const l = responseSummary(s, teamLeaders(squad).filter(p => isCalled(s, p)));
   const guests = (s.guestPlayers || []).length;
   const split = (k: 'attending' | 'partial' | 'declined' | 'unanswered', extra = 0): SplitCount => ({ players: p[k] + extra, leaders: l[k] });
   return {

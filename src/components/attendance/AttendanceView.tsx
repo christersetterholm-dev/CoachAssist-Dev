@@ -15,7 +15,7 @@ import { allSeries, describeSeries } from '../sessions/seriesUtils';
 import AttendanceStatsView from './AttendanceStatsView';
 import LokCardView from './LokCardView';
 import NewActivitySheet from './NewActivitySheet';
-import { answerForMe, isPresent, myRow, responseSummary, sessionEnd, sessionStart, sessionTitle, teamLeaders, teamPlayers } from './shared';
+import { answerForMe, isCalled, isPresent, myRow, responseSummary, sessionEnd, sessionStart, sessionTitle, teamLeaders, teamPlayers } from './shared';
 
 interface AttendanceViewProps {
   squad: SquadPlayer[];
@@ -332,7 +332,8 @@ const ActivityRow: React.FC<{
             past || hasInvite ? (
               <span className="block mt-2 space-y-1">
                 <GroupLine label="Spelare" session={s} people={players} past={past} />
-                {leaders.length > 0 && <GroupLine label="Tränare" session={s} people={leaders} past={past} />}
+                {/* Kommande: bara ledare som är kallade (valt den typen av pass); genomförda: alla, för närvaron */}
+                {leaders.length > 0 && <GroupLine label="Tränare" session={s} people={past ? leaders : leaders.filter(p => isCalled(s, p))} past={past} />}
               </span>
             ) : (
               <span className="inline-block mt-2 px-2 py-0.5 rounded-lg text-xs font-semibold bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400">Ingen kallelse</span>

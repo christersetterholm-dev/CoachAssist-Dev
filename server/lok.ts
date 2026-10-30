@@ -397,9 +397,9 @@ export function loadTeam(db: Db, clubId: string, teamId: string): { sessions: Ca
   }));
   const rows = db.prepare(
     `SELECT m.id, m.full_name, m.personnummer, m.gender, m.disability, r.role FROM team_roles r JOIN members m ON m.id = r.member_id
-     WHERE r.club_id = ? AND r.team_id = ? AND r.role IN ('player','coach') ORDER BY r.sort, m.full_name COLLATE NOCASE`
+     WHERE r.club_id = ? AND r.team_id = ? AND r.role IN ('player','coach','leader') ORDER BY r.sort, m.full_name COLLATE NOCASE`
   ).all(clubId, teamId);
-  // Den som är både spelare och tränare står bland deltagarna (som på laget.se och i appens trupp).
+  // Den som är både spelare och tränare/ledare står bland deltagarna (som på laget.se och i appens trupp).
   const playerIds = new Set(rows.filter((r: any) => r.role === 'player').map((r: any) => r.id));
   const people: CardPerson[] = [];
   const seen = new Set<string>();

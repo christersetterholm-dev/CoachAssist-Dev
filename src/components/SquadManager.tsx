@@ -228,7 +228,7 @@ export default function SquadManager({ squad, sessions = [], onUpdateSquad, acti
         setFetchedMembers(members);
 
         const relevantMembers = teamIdToUse 
-          ? members.filter(m => m.teams && (m.teams.includes(teamIdToUse) || m.teams.length === 0 || (m.roles && (m.roles.includes('admin') || m.roles.includes('coach')))))
+          ? members.filter(m => m.teams && (m.teams.includes(teamIdToUse) || m.teams.length === 0 || (m.roles && (m.roles.includes('admin') || m.roles.includes('coach') || m.roles.includes('leader')))))
           : members;
 
         const autoSelected = relevantMembers
@@ -271,8 +271,9 @@ export default function SquadManager({ squad, sessions = [], onUpdateSquad, acti
       const cleanEmail = (member.email || '').trim().toLowerCase();
       const memberUserId = member.userId;
 
-      const hasPlayerRole = member.roles?.includes('player') || !member.roles?.some(r => r === 'coach' || r === 'admin');
-      const hasLeaderRole = member.roles?.some(r => r === 'coach' || r === 'admin');
+      const hasPlayerRole = member.roles?.includes('player') || !member.roles?.some(r => r === 'coach' || r === 'leader' || r === 'admin');
+      const hasLeaderRole = member.roles?.some(r => r === 'coach' || r === 'leader' || r === 'admin');
+      const isLeaderRoleOnly = !!member.roles?.includes('leader') && !member.roles?.includes('coach');
 
       const findIdx = (targetRole: 'player' | 'leader') => {
         return updatedSquad.findIndex(sp => {
@@ -340,7 +341,8 @@ export default function SquadManager({ squad, sessions = [], onUpdateSquad, acti
             position: member.position || undefined,
             number: member.number || undefined,
             photoUrl: member.photoUrl || undefined,
-            role: 'leader'
+            role: 'leader',
+            ...(isLeaderRoleOnly ? { teamRole: 'leader' as const } : {})
           });
           countAdded++;
         }
@@ -1331,7 +1333,7 @@ export default function SquadManager({ squad, sessions = [], onUpdateSquad, acti
                   (cleanEmail && sp.email && sp.email.trim().toLowerCase() === cleanEmail) ||
                   (sp.name.trim().toLowerCase() === cleanName)
                 );
-                const isCoach = member.roles?.some(r => r === 'coach' || r === 'admin');
+                const isCoach = member.roles?.some(r => r === 'coach' || r === 'leader' || r === 'admin');
                 return (
                   <label
                     key={mId}

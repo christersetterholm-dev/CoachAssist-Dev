@@ -1087,12 +1087,14 @@ export default function ProfileAndSettings({
                                         ? 'bg-purple-100 text-purple-700 dark:bg-purple-950/40 dark:text-purple-400'
                                         : r === 'coach'
                                         ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400'
+                                        : r === 'leader'
+                                        ? 'bg-teal-100 text-teal-700 dark:bg-teal-950/40 dark:text-teal-400'
                                         : r === 'player'
                                         ? 'bg-sky-100 text-sky-700 dark:bg-sky-950/40 dark:text-sky-450'
                                         : 'bg-amber-100 text-amber-700 dark:bg-amber-950/40 dark:text-amber-400'
                                     }`}
                                   >
-                                    {r === 'admin' ? 'Admin' : r === 'coach' ? 'Tränare' : r === 'player' ? 'Spelare' : 'Förälder'}
+                                    {r === 'admin' ? 'Admin' : r === 'coach' ? 'Tränare' : r === 'leader' ? 'Ledare' : r === 'player' ? 'Spelare' : 'Förälder'}
                                   </span>
                                 ))}
                               </div>

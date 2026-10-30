@@ -695,7 +695,7 @@ export function saveFile(db: Db, a: ConvAccess, file: { originalname: string; mi
 function canModerateAuthor(ctx: Ctx, people: Map<string, Person>, authorId: string | null): boolean {
   if (ctx.access.isClubAdmin) return true;
   const teams = authorId ? people.get(authorId)?.teams || [] : [];
-  return teams.some((t) => ['admin', 'coach'].some((r) => ctx.access.teamRoles.get(t)?.has(r)));
+  return teams.some((t) => ['admin', 'coach', 'leader'].some((r) => ctx.access.teamRoles.get(t)?.has(r)));
 }
 
 export function reportMessage(db: Db, a: ConvAccess, seq: unknown, reason: unknown) {

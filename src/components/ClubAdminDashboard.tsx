@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { ClipboardCheck, Landmark, Trash2, Edit3, Users, Shield, ShieldAlert, Check, PlusCircle, Search, Mail, Phone, Fingerprint, Settings, UserPlus, Save, Smartphone, X, Database, HardDrive, RefreshCw, Download, Upload, Globe, CheckCircle2, AlertTriangle, AlertCircle, Calendar, Link, Copy, ExternalLink, FileSpreadsheet, FileText, Camera, Loader2, Key, UserCheck, Sparkles, Filter, ArrowUpDown, RotateCcw, Pencil } from 'lucide-react';
-import { Club, ClubMetadata, ClubTeam, ClubMember, SquadPlayer, TrainingSettings, TrainingSession } from '../types';
+import { Club, ClubMetadata, ClubTeam, ClubMember, RsvpKind, SquadPlayer, TrainingSettings, TrainingSession } from '../types';
 import { db, storage, getApiUrl, getAuthHeader, ref, uploadBytes, getDownloadURL, doc, getDoc, setDoc } from '../lib/firebase';
 import PwaIconGenerator from './PwaIconGenerator';
 import ImageCropper from './ImageCropper';
@@ -255,6 +255,8 @@ export default function ClubAdminDashboard({
   // Kön och funktionsnedsättning behövs till LOK-stödets närvarokort ('' = räknas fram ur personnumret)
   const [memberGender, setMemberGender] = useState<'' | 'female' | 'male'>('');
   const [memberDisability, setMemberDisability] = useState(false);
+  // Ledare: vilka kallelser hen får (ledaren kan också ändra själv under Notiser)
+  const [memberRsvpTypes, setMemberRsvpTypes] = useState<RsvpKind[]>([]);
   const [memberPosition, setMemberPosition] = useState('');
   const [memberNumber, setMemberNumber] = useState('');
   const [memberPhotoUrl, setMemberPhotoUrl] = useState('');
@@ -330,10 +332,10 @@ export default function ClubAdminDashboard({
 
     setIsUploadingPhoto(false);
   };
-  const [memberRoles, setMemberRoles] = useState<('admin' | 'coach' | 'player' | 'parent')[]>([]);
+  const [memberRoles, setMemberRoles] = useState<ClubMember['roles']>([]);
   const [memberTeams, setMemberTeams] = useState<string[]>([]);
   const [memberSearchQuery, setMemberSearchQuery] = useState('');
-  const [memberRoleFilter, setMemberRoleFilter] = useState<'all' | 'admin' | 'coach' | 'player' | 'parent'>('all');
+  const [memberRoleFilter, setMemberRoleFilter] = useState<'all' | 'admin' | 'coach' | 'leader' | 'player' | 'parent'>('all');
   const [memberTeamFilter, setMemberTeamFilter] = useState<string>('all');
   const [memberSortBy, setMemberSortBy] = useState<'name-asc' | 'name-desc' | 'role' | 'number' | 'team'>('name-asc');
 
@@ -406,6 +408,7 @@ export default function ClubAdminDashboard({
 
       const roleLabel = m.roles?.includes('admin') ? 'Admin' :
                         m.roles?.includes('coach') ? 'Tränare' :
+                        m.roles?.includes('leader') ? 'Ledare' :
                         m.roles?.includes('parent') ? 'Förälder' : 'Spelare';
 
       result.push({
@@ -480,7 +483,7 @@ export default function ClubAdminDashboard({
         id: m.userId || (m as any).id || crypto.randomUUID(),
         name: m.fullName || (m as any).name,
         email: m.email,
-        role: m.roles?.includes('admin') ? 'Admin' : m.roles?.includes('coach') ? 'Tränare' : 'Spelare'
+        role: m.roles?.includes('admin') ? 'Admin' : (m.roles?.includes('coach') || m.roles?.includes('leader')) ? 'Tränare' : 'Spelare'
       }));
 
       const res = await fetch(getApiUrl('/api/admin/users/bulk-generate'), {
@@ -1469,7 +1472,7 @@ export default function ClubAdminDashboard({
             id: m.userId,
             name: m.fullName,
             email: m.email,
-            role: m.roles?.includes('admin') ? 'Admin' : m.roles?.includes('coach') ? 'Tränare' : 'Spelare'
+            role: m.roles?.includes('admin') ? 'Admin' : (m.roles?.includes('coach') || m.roles?.includes('leader')) ? 'Tränare' : 'Spelare'
           }));
           fetch(getApiUrl('/api/admin/users/bulk-generate'), {
             method: 'POST',
@@ -1589,6 +1592,7 @@ export default function ClubAdminDashboard({
       setMemberNumber(member.number || '');
       setMemberPhotoUrl(member.photoUrl || '');
       setMemberRoles(member.roles && member.roles.length > 0 ? member.roles : ['player']);
+      setMemberRsvpTypes(member.rsvpTypes || []);
       setMemberTeams(member.teams || []);
     } else {
       setEditingMember(null);
@@ -1598,6 +1602,7 @@ export default function ClubAdminDashboard({
       setMemberPersonnummer('');
       setMemberGender('');
       setMemberDisability(false);
+      setMemberRsvpTypes([]);
       setMemberPosition('');
       setMemberNumber('');
       setMemberPhotoUrl('');
@@ -1650,7 +1655,8 @@ export default function ClubAdminDashboard({
         number: memberNumber.trim() || undefined,
         photoUrl: memberPhotoUrl.trim() || undefined,
         roles: memberRoles && memberRoles.length > 0 ? memberRoles : ['player'],
-        teams: memberTeams
+        teams: memberTeams,
+        ...(memberRoles.includes('leader') ? { rsvpTypes: memberRsvpTypes } : {})
       };
 
       if (editingMember) {
@@ -1701,8 +1707,10 @@ export default function ClubAdminDashboard({
             const squadSnap = await getDoc(squadRef);
             let teamSquad: SquadPlayer[] = squadSnap.exists() ? (squadSnap.data().squad || []) : [];
 
-            const hasPlayerRole = newOrUpdatedMember.roles.includes('player') || !newOrUpdatedMember.roles.some(r => r === 'coach' || r === 'admin');
-            const hasLeaderRole = newOrUpdatedMember.roles.includes('coach') || newOrUpdatedMember.roles.includes('admin');
+            const hasPlayerRole = newOrUpdatedMember.roles.includes('player') || !newOrUpdatedMember.roles.some(r => r === 'coach' || r === 'leader' || r === 'admin');
+            const hasLeaderRole = newOrUpdatedMember.roles.includes('coach') || newOrUpdatedMember.roles.includes('leader') || newOrUpdatedMember.roles.includes('admin');
+            // Ledarraden är rollen Ledare om personen inte är tränare
+            const isLeaderRoleOnly = newOrUpdatedMember.roles.includes('leader') && !newOrUpdatedMember.roles.includes('coach');
 
             // Filter out existing entries for this player/member from teamSquad
             teamSquad = teamSquad.filter(sp => {
@@ -1744,6 +1752,7 @@ export default function ClubAdminDashboard({
                   number: newOrUpdatedMember.number,
                   photoUrl: newOrUpdatedMember.photoUrl,
                   role: 'leader',
+                  ...(isLeaderRoleOnly ? { teamRole: 'leader' as const } : {}),
                   roles: newOrUpdatedMember.roles
                 });
               }
@@ -1779,7 +1788,7 @@ export default function ClubAdminDashboard({
               id: newOrUpdatedMember.userId,
               name: newOrUpdatedMember.fullName,
               email: syncEmail,
-              role: newOrUpdatedMember.roles?.includes('admin') ? 'Admin' : newOrUpdatedMember.roles?.includes('coach') ? 'Tränare' : 'Spelare'
+              role: newOrUpdatedMember.roles?.includes('admin') ? 'Admin' : (newOrUpdatedMember.roles?.includes('coach') || newOrUpdatedMember.roles?.includes('leader')) ? 'Tränare' : 'Spelare'
             }]
           })
         }).then(() => fetchUserAccounts()).catch(err => console.error(err));
@@ -1826,7 +1835,7 @@ export default function ClubAdminDashboard({
   };
 
   // Helper toggle role list
-  const toggleRole = (role: 'admin' | 'coach' | 'player' | 'parent') => {
+  const toggleRole = (role: ClubMember['roles'][number]) => {
     if (memberRoles.includes(role)) {
       setMemberRoles(memberRoles.filter(r => r !== role));
     } else {
@@ -1849,6 +1858,7 @@ export default function ClubAdminDashboard({
       all: members.length,
       admin: 0,
       coach: 0,
+      leader: 0,
       player: 0,
       parent: 0,
       unassigned: 0
@@ -1856,6 +1866,7 @@ export default function ClubAdminDashboard({
     members.forEach(m => {
       if (m.roles?.includes('admin')) counts.admin++;
       if (m.roles?.includes('coach')) counts.coach++;
+      if (m.roles?.includes('leader')) counts.leader++;
       if (m.roles?.includes('player')) counts.player++;
       if (m.roles?.includes('parent')) counts.parent++;
       if (!m.teams || m.teams.length === 0) counts.unassigned++;
@@ -2391,6 +2402,17 @@ export default function ClubAdminDashboard({
               </button>
               <button
                 type="button"
+                onClick={() => setMemberRoleFilter('leader')}
+                className={`px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                  memberRoleFilter === 'leader'
+                    ? 'bg-teal-600 text-white shadow-sm'
+                    : 'bg-teal-50 dark:bg-teal-950/40 hover:bg-teal-100 dark:hover:bg-teal-900/50 text-teal-700 dark:text-teal-300'
+                }`}
+              >
+                Ledare ({roleCounts.leader})
+              </button>
+              <button
+                type="button"
                 onClick={() => setMemberRoleFilter('admin')}
                 className={`px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
                   memberRoleFilter === 'admin'
@@ -2613,6 +2635,7 @@ export default function ClubAdminDashboard({
                       {[
                         { id: 'admin', label: 'Föreningsadmin', desc: 'Hantera lag, föreningar och roller.', color: 'purple' },
                         { id: 'coach', label: 'Tränare', desc: 'Skapa och ändra träningar, trupper, laguppställningar.', color: 'emerald' },
+                        { id: 'leader', label: 'Ledare', desc: 'Samma behörighet som tränare. Får bara de kallelser hen väljer.', color: 'teal' },
                         { id: 'player', label: 'Spelare', desc: 'Kan läsa träningar, se laguppställningar och närvaro.', color: 'sky' },
                         { id: 'parent', label: 'Förälder', desc: 'Se träningar, laguppställningar samt barnets närvaro.', color: 'amber' }
                       ].map(r => {
@@ -2627,6 +2650,7 @@ export default function ClubAdminDashboard({
                                 ? r.color === 'purple' ? 'border-purple-500 bg-purple-50/50 dark:bg-purple-950/30' :
                                   r.color === 'emerald' ? 'border-emerald-500 bg-emerald-50/50 dark:bg-emerald-950/30' :
                                   r.color === 'sky' ? 'border-sky-500 bg-sky-50/50 dark:bg-sky-950/30' :
+                                  r.color === 'teal' ? 'border-teal-500 bg-teal-50/50 dark:bg-teal-950/30' :
                                   'border-amber-500 bg-amber-50/50 dark:bg-amber-950/30'
                                 : 'bg-zinc-50 hover:bg-zinc-100/50 border-zinc-200 dark:bg-zinc-950 dark:hover:bg-zinc-900/60 dark:border-zinc-800'
                             }`}
@@ -2646,6 +2670,30 @@ export default function ClubAdminDashboard({
                         );
                       })}
                     </div>
+                    {memberRoles.includes('leader') && !memberRoles.includes('coach') && !memberRoles.includes('player') && (
+                      <div className="mt-3 p-3.5 rounded-2xl border border-teal-200 dark:border-teal-900/60 bg-teal-50/40 dark:bg-teal-950/20">
+                        <div className="text-sm font-semibold text-zinc-900 dark:text-white">Kallelser till ledaren</div>
+                        <p className="text-xs text-zinc-500 dark:text-zinc-400 mb-2.5">En ledare kallas bara till de typer av aktiviteter som är valda. Ledaren kan också ändra det själv under Notiser.</p>
+                        <div className="flex flex-wrap gap-2">
+                          {([['training', 'Träning'], ['match', 'Match'], ['other', 'Övrigt']] as [RsvpKind, string][]).map(([k, label]) => {
+                            const on = memberRsvpTypes.includes(k);
+                            return (
+                              <button
+                                key={k}
+                                type="button"
+                                aria-pressed={on}
+                                onClick={() => setMemberRsvpTypes(on ? memberRsvpTypes.filter(x => x !== k) : [...memberRsvpTypes, k])}
+                                className={`min-h-[40px] px-3.5 rounded-xl border text-sm font-semibold inline-flex items-center gap-2 cursor-pointer transition-all ${
+                                  on ? 'bg-teal-600 border-teal-600 text-white' : 'bg-white dark:bg-zinc-900 border-zinc-200 dark:border-zinc-700 text-zinc-700 dark:text-zinc-200'
+                                }`}
+                              >
+                                {on && <Check size={14} strokeWidth={3} />}{label}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
                   </div>
 
                   {/* Team Assignments */}
@@ -2796,12 +2844,14 @@ export default function ClubAdminDashboard({
                                 ? 'bg-purple-100 text-purple-700 dark:bg-purple-950/40 dark:text-purple-400'
                                 : r === 'coach'
                                 ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400'
+                                : r === 'leader'
+                                ? 'bg-teal-100 text-teal-700 dark:bg-teal-950/40 dark:text-teal-400'
                                 : r === 'player'
                                 ? 'bg-sky-100 text-sky-700 dark:bg-sky-950/40 dark:text-sky-400'
                                 : 'bg-amber-100 text-amber-700 dark:bg-amber-950/40 dark:text-amber-400'
                             }`}
                           >
-                            {r === 'admin' ? 'Admin' : r === 'coach' ? 'Tränare' : r === 'player' ? 'Spelare' : 'Förälder'}
+                            {r === 'admin' ? 'Admin' : r === 'coach' ? 'Tränare' : r === 'leader' ? 'Ledare' : r === 'player' ? 'Spelare' : 'Förälder'}
                           </span>
                         ))}
                       </div>

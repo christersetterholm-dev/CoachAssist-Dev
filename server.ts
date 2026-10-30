@@ -2569,6 +2569,7 @@ async function startServer() {
         title: typeof x?.title === 'string' ? x.title.replace(/\s+/g, ' ').trim().slice(0, 60) : '',
         date: Number(x?.date),
         startTime: typeof x?.startTime === 'string' && /^\d{1,2}:\d{2}$/.test(x.startTime) ? x.startTime : '',
+        kind: registry.RSVP_KINDS.includes(x?.kind) ? x.kind : 'training',
       }))
       .filter((x: any) => x.id && Number.isFinite(x.date))
       .sort((x: any, y: any) => x.date - y.date);
@@ -2591,7 +2592,9 @@ async function startServer() {
     const body = single
       ? `${first.title || 'Pass'} ${fmt(first.date, true)}${first.startTime ? ` ${first.startTime}` : ''}. Svara i appen.`
       : `${items.length} ${sameTitle ? `pass (${first.title})` : 'pass'} ${fmt(first.date, false)} – ${fmt(last.date, false)}. Svara i appen.`;
-    const ids = teamUserIds(a.clubId, a.teamId, a.user.id);
+    // Ledare (som bara är ledare) får bara kallelser till de typer av pass de valt
+    const ids = registry.sessionNotifyUserIds(db, a.clubId, a.teamId, Array.from(new Set(items.map((x: any) => x.kind))))
+      .filter((id) => id !== String(a.user.id));
     push.notifyUsers(ids, 'sessions', {
       title: `${single ? 'Ny kallelse' : 'Nya pass att svara på'} · ${teamName}`,
       body,
@@ -2599,6 +2602,16 @@ async function startServer() {
       open: { view: 'sessions', clubId: a.clubId, teamId: a.teamId, ...(single ? { sessionId: first.id } : {}) },
     });
     res.json({ success: true, recipients: ids.length });
+  });
+
+  // En ledare väljer själv vilka kallelser hen vill ha (Träning/Match/Övrigt) i laget.
+  app.put('/api/leader/rsvp-types', requireAuthUser, async (req, res) => {
+    const a = await teamAccess(req, req.body?.clubId, req.body?.teamId);
+    if (!a) return res.status(400).json({ error: 'clubId och teamId krävs.' });
+    const access = registry.getClubAccess(db, a.user, a.clubId, false);
+    const n = registry.setLeaderRsvpKinds(db, access.memberIds, a.teamId, req.body?.types);
+    if (n === 0) return res.status(403).json({ error: 'Du är inte ledare i laget.' });
+    res.json({ success: true, types: registry.cleanRsvpKinds(req.body?.types) });
   });
 
   // Inlägg: tränare skriver till laget, alla i laget läser, reagerar och kommenterar.

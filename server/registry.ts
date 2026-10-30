@@ -9,8 +9,11 @@ import crypto from 'crypto';
 import type { Db } from './database.ts';
 
 export const CLUB_LEVEL = 'club_global';
-const MANAGER_ROLES = ['admin', 'coach'];
-const VALID_ROLES = ['admin', 'coach', 'player', 'parent'];
+// Ledare ('leader') har samma rättigheter som tränare men får bara de kallelser hen själv valt (rsvp_types).
+const MANAGER_ROLES = ['admin', 'coach', 'leader'];
+const VALID_ROLES = ['admin', 'coach', 'leader', 'player', 'parent'];
+export const RSVP_KINDS = ['training', 'match', 'other'];
+export const cleanRsvpKinds = (v: any): string[] => Array.from(new Set((Array.isArray(v) ? v : []).filter((k: any) => RSVP_KINDS.includes(k))));
 export const RSVP_STATUSES = ['attending', 'declined', 'partial'];
 
 const lower = (s: any) => String(s || '').trim().toLowerCase();
@@ -61,7 +64,7 @@ export function getClubAccess(db: Db, user: any, clubId: string, isRoot: boolean
 
 export const isClubMember = (a: ClubAccess) => a.isClubAdmin || a.teamRoles.size > 0 || a.memberIds.length > 0;
 export const isClubCoach = (a: ClubAccess) =>
-  a.isClubAdmin || Array.from(a.teamRoles.values()).some((s) => s.has('coach'));
+  a.isClubAdmin || Array.from(a.teamRoles.values()).some((s) => s.has('coach') || s.has('leader'));
 export const isTeamCoach = (a: ClubAccess, teamId: string) =>
   a.isClubAdmin || MANAGER_ROLES.some((r) => a.teamRoles.get(teamId)?.has(r));
 export const isTeamMember = (a: ClubAccess, teamId: string) =>
@@ -105,7 +108,7 @@ export function getManagedClubIds(db: Db, user: any): string[] {
   if (!user) return [];
   return db.prepare(
     `SELECT DISTINCT m.club_id FROM members m JOIN team_roles r ON r.member_id = m.id
-     WHERE r.role IN ('admin','coach') AND (m.user_id = ? OR (m.user_id IS NULL AND m.email IS NOT NULL AND m.email != '' AND LOWER(m.email) = ?))`
+     WHERE r.role IN ('admin','coach','leader') AND (m.user_id = ? OR (m.user_id IS NULL AND m.email IS NOT NULL AND m.email != '' AND LOWER(m.email) = ?))`
   ).all(String(user.id || ''), lower(user.email)).map((r: any) => r.club_id);
 }
 
@@ -126,8 +129,42 @@ function getMember(db: Db, id: string): MemberRow | undefined {
   return db.prepare('SELECT * FROM members WHERE id = ?').get(id);
 }
 
-function rolesOf(db: Db, memberId: string): { team_id: string; role: string; sort: number }[] {
-  return db.prepare('SELECT team_id, role, sort FROM team_roles WHERE member_id = ?').all(memberId);
+function rolesOf(db: Db, memberId: string): { team_id: string; role: string; sort: number; rsvp_types: string | null }[] {
+  return db.prepare('SELECT team_id, role, sort, rsvp_types FROM team_roles WHERE member_id = ?').all(memberId);
+}
+
+// Kallelser som en ledare valt (samma val i alla lag där hen är ledare); null om personen inte är ledare.
+function leaderRsvpKinds(roles: { role: string; rsvp_types: string | null }[]): string[] | null {
+  const row = roles.find((r) => r.role === 'leader');
+  return row ? cleanRsvpKinds(parse(row.rsvp_types)) : null;
+}
+
+/** En ledare väljer vilka kallelser hen vill ha (Träning/Match/Övrigt). Gäller personens ledarroller i laget. */
+export function setLeaderRsvpKinds(db: Db, memberIds: string[], teamId: string, kinds: any): number {
+  const value = JSON.stringify(cleanRsvpKinds(kinds));
+  let n = 0;
+  for (const id of memberIds) {
+    n += Number(db.prepare(`UPDATE team_roles SET rsvp_types = ? WHERE member_id = ? AND team_id = ? AND role = 'leader'`).run(value, id, teamId).changes || 0);
+  }
+  return n;
+}
+
+/**
+ * Konton som ska få notis om kallelser till pass av de här typerna: alla med roll i laget, utom ledare
+ * (som inte också är spelare eller tränare) som inte valt någon av typerna.
+ */
+export function sessionNotifyUserIds(db: Db, clubId: string, teamId: string, kinds: string[]): string[] {
+  const rows = db.prepare(
+    `SELECT m.user_id, tr.role, tr.rsvp_types FROM team_roles tr JOIN members m ON m.id = tr.member_id
+     WHERE tr.club_id = ? AND tr.team_id = ? AND m.user_id IS NOT NULL AND m.user_id != ''`
+  ).all(clubId, teamId);
+  const ok = new Set<string>();
+  for (const r of rows) {
+    const uid = String(r.user_id);
+    if (r.role !== 'leader') ok.add(uid);
+    else if (cleanRsvpKinds(parse(r.rsvp_types)).some((k) => kinds.includes(k))) ok.add(uid);
+  }
+  return Array.from(ok);
 }
 
 const clean = (v: any): string | null => {
@@ -212,6 +249,7 @@ function memberToClubMember(db: Db, m: MemberRow, full: boolean, isMe = false) {
     photoUrl: m.photo_url || undefined,
     roles: Array.from(new Set(roles.map((r) => r.role))),
     teams: Array.from(new Set(roles.filter((r) => r.team_id !== CLUB_LEVEL).map((r) => r.team_id))),
+    ...(leaderRsvpKinds(roles) ? { rsvpTypes: leaderRsvpKinds(roles) } : {}),
     accountLinked: !!m.user_id,
   };
 }
@@ -244,7 +282,8 @@ export function saveMembersDoc(db: Db, clubId: string, incoming: any[], a: ClubA
       if (beforeShape) {
         const same = ['fullName', 'email', 'phone', 'personnummer', 'position', 'number', 'photoUrl', 'gender', 'disability']
           .every((k) => (clean((beforeShape as any)[k]) || '') === (clean((e as any)[k]) || '').toString() || (k === 'email' && lower((beforeShape as any)[k]) === lower(e.email)))
-          && sameSet(beforeShape.roles, newRoles) && sameSet(beforeShape.teams, newTeams);
+          && sameSet(beforeShape.roles, newRoles) && sameSet(beforeShape.teams, newTeams)
+          && (!Array.isArray(e.rsvpTypes) || sameSet((beforeShape as any).rsvpTypes || [], cleanRsvpKinds(e.rsvpTypes)));
         if (same) continue;
       }
       if (upsertMember(db, clubId, id, fields) === 'conflict') continue;
@@ -273,6 +312,9 @@ export function saveMembersDoc(db: Db, clubId: string, incoming: any[], a: ClubA
           if ((addedRole || addedTeam) && !after.some((r) => r.team_id === t && r.role === role)) setRole(db, id, clubId, t, role, 9999);
         }
       }
+      if (Array.isArray(e.rsvpTypes)) {
+        db.prepare(`UPDATE team_roles SET rsvp_types = ? WHERE member_id = ? AND role = 'leader'`).run(JSON.stringify(cleanRsvpKinds(e.rsvpTypes)), id);
+      }
     }
 
     // Medlemmar som inte längre finns i listan tas bort (inte administratörer, om man inte själv är admin).
@@ -300,8 +342,8 @@ function sameSet(a: string[], b: string[]) {
 export function getSquadDoc(db: Db, clubId: string, teamId: string, a: ClubAccess) {
   const full = isTeamCoach(a, teamId);
   const rows = db.prepare(
-    `SELECT m.*, r.role, r.sort FROM team_roles r JOIN members m ON m.id = r.member_id
-     WHERE r.club_id = ? AND r.team_id = ? AND r.role IN ('player','coach') ORDER BY r.sort, m.full_name COLLATE NOCASE`
+    `SELECT m.*, r.role, r.sort, r.rsvp_types FROM team_roles r JOIN members m ON m.id = r.member_id
+     WHERE r.club_id = ? AND r.team_id = ? AND r.role IN ('player','coach','leader') ORDER BY r.sort, m.full_name COLLATE NOCASE`
   ).all(clubId, teamId);
   const clubAdmins = new Set(db.prepare(`SELECT member_id FROM team_roles WHERE club_id = ? AND role = 'admin'`).all(clubId).map((r: any) => r.member_id));
   const byMember = new Map<string, Set<string>>();
@@ -314,7 +356,10 @@ export function getSquadDoc(db: Db, clubId: string, teamId: string, a: ClubAcces
   for (const r of rows) {
     updatedAt = Math.max(updatedAt, r.updated_at);
     const roles = byMember.get(r.id)!;
-    const isLeaderRow = r.role === 'coach';
+    if (r.role === 'leader' && roles.has('coach')) continue; // tränaren har redan en ledarrad
+    const isLeaderRow = r.role === 'coach' || r.role === 'leader';
+    // Ledare som bara är ledare får de kallelser hen valt (rsvpTypes); övriga kallas till allt.
+    const leaderOnly = r.role === 'leader' && !roles.has('player');
     const allRoles = new Set<string>(roles);
     if (clubAdmins.has(r.id)) allRoles.add('admin');
     const isMe = a.memberIds.includes(r.id);
@@ -322,6 +367,8 @@ export function getSquadDoc(db: Db, clubId: string, teamId: string, a: ClubAcces
       id: isLeaderRow && roles.has('player') ? `${r.id}_leader` : r.id,
       name: r.full_name,
       role: isLeaderRow ? 'leader' : 'player',
+      ...(r.role === 'leader' ? { teamRole: 'leader' } : {}),
+      ...(leaderOnly ? { rsvpTypes: cleanRsvpKinds(parse(r.rsvp_types)) } : {}),
       roles: Array.from(allRoles),
       position: r.position || undefined,
       number: r.number || undefined,
@@ -338,10 +385,15 @@ export function saveSquadDoc(db: Db, clubId: string, teamId: string, squad: any[
   let changed = 0;
   db.transaction(() => {
     const desired = new Map<string, { role: string; sort: number }>(); // `${id}|${role}`
+    const existing = db.prepare(`SELECT member_id, role, sort FROM team_roles WHERE club_id = ? AND team_id = ? AND role IN ('player','coach','leader')`).all(clubId, teamId);
     (Array.isArray(squad) ? squad : []).forEach((p: any, i: number) => {
       if (!p || !p.id || !String(p.name || '').trim()) return;
       const baseId = String(p.id).replace(/_leader$/, '');
-      const role = p.role === 'leader' ? 'coach' : 'player';
+      // En ledarrad är tränare eller ledare; äldre appversioner skickar inte teamRole, då behålls rollen som finns
+      const wasLeader = existing.some((r: any) => r.member_id === baseId && r.role === 'leader');
+      const role = p.role === 'leader'
+        ? (p.teamRole === 'leader' || (!p.teamRole && wasLeader) ? 'leader' : 'coach')
+        : 'player';
       const res = upsertMember(db, clubId, baseId, {
         fullName: p.name, email: p.email, phone: p.phone, personnummer: p.personnummer,
         position: p.position, number: p.number, photoUrl: p.photoUrl, gender: p.gender, disability: p.disability,
@@ -349,7 +401,6 @@ export function saveSquadDoc(db: Db, clubId: string, teamId: string, squad: any[
       if (res === 'conflict') return;
       desired.set(`${baseId}|${role}`, { role, sort: i });
     });
-    const existing = db.prepare(`SELECT member_id, role, sort FROM team_roles WHERE club_id = ? AND team_id = ? AND role IN ('player','coach')`).all(clubId, teamId);
     for (const r of existing) {
       const key = `${r.member_id}|${r.role}`;
       if (!desired.has(key)) { removeRole(db, r.member_id, teamId, r.role); changed++; }

@@ -3,6 +3,8 @@
 // Notiser gäller en enhet i taget (telefonen, iPaden, datorn). På iPhone/iPad fungerar de bara när
 // appen är tillagd på hemskärmen (iOS 16.4 eller senare) och öppnad därifrån.
 import { getApiUrl, getAuthHeader } from './firebase';
+import type { RsvpKind, TrainingSession } from '../types';
+import { categorizeSession } from '../utils/sessionCategory';
 
 export type PushOpen =
   | { view: 'chat'; clubId: string; conversationId: string }
@@ -170,10 +172,23 @@ export function listenForPushOpen(handler: (open: PushOpen) => void): () => void
  * Returnerar hur många konton i laget som kan få den (bara de som slagit på notiser får den).
  */
 export async function notifyTeamAboutSessions(
-  clubId: string, teamId: string, sessions: { id: string; title?: string; date: number; startTime?: string }[],
+  clubId: string, teamId: string, sessions: { id: string; title?: string; date: number; startTime?: string; type?: TrainingSession['type']; category?: TrainingSession['category'] }[],
 ): Promise<{ recipients: number }> {
   return call('/api/sessions/notify', {
     clubId, teamId,
-    sessions: sessions.map((x) => ({ id: x.id, title: x.title || '', date: x.date, startTime: x.startTime || '' })),
+    // kind: ledare får bara notis om de typer av pass de valt
+    sessions: sessions.map((x) => ({ id: x.id, title: x.title || '', date: x.date, startTime: x.startTime || '', kind: categorizeSession(x) })),
   });
+}
+
+/** En ledare väljer vilka kallelser hen vill ha i laget (gäller personen, inte enheten). */
+export async function saveLeaderRsvpTypes(clubId: string, teamId: string, types: RsvpKind[]): Promise<RsvpKind[]> {
+  const res = await fetch(getApiUrl('/api/leader/rsvp-types'), {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
+    body: JSON.stringify({ clubId, teamId, types }),
+  }).catch(() => { throw new Error('Kunde inte nå servern. Kontrollera anslutningen och försök igen.'); });
+  const json = await res.json().catch(() => null);
+  if (!res.ok || !json) throw new Error(json?.error || `Något gick fel (${res.status})`);
+  return json.types;
 }
