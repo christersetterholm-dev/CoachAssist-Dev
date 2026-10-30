@@ -52,22 +52,26 @@ export const myRow = (squad: SquadPlayer[]) => {
 // Svar och närvaro sparas på truppradens id; ledarrader (<id>_leader) kan ha svarat på grund-id:t.
 const rsvpOf = (s: TrainingSession, p: SquadPlayer) => s.rsvps?.[p.id] || s.rsvps?.[p.id.replace(/_leader$/, '')];
 
-/**
- * Är personen kallad till passet? Ledare som bara är ledare (rsvpTypes finns) kallas bara till de typer
- * av pass de valt; den som ändå har svarat räknas med. Alla andra är kallade.
- */
-export const isCalled = (s: TrainingSession, p: SquadPlayer) =>
-  !p.rsvpTypes || p.rsvpTypes.includes(categorizeSession(s)) || !!rsvpOf(s, p);
-
 export const isPresent = (s: TrainingSession, p: SquadPlayer) => {
   const att = s.attendance || [];
   return att.includes(p.id) || att.includes(p.id.replace(/_leader$/, ''));
 };
 
+/**
+ * Är personen kallad till passet? Ledare som bara är ledare (rsvpTypes finns) kallas bara till de typer
+ * av pass de valt; den som ändå har svarat eller är bockad som närvarande räknas med. Alla andra är kallade.
+ */
+export const isCalled = (s: TrainingSession, p: SquadPlayer) =>
+  !p.rsvpTypes || p.rsvpTypes.includes(categorizeSession(s)) || !!rsvpOf(s, p) || isPresent(s, p);
+
+/** Svaret i summeringarna: den som är bockad som närvarande men inte svarat räknas som Kommer. */
+export const answerStatus = (s: TrainingSession, p: SquadPlayer): RsvpStatus | undefined =>
+  rsvpOf(s, p)?.status || (isPresent(s, p) ? 'attending' : undefined);
+
 export const responseSummary = (s: TrainingSession, people: SquadPlayer[]) => {
   let attending = 0, partial = 0, declined = 0;
   people.forEach(p => {
-    const st = rsvpOf(s, p)?.status;
+    const st = answerStatus(s, p);
     if (st === 'attending') attending++;
     else if (st === 'partial') partial++;
     else if (st === 'declined') declined++;

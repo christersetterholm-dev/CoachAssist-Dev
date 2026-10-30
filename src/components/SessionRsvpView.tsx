@@ -323,14 +323,17 @@ export const SessionRsvpView: React.FC<SessionRsvpViewProps> = ({
     setMyComment(myRsvp?.comment || '');
   }, [matchedPlayer?.id, myRsvp?.comment]);
 
+  // Den som är bockad som närvarande men inte svarat räknas som Kommer (samma som på Översikt).
+  const statusOf = (p: SquadPlayer): RsvpStatus | 'unanswered' => rsvps[p.id]?.status || (attendance.includes(p.id) ? 'attending' : 'unanswered');
+
   const stats = useMemo(() => {
     let attending = 0, partial = 0, declined = 0, unanswered = 0;
     calledSquad.forEach(p => {
-      const rsvp = rsvps[p.id];
-      if (!rsvp) unanswered++;
-      else if (rsvp.status === 'attending') attending++;
-      else if (rsvp.status === 'partial') partial++;
-      else if (rsvp.status === 'declined') declined++;
+      const st = statusOf(p);
+      if (st === 'unanswered') unanswered++;
+      else if (st === 'attending') attending++;
+      else if (st === 'partial') partial++;
+      else if (st === 'declined') declined++;
     });
     return { attending, partial, declined, unanswered, total: calledSquad.length, presentCount: attendance.length };
   }, [calledSquad, rsvps, attendance]);
@@ -672,8 +675,6 @@ export const SessionRsvpView: React.FC<SessionRsvpViewProps> = ({
     setTimeout(() => setSavedToast(null), 3500);
   };
 
-  const statusOf = (p: SquadPlayer): RsvpStatus | 'unanswered' => rsvps[p.id]?.status || 'unanswered';
-
   // Flikarna Kommer/Delvis/Kan inte visar hela truppen så att tränaren kan bocka i svaret åt en spelare
   // (t.ex. efter ett sms). De som hade svaret när fliken öppnades ligger först; ordningen hålls fast
   // medan man bockar, så att raderna inte hoppar.
@@ -701,7 +702,7 @@ export const SessionRsvpView: React.FC<SessionRsvpViewProps> = ({
     const q = searchQuery.toLowerCase().trim();
     return allMembers.filter(player => {
       const isGuest = player.id.startsWith('guest_');
-      const status = rsvps[player.id]?.status || 'unanswered';
+      const status = statusOf(player);
       if (filter === 'present' && !attendance.includes(player.id)) return false;
       if ((filter === 'attending' || filter === 'partial' || filter === 'declined') && isGuest) return false;
       if (filter === 'unanswered' && (status !== 'unanswered' || isGuest)) return false;

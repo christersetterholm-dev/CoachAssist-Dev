@@ -84,6 +84,8 @@ Appen läser/skriver JSON-dokument via sökvägar:
   svarsrutorna och Närvaro-raderna; notisen om kallelser (`sessionNotifyUserIds`) skickar `kind` per pass.
 - Den som är både spelare och tränare/ledare räknas och listas som spelare (en gång). Tester i `tests/leaders.test.mjs`.
 - Svarsrutorna på Översikt och i passvyn (`rsvpCounts`): spelare stort, ledare inom parentes, provspelare räknas till Kommer.
+  Den som är bockad som närvarande (t.ex. "Tränare på plats") men inte svarat räknas som Kommer (`answerStatus` i
+  attendance/shared.ts, `statusOf` i SessionRsvpView) – inget svar sparas; ett eget svar går alltid före.
 
 ### Behörigheter (`getClubAccess` i registry.ts)
 - Root-admin: e-post i `ADMIN_EMAILS` eller `admins/root_admins_list`. Får allt.
