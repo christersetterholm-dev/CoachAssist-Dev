@@ -4929,6 +4929,8 @@ export default function App() {
               setLinkToMomentId(null);
             }}
             onCreateExercise={(name, momentId) => {
+              // Tillbaka till passets Planera-flik (inte fliken passet öppnades med)
+              setSessionEditorTab('schema');
               setPreviousActiveExerciseId(activeExerciseId);
               setLinkToMomentId(momentId);
               setPrefilledName(name || 'Nytt tävlingsmoment');
@@ -4939,10 +4941,12 @@ export default function App() {
               return ""; 
             }}
             onSelectExercise={(id) => {
+              setSessionEditorTab('schema');
               handleSelectExercise(id);
               // We DON'T call setActiveSessionId(null) here because we want to come back to it
             }}
             onEditExercise={(id) => {
+              setSessionEditorTab('schema');
               setPreviousActiveExerciseId(activeExerciseId);
               setData(prev => ({ ...prev, activeExerciseId: id }));
               setEditReturnView('training');

@@ -652,15 +652,18 @@ export default function GameSetup({
           const point = (e.nativeEvent || e).clientX !== undefined ? (e.nativeEvent || e) : info.point;
           handleDragEndInOverview(pid, point.clientX || point.x, point.clientY || point.y);
         }}
-        className={`h-9 pl-3 pr-1 rounded-lg text-sm font-semibold flex items-center gap-1.5 cursor-grab active:cursor-grabbing touch-none z-50 select-none ${
+        className={`h-9 max-w-full min-w-0 pl-3 pr-1 rounded-lg text-sm font-semibold flex items-center gap-1.5 cursor-grab active:cursor-grabbing touch-none z-50 select-none ${
           variant.neutral
             ? 'text-zinc-800 dark:text-zinc-100 bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700'
             : 'text-white shadow-sm'
         }`}
         style={variant.neutral ? undefined : { backgroundColor: variant.color }}
       >
-        <span className="truncate max-w-[9rem]">{player.name}</span>
-        {positionTag(player, !variant.neutral)}
+        {/* Rutan får inte bli bredare än lagets kolumn: positionen kortas först, sedan namnet */}
+        <span className="truncate min-w-0">{player.name}</span>
+        {(player.role === 'leader' || player.position) && (
+          <span className="truncate min-w-0 shrink-[100]">{positionTag(player, !variant.neutral)}</span>
+        )}
         <button
           type="button"
           onPointerDown={(e) => e.stopPropagation()}
