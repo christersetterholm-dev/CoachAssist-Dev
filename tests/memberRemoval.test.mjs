@@ -57,3 +57,26 @@ test('truppen: många borttagna på en gång stoppas, Rensa truppen går', async
   assert.equal((await squad()).length, 0);
   assert.equal((await members()).length, 5, 'Rensa truppen tar inte bort personerna ur registret');
 });
+
+test('en borttagen person kommer inte tillbaka från en gammal trupplista eller medlemslista', async () => {
+  await post(MEMBERS, { members: people.slice(0, 5) });
+  const list = await members();
+  const gone = list.find((m) => m.userId === 'e');
+  assert.ok(gone);
+  assert.equal((await post(MEMBERS, { members: list.filter((m) => m.userId !== 'e') })).status, 200);
+  assert.equal((await members()).length, 4);
+
+  // En app med gammal kopia sparar truppen med den borttagna kvar
+  const oldSquad = [...(await squad()), { id: 'e', name: 'Spelare e', role: 'player' }];
+  assert.equal((await post(SQUAD, { squad: oldSquad })).status, 200);
+  assert.equal((await members()).length, 4, 'truppen lade inte tillbaka personen');
+  assert.ok(!(await squad()).some((p) => p.id === 'e'));
+
+  // Och en gammal medlemslista
+  assert.equal((await post(MEMBERS, { members: [...(await members()), gone] })).status, 200);
+  assert.equal((await members()).length, 4, 'medlemslistan lade inte tillbaka personen');
+
+  // En ny person (nytt id) går fortfarande att lägga till
+  assert.equal((await post(SQUAD, { squad: [...(await squad()), { id: 'ny', name: 'Ny spelare', role: 'player' }] })).status, 200);
+  assert.equal((await members()).length, 5);
+});

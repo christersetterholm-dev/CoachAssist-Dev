@@ -183,6 +183,8 @@ function upsertMember(db: Db, clubId: string, id: string, f: {
   const existing = getMember(db, id);
   const t = now();
   if (!existing) {
+    // Borttagen ur registret: en gammal lista i en app får inte lägga tillbaka personen.
+    if (db.prepare('SELECT 1 FROM removed_members WHERE club_id = ? AND member_id = ?').get(clubId, id)) return 'conflict';
     db.prepare(
       `INSERT INTO members (id, club_id, user_id, full_name, email, phone, personnummer, position, number, photo_url, gender, disability, created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
@@ -275,7 +277,7 @@ export const MAX_MEMBER_REMOVALS = 1;
 /** Högst så här många lagroller får försvinna ur truppen i en sparning (utom Rensa truppen, som skickar en tom lista). */
 export const MAX_SQUAD_ROLE_REMOVALS = 3;
 
-export function saveMembersDoc(db: Db, clubId: string, incoming: any[], a: ClubAccess): { changed: number } {
+export function saveMembersDoc(db: Db, clubId: string, incoming: any[], a: ClubAccess, by?: string): { changed: number } {
   let changed = 0;
   const canAdmin = a.isClubAdmin;
   db.transaction(() => {
@@ -338,6 +340,8 @@ export function saveMembersDoc(db: Db, clubId: string, incoming: any[], a: ClubA
       throw new TooManyRemovalsError(`Sparningen skulle ta bort ${toRemove.length} personer ur medlemsregistret på en gång och stoppades. Ladda om sidan och försök igen.`);
     }
     for (const m of toRemove) {
+      db.prepare(`INSERT OR REPLACE INTO removed_members (club_id, member_id, full_name, removed_at, removed_by) VALUES (?, ?, ?, ?, ?)`)
+        .run(clubId, m.id, m.full_name, now(), by ?? null);
       db.prepare('DELETE FROM team_roles WHERE member_id = ?').run(m.id);
       db.prepare('DELETE FROM members WHERE id = ?').run(m.id);
       changed++;

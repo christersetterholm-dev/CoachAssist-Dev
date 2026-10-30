@@ -156,6 +156,17 @@ export const SCHEMA = `
   CREATE INDEX IF NOT EXISTS idx_members_user ON members(user_id);
   CREATE INDEX IF NOT EXISTS idx_members_email ON members(email COLLATE NOCASE);
 
+  -- Personer som tagits bort ur medlemsregistret. En gammal kopia av truppen eller medlemslistan i en app
+  -- får inte skapa dem igen (okt 2026 kom tre borttagna spelare tillbaka så).
+  CREATE TABLE IF NOT EXISTS removed_members (
+    club_id TEXT NOT NULL,
+    member_id TEXT NOT NULL,
+    full_name TEXT,
+    removed_at INTEGER NOT NULL,
+    removed_by TEXT,
+    PRIMARY KEY (club_id, member_id)
+  );
+
   -- Roller per lag. team_id = 'club_global' betyder roll på föreningsnivå.
   CREATE TABLE IF NOT EXISTS team_roles (
     member_id TEXT NOT NULL,

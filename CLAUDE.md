@@ -78,6 +78,9 @@ Appen läser/skriver JSON-dokument via sökvägar:
   `MAX_MEMBER_REMOVALS` (1) person och av `squad` högst `MAX_SQUAD_ROLE_REMOVALS` (3) lagroller, utom Rensa truppen
   (tom lista). Annars 409 och inget ändras (`TooManyRemovalsError`). Tester i `tests/memberRemoval.test.mjs`.
   Leta aldrig upp personer på e-post eller namn när något ska tas bort – använd id (`userId`).
+  Borttagna personer sparas i `removed_members` (förening + id, namn, när, av vem). `upsertMember` skapar inte en
+  sådan person igen (ger 'conflict'), så en gammal trupp- eller medlemslista i en app kan inte lägga tillbaka hen.
+  Ny person = nytt id. Ska en borttagen återställas för hand: ta bort raden i `removed_members` också.
 
 ### Rollen Ledare (okt 2026)
 - Lagroll `leader` (utöver admin/coach/player/parent): samma rättigheter som tränare (`MANAGER_ROLES`; i appen lägger

@@ -3458,7 +3458,7 @@ async function startServer() {
         try {
           if (teamId === registry.CLUB_LEVEL && segment === 'members') {
             const list = Array.isArray(data) ? data : (data?.members || []);
-            registry.saveMembersDoc(db, clubId, list, creatingClub ? { ...access, isClubAdmin: true } : access);
+            registry.saveMembersDoc(db, clubId, list, creatingClub ? { ...access, isClubAdmin: true } : access, clubReqUser.email);
             return res.json({ success: true, updatedAt: Date.now() });
           }
           if (teamId !== registry.CLUB_LEVEL && segment === 'squad') {
