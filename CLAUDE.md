@@ -73,6 +73,11 @@ Appen läser/skriver JSON-dokument via sökvägar:
   dem ur tabellerna vid läsning och översätter tillbaka vid sparning (`getSquadDoc`,
   `saveSquadDoc`, `getMembersDoc`, `saveMembersDoc`). Ledarrader i truppen kan ha id `<id>_leader`.
 - Den inloggades egna rader markeras `isMe: true`.
+- **Skydd mot massborttagning** (efter 31 okt 2026, då registret tömdes: Administrationens Ta bort letade på e-post och
+  tog med alla 27 utan e-post; återställt ur deploy-backupen): en sparning av `members` får ta bort högst
+  `MAX_MEMBER_REMOVALS` (1) person och av `squad` högst `MAX_SQUAD_ROLE_REMOVALS` (3) lagroller, utom Rensa truppen
+  (tom lista). Annars 409 och inget ändras (`TooManyRemovalsError`). Tester i `tests/memberRemoval.test.mjs`.
+  Leta aldrig upp personer på e-post eller namn när något ska tas bort – använd id (`userId`).
 
 ### Rollen Ledare (okt 2026)
 - Lagroll `leader` (utöver admin/coach/player/parent): samma rättigheter som tränare (`MANAGER_ROLES`; i appen lägger

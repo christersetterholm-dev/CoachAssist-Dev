@@ -1812,25 +1812,27 @@ export default function ClubAdminDashboard({
   };
 
   // Delete a member
-  const handleDeleteMember = async (memberEmailToDelete: string) => {
-    if (!selectedClub) return;
-    if (memberEmailToDelete.toLowerCase() === userEmail.toLowerCase()) {
+  // Tar bort EN person, vald på id. (Tidigare på e-post: då följde alla utan e-post med, okt 2026.)
+  const handleDeleteMember = async (member: ClubMember) => {
+    if (!selectedClub || !member.userId) return;
+    if (member.email && member.email.toLowerCase() === userEmail.toLowerCase()) {
       alert("Du kan inte ta bort din egen administratörsrättighet från panelen.");
       return;
     }
 
-    if (!window.confirm(`Är du säker på att du vill ta bort medlemmen med e-post ${memberEmailToDelete} från föreningen?`)) {
+    if (!window.confirm(`Är du säker på att du vill ta bort ${member.fullName || 'medlemmen'} från föreningen?`)) {
       return;
     }
 
     try {
-      const updatedMembers = members.filter(m => m.email !== memberEmailToDelete);
+      const updatedMembers = members.filter(m => m.userId !== member.userId);
+      if (updatedMembers.length !== members.length - 1) throw new Error('Medlemmen kunde inte hittas i listan.');
       await setDoc(doc(db, 'clubs', selectedClub.id, 'teams', 'club_global', 'data', 'members'), { members: updatedMembers });
       
       setMembers(updatedMembers);
-    } catch (err) {
+    } catch (err: any) {
       console.error('Failed to delete member:', err);
-      alert('Kunde inte ta bort medlemmen.');
+      alert(`Kunde inte ta bort medlemmen. ${err?.message || ''}`.trim());
     }
   };
 
@@ -2865,8 +2867,8 @@ export default function ClubAdminDashboard({
                           <Edit3 size={15} />
                         </button>
                         <button
-                          disabled={member.email.toLowerCase() === userEmail.toLowerCase()}
-                          onClick={() => handleDeleteMember(member.email)}
+                          disabled={!!member.email && member.email.toLowerCase() === userEmail.toLowerCase()}
+                          onClick={() => handleDeleteMember(member)}
                           className="text-red-500 hover:text-red-650 p-2 hover:bg-red-50 dark:hover:bg-red-950/30 rounded-xl transition-all disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer"
                           title="Ta bort medlem"
                         >

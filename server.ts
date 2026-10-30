@@ -3455,14 +3455,22 @@ async function startServer() {
         if (creatingClub ? !isRootReq : !registry.canWriteClubDoc(access, teamId, segment)) {
           return res.status(403).json({ error: creatingClub ? 'Endast administratörer kan skapa nya föreningar.' : 'Du har inte behörighet att ändra i det här laget.' });
         }
-        if (teamId === registry.CLUB_LEVEL && segment === 'members') {
-          const list = Array.isArray(data) ? data : (data?.members || []);
-          registry.saveMembersDoc(db, clubId, list, creatingClub ? { ...access, isClubAdmin: true } : access);
-          return res.json({ success: true, updatedAt: Date.now() });
-        }
-        if (teamId !== registry.CLUB_LEVEL && segment === 'squad') {
-          registry.saveSquadDoc(db, clubId, teamId, Array.isArray(data) ? data : (data?.squad || []));
-          return res.json({ success: true, updatedAt: Date.now() });
+        try {
+          if (teamId === registry.CLUB_LEVEL && segment === 'members') {
+            const list = Array.isArray(data) ? data : (data?.members || []);
+            registry.saveMembersDoc(db, clubId, list, creatingClub ? { ...access, isClubAdmin: true } : access);
+            return res.json({ success: true, updatedAt: Date.now() });
+          }
+          if (teamId !== registry.CLUB_LEVEL && segment === 'squad') {
+            registry.saveSquadDoc(db, clubId, teamId, Array.isArray(data) ? data : (data?.squad || []));
+            return res.json({ success: true, updatedAt: Date.now() });
+          }
+        } catch (err) {
+          if (err instanceof registry.TooManyRemovalsError) {
+            console.warn(`[docs] ${pathStr} stoppades (${clubReqUser.email}): ${err.message}`);
+            return res.status(409).json({ error: err.message });
+          }
+          throw err;
         }
 
         let finalDataToSave = data;

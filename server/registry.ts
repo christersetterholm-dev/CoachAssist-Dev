@@ -261,6 +261,20 @@ export function getMembersDoc(db: Db, clubId: string, a: ClubAccess) {
   return { members: rows.map((m) => memberToClubMember(db, m, full, a.memberIds.includes(m.id))), updatedAt };
 }
 
+/** Sparningen stoppades för att den skulle ta bort för många på en gång (troligen en gammal lista i appen). */
+export class TooManyRemovalsError extends Error {
+  constructor(message: string) { super(message); this.name = 'TooManyRemovalsError'; }
+}
+
+/**
+ * Högst så här många personer får försvinna ur medlemsregistret i en sparning. Appen tar bort en i taget;
+ * en lista som saknar fler är en gammal kopia eller ett fel (okt 2026 tömdes registret när en spelare utan
+ * e-post togs bort och alla andra utan e-post följde med).
+ */
+export const MAX_MEMBER_REMOVALS = 1;
+/** Högst så här många lagroller får försvinna ur truppen i en sparning (utom Rensa truppen, som skickar en tom lista). */
+export const MAX_SQUAD_ROLE_REMOVALS = 3;
+
 export function saveMembersDoc(db: Db, clubId: string, incoming: any[], a: ClubAccess): { changed: number } {
   let changed = 0;
   const canAdmin = a.isClubAdmin;
@@ -319,10 +333,11 @@ export function saveMembersDoc(db: Db, clubId: string, incoming: any[], a: ClubA
 
     // Medlemmar som inte längre finns i listan tas bort (inte administratörer, om man inte själv är admin).
     const all: MemberRow[] = db.prepare('SELECT * FROM members WHERE club_id = ?').all(clubId);
-    for (const m of all) {
-      if (seen.has(m.id)) continue;
-      const isAdminMember = rolesOf(db, m.id).some((r) => r.role === 'admin');
-      if (isAdminMember && !canAdmin) continue;
+    const toRemove = all.filter((m) => !seen.has(m.id) && (canAdmin || !rolesOf(db, m.id).some((r) => r.role === 'admin')));
+    if (toRemove.length > MAX_MEMBER_REMOVALS) {
+      throw new TooManyRemovalsError(`Sparningen skulle ta bort ${toRemove.length} personer ur medlemsregistret på en gång och stoppades. Ladda om sidan och försök igen.`);
+    }
+    for (const m of toRemove) {
       db.prepare('DELETE FROM team_roles WHERE member_id = ?').run(m.id);
       db.prepare('DELETE FROM members WHERE id = ?').run(m.id);
       changed++;
@@ -401,10 +416,12 @@ export function saveSquadDoc(db: Db, clubId: string, teamId: string, squad: any[
       if (res === 'conflict') return;
       desired.set(`${baseId}|${role}`, { role, sort: i });
     });
-    for (const r of existing) {
-      const key = `${r.member_id}|${r.role}`;
-      if (!desired.has(key)) { removeRole(db, r.member_id, teamId, r.role); changed++; }
+    const removed = existing.filter((r: any) => !desired.has(`${r.member_id}|${r.role}`));
+    const clearing = Array.isArray(squad) && squad.length === 0;
+    if (!clearing && removed.length > MAX_SQUAD_ROLE_REMOVALS) {
+      throw new TooManyRemovalsError(`Sparningen skulle ta bort ${removed.length} personer ur truppen på en gång och stoppades. Ladda om sidan och försök igen.`);
     }
+    for (const r of removed) { removeRole(db, r.member_id, teamId, r.role); changed++; }
     for (const [key, v] of desired) {
       const memberId = key.split('|')[0];
       const prev = existing.find((r: any) => r.member_id === memberId && r.role === v.role);
