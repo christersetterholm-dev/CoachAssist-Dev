@@ -768,6 +768,7 @@ export const setDoc = async (docRef: { path: string }, data: any, options?: { me
     const errBody = await res.json().catch(() => ({}));
     throw new Error(errBody.error || `Failed to save doc (${res.status})`);
   }
+  return res.json().catch(() => ({}));
 };
 
 export const deleteDoc = async (docRef: { path: string }) => {

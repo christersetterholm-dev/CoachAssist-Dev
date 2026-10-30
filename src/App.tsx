@@ -6,6 +6,7 @@ import { auth, signInWithGoogle, db, handleFirestoreError, OperationType, getApi
 import { calculateLeaderboard } from './lib/leaderboardUtils';
 import { deduplicateSquad } from './lib/clubUtils';
 import { deduplicateSessionsList } from './utils/calendarSync';
+import { mergeSessionChanges } from './utils/sessionMerge';
 
 import GameSetup from './components/GameSetup';
 import PlayerCard from './components/PlayerCard';
@@ -985,6 +986,7 @@ export default function App() {
   const sessionIdRef = useRef<string>(Math.random().toString(36).substring(7));
   const syncUserIdRef = useRef<string | null>(null);
   const lastCloudDataRef = useRef<CoachData | null>(null);
+  const pullLatestDataRef = useRef<(() => Promise<void>) | null>(null);
   const notifiedMomentsRef = useRef<Set<string>>(new Set());
   const lastSharedLeaderboardsRef = useRef<Record<string, string>>({});
 
@@ -1751,13 +1753,18 @@ export default function App() {
     const writePromises = [];
     const { docSquadRef, docSessionsRef, docExercisesRef, docLineupsRef, docPeriodsRef, docSettingsRef } = getDocRefs(user, userProfile);
 
-    const shouldForce = forcePushAll || (sessionActionCountRef.current > 0 && !nowSquadDirty && !nowSessionsDirty && !nowExercisesDirty && !nowLineupsDirty && !nowPeriodsDirty && !nowSettingsDirty);
+    // Bara det som ändrats skickas. (Tidigare skickades allt om inget ändrats – en mobil med gammal kopia
+    // skrev då upp hela passlistan vid varje tryck, okt 2026.)
+    const shouldForce = forcePushAll;
 
     if (nowSquadDirty || shouldForce) {
       writePromises.push(setDoc(docSquadRef, { squad: pushSquad, updatedAt: now, lastUpdatedBy }));
     }
     if (nowSessionsDirty || shouldForce) {
-      writePromises.push(setDoc(docSessionsRef, { sessions: pushSessions, deletedSessions: pushDeletedSessions, updatedAt: now, lastUpdatedBy }));
+      writePromises.push(setDoc(docSessionsRef, { sessions: pushSessions, deletedSessions: pushDeletedSessions, updatedAt: now, lastUpdatedBy }).then((res: any) => {
+        // Servern hade nyare versioner av några pass och behöll dem – hämta dem så att den här enheten visar rätt
+        if (res?.keptSessions > 0) setTimeout(() => pullLatestDataRef.current?.(), 300);
+      }));
     }
     if (nowExercisesDirty || shouldForce) {
       writePromises.push(setDoc(docExercisesRef, { exercises: pushExercises, exerciseBank: pushExerciseBank, exerciseBankCategories: pushExerciseBankCategories, updatedAt: now, lastUpdatedBy }));
@@ -1943,6 +1950,8 @@ export default function App() {
       setSyncingStatus(false);
     }
   };
+
+  pullLatestDataRef.current = pullLatestData;
 
   // Sync when tab gains focus or hides (visibilitychange & beforeunload)
   useEffect(() => {
@@ -3065,7 +3074,8 @@ export default function App() {
     const current = latestDataRef.current.sessions || [];
     const removed = current.filter(s => remove.has(s.id));
     if (removed.length === 0) return;
-    replaceSessionsNow(current.filter(s => !remove.has(s.id)), [...removed, ...(latestDataRef.current.deletedSessions || [])]);
+    const deletedAt = Date.now();
+    replaceSessionsNow(current.filter(s => !remove.has(s.id)), [...removed.map(s => ({ ...s, deletedAt })), ...(latestDataRef.current.deletedSessions || [])]);
   };
 
   const addBankExercise = (exercise: Omit<BankExercise, 'id' | 'createdAt'>) => {
@@ -3259,7 +3269,7 @@ export default function App() {
       const sessionToDelete = prev.sessions.find(s => s.id === id);
       const updatedSessions = prev.sessions.filter(s => s.id !== id);
       const updatedDeleted = sessionToDelete 
-        ? [sessionToDelete, ...(prev.deletedSessions || [])]
+        ? [{ ...sessionToDelete, deletedAt: Date.now() }, ...(prev.deletedSessions || [])]
         : (prev.deletedSessions || []);
       
       updatedSessionsList = updatedSessions;
@@ -3288,7 +3298,7 @@ export default function App() {
       const restoredSession = (prev.deletedSessions || []).find(s => s.id === id);
       const updatedDeleted = (prev.deletedSessions || []).filter(s => s.id !== id);
       const updatedSessions = restoredSession
-        ? [restoredSession, ...prev.sessions]
+        ? [{ ...restoredSession, deletedAt: undefined, updatedAt: Date.now() }, ...prev.sessions]
         : prev.sessions;
       
       updatedSessionsList = updatedSessions;
@@ -4206,8 +4216,9 @@ export default function App() {
                   onUpdateSession={onUpdateSession}
                   onMovePlayer={movePlayer}
                   onCopyTeams={copyTeams}
-                  onReorderSessions={(reordered) => {
-                    onReplaceAllSessions(reordered, true);
+                  onReorderSessions={(reordered, before) => {
+                    // Kalendersynken räknades på en äldre bild av passen – lägg bara in vad den ändrade
+                    onReplaceAllSessions(before ? mergeSessionChanges(before, reordered, latestDataRef.current.sessions || []) : reordered, true);
                   }}
                 />
               </>

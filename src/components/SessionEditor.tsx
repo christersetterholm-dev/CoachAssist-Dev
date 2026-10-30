@@ -1173,7 +1173,7 @@ export default function SessionEditor({
                 <TextInput
                   type="text"
                   value={session.title}
-                  onChange={(e) => onUpdate({ ...session, title: e.target.value })}
+                  onChange={(e) => onUpdate({ ...session, title: e.target.value , updatedAt: Date.now() })}
                   placeholder="Passets namn"
                   aria-label="Passets namn"
                   className="w-full h-10 bg-transparent border-none px-0 text-lg font-bold text-zinc-900 dark:text-white focus:ring-0 placeholder:text-zinc-300 dark:placeholder:text-zinc-600"

@@ -1,6 +1,7 @@
 // API-tester för behörigheter och datalagring. Kör: npm test
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
+import nodePath from 'node:path';
 import { startServer, ROOT_EMAIL, ROOT_PASSWORD } from './helpers.mjs';
 
 let s;
@@ -227,6 +228,32 @@ test('svar på flera pass på en gång: samma regler, allt eller inget', async (
   await batch(playerToken, { memberId: 'm-player', sessionIds: ['s2', 's3'], status: null });
   assert.equal((await rsvpsOf('s2'))['m-player'], undefined);
   assert.equal((await rsvpsOf('s3'))['m-player'], undefined);
+});
+
+test('passlistan: en gammal kopia skriver inte över nyare planering, och historiken sparas', async () => {
+  const s1 = { id: 's1', title: 'Träning', date: 1, startTime: '18:00', moments: [] };
+  const plan = { id: 'p1', title: 'Träning', date: 2, startTime: '18:00', moments: [{ id: 'm1', name: 'Rondo' }], createdAt: 1, updatedAt: 200 };
+  await post('clubs/klubb1/teams/lag1/data/sessions', { sessions: [s1, plan] }, coachToken);
+  const r = await s.api('POST', '/api/docs?path=' + encodeURIComponent('clubs/klubb1/teams/lag1/data/sessions'), {
+    token: coachToken, body: { data: { sessions: [s1, { ...plan, moments: [], updatedAt: 100 }] } },
+  });
+  assert.equal(r.status, 200);
+  assert.equal(r.json.keptSessions, 1, 'appen får veta att servern behöll en nyare version');
+  const got = (await get('clubs/klubb1/teams/lag1/data/sessions', coachToken)).json.sessions.find((x) => x.id === 'p1');
+  assert.equal(got.moments.length, 1);
+
+  // En nyare ändring går igenom, och versionen före sparas i historiken
+  await post('clubs/klubb1/teams/lag1/data/sessions', { sessions: [s1, { ...plan, moments: [], updatedAt: 300 }] }, coachToken);
+  assert.equal((await get('clubs/klubb1/teams/lag1/data/sessions', coachToken)).json.sessions.find((x) => x.id === 'p1').moments.length, 0);
+  const { DatabaseSync } = await import('node:sqlite');
+  const db = new DatabaseSync(nodePath.join(s.dataDir, 'coachassist.db'), { readOnly: true });
+  const rows = db.prepare("SELECT data, replaced_by FROM sessions_history WHERE club_id = 'klubb1' AND team_id = 'lag1' ORDER BY id").all();
+  db.close();
+  assert.ok(rows.length >= 1);
+  const last = JSON.parse(rows[rows.length - 1].data);
+  assert.equal(last.sessions.find((x) => x.id === 'p1').moments.length, 1, 'versionen med planeringen finns i historiken');
+  assert.equal(rows[rows.length - 1].replaced_by, 'coach@test.se');
+  await post('clubs/klubb1/teams/lag1/data/sessions', { sessions: [s1] }, coachToken);
 });
 
 test('närvaro: egen rad per person, tränare bockar, gamla pass-kopior lägger inte tillbaka', async () => {

@@ -257,6 +257,7 @@ export interface TrainingSession {
   homeAway?: 'home' | 'away'; // Hemma eller borta (match)
   lok?: boolean; // Räknas för LOK-stöd; saknas = ja, false = nej
   seriesId?: string; // Pass som skapades tillsammans (serie) – kan ändras tillsammans
+  deletedAt?: number; // När passet lades i papperskorgen (servern låter inte en äldre kopia ta tillbaka det)
   moments: SessionMoment[];
   attendance?: string[]; // Player IDs or names
   guestPlayers?: SquadPlayer[];

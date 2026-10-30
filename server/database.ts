@@ -192,6 +192,18 @@ export const SCHEMA = `
     PRIMARY KEY (club_id, team_id, session_id, member_id)
   );
 
+  -- Tidigare versioner av lagets passlista (före varje ändring), för felsökning och återställning. Se server/sessionsMerge.ts.
+  CREATE TABLE IF NOT EXISTS sessions_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    club_id TEXT NOT NULL,
+    team_id TEXT NOT NULL,
+    saved_at INTEGER NOT NULL,
+    replaced_by TEXT,
+    client TEXT,
+    data TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_sessions_history_team ON sessions_history (club_id, team_id, saved_at);
+
   -- Intygade (låsta) närvarokort för LOK-stöd. snapshot = summorna när kortet låstes. Se server/lok.ts.
   CREATE TABLE IF NOT EXISTS lok_locks (
     club_id TEXT NOT NULL,

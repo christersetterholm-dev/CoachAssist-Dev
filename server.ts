@@ -19,6 +19,7 @@ import * as registry from './server/registry.ts';
 import * as invites from './server/invites.ts';
 import * as tacticalBoards from './server/tacticalBoards.ts';
 import * as attendance from './server/attendance.ts';
+import { mergeSessionsDoc, saveSessionsHistory } from './server/sessionsMerge.ts';
 import * as lok from './server/lok.ts';
 import * as posts from './server/posts.ts';
 import { registerChatRoutes, teamNames } from './server/chat.ts';
@@ -3496,15 +3497,32 @@ async function startServer() {
           try { prev = prevRow ? JSON.parse(prevRow.data) : null; } catch (_) {}
           if (prev && typeof prev === 'object' && !Array.isArray(prev)) finalDataToSave = { ...prev, ...finalDataToSave };
         }
+        // Passen slås ihop pass för pass så att en gammal kopia inte skriver över nyare planering
+        let keptSessions: string[] = [];
+        let prevSessionsData: string | null = null;
+        if (segment === 'sessions' && finalDataToSave && typeof finalDataToSave === 'object' && !Array.isArray(finalDataToSave)) {
+          const prevRow: any = db.prepare('SELECT data FROM clubs_data WHERE clubId = ? AND teamId = ? AND segment = ?').get(clubId, teamId, segment);
+          prevSessionsData = prevRow ? prevRow.data : null;
+          let prev: any = null;
+          try { prev = prevSessionsData ? JSON.parse(prevSessionsData) : null; } catch (_) {}
+          const merged = mergeSessionsDoc(prev, finalDataToSave);
+          finalDataToSave = merged.doc;
+          keptSessions = merged.kept;
+          if (keptSessions.length > 0) console.log(`Passlistan ${clubId}/${teamId}: behöll serverns nyare version av ${keptSessions.length} pass (${keptSessions.slice(0, 5).join(', ')})`);
+        }
         const serializedData = JSON.stringify(finalDataToSave);
         const updateTimestamp = Number(data?.updatedAt) || Date.now();
-        db.prepare(`
-          INSERT INTO clubs_data (clubId, teamId, segment, data, updatedAt)
-          VALUES (?, ?, ?, ?, ?)
-          ON CONFLICT(clubId, teamId, segment) DO UPDATE SET data = excluded.data, updatedAt = excluded.updatedAt
-        `).run(clubId, teamId, segment, serializedData, updateTimestamp);
+        const saveDoc = () => {
+          if (segment === 'sessions') saveSessionsHistory(db, clubId, teamId, prevSessionsData, serializedData, clubReqUser.email || null, String(req.headers['user-agent'] || '') || null);
+          db.prepare(`
+            INSERT INTO clubs_data (clubId, teamId, segment, data, updatedAt)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(clubId, teamId, segment) DO UPDATE SET data = excluded.data, updatedAt = excluded.updatedAt
+          `).run(clubId, teamId, segment, serializedData, updateTimestamp);
+        };
+        if (segment === 'sessions') db.transaction(saveDoc)(); else saveDoc();
 
-        res.json({ success: true, updatedAt: updateTimestamp });
+        res.json({ success: true, updatedAt: updateTimestamp, ...(segment === 'sessions' ? { keptSessions: keptSessions.length } : {}) });
       } catch (e: any) {
         if (e.name === 'JsonWebTokenError' || e.name === 'TokenExpiredError' || e.message === 'Invalid token' || e.message === 'No token provided') {
           return res.status(401).json({ error: 'Unauthorized', message: 'Session expired, please log in again.' });

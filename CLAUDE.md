@@ -142,6 +142,20 @@ Appen läser/skriver JSON-dokument via sökvägar:
 - **Ingen koppling till RF:s API** (kostar pengar, gäller inte alla föreningar). Statligt LOK-stöd kräver att närvaron
   finns i RF:s system (IdrottOnline/Idrottsarenan), så Truppio tar fram underlag men skickar inget till RF.
 
+### Passlistan: sammanslagning och historik (okt 2026)
+- Appen skickar lagets hela passlista. En mobil med gammal kopia tömde ett planerat pass (30 okt 2026, syntes i
+  åtkomstloggen: mobilen skrev upp allt tio gånger). Orsak: kalendersynken från laget.se (`handleSyncCalendar` i
+  TrainingManager, körs själv vid start/fokus) räknade på en gammal bild av passen och ersatte hela listan.
+- Nu: kalendersynkens resultat läggs in med `mergeSessionChanges` (`src/utils/sessionMerge.ts`, bara fält som synken
+  ändrade). Servern slår ihop pass för pass (`server/sessionsMerge.ts`): nyare `updatedAt` på servern vinner, och pass
+  i papperskorgen (`deletedAt`) kommer inte tillbaka från en äldre kopia. Svaret har `keptSessions`; då hämtar appen om.
+  Pass som saknas i det inskickade tas fortfarande bort (papperskorg, borttagna kalenderpass).
+- Varje ändring av passlistan sparar den tidigare versionen i tabellen `sessions_history` (100 senaste per lag, med
+  vem och vilken webbläsare som skrev över) – där kan man se vad som hände och hämta tillbaka.
+- Användarens ändringar av pass ska sätta `updatedAt: Date.now()`, annars kan de förloras mot en annan enhet.
+- `pushDirtySegments` skickar bara ändrade delar (tidigare skickades allt när inget ändrats).
+- Åtkomstloggen på servern: `~/access-logs/app.truppio.se-ssl_log` (läsa kräver Christers ok).
+
 ### Svar på kallelser
 - Tabell `rsvps` (en rad per person och aktivitet). `POST /api/rsvp`, `POST /api/rsvp/clear`.
 - Vid läsning av `sessions` läggs svaren in i varje pass (`overlayRsvps`); vid sparning tas

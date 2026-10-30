@@ -33,7 +33,8 @@ interface TrainingManagerProps {
   onRestoreSession?: (id: string) => void;
   onDeleteSessionPermanent?: (ids: string | string[]) => void;
   onCopySession: (id: string) => void;
-  onReorderSessions: (sessions: TrainingSession[]) => void;
+  // before = passen som ändringen räknades fram ur (kalendersynken), så att App kan lägga in den på senaste versionen
+  onReorderSessions: (sessions: TrainingSession[], before?: TrainingSession[]) => void;
   onUpdateSession: (updated: TrainingSession) => void;
   onMovePlayer: (exerciseId: string, playerId: string, targetTeamId: string) => void;
   onCopyTeams?: (sourceId: string, targetId: string) => void;
@@ -269,7 +270,7 @@ function SessionItem({
                     type="button"
                     onClick={(e) => {
                       e.stopPropagation();
-                      onUpdateSession({ ...session, isCompleted: false });
+                      onUpdateSession({ ...session, isCompleted: false , updatedAt: Date.now() });
                     }}
                     className="inline-flex items-center gap-0.5 px-1.5 py-0.5 bg-green-600 dark:bg-green-700 text-white text-[9px] font-black rounded-lg uppercase tracking-wider border border-green-700 hover:bg-green-700 dark:hover:bg-green-600 cursor-pointer active:scale-95 transition-all"
                     title="Markera som ej klarmarkerad"
@@ -289,7 +290,7 @@ function SessionItem({
                     type="button"
                     onClick={(e) => {
                       e.stopPropagation();
-                      onUpdateSession({ ...session, isCompleted: true });
+                      onUpdateSession({ ...session, isCompleted: true , updatedAt: Date.now() });
                     }}
                     className="inline-flex items-center gap-0.5 px-1.5 py-0.5 bg-green-50 hover:bg-green-100 dark:bg-green-955/30 text-green-600 dark:text-green-400 text-[9px] font-black rounded-lg uppercase tracking-wider border border-green-150/40 cursor-pointer active:scale-95 transition-all"
                     title="Klicka för att klarmarkera"
@@ -369,7 +370,7 @@ function SessionItem({
                     type="button"
                     onClick={(e) => {
                       e.stopPropagation();
-                      onUpdateSession({ ...session, isIgnored: !session.isIgnored });
+                      onUpdateSession({ ...session, isIgnored: !session.isIgnored , updatedAt: Date.now() });
                     }}
                     className={`p-1.5 transition-colors border rounded-lg cursor-pointer ${
                       session.isIgnored
@@ -845,10 +846,11 @@ export default function TrainingManager({
     }
 
     try {
-      const result = await syncTeamCalendar(urlToUse, sessions || [], forceOverwrite);
+      const before = sessions || [];
+      const result = await syncTeamCalendar(urlToUse, before, forceOverwrite);
 
       if (result.success) {
-        onReorderSessions(result.updatedSessions);
+        onReorderSessions(result.updatedSessions, before);
 
         const updatedSettings: TrainingSettings = {
           ...(settings || { defaultStartTime: '18:00' }),
@@ -1578,7 +1580,7 @@ export default function TrainingManager({
                             <button
                               type="button"
                               onClick={() => {
-                                onUpdateSession({ ...ignoredSession, isIgnored: false });
+                                onUpdateSession({ ...ignoredSession, isIgnored: false , updatedAt: Date.now() });
                               }}
                               className="px-2 py-1 text-[10px] font-bold text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-950/50 rounded-lg border border-indigo-150 dark:border-indigo-900/40 transition-all cursor-pointer shrink-0"
                             >
@@ -1805,7 +1807,7 @@ export default function TrainingManager({
                     <button
                       onClick={() => {
                         if (sessionToDeleteData) {
-                          onUpdateSession({ ...sessionToDeleteData, isIgnored: true });
+                          onUpdateSession({ ...sessionToDeleteData, isIgnored: true , updatedAt: Date.now() });
                         }
                         setSessionToDelete(null);
                       }}
