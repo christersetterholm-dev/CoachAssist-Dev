@@ -70,23 +70,23 @@ export default function SeriesSheet({ open, onClose, seriesId, allSessions, onUp
 
   return (
     <>
-      <Sheet open={open && !edit} onClose={onClose} title="Serie" footer={footer}>
+      <Sheet open={open && !edit} onClose={onClose} title="Återkommande pass" footer={footer}>
         <div className="px-2 pb-2 space-y-3">
           <p className="text-sm font-semibold">{describeSeries(list)}</p>
           {msg && <p className="text-sm text-emerald-700 dark:text-emerald-300" role="status">{msg}</p>}
 
           {mode === 'menu' && (
             <div className="space-y-1">
-              <MenuItem icon={<Pencil size={18} />} label="Ändra alla pass i serien" description={`${list.length} pass, även genomförda (t.ex. LOK-aktivitet)`} onClick={() => setEdit('all')} />
-              <MenuItem icon={<Pencil size={18} />} label="Ändra kommande pass" description={upcoming.length ? `${upcoming.length} pass från idag` : 'Inga kommande pass'} onClick={() => upcoming.length && setEdit('upcoming')} />
-              <MenuItem icon={<CalendarPlus size={18} />} label="Förläng serien" description="Fler veckor på samma dagar och tider" onClick={() => setMode('extend')} />
-              <MenuItem icon={<Trash2 size={18} />} label="Ta bort pass från ett datum" description="T.ex. när träningstiden byts mitt i säsongen" tone="danger" onClick={() => setMode('delete')} />
+              <MenuItem icon={<Pencil size={18} />} label="Ändra alla tillfällen" description={`${list.length} pass, även genomförda (t.ex. LOK-aktivitet)`} onClick={() => setEdit('all')} />
+              <MenuItem icon={<Pencil size={18} />} label="Ändra kommande tillfällen" description={upcoming.length ? `${upcoming.length} pass från idag` : 'Inga kommande pass'} onClick={() => upcoming.length && setEdit('upcoming')} />
+              <MenuItem icon={<CalendarPlus size={18} />} label="Lägg till fler veckor" description="Fler veckor på samma dagar och tider" onClick={() => setMode('extend')} />
+              <MenuItem icon={<Trash2 size={18} />} label="Ta bort tillfällen från ett datum" description="T.ex. när träningstiden byts mitt i säsongen" tone="danger" onClick={() => setMode('delete')} />
             </div>
           )}
 
           {mode === 'extend' && (
             <div className="space-y-2">
-              <label htmlFor="series-until" className="block text-sm font-semibold text-zinc-700 dark:text-zinc-300">Förläng till och med</label>
+              <label htmlFor="series-until" className="block text-sm font-semibold text-zinc-700 dark:text-zinc-300">Lägg till veckor till och med</label>
               <input id="series-until" type="date" value={until} onChange={(e) => setUntil(e.target.value)} className={dateInput} />
               <p className="text-sm text-zinc-500 dark:text-zinc-400">
                 {extension.length ? `${extension.length} nya pass på samma veckodagar och tider. De får samma plats, information och kallelse men inget upplägg.` : 'Inga nya datum före det datumet.'}
@@ -103,7 +103,7 @@ export default function SeriesSheet({ open, onClose, seriesId, allSessions, onUp
           )}
 
           <details className="text-sm">
-            <summary className="cursor-pointer font-semibold text-zinc-600 dark:text-zinc-300">Visa alla pass i serien</summary>
+            <summary className="cursor-pointer font-semibold text-zinc-600 dark:text-zinc-300">Visa alla tillfällen</summary>
             <ul className="mt-2 space-y-0.5 text-zinc-600 dark:text-zinc-300">
               {list.map(s => (
                 <li key={s.id} className="tabular-nums">
@@ -119,7 +119,7 @@ export default function SeriesSheet({ open, onClose, seriesId, allSessions, onUp
         open={open && !!edit}
         onClose={() => setEdit(null)}
         sessions={edit === 'upcoming' ? upcoming : list}
-        subtitle={edit === 'upcoming' ? 'Kommande pass i serien' : 'Alla pass i serien'}
+        subtitle={edit === 'upcoming' ? 'Kommande tillfällen' : 'Alla tillfällen'}
         onApply={(updated) => { onUpdateSessions(updated); setMsg(`${updated.length} pass ändrades.`); }}
       />
     </>

@@ -5,7 +5,7 @@
  * visar närvaron per spelare.
  */
 import React, { useMemo, useState } from 'react';
-import { Check, X, HelpCircle, Plus, ListChecks, Dumbbell, Trophy, Shapes, Clock, MapPin, ChevronRight, BarChart3, CalendarDays, FileCheck2, CheckSquare, Repeat } from 'lucide-react';
+import { Check, X, HelpCircle, Plus, ListChecks, Dumbbell, Trophy, Shapes, Clock, MapPin, ChevronRight, BarChart3, CalendarDays, FileCheck2, CheckSquare, Repeat, Trash2 } from 'lucide-react';
 import { RsvpStatus, SquadPlayer, TrainingSession, TrainingSettings } from '../../types';
 import { categorizeSession, SessionCategory } from '../../utils/sessionCategory';
 import { Button, Card, EmptyState, MenuItem, SegmentedTabs, Sheet } from '../ui';
@@ -32,7 +32,7 @@ interface AttendanceViewProps {
   onOpenSession: (id: string, tab?: 'schema' | 'attendance' | 'rsvp') => void;
   onOpenMultiRsvp: () => void;
   onCreateSessions: (sessions: TrainingSession[], notify: boolean) => void;
-  /** Serier och Välj flera */
+  /** Återkommande pass och Välj flera */
   onUpdateSessions: (changed: TrainingSession[]) => void;
   onAddSessions: (created: TrainingSession[]) => void;
   onDeleteSessions: (ids: string[]) => void;
@@ -74,10 +74,11 @@ export default function AttendanceView(props: AttendanceViewProps) {
   const [isNewOpen, setIsNewOpen] = useState(false);
   const [savingId, setSavingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  // Välj flera pass och ändra dem på en gång; serier
+  // Välj flera pass och ändra eller ta bort dem på en gång; återkommande pass (serier)
   const [selecting, setSelecting] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [isBulkOpen, setIsBulkOpen] = useState(false);
+  const [isDeleteOpen, setIsDeleteOpen] = useState(false);
   const [isSeriesListOpen, setIsSeriesListOpen] = useState(false);
   const [openSeriesId, setOpenSeriesId] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -163,7 +164,7 @@ export default function AttendanceView(props: AttendanceViewProps) {
                 {selecting ? 'Sluta välja' : 'Välj flera'}
               </Button>
               {series.length > 0 && (
-                <Button size="sm" variant="secondary" icon={<Repeat size={16} />} onClick={() => setIsSeriesListOpen(true)}>Serier ({series.length})</Button>
+                <Button size="sm" variant="secondary" icon={<Repeat size={16} />} onClick={() => setIsSeriesListOpen(true)}>Återkommande pass ({series.length})</Button>
               )}
             </div>
           )}
@@ -232,6 +233,7 @@ export default function AttendanceView(props: AttendanceViewProps) {
             <div className="sticky bottom-3 z-20">
               <Card className="flex flex-wrap items-center gap-2 shadow-lg">
                 <span className="text-sm font-semibold flex-1 min-w-[8rem]">{selected.size} valda</span>
+                <Button size="sm" variant="ghost" icon={<Trash2 size={16} />} disabled={selected.size === 0} onClick={() => setIsDeleteOpen(true)} className="text-red-600! dark:text-red-400! hover:bg-red-50! dark:hover:bg-red-950/40!">Ta bort</Button>
                 <Button size="sm" variant="ghost" onClick={() => setSelected(new Set(shown.map(s => s.id)))}>Välj alla i listan</Button>
                 {selected.size > 0 && <Button size="sm" variant="ghost" onClick={() => setSelected(new Set())}>Avmarkera</Button>}
                 <Button size="sm" disabled={selected.size === 0} onClick={() => setIsBulkOpen(true)}>Ändra {selected.size || ''} pass</Button>
@@ -250,11 +252,46 @@ export default function AttendanceView(props: AttendanceViewProps) {
             subtitle={`${selectedSessions.length} valda pass`}
             onApply={(updated) => { onUpdateSessions(updated); setNotice(`${updated.length} pass ändrades.`); stopSelecting(); }}
           />
-          <Sheet open={isSeriesListOpen} onClose={() => setIsSeriesListOpen(false)} title="Serier">
+          <Sheet
+            open={isDeleteOpen}
+            onClose={() => setIsDeleteOpen(false)}
+            title={`Ta bort ${selectedSessions.length} pass?`}
+            footer={
+              <div className="flex gap-2 justify-end">
+                <Button variant="secondary" onClick={() => setIsDeleteOpen(false)}>Avbryt</Button>
+                <Button
+                  variant="danger"
+                  icon={<Trash2 size={18} />}
+                  disabled={selectedSessions.length === 0}
+                  onClick={() => {
+                    onDeleteSessions(selectedSessions.map(s => s.id));
+                    setNotice(`${selectedSessions.length} pass flyttades till papperskorgen. De kan återställas från Kalendern.`);
+                    setIsDeleteOpen(false);
+                    stopSelecting();
+                  }}
+                >
+                  Ta bort {selectedSessions.length} pass
+                </Button>
+              </div>
+            }
+          >
+            <div className="px-5 pb-4 space-y-3">
+              <p className="text-sm text-zinc-600 dark:text-zinc-300">Passen flyttas till papperskorgen i Kalendern och kan återställas därifrån.</p>
+              <ul className="space-y-1 max-h-64 overflow-y-auto">
+                {[...selectedSessions].sort((a, b) => sessionStart(a) - sessionStart(b)).map(s => (
+                  <li key={s.id} className="text-sm">
+                    <span className="font-semibold">{new Date(s.date).toLocaleDateString('sv-SE', { weekday: 'short', day: 'numeric', month: 'short' })}</span>
+                    <span className="text-zinc-500 dark:text-zinc-400"> · {sessionTitle(s)}{s.startTime ? ` ${s.startTime}` : ''}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </Sheet>
+          <Sheet open={isSeriesListOpen} onClose={() => setIsSeriesListOpen(false)} title="Återkommande pass">
             <div className="px-2 pb-2 space-y-1">
-              <p className="text-sm text-zinc-500 dark:text-zinc-400 px-1 pb-1">Pass som skapades tillsammans. Öppna en serie för att ändra, förlänga eller ta bort pass.</p>
+              <p className="text-sm text-zinc-500 dark:text-zinc-400 px-1 pb-1">Pass som skapades tillsammans och upprepas. Öppna en för att ändra, lägga till fler veckor eller ta bort tillfällen.</p>
               {series.map(x => (
-                <MenuItem key={x.id} icon={<Repeat size={18} />} label={x.sessions[0].title || 'Serie'} description={describeSeries(x.sessions)} onClick={() => { setIsSeriesListOpen(false); setOpenSeriesId(x.id); }} />
+                <MenuItem key={x.id} icon={<Repeat size={18} />} label={x.sessions[0].title || 'Återkommande pass'} description={describeSeries(x.sessions)} onClick={() => { setIsSeriesListOpen(false); setOpenSeriesId(x.id); }} />
               ))}
             </div>
           </Sheet>
@@ -321,7 +358,7 @@ const ActivityRow: React.FC<{
           <span className="block font-semibold truncate">
             {sessionTitle(s)}
             {s.homeAway && <span className="ml-1.5 text-xs font-medium text-zinc-500 dark:text-zinc-400">{s.homeAway === 'home' ? 'Hemma' : 'Borta'}</span>}
-            {isCoachOrAdmin && s.seriesId && <span className="ml-1.5 text-xs font-medium text-indigo-600 dark:text-indigo-300">Serie</span>}
+            {isCoachOrAdmin && s.seriesId && <span className="ml-1.5 text-xs font-medium text-indigo-600 dark:text-indigo-300">Återkommande</span>}
             {isCoachOrAdmin && s.lok === false && <span className="ml-1.5 text-xs font-medium text-zinc-500 dark:text-zinc-400">Ej LOK</span>}
           </span>
           <span className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">

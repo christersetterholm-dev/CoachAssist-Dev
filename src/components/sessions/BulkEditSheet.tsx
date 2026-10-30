@@ -13,7 +13,7 @@ interface BulkEditSheetProps {
   open: boolean;
   onClose: () => void;
   sessions: TrainingSession[];
-  /** T.ex. "12 valda pass" eller "Alla pass i serien". */
+  /** T.ex. "12 valda pass" eller "Alla tillfällen". */
   subtitle: string;
   onApply: (updated: TrainingSession[]) => void;
 }

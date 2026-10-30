@@ -464,7 +464,7 @@ export default function MobileCalendarView({
                     setShowPlanMenu(prev => !prev);
                   }}
                   className="h-10 px-3 sm:px-4 inline-flex items-center justify-center gap-1.5 bg-indigo-600 hover:bg-indigo-700 dark:bg-indigo-500 text-white rounded-xl text-sm font-semibold transition-all shadow-sm active:scale-95 cursor-pointer"
-                  title="Planera ny aktivitet (enstaka eller serie)"
+                  title="Planera ny aktivitet (enstaka eller återkommande)"
                 >
                   <Plus size={18} strokeWidth={2.5} />
                   <span className="hidden sm:inline">Ny</span>
@@ -503,7 +503,7 @@ export default function MobileCalendarView({
                           className="w-full text-left px-4 py-2.5 text-xs font-bold text-zinc-700 dark:text-zinc-200 hover:bg-zinc-50 dark:hover:bg-zinc-800 flex items-center gap-2 cursor-pointer transition-colors border-t border-zinc-100 dark:border-zinc-800"
                         >
                           <Calendar size={13} className="text-zinc-400" />
-                          <span>Skapa serie träningspass</span>
+                          <span>Återkommande träningspass</span>
                         </button>
                       )}
                       {onOpenMultiRsvp && (

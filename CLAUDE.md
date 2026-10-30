@@ -116,11 +116,14 @@ Appen läser/skriver JSON-dokument via sökvägar:
 - **Serier och ändra flera pass** (`src/components/sessions/`): pass som skapas tillsammans (serieformuläret i Kalendern,
   "Varje vecka" i Ny aktivitet) får samma `seriesId`. Ändras tid, plats, samling, information, typ eller LOK i passvyns
   "Tid och plats" frågar appen: bara det här / det här och kommande / alla i serien (även genomförda); pass som har ett
-  annat värde behåller det om man inte bockar "skriv över" (`applyChanges` med `onlyIf`). "Hantera serien" och knappen
-  Serier i Närvaro öppnar `SeriesSheet`: ändra alla eller kommande (`BulkEditSheet`), förläng (`extendSeries`, samma
-  veckodagar/tider, inget upplägg/svar/närvaro) och ta bort pass från ett datum (till papperskorgen). "Välj flera" i
-  Närvaro → Aktiviteter ändrar valfria pass (även gamla utan serie, t.ex. LOK på genomförda). LOK-rutan finns i "Tid och
-  plats". Tester i `tests/series.test.mjs`.
+  annat värde behåller det om man inte bockar "skriv över" (`applyChanges` med `onlyIf`). "Hantera alla tillfällen" och
+  knappen Återkommande pass i Närvaro öppnar `SeriesSheet`: ändra alla eller kommande (`BulkEditSheet`), lägg till fler
+  veckor (`extendSeries`, samma veckodagar/tider, inget upplägg/svar/närvaro) och ta bort tillfällen från ett datum (till
+  papperskorgen). "Välj flera" i Närvaro → Aktiviteter ändrar eller tar bort (till papperskorgen, efter bekräftelse)
+  valfria pass (även gamla utan serie, t.ex. LOK på genomförda). LOK-rutan finns i "Tid och plats". Tester i
+  `tests/series.test.mjs`.
+  **Ordval:** i appens texter heter en serie **återkommande pass** och passen i den **tillfällen** – "serie" betyder
+  seriespelet (Lagsidans Serien/Tabellen). I koden heter det fortfarande `seriesId`, `SeriesSheet` osv.
   **Viktigt:** ändringar av flera pass räknas fram ur `latestDataRef` och sparas i ett anrop (`replaceSessionsNow`,
   `onUpdateSessions`, `onDeleteSessions` i App.tsx). Att anropa `onDeleteSession`/`onUpdateSession` i en loop skickade
   en tom passlista till servern (variabeln som sätts i `setData(prev => …)` hinner inte sättas) – det tömde den lokala

@@ -669,7 +669,7 @@ export default function TrainingManager({
 
   const handleCreateSeries = () => {
     if (selectedDates.length === 0) {
-      alert("Välj minst ett datum för serien.");
+      alert("Välj minst ett datum.");
       return;
     }
 
@@ -1959,7 +1959,7 @@ export default function TrainingManager({
               {/* Header */}
               <div className="flex items-center justify-between mb-4 pb-4 border-b border-zinc-50 dark:border-zinc-800">
                 <div>
-                  <h3 className="text-xl font-black text-zinc-900 dark:text-white uppercase tracking-tight">Planera en serie träningspass</h3>
+                  <h3 className="text-xl font-black text-zinc-900 dark:text-white uppercase tracking-tight">Återkommande träningspass</h3>
                   <p className="text-xs text-zinc-400 font-bold mt-0.5">Skapa flera träningar på en och samma gång</p>
                 </div>
                 <button type="button" onClick={() => setShowSeriesModal(false)} className="p-1 -mr-1 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 transition-colors rounded-xl">
@@ -2038,7 +2038,7 @@ export default function TrainingManager({
                     rows={3}
                     className="w-full bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-xl px-3 py-2.5 text-sm font-bold text-zinc-900 dark:text-white focus:ring-2 focus:ring-indigo-500 outline-none resize-none min-h-[80px]"
                   />
-                  <span className="text-[10px] text-zinc-400 dark:text-zinc-500 block mt-1 font-bold">Visas i kallelsen för alla pass i serien och kan ändras per pass.</span>
+                  <span className="text-[10px] text-zinc-400 dark:text-zinc-500 block mt-1 font-bold">Visas i kallelsen för alla passen och kan ändras per pass.</span>
                 </div>
               </div>
 

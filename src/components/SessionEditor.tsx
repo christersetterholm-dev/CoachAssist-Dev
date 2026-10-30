@@ -1377,10 +1377,10 @@ export default function SessionEditor({
           {seriesList.length > 1 && (
             <div className="p-3 rounded-2xl bg-indigo-50/70 dark:bg-indigo-950/30 text-sm flex items-center gap-3">
               <span className="flex-1 min-w-0">
-                <span className="block font-semibold">Del av en serie</span>
+                <span className="block font-semibold">Återkommande pass</span>
                 <span className="block text-zinc-600 dark:text-zinc-300 truncate">{describeSeries(seriesList)}</span>
               </span>
-              {onUpdateSessions && <Button size="sm" variant="secondary" onClick={() => { setShowTimePicker(false); setShowSeries(true); }}>Hantera serien</Button>}
+              {onUpdateSessions && <Button size="sm" variant="secondary" onClick={() => { setShowTimePicker(false); setShowSeries(true); }}>Hantera alla tillfällen</Button>}
             </div>
           )}
           <div>
@@ -1468,7 +1468,7 @@ export default function SessionEditor({
       <Sheet
         open={!!seriesPrompt}
         onClose={() => setSeriesPrompt(null)}
-        title="Ändra fler pass i serien?"
+        title="Ändra även andra tillfällen?"
       >
         {seriesPrompt && (() => {
           const fields = Object.keys(seriesPrompt.changes).map(f => FIELD_LABEL[f as keyof typeof FIELD_LABEL].toLowerCase());
@@ -1481,11 +1481,11 @@ export default function SessionEditor({
           };
           return (
             <div className="px-2 pb-2 space-y-3">
-              <p className="text-sm text-zinc-600 dark:text-zinc-300">Du ändrade {fields.join(', ')}. Passet är del av en serie med {seriesList.length} pass.</p>
+              <p className="text-sm text-zinc-600 dark:text-zinc-300">Du ändrade {fields.join(', ')}. Passet återkommer, totalt {seriesList.length} tillfällen.</p>
               <div className="space-y-2">
                 <Button block variant="secondary" onClick={() => setSeriesPrompt(null)}>Bara det här passet</Button>
                 <Button block variant="secondary" disabled={later.length === 0} onClick={() => apply(later)}>Det här och kommande ({later.length + 1} pass)</Button>
-                <Button block onClick={() => apply(others)}>Alla i serien ({seriesList.length} pass, även genomförda)</Button>
+                <Button block onClick={() => apply(others)}>Alla tillfällen ({seriesList.length} pass, även genomförda)</Button>
               </div>
               <label className="flex items-start gap-3 cursor-pointer">
                 <input type="checkbox" checked={overwriteOthers} onChange={(e) => setOverwriteOthers(e.target.checked)} className="w-5 h-5 rounded accent-indigo-600 shrink-0 mt-0.5" />
