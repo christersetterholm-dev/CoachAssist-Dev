@@ -68,6 +68,28 @@ export const responseSummary = (s: TrainingSession, people: SquadPlayer[]) => {
   return { attending, partial, declined, unanswered: Math.max(0, people.length - attending - partial - declined) };
 };
 
+export type SplitCount = { players: number; leaders: number };
+
+/**
+ * Svaren på en kallelse uppdelade på spelare och ledare (för Översikt och passvyn).
+ * Provspelare (pass.guestPlayers) läggs till just det här passet och räknas som spelare som kommer.
+ */
+export const rsvpCounts = (s: TrainingSession, squad: SquadPlayer[]) => {
+  const players = teamPlayers(squad);
+  const p = responseSummary(s, players);
+  const l = responseSummary(s, teamLeaders(squad));
+  const guests = (s.guestPlayers || []).length;
+  const split = (k: 'attending' | 'partial' | 'declined' | 'unanswered', extra = 0): SplitCount => ({ players: p[k] + extra, leaders: l[k] });
+  return {
+    attending: split('attending', guests),
+    partial: split('partial'),
+    declined: split('declined'),
+    unanswered: split('unanswered'),
+    guests,
+    totalPlayers: players.length + guests,
+  };
+};
+
 /**
  * Den inloggade svarar själv på en kallelse. Samma svar igen tar bort svaret.
  * Passet uppdateras direkt i appen och sparas sedan med /api/rsvp; går det inte återställs det.

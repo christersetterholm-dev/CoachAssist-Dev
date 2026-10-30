@@ -15,6 +15,8 @@ import { isMatchSession } from '../utils/sessionCategory';
 import type { Post } from '../lib/posts';
 import { PostsHomeSection } from './PostsView';
 import { Avatar, Badge, Button, Card, EmptyState, SectionHeader } from './ui';
+import { rsvpCounts } from './attendance/shared';
+import { SplitCaption, SplitNumber } from './attendance/RsvpCountTile';
 
 interface HomeViewProps {
   user: User | null;
@@ -124,8 +126,6 @@ export default function HomeView(props: HomeViewProps) {
     return mine.find(p => p.role !== 'leader') || mine[0] || null;
   }, [squad]);
 
-  const players = useMemo(() => squad.filter(p => p.role !== 'leader' && !p.id.endsWith('_leader')), [squad]);
-
   const upcoming = useMemo(() => {
     const now = Date.now();
     return sessions
@@ -156,17 +156,6 @@ export default function HomeView(props: HomeViewProps) {
     }
   }, [squad, exercises, activePeriod, periods, sessions]);
 
-  const responseSummary = (s: TrainingSession) => {
-    const r = s.rsvps || {};
-    let attending = 0, partial = 0, declined = 0;
-    players.forEach(p => {
-      const st = r[p.id]?.status;
-      if (st === 'attending') attending++;
-      else if (st === 'partial') partial++;
-      else if (st === 'declined') declined++;
-    });
-    return { attending, partial, declined, unanswered: Math.max(0, players.length - attending - partial - declined) };
-  };
 
   const answer = async (s: TrainingSession, status: RsvpStatus) => {
     if (!me) return;
@@ -288,14 +277,15 @@ export default function HomeView(props: HomeViewProps) {
                       </>
                     )}
                     {isCoachOrAdmin && (() => {
-                      const r = responseSummary(next);
-                      const total = Math.max(1, players.length);
+                      // Spelare (provspelare räknas till Kommer), ledare inom parentes
+                      const r = rsvpCounts(next, squad);
+                      const total = Math.max(1, r.totalPlayers);
                       return (
                         <>
                           <div className="flex h-2.5 rounded-full overflow-hidden bg-zinc-100 dark:bg-zinc-800">
-                            <div className="bg-emerald-500" style={{ width: `${(r.attending / total) * 100}%` }} />
-                            <div className="bg-amber-400" style={{ width: `${(r.partial / total) * 100}%` }} />
-                            <div className="bg-red-500" style={{ width: `${(r.declined / total) * 100}%` }} />
+                            <div className="bg-emerald-500" style={{ width: `${(r.attending.players / total) * 100}%` }} />
+                            <div className="bg-amber-400" style={{ width: `${(r.partial.players / total) * 100}%` }} />
+                            <div className="bg-red-500" style={{ width: `${(r.declined.players / total) * 100}%` }} />
                           </div>
                           <div className="grid grid-cols-4 gap-2 text-center">
                             {[
@@ -305,11 +295,12 @@ export default function HomeView(props: HomeViewProps) {
                               { n: r.unanswered, l: 'Ej svarat', c: 'text-zinc-500' },
                             ].map(x => (
                               <div key={x.l}>
-                                <div className={`text-xl font-bold ${x.c}`}>{x.n}</div>
+                                <SplitNumber n={x.n} className={`block text-xl font-bold ${x.c}`} />
                                 <div className="text-xs text-zinc-500 dark:text-zinc-400">{x.l}</div>
                               </div>
                             ))}
                           </div>
+                          <SplitCaption counts={r} className="text-center -mt-1" />
                           <div className="flex flex-wrap gap-2 pt-1">
                             <Button size="sm" icon={<ClipboardList size={16} />} onClick={() => onOpenSession(next.id, 'schema')}>Planera</Button>
                             <Button size="sm" variant="secondary" icon={<Users size={16} />} onClick={() => onOpenSession(next.id, 'rsvp')}>Kallelse & svar</Button>
@@ -346,7 +337,7 @@ export default function HomeView(props: HomeViewProps) {
                 <Card padded={false} className="divide-y divide-zinc-100 dark:divide-zinc-800">
                   {later.map(s => {
                     const my = me ? s.rsvps?.[me.id]?.status : undefined;
-                    const r = isCoachOrAdmin ? responseSummary(s) : null;
+                    const r = isCoachOrAdmin ? rsvpCounts(s, squad) : null;
                     return (
                       <div key={s.id} className="flex items-center gap-3 px-4 py-3">
                         <button type="button" onClick={() => onOpenSession(s.id, isCoachOrAdmin ? 'schema' : 'rsvp')} className="flex-1 min-w-0 flex items-center gap-3 text-left cursor-pointer">
@@ -382,7 +373,7 @@ export default function HomeView(props: HomeViewProps) {
                         )}
                         {r && (
                           <div className="text-right shrink-0">
-                            <div className="text-sm font-bold text-emerald-600 dark:text-emerald-400">{r.attending + r.partial}</div>
+                            <SplitNumber n={{ players: r.attending.players + r.partial.players, leaders: r.attending.leaders + r.partial.leaders }} className="block text-sm font-bold text-emerald-600 dark:text-emerald-400" />
                             <div className="text-[11px] text-zinc-500">kommer</div>
                           </div>
                         )}

@@ -32,7 +32,8 @@ import { saveRsvp, clearRsvps } from '../lib/firebase';
 import { notifyTeamAboutSessions } from '../lib/push';
 import { isMatchSession } from '../utils/sessionCategory';
 import { Button, Card, SectionHeader, SegmentedTabs, Badge, EmptyState, Avatar, Sheet, MenuItem, TextArea, TextInput } from './ui';
-import { teamLeaders } from './attendance/shared';
+import { rsvpCounts, teamLeaders } from './attendance/shared';
+import { SplitCaption, SplitNumber } from './attendance/RsvpCountTile';
 
 // Antal i en grupp, t.ex. "3 st, varav 2 spelare & 1 ledare" – för planeringen av passet.
 const GroupCount: React.FC<{ members: SquadPlayer[] }> = ({ members }) => {
@@ -775,17 +776,20 @@ export const SessionRsvpView: React.FC<SessionRsvpViewProps> = ({
     </Card>
   ) : null;
 
+  // Spelare (provspelare räknas till Kommer), ledare inom parentes – samma som på Översikt
+  const split = rsvpCounts(session, safeSquad);
   const countTiles = (
+    <div>
     <div className={`grid grid-cols-4 gap-2 ${isCoachOrAdmin ? 'md:grid-cols-2 xl:grid-cols-4' : ''}`}>
       {([
-        { id: 'attending', n: stats.attending, l: 'Kommer', c: 'text-emerald-600 dark:text-emerald-400' },
-        { id: 'partial', n: stats.partial, l: 'Delvis', c: 'text-amber-600 dark:text-amber-400' },
-        { id: 'declined', n: stats.declined, l: 'Kan inte', c: 'text-red-600 dark:text-red-400' },
-        { id: 'unanswered', n: stats.unanswered, l: 'Ej svarat', c: 'text-zinc-500 dark:text-zinc-400' },
-      ] as { id: Filter; n: number; l: string; c: string }[]).map(t => {
+        { id: 'attending', n: split.attending, l: 'Kommer', c: 'text-emerald-600 dark:text-emerald-400' },
+        { id: 'partial', n: split.partial, l: 'Delvis', c: 'text-amber-600 dark:text-amber-400' },
+        { id: 'declined', n: split.declined, l: 'Kan inte', c: 'text-red-600 dark:text-red-400' },
+        { id: 'unanswered', n: split.unanswered, l: 'Ej svarat', c: 'text-zinc-500 dark:text-zinc-400' },
+      ] as { id: Filter; n: { players: number; leaders: number }; l: string; c: string }[]).map(t => {
         const content = (
           <>
-            <span className={`block text-2xl font-bold tabular-nums ${t.c}`}>{t.n}</span>
+            <SplitNumber n={t.n} className={`block text-2xl font-bold ${t.c}`} />
             <span className="block text-xs font-semibold text-zinc-500 dark:text-zinc-400 truncate">{t.l}</span>
           </>
         );
@@ -805,6 +809,8 @@ export const SessionRsvpView: React.FC<SessionRsvpViewProps> = ({
           <div key={t.id} className="rounded-xl px-2 py-2 text-center bg-zinc-50 dark:bg-zinc-800/60">{content}</div>
         );
       })}
+    </div>
+    <SplitCaption counts={split} className="mt-2 text-center" />
     </div>
   );
 
