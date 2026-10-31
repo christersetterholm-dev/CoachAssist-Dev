@@ -100,6 +100,9 @@ Appen läser/skriver JSON-dokument via sökvägar:
 - Läsa lagets data: medlem i laget. Skriva: tränare i laget eller föreningsadmin.
 - Personnummer/telefon/e-post visas bara för tränare (och för personen själv).
 - Bara root-admin skapar föreningar. Tränare kan inte ge sig själva admin-roll.
+- Inloggning (okt 2026): efter 10 fel spärras ett konto i 15 min oavsett avsändare (`loginFailures` i server.ts,
+  tester i `tests/loginLock.test.mjs`). Avsändaren för adressspärrarna är SISTA värdet i X-Forwarded-For (`clientIp`;
+  det första kan vem som helst hitta på). Tillfälliga lösenord görs med `generateTempPassword` (ord + 6 slumpade tecken).
 - Konton kopplas automatiskt till medlemsrader med samma id eller e-post vid inloggning.
 
 ### Närvaro (menyn, gren `narvaro`, okt 2026)
@@ -463,7 +466,6 @@ npm run set-password -- e@post.se            # lokalt konto/lösenord
 
 - Föräldrar kopplade till barn (svara på kallelser åt dem).
 - `admins/root_admins_list` kan läsas av alla inloggade – begränsa.
-- Rate-limit litar på `X-Forwarded-For` (kan förfalskas).
 - Vite-HMR via websocket fungerar inte i middleware-läget (ofarligt, sidan laddas om manuellt).
 - Dela upp `server.ts`, `App.tsx`, `LineupBuilder.tsx` gradvis; appen laddas som ett stort JS-paket (3,4 MB).
 - Gränssnittet, kvar att göra i nya stilen:

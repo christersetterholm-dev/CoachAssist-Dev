@@ -455,10 +455,47 @@ setInterval(() => {
   }
 }, 60000);
 
+// Avsändarens adress. Webbhotellets proxy lägger den riktiga adressen SIST i X-Forwarded-For; det första värdet
+// kan vem som helst skicka med själv (då gick spärren mot lösenordsgissning att kringgå).
+function clientIp(req: express.Request): string {
+  const parts = String(req.headers['x-forwarded-for'] || '').split(',').map((p) => p.trim()).filter(Boolean);
+  return parts[parts.length - 1] || req.socket.remoteAddress || 'unknown';
+}
+
+// Misslyckade inloggningar per konto (e-post/användarnamn), oavsett varifrån de kommer. Efter
+// LOGIN_FAILS_MAX fel spärras kontot i LOGIN_FAIL_WINDOW_MS, även för rätt lösenord.
+const LOGIN_FAILS_MAX = 10;
+const LOGIN_FAIL_WINDOW_MS = 15 * 60 * 1000;
+const loginFailures = new Map<string, RateLimitRecord>();
+function loginLockedFor(account: string): number {
+  const r = loginFailures.get(account);
+  if (!r || r.resetAt <= Date.now()) return 0;
+  return r.count >= LOGIN_FAILS_MAX ? Math.ceil((r.resetAt - Date.now()) / 1000) : 0;
+}
+function recordLoginFailure(account: string) {
+  const now = Date.now();
+  const r = loginFailures.get(account);
+  if (!r || r.resetAt <= now) loginFailures.set(account, { count: 1, resetAt: now + LOGIN_FAIL_WINDOW_MS });
+  else r.count += 1;
+}
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, record] of loginFailures.entries()) if (record.resetAt <= now) loginFailures.delete(key);
+}, 60000);
+
+/** Tillfälligt lösenord: ett ord och sex slumpade tecken utan förväxlingsbara (0/O, 1/l/I), t.ex. "Stark-K7mPq4". */
+const TEMP_PASSWORD_WORDS = ['Snabb', 'Stark', 'Smidig', 'Skarp', 'Klok', 'Pigg', 'Trygg', 'Lirare', 'Kampe', 'Stjarna'];
+const TEMP_PASSWORD_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789';
+export function generateTempPassword(): string {
+  let tail = '';
+  for (let i = 0; i < 6; i++) tail += TEMP_PASSWORD_CHARS[crypto.randomInt(TEMP_PASSWORD_CHARS.length)];
+  return `${TEMP_PASSWORD_WORDS[crypto.randomInt(TEMP_PASSWORD_WORDS.length)]}-${tail}`;
+}
+
 function createRateLimiter(options: { windowMs: number; max: number; message: string }) {
   return (req: express.Request, res: express.Response, next: express.NextFunction) => {
-    const clientIp = (req.headers['x-forwarded-for'] as string || req.socket.remoteAddress || 'unknown').split(',')[0].trim();
-    const key = `${req.path}:${clientIp}`;
+    const ip = clientIp(req);
+    const key = `${req.path}:${ip}`;
     const now = Date.now();
 
     const record = rateLimitMap.get(key);
@@ -1292,11 +1329,18 @@ async function startServer() {
       return res.status(400).json({ error: 'E-post/användarnamn och lösenord krävs.' });
     }
 
+    const locked = loginLockedFor(loginInput);
+    if (locked > 0) {
+      res.setHeader('Retry-After', locked);
+      return res.status(429).json({ error: 'För många felaktiga inloggningsförsök för det här kontot. Vänta 15 minuter och försök igen.' });
+    }
+
     try {
       // Support matching all potential candidate rows for this email or username
       let candidates: any[] = db.prepare('SELECT * FROM users WHERE LOWER(email) = ? OR LOWER(username) = ?').all(loginInput, loginInput);
 
       if (candidates.length === 0) {
+        recordLoginFailure(loginInput);
         return res.status(400).json({ error: 'Fel e-post/användarnamn eller lösenord.' });
       }
 
@@ -1315,8 +1359,10 @@ async function startServer() {
       }
 
       if (!userRow) {
+        recordLoginFailure(loginInput);
         return res.status(400).json({ error: 'Fel e-post/användarnamn eller lösenord.' });
       }
+      loginFailures.delete(loginInput);
 
       // If multiple accounts existed for this email, synchronize the validated password hash and login status across all of them
       if (candidates.length > 1 && userRow.email) {
@@ -2162,7 +2208,7 @@ async function startServer() {
         `).run(finalEmail, cleanUsername, passwordHash, hasLoggedIn, tempPassword, targetUserId);
       } else {
         if (!passwordHash) {
-          const defaultPass = 'Coach' + Math.floor(1000 + Math.random() * 9000);
+          const defaultPass = generateTempPassword();
           passwordHash = await bcrypt.hash(defaultPass, 10);
           tempPassword = defaultPass;
         }
@@ -2225,12 +2271,7 @@ async function startServer() {
         return candidate;
       };
 
-      const adjectives = ['Snabb', 'Stark', 'Smidig', 'Skarp', 'Klok', 'Pigg', 'Trygg', 'Lirare', 'Kämpe', 'Stjärna'];
-      const getRandomPassword = () => {
-        const adj = adjectives[Math.floor(Math.random() * adjectives.length)];
-        const num = Math.floor(1000 + Math.random() * 9000);
-        return `${adj}-${num}`;
-      };
+      const getRandomPassword = generateTempPassword;
 
       for (const m of members) {
         let targetId = m.userId || m.id;
