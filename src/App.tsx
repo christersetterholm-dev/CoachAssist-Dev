@@ -7,6 +7,7 @@ import { calculateLeaderboard } from './lib/leaderboardUtils';
 import { deduplicateSquad } from './lib/clubUtils';
 import { deduplicateSessionsList } from './utils/calendarSync';
 import { mergeSessionChanges } from './utils/sessionMerge';
+import { applyTeamOrder, sameTeams, sortedTeamIds, SORT_SETTLE_MS } from './utils/teamOrder';
 
 import GameSetup from './components/GameSetup';
 import PlayerCard from './components/PlayerCard';
@@ -184,6 +185,20 @@ const mergeLineups = (remoteLineups: Lineup[] = [], localLineups: Lineup[] = [])
   }
   return Array.from(map.values());
 };
+
+// Vilka delar av lagets data skiljer sig från det som senast fanns på servern (= måste sparas)?
+const dirtySegments = (cloud: CoachData, d: CoachData) => {
+  const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
+  return {
+    squad: !same(cloud.squad, d.squad),
+    sessions: !same(cloud.sessions, d.sessions) || !same(cloud.deletedSessions, d.deletedSessions),
+    exercises: !same(cloud.exercises, d.exercises) || !same(cloud.exerciseBank, d.exerciseBank) || !same(cloud.exerciseBankCategories, d.exerciseBankCategories),
+    lineups: !same(cloud.lineups, d.lineups) || cloud.activeLineupId !== d.activeLineupId,
+    periods: !same(cloud.periods, d.periods) || cloud.currentPeriodId !== d.currentPeriodId,
+    settings: cloud.teamUrl !== d.teamUrl || cloud.adminUrl !== d.adminUrl || cloud.seriesUrl !== d.seriesUrl || !same(cloud.customFormations, d.customFormations) || !same(cloud.pinnedFormationIds, d.pinnedFormationIds) || !same(cloud.trainingSettings, d.trainingSettings) || cloud.activeExerciseId !== d.activeExerciseId,
+  };
+};
+const hasDirtySegments = (cloud: CoachData, d: CoachData) => Object.values(dirtySegments(cloud, d)).some(Boolean);
 
 const mergeExercises = (remoteExercises: Exercise[] = [], localExercises: Exercise[] = []): Exercise[] => {
   const map = new Map<string, Exercise>();
@@ -1745,12 +1760,13 @@ export default function App() {
     } = effectiveData;
 
     const currentSynced = lastCloudDataRef.current || INITIAL_DATA;
-    const nowSquadDirty = JSON.stringify(currentSynced.squad) !== JSON.stringify(pushSquad);
-    const nowSessionsDirty = JSON.stringify(currentSynced.sessions) !== JSON.stringify(pushSessions) || JSON.stringify(currentSynced.deletedSessions) !== JSON.stringify(pushDeletedSessions);
-    const nowExercisesDirty = JSON.stringify(currentSynced.exercises) !== JSON.stringify(pushExercises) || JSON.stringify(currentSynced.exerciseBank) !== JSON.stringify(pushExerciseBank) || JSON.stringify(currentSynced.exerciseBankCategories) !== JSON.stringify(pushExerciseBankCategories);
-    const nowLineupsDirty = JSON.stringify(currentSynced.lineups) !== JSON.stringify(pushLineups) || currentSynced.activeLineupId !== pushActiveLineupId;
-    const nowPeriodsDirty = JSON.stringify(currentSynced.periods) !== JSON.stringify(pushPeriods) || currentSynced.currentPeriodId !== pushCurrentPeriodId;
-    const nowSettingsDirty = currentSynced.teamUrl !== pushTeamUrl || currentSynced.adminUrl !== pushAdminUrl || currentSynced.seriesUrl !== pushSeriesUrl || JSON.stringify(currentSynced.customFormations) !== JSON.stringify(pushCustomFormations) || JSON.stringify(currentSynced.pinnedFormationIds) !== JSON.stringify(pushPinnedFormationIds) || JSON.stringify(currentSynced.trainingSettings) !== JSON.stringify(pushTrainingSettings) || currentSynced.activeExerciseId !== pushActiveExerciseId;
+    const dirty = dirtySegments(currentSynced, effectiveData);
+    const nowSquadDirty = dirty.squad;
+    const nowSessionsDirty = dirty.sessions;
+    const nowExercisesDirty = dirty.exercises;
+    const nowLineupsDirty = dirty.lineups;
+    const nowPeriodsDirty = dirty.periods;
+    const nowSettingsDirty = dirty.settings;
 
     const writePromises = [];
     const { docSquadRef, docSessionsRef, docExercisesRef, docLineupsRef, docPeriodsRef, docSettingsRef } = getDocRefs(user, userProfile);
@@ -1783,7 +1799,7 @@ export default function App() {
 
     if (writePromises.length === 0) {
       console.log("App: No dirty data segments to push.");
-      setSessionActionCount(0);
+      settleActionCount();
       return;
     }
 
@@ -1809,10 +1825,21 @@ export default function App() {
       exerciseBank: pushExerciseBank,
       exerciseBankCategories: pushExerciseBankCategories
     };
-    setSessionActionCount(0);
+    // Ändringar (t.ex. poängtryck) som gjordes medan sparningen pågick är inte sparade – räknaren får inte
+    // nollas då, annars skickas de aldrig (poängen hoppade tillbaka nästa gång appen öppnades).
+    settleActionCount();
     setPrefixedItem('last_local_sync_at', now.toString(), user);
     setSyncError(null);
     console.log("App: Push successful for segments:", writePromises.length);
+  };
+
+  // Räknaren för osparade ändringar: 0 bara om det som visas just nu är det som finns på servern. Körs strax
+  // efter en sparning/hämtning så att tryck som hann komma under tiden (och har renderats) räknas med.
+  const settleActionCount = () => {
+    setTimeout(() => {
+      const cloud = lastCloudDataRef.current;
+      setSessionActionCount(cloud && hasDirtySegments(cloud, latestDataRef.current) ? (c => Math.max(c, 1)) : 0);
+    }, 50);
   };
 
   // Helper to fetch all segmented cloud docs to merge into local state
@@ -1853,91 +1880,95 @@ export default function App() {
       const savedPeriods = getPrefixedItem('football_periods', user);
       const savedExerciseBank = getPrefixedItem('football_exercise_bank', user);
       const savedExerciseBankCategories = getPrefixedItem('football_exercise_bank_categories', user);
-
-      const localSquad = squad.length > 0 ? squad : (savedSquad ? JSON.parse(savedSquad) : []);
-      const localSessions = sessions.length > 0 ? sessions : (savedSessions ? JSON.parse(savedSessions) : []);
-      const localDeletedSessions = deletedSessions.length > 0 ? deletedSessions : (savedDeletedSessions ? JSON.parse(savedDeletedSessions) : []);
-      const localExercises = exercises.length > 0 ? exercises : (savedExercises ? JSON.parse(savedExercises) : []);
-      const localExerciseBank = exerciseBank.length > 0 ? exerciseBank : (savedExerciseBank ? JSON.parse(savedExerciseBank) : []);
-      const localExerciseBankCategories = exerciseBankCategories.length > 0 ? exerciseBankCategories : (savedExerciseBankCategories ? JSON.parse(savedExerciseBankCategories) : []);
-      const localLineups = lineups.length > 0 ? lineups : (savedLineups ? JSON.parse(savedLineups) : []);
       const cachedPeriods = getAllCachedPeriods(user);
-      const localPeriods = periods.length > 0 ? periods : (savedPeriods ? deduplicateById([...JSON.parse(savedPeriods), ...cachedPeriods]) : cachedPeriods);
 
       const remoteLineups = lineupsSnap.exists() ? (lineupsSnap.data().lineups || []) : [];
-      const mergedLineups = deduplicateById(mergeLineups(remoteLineups, localLineups));
-      const targetActiveLineupId = activeLineupId || (lineupsSnap.exists() ? (lineupsSnap.data().activeLineupId || null) : null) || (mergedLineups[0]?.id || null);
-
       const remoteExercises = exercisesSnap.exists() ? (exercisesSnap.data().exercises || []) : [];
-      const mergedExercises = deduplicateById(mergeExercises(remoteExercises, localExercises));
-
       const remoteSessions = sessionsSnap.exists() ? (sessionsSnap.data().sessions || []) : [];
-      const mergedSessions = normalizeSessionMoments(deduplicateById(mergeSessions(remoteSessions, localSessions)));
-
       const remoteBank = exercisesSnap.exists() ? (exercisesSnap.data().exerciseBank || []) : [];
-      const mergedBank = normalizeExerciseBank(deduplicateById(mergeExerciseBank(remoteBank, localExerciseBank)));
-
       const remotePeriods = periodsSnap.exists() ? (periodsSnap.data().periods || []) : [];
-      const mergedCandidatePeriods = deduplicateById(mergePeriods(remotePeriods, localPeriods));
-      const finalMergedPeriods = recoverPeriodsFromExercises(
-        mergedCandidatePeriods,
-        mergedExercises,
-        squadSnap.exists() ? (squadSnap.data().squad || []) : localSquad
-      );
 
-      const targetActiveExerciseId = activeExerciseId 
-        || (typeof window !== 'undefined' ? sessionStorage.getItem('coach_active_exercise_id') : null)
-        || getPrefixedItem('active_exercise_id', user) 
-        || (settingsSnap.exists() ? (settingsSnap.data().activeExerciseId || null) : null);
+      // Slår ihop serverns data med det som visas NÄR SVARET KOMMER (inte när hämtningen började): poäng som
+      // trycktes in under hämtningen har nyare updatedAt och vinner. Tidigare ersattes de med en gammal bild.
+      const buildState = (local: CoachData): CoachData => {
+        const localSquad = local.squad?.length > 0 ? local.squad : (savedSquad ? JSON.parse(savedSquad) : []);
+        const localSessions = local.sessions?.length > 0 ? local.sessions : (savedSessions ? JSON.parse(savedSessions) : []);
+        const localDeletedSessions = local.deletedSessions?.length > 0 ? local.deletedSessions : (savedDeletedSessions ? JSON.parse(savedDeletedSessions) : []);
+        const localExercises = local.exercises?.length > 0 ? local.exercises : (savedExercises ? JSON.parse(savedExercises) : []);
+        const localExerciseBank = local.exerciseBank?.length > 0 ? local.exerciseBank : (savedExerciseBank ? JSON.parse(savedExerciseBank) : []);
+        const localExerciseBankCategories = local.exerciseBankCategories?.length > 0 ? local.exerciseBankCategories : (savedExerciseBankCategories ? JSON.parse(savedExerciseBankCategories) : []);
+        const localLineups = local.lineups?.length > 0 ? local.lineups : (savedLineups ? JSON.parse(savedLineups) : []);
+        const localPeriods = local.periods?.length > 0 ? local.periods : (savedPeriods ? deduplicateById([...JSON.parse(savedPeriods), ...cachedPeriods]) : cachedPeriods);
 
-      const updatedState: CoachData = {
-        squad: squadSnap.exists() ? deduplicateById(squadSnap.data().squad || []) : deduplicateById(localSquad),
-        sessions: mergedSessions,
-        deletedSessions: sessionsSnap.exists() ? deduplicateById(sessionsSnap.data().deletedSessions || []) : deduplicateById(localDeletedSessions),
-        exercises: mergedExercises,
-        exerciseBank: mergedBank,
-        exerciseBankCategories: exercisesSnap.exists() ? (exercisesSnap.data().exerciseBankCategories || []) : localExerciseBankCategories,
-        lineups: mergedLineups,
-        activeLineupId: targetActiveLineupId,
-        periods: finalMergedPeriods,
-        currentPeriodId: periodsSnap.exists() ? (periodsSnap.data().currentPeriodId || null) : (currentPeriodId || finalMergedPeriods.find(p => p.isActive)?.id || null),
-        teamUrl: settingsSnap.exists() ? (settingsSnap.data().teamUrl || '') : teamUrl,
-        adminUrl: settingsSnap.exists() ? (settingsSnap.data().adminUrl || '') : adminUrl,
-        seriesUrl: settingsSnap.exists() ? (settingsSnap.data().seriesUrl || '') : seriesUrl,
-        customFormations: settingsSnap.exists() ? deduplicateById(settingsSnap.data().customFormations || []) : customFormations,
-        pinnedFormationIds: settingsSnap.exists() ? (settingsSnap.data().pinnedFormationIds || ['4-2-3-1', '4-4-2', '4-3-3']) : pinnedFormationIds,
-        trainingSettings: settingsSnap.exists() ? (settingsSnap.data().trainingSettings || INITIAL_DATA.trainingSettings) : trainingSettings,
-        activeExerciseId: targetActiveExerciseId,
+        const mergedLineups = deduplicateById(mergeLineups(remoteLineups, localLineups));
+        const mergedExercises = deduplicateById(mergeExercises(remoteExercises, localExercises));
+        const mergedSessions = normalizeSessionMoments(deduplicateById(mergeSessions(remoteSessions, localSessions)));
+        const mergedBank = normalizeExerciseBank(deduplicateById(mergeExerciseBank(remoteBank, localExerciseBank)));
+        const finalMergedPeriods = recoverPeriodsFromExercises(
+          deduplicateById(mergePeriods(remotePeriods, localPeriods)),
+          mergedExercises,
+          squadSnap.exists() ? (squadSnap.data().squad || []) : localSquad
+        );
+        const targetActiveExerciseId = local.activeExerciseId
+          || (typeof window !== 'undefined' ? sessionStorage.getItem('coach_active_exercise_id') : null)
+          || getPrefixedItem('active_exercise_id', user)
+          || (settingsSnap.exists() ? (settingsSnap.data().activeExerciseId || null) : null);
+
+        return {
+          // Truppen kommer direkt från medlemsregistret på servern; ingen synk behövs i klienten.
+          squad: deduplicateSquad(squadSnap.exists() ? deduplicateById(squadSnap.data().squad || []) : deduplicateById(localSquad)),
+          sessions: mergedSessions,
+          deletedSessions: sessionsSnap.exists() ? deduplicateById(sessionsSnap.data().deletedSessions || []) : deduplicateById(localDeletedSessions),
+          exercises: mergedExercises,
+          exerciseBank: mergedBank,
+          exerciseBankCategories: exercisesSnap.exists() ? (exercisesSnap.data().exerciseBankCategories || []) : localExerciseBankCategories,
+          lineups: mergedLineups,
+          activeLineupId: local.activeLineupId || (lineupsSnap.exists() ? (lineupsSnap.data().activeLineupId || null) : null) || (mergedLineups[0]?.id || null),
+          periods: finalMergedPeriods,
+          currentPeriodId: periodsSnap.exists() ? (periodsSnap.data().currentPeriodId || null) : (local.currentPeriodId || finalMergedPeriods.find(p => p.isActive)?.id || null),
+          teamUrl: settingsSnap.exists() ? (settingsSnap.data().teamUrl || '') : local.teamUrl,
+          adminUrl: settingsSnap.exists() ? (settingsSnap.data().adminUrl || '') : local.adminUrl,
+          seriesUrl: settingsSnap.exists() ? (settingsSnap.data().seriesUrl || '') : local.seriesUrl,
+          customFormations: settingsSnap.exists() ? deduplicateById(settingsSnap.data().customFormations || []) : local.customFormations,
+          pinnedFormationIds: settingsSnap.exists() ? (settingsSnap.data().pinnedFormationIds || ['4-2-3-1', '4-4-2', '4-3-3']) : local.pinnedFormationIds,
+          trainingSettings: settingsSnap.exists() ? (settingsSnap.data().trainingSettings || INITIAL_DATA.trainingSettings) : local.trainingSettings,
+          activeExerciseId: targetActiveExerciseId,
+        };
       };
 
-      // Truppen kommer direkt från medlemsregistret på servern; ingen synk behövs i klienten.
-      updatedState.squad = deduplicateSquad(updatedState.squad || []);
+      // Med prev kommer även tryck med som React ännu inte hunnit rita.
+      setData(prev => buildState(prev));
+      const updatedState = buildState(latestDataRef.current);
 
-      setData(updatedState);
-      lastCloudDataRef.current = updatedState;
+      // Det servern har (inte det sammanslagna): övningar och pass som bara är ändrade här räknas då som
+      // osparade och skickas. Övriga delar som tidigare.
+      lastCloudDataRef.current = {
+        ...updatedState,
+        exercises: exercisesSnap.exists() ? deduplicateById(remoteExercises) : updatedState.exercises,
+        exerciseBank: exercisesSnap.exists() ? normalizeExerciseBank(deduplicateById(remoteBank)) : updatedState.exerciseBank,
+        sessions: sessionsSnap.exists() ? normalizeSessionMoments(deduplicateById(remoteSessions)) : updatedState.sessions,
+      };
       syncUserIdRef.current = user.uid;
-      setSessionActionCount(0);
+      settleActionCount();
       setSyncError(null);
 
       try {
-        setPrefixedItem('football_exercises', JSON.stringify(mergedExercises), user);
-        setPrefixedItem('football_sessions', JSON.stringify(mergedSessions), user);
-        setPrefixedItem('football_lineups', JSON.stringify(mergedLineups), user);
-        setPrefixedItem('football_exercise_bank', JSON.stringify(mergedBank), user);
+        setPrefixedItem('football_exercises', JSON.stringify(updatedState.exercises), user);
+        setPrefixedItem('football_sessions', JSON.stringify(updatedState.sessions), user);
+        setPrefixedItem('football_lineups', JSON.stringify(updatedState.lineups), user);
+        setPrefixedItem('football_exercise_bank', JSON.stringify(updatedState.exerciseBank), user);
         setPrefixedItem('football_exercise_bank_categories', JSON.stringify(updatedState.exerciseBankCategories || []), user);
-        setPrefixedItem('football_periods', JSON.stringify(finalMergedPeriods), user);
-        setPrefixedItem('football_periods_backup', JSON.stringify(finalMergedPeriods), user);
-        if (targetActiveExerciseId) {
-          setPrefixedItem('active_exercise_id', targetActiveExerciseId, user);
-          sessionStorage.setItem('coach_active_exercise_id', targetActiveExerciseId);
+        setPrefixedItem('football_periods', JSON.stringify(updatedState.periods), user);
+        setPrefixedItem('football_periods_backup', JSON.stringify(updatedState.periods), user);
+        if (updatedState.activeExerciseId) {
+          setPrefixedItem('active_exercise_id', updatedState.activeExerciseId, user);
+          sessionStorage.setItem('coach_active_exercise_id', updatedState.activeExerciseId);
         }
       } catch (e) {}
 
-      const hasUnsyncedLocalExercises = mergedExercises.some(me => !remoteExercises.some(re => re.id === me.id));
-      const hasUnsyncedLocalSessions = mergedSessions.some(ms => !remoteSessions.some(rs => rs.id === ms.id));
-      const hasUnsyncedLocalPeriods = finalMergedPeriods.some(fp => !remotePeriods.some(rp => rp.id === fp.id));
-      if (hasUnsyncedLocalExercises || hasUnsyncedLocalSessions || hasUnsyncedLocalPeriods) {
-        console.log("App: Preserved local unsynced data during pull. Triggering follow-up push.");
+      const hasUnsyncedLocalPeriods = updatedState.periods.some(fp => !remotePeriods.some(rp => rp.id === fp.id));
+      if (hasUnsyncedLocalPeriods) {
+        console.log("App: Preserved local unsynced periods during pull. Triggering follow-up push.");
         setTimeout(() => {
           pushDirtySegments(true).catch(e => console.warn("App: Follow-up push after pull failed:", e));
         }, 150);
@@ -2568,6 +2599,20 @@ export default function App() {
     || (typeof window !== 'undefined' ? sessionStorage.getItem('coach_active_exercise_id') : null);
 
   const activeExercise = exercises.find(e => e.id === effectiveActiveExerciseId);
+
+  // Visad ordning på lagen vid "sortera efter poäng": byts först när man slutat trycka (se utils/teamOrder.ts)
+  const [teamOrder, setTeamOrder] = useState<string[]>([]);
+  useEffect(() => {
+    if (!activeExercise?.sortByScore) return;
+    const target = sortedTeamIds(activeExercise.teams);
+    if (!sameTeams(teamOrder, activeExercise.teams)) {
+      setTeamOrder(target);
+      return;
+    }
+    if (target.join('|') === teamOrder.join('|')) return;
+    const timer = setTimeout(() => setTeamOrder(target), SORT_SETTLE_MS);
+    return () => clearTimeout(timer);
+  }, [activeExercise?.id, activeExercise?.teams, activeExercise?.sortByScore, teamOrder]);
 
   useEffect(() => {
     if (!activeExerciseId && effectiveActiveExerciseId && activeExercise) {
@@ -4749,7 +4794,7 @@ export default function App() {
               <div className={`flex-1 flex flex-col gap-2 sm:gap-3 min-h-0 w-full max-w-2xl mx-auto ${activeExercise.teams.length > 5 ? 'overflow-y-auto' : 'overflow-hidden sm:overflow-y-auto'}`}>
                 <AnimatePresence mode="popLayout">
                   {(activeExercise.sortByScore 
-                    ? [...activeExercise.teams].sort((a, b) => b.score - a.score)
+                    ? applyTeamOrder(activeExercise.teams, teamOrder)
                     : activeExercise.teams
                   ).filter((team, index, self) => 
                     index === self.findIndex((t) => t.id === team.id)

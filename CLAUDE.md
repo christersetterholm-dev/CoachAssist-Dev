@@ -182,6 +182,11 @@ Appen läser/skriver JSON-dokument via sökvägar:
 - Användarens ändringar av pass ska sätta `updatedAt: Date.now()`, annars kan de förloras mot en annan enhet.
 - `pushDirtySegments` skickar bara ändrade delar (tidigare skickades allt när inget ändrats).
 - Åtkomstloggen på servern: `~/access-logs/app.truppio.se-ssl_log` (läsa kräver Christers ok).
+- **Hämtning och sparning i appen** (okt 2026, poäng hoppade tillbaka): `pullLatestData` slår ihop serverns data med
+  det som visas när svaret kommer (`setData(prev => buildState(prev))`), inte med en bild från när hämtningen började.
+  `lastCloudDataRef` för övningar och pass är serverns version, så lokala ändringar räknas som osparade.
+  `settleActionCount` (efter sparning/hämtning) nollar räknaren bara om det som visas finns på servern
+  (`hasDirtySegments`); förr nollades den även om man tryckt under sparningen.
 
 ### Svar på kallelser
 - Tabell `rsvps` (en rad per person och aktivitet). `POST /api/rsvp`, `POST /api/rsvp/clear`.
@@ -475,6 +480,8 @@ npm run set-password -- e@post.se            # lokalt konto/lösenord
 - `hideContentForPlayers` döljs bara i appen; servern skickar ändå passets moment till spelare.
 - Tränarens app visade inte en spelares nya svar ens efter omladdning (servern hade svaret);
   troligen används pass som sparats i webbläsaren i stället för serverns. Utred synkningen.
+- Poängräkningen med "Sortera lagen efter poäng": korten byter plats först `SORT_SETTLE_MS` (1,5 s) efter senaste
+  trycket (`src/utils/teamOrder.ts`, tester i `tests/teamOrder.test.mjs`), annars flyttade sig kortet under fingret.
 - I poängräkningen (`view === 'exercise'` i App.tsx) är timerpanelen och jokerraden ovanför
   poängkorten fortfarande i gammal stil (VERSALER).
 - Taktiktavlans animationer, etapp 4 (stäm av med Christer): spara som video/GIF. Animationen finns

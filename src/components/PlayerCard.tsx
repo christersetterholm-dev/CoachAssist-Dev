@@ -104,8 +104,9 @@ export default function PlayerCard({
   };
 
   return (
+    // Ingen egen layout-animering: ramen runt kortet (App.tsx) sköter flytten, annars skalades kortet en kort
+    // stund vid varje poängändring och knapparna kändes sega.
     <motion.div
-      layout
       initial={{ opacity: 0, scale: 0.9 }}
       animate={{ 
         opacity: 1, 
@@ -126,7 +127,7 @@ export default function PlayerCard({
           type="button"
           aria-label={`Ta bort ett poäng från ${team.name}`}
           onClick={() => onUpdateScore(team.id, -1)}
-          className="w-16 sm:w-24 bg-black/10 text-white flex items-center justify-center hover:bg-black/20 active:bg-black/30 transition-all border-r border-white/10 shrink-0"
+          className="touch-manipulation select-none w-16 sm:w-24 bg-black/10 text-white flex items-center justify-center hover:bg-black/20 active:bg-black/30 transition-all border-r border-white/10 shrink-0"
         >
           <Minus size={24} strokeWidth={4} className="sm:size-[32px]" />
         </button>
@@ -212,7 +213,7 @@ export default function PlayerCard({
               type="button"
               aria-label={`Två poäng till ${team.name}`}
               onClick={() => onUpdateScore(team.id, 2)}
-              className="flex-1 bg-white/5 text-white text-sm sm:text-xl font-black hover:bg-white/15 active:bg-white/25 transition-all flex items-center justify-center"
+              className="touch-manipulation select-none flex-1 bg-white/5 text-white text-sm sm:text-xl font-black hover:bg-white/15 active:bg-white/25 transition-all flex items-center justify-center"
             >
               +2
             </button>
@@ -220,7 +221,7 @@ export default function PlayerCard({
               type="button"
               aria-label={`Tre poäng till ${team.name}`}
               onClick={() => onUpdateScore(team.id, 3)}
-              className="flex-1 bg-white/5 text-white text-sm sm:text-xl font-black hover:bg-white/15 active:bg-white/25 transition-all border-t border-white/10 flex items-center justify-center"
+              className="touch-manipulation select-none flex-1 bg-white/5 text-white text-sm sm:text-xl font-black hover:bg-white/15 active:bg-white/25 transition-all border-t border-white/10 flex items-center justify-center"
             >
               +3
             </button>
@@ -230,7 +231,7 @@ export default function PlayerCard({
             type="button"
             aria-label={`Ett poäng till ${team.name}`}
             onClick={() => onUpdateScore(team.id, 1)}
-            className="w-20 sm:w-28 bg-white/20 text-white flex items-center justify-center hover:bg-white/30 active:bg-white/40 transition-all border-l border-white/10"
+            className="touch-manipulation select-none w-20 sm:w-28 bg-white/20 text-white flex items-center justify-center hover:bg-white/30 active:bg-white/40 transition-all border-l border-white/10"
           >
             <Plus size={32} strokeWidth={4} className="sm:size-[48px]" />
           </button>
